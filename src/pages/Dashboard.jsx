@@ -2,20 +2,26 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { FiTruck, FiCalendar, FiStar, FiAlertTriangle, FiArrowRight, FiCheckCircle, FiClock, FiUsers } from 'react-icons/fi';
+import { FiTruck, FiCalendar, FiStar, FiAlertTriangle, FiArrowRight, FiCheckCircle, FiClock, FiUsers, FiShield } from 'react-icons/fi';
 
 export default function Dashboard() {
     const { profile, isAdmin, isOwner, isRenter } = useAuth();
     const [stats, setStats] = useState({ vehicles: 0, bookings: 0, reviews: 0, pendingUsers: 0 });
     const [recentBookings, setRecentBookings] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [dataLoading, setDataLoading] = useState(true);
 
     useEffect(() => {
-        fetchDashboardData();
+        if (profile) {
+            fetchDashboardData();
+        } else {
+            // Even if profile hasn't loaded, stop blocking the UI after a brief delay
+            const timer = setTimeout(() => setDataLoading(false), 1500);
+            return () => clearTimeout(timer);
+        }
     }, [profile]);
 
     const fetchDashboardData = async () => {
-        if (!profile) return;
+        if (!profile) { setDataLoading(false); return; }
         try {
             // Fetch counts based on role
             if (isAdmin) {
@@ -70,7 +76,7 @@ export default function Dashboard() {
         } catch (err) {
             console.error('Dashboard error:', err);
         } finally {
-            setLoading(false);
+            setDataLoading(false);
         }
     };
 
@@ -84,46 +90,93 @@ export default function Dashboard() {
                 desc: 'Submit your government IDs and selfie to get verified and start using SafeDrive.',
                 action: 'Submit Documents',
                 link: '/profile',
+                bgGradient: 'linear-gradient(135deg, #fff7ed 0%, #fef3c7 100%)',
+                borderColor: 'rgba(245,158,11,0.3)',
+                iconBg: '#fef3c7',
+                iconColor: '#d97706',
             },
             submitted: {
                 icon: <FiClock />,
                 title: 'Verification In Progress',
-                desc: 'Your documents have been submitted. Our admin team is reviewing your identity.',
+                desc: 'Your documents have been submitted. Our admin team is reviewing your identity. This usually takes 24-48 hours.',
                 action: 'View Status',
                 link: '/profile',
+                bgGradient: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                borderColor: 'rgba(59,130,246,0.3)',
+                iconBg: '#dbeafe',
+                iconColor: '#2563eb',
             },
             rejected: {
                 icon: <FiAlertTriangle />,
                 title: 'Verification Rejected',
-                desc: 'Your verification was not approved. Please resubmit your documents.',
+                desc: 'Your verification was not approved. Please resubmit your documents with clearer photos.',
                 action: 'Resubmit',
                 link: '/profile',
+                bgGradient: 'linear-gradient(135deg, #fef2f2 0%, #fecaca 100%)',
+                borderColor: 'rgba(239,68,68,0.3)',
+                iconBg: '#fecaca',
+                iconColor: '#dc2626',
             },
         };
 
         const msg = messages[profile?.verification_status || 'pending'];
 
         return (
-            <div className={`verification-card ${profile?.verification_status === 'verified' ? 'verified' : ''}`}>
-                <div className="verification-card-icon">{msg.icon}</div>
-                <div style={{ flex: 1 }}>
-                    <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{msg.title}</h3>
-                    <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{msg.desc}</p>
+            <div style={{
+                background: msg.bgGradient,
+                border: `1px solid ${msg.borderColor}`,
+                borderRadius: 'var(--radius-lg, 12px)',
+                padding: '20px 24px',
+                marginBottom: 24,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 16,
+                flexWrap: 'wrap',
+            }}>
+                <div style={{
+                    width: 48, height: 48, borderRadius: 12,
+                    background: msg.iconBg, color: msg.iconColor,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 22, flexShrink: 0,
+                }}>
+                    {msg.icon}
                 </div>
-                <Link to={msg.link} className="btn btn-accent btn-sm">{msg.action} <FiArrowRight /></Link>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{msg.title}</h3>
+                    <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>{msg.desc}</p>
+                </div>
+                <Link to={msg.link} className="btn btn-accent btn-sm" style={{ flexShrink: 0 }}>
+                    {msg.action} <FiArrowRight />
+                </Link>
             </div>
         );
     };
 
-    if (loading) {
-        return <div className="loading-spinner"><div className="spinner" /></div>;
-    }
+    // Skeleton placeholder for stats while loading
+    const StatSkeleton = () => (
+        <div className="stat-card" style={{ opacity: 0.5 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--neutral-200, #e5e7eb)', animation: 'pulse 1.5s infinite' }} />
+            <div className="stat-info">
+                <div style={{ width: 40, height: 24, borderRadius: 6, background: 'var(--neutral-200, #e5e7eb)', marginBottom: 4, animation: 'pulse 1.5s infinite' }} />
+                <div style={{ width: 80, height: 14, borderRadius: 4, background: 'var(--neutral-200, #e5e7eb)', animation: 'pulse 1.5s infinite' }} />
+            </div>
+        </div>
+    );
 
     return (
         <div>
+            {/* Pulse animation for skeletons */}
+            <style>{`
+                @keyframes pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.4; }
+                }
+            `}</style>
+
             <div className="page-header">
                 <h1>
-                    {isAdmin ? '🛡️ Admin Dashboard' : isOwner ? '🚘 Owner Dashboard' : '👋 Welcome back'}, {profile?.full_name?.split(' ')[0]}
+                    {isAdmin ? '🛡️ Admin Dashboard' : isOwner ? '🚘 Owner Dashboard' : '👋 Welcome back'}
+                    {profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}
                 </h1>
                 <p>
                     {isAdmin
@@ -138,7 +191,13 @@ export default function Dashboard() {
 
             {/* Stats Grid */}
             <div className="stats-grid">
-                {isAdmin ? (
+                {dataLoading ? (
+                    <>
+                        <StatSkeleton />
+                        <StatSkeleton />
+                        <StatSkeleton />
+                    </>
+                ) : isAdmin ? (
                     <>
                         <div className="stat-card">
                             <div className="stat-icon blue"><FiUsers /></div>
@@ -268,7 +327,12 @@ export default function Dashboard() {
                     <h2 style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-display)' }}>Recent Bookings</h2>
                     <Link to="/bookings" className="btn btn-ghost btn-sm">View All <FiArrowRight /></Link>
                 </div>
-                {recentBookings.length === 0 ? (
+                {dataLoading ? (
+                    <div style={{ padding: 32, textAlign: 'center' }}>
+                        <div className="spinner" style={{ margin: '0 auto 12px' }} />
+                        <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Loading bookings...</p>
+                    </div>
+                ) : recentBookings.length === 0 ? (
                     <div className="empty-state" style={{ padding: 48 }}>
                         <div className="empty-state-icon">📋</div>
                         <h3>No bookings yet</h3>

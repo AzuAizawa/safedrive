@@ -96,7 +96,7 @@ export function AuthProvider({ children }) {
             return { data: null, error: { message: 'Invalid characters detected in name.' } };
         }
 
-        // A07: Check password strength
+        // A07: Check password strength (min 8 chars with uppercase, lowercase, number, special char)
         const strength = checkPasswordStrength(password);
         if (!strength.passing) {
             return { data: null, error: { message: `Password too weak: ${strength.feedback.join(', ')}` } };
