@@ -23,56 +23,68 @@ export default function Dashboard() {
     const fetchDashboardData = async () => {
         if (!profile) { setDataLoading(false); return; }
         try {
+            // Helper to safely query — returns 0 on any error
+            const safeCount = async (queryFn) => {
+                try {
+                    const result = await queryFn();
+                    return result.count || 0;
+                } catch { return 0; }
+            };
+
             // Fetch counts based on role
             if (isAdmin) {
-                const [vehicles, bookings, users, pendingUsers] = await Promise.all([
-                    supabase.from('vehicles').select('id', { count: 'exact', head: true }),
-                    supabase.from('bookings').select('id', { count: 'exact', head: true }),
-                    supabase.from('profiles').select('id', { count: 'exact', head: true }),
-                    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('verification_status', 'submitted'),
+                const [vehicleCount, bookingCount, userCount, pendingCount] = await Promise.all([
+                    safeCount(() => supabase.from('vehicles').select('id', { count: 'exact', head: true })),
+                    safeCount(() => supabase.from('bookings').select('id', { count: 'exact', head: true })),
+                    safeCount(() => supabase.from('profiles').select('id', { count: 'exact', head: true })),
+                    safeCount(() => supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('verification_status', 'submitted')),
                 ]);
                 setStats({
-                    vehicles: vehicles.count || 0,
-                    bookings: bookings.count || 0,
-                    reviews: users.count || 0,
-                    pendingUsers: pendingUsers.count || 0,
+                    vehicles: vehicleCount,
+                    bookings: bookingCount,
+                    reviews: userCount,
+                    pendingUsers: pendingCount,
                 });
             } else if (isOwner) {
-                const [vehicles, bookings, reviews] = await Promise.all([
-                    supabase.from('vehicles').select('id', { count: 'exact', head: true }).eq('owner_id', profile.id),
-                    supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('owner_id', profile.id),
-                    supabase.from('reviews').select('id', { count: 'exact', head: true }).eq('reviewee_id', profile.id),
+                const [vehicleCount, bookingCount, reviewCount] = await Promise.all([
+                    safeCount(() => supabase.from('vehicles').select('id', { count: 'exact', head: true }).eq('owner_id', profile.id)),
+                    safeCount(() => supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('owner_id', profile.id)),
+                    safeCount(() => supabase.from('reviews').select('id', { count: 'exact', head: true }).eq('reviewee_id', profile.id)),
                 ]);
                 setStats({
-                    vehicles: vehicles.count || 0,
-                    bookings: bookings.count || 0,
-                    reviews: reviews.count || 0,
+                    vehicles: vehicleCount,
+                    bookings: bookingCount,
+                    reviews: reviewCount,
                 });
             } else {
-                const [bookings, reviews, favorites] = await Promise.all([
-                    supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('renter_id', profile.id),
-                    supabase.from('reviews').select('id', { count: 'exact', head: true }).eq('reviewer_id', profile.id),
-                    supabase.from('favorites').select('id', { count: 'exact', head: true }).eq('user_id', profile.id),
+                const [bookingCount, reviewCount, favCount] = await Promise.all([
+                    safeCount(() => supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('renter_id', profile.id)),
+                    safeCount(() => supabase.from('reviews').select('id', { count: 'exact', head: true }).eq('reviewer_id', profile.id)),
+                    safeCount(() => supabase.from('favorites').select('id', { count: 'exact', head: true }).eq('user_id', profile.id)),
                 ]);
                 setStats({
-                    bookings: bookings.count || 0,
-                    reviews: reviews.count || 0,
-                    vehicles: favorites.count || 0,
+                    bookings: bookingCount,
+                    reviews: reviewCount,
+                    vehicles: favCount,
                 });
             }
 
-            // Fetch recent bookings
-            const query = supabase
-                .from('bookings')
-                .select('*, vehicles(make, model, year, thumbnail_url), profiles!bookings_renter_id_fkey(full_name)')
-                .order('created_at', { ascending: false })
-                .limit(5);
+            // Fetch recent bookings (with graceful failure)
+            try {
+                const query = supabase
+                    .from('bookings')
+                    .select('*, vehicles(make, model, year, thumbnail_url), profiles!bookings_renter_id_fkey(full_name)')
+                    .order('created_at', { ascending: false })
+                    .limit(5);
 
-            if (isOwner) query.eq('owner_id', profile.id);
-            else if (isRenter) query.eq('renter_id', profile.id);
+                if (isOwner) query.eq('owner_id', profile.id);
+                else if (isRenter) query.eq('renter_id', profile.id);
 
-            const { data } = await query;
-            setRecentBookings(data || []);
+                const { data } = await query;
+                setRecentBookings(data || []);
+            } catch {
+                setRecentBookings([]);
+            }
         } catch (err) {
             console.error('Dashboard error:', err);
         } finally {

@@ -73,8 +73,22 @@ export function AuthProvider({ children }) {
                 .eq('id', userId)
                 .single();
 
-            if (error) throw error;
-            setProfile(data);
+            if (error) {
+                console.warn('Profile fetch error (may not exist yet):', error.message);
+                // Build a minimal profile from auth metadata so the UI isn't stuck
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    setProfile({
+                        id: user.id,
+                        full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+                        role: user.user_metadata?.role || 'renter',
+                        verification_status: 'pending',
+                        email: user.email,
+                    });
+                }
+            } else {
+                setProfile(data);
+            }
         } catch (error) {
             console.error('Error fetching profile:', error);
         } finally {
@@ -153,15 +167,25 @@ export function AuthProvider({ children }) {
     };
 
     const signOut = async () => {
-        // A09: Log sign out
-        await logSecurityEvent('auth.logout', 'User initiated sign out', { severity: 'info' });
+        // A09: Log sign out — fire-and-forget so it never blocks sign-out
+        try {
+            logSecurityEvent('auth.logout', 'User initiated sign out', { severity: 'info' }).catch(() => { });
+        } catch (e) {
+            // Security logging must never block sign-out
+        }
 
-        const { error } = await supabase.auth.signOut();
-        if (!error) {
+        try {
+            const { error } = await supabase.auth.signOut();
+            // Always clear local state regardless of error
             setUser(null);
             setProfile(null);
+            return { error };
+        } catch (err) {
+            // Force clear state even on unexpected errors
+            setUser(null);
+            setProfile(null);
+            return { error: err };
         }
-        return { error };
     };
 
     const updateProfile = async (updates) => {

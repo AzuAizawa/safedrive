@@ -233,23 +233,32 @@ export function checkPasswordStrength(password) {
  */
 export async function logSecurityEvent(eventType, description, options = {}) {
     try {
-        const { data: { user } } = await supabase.auth.getUser();
+        // Use a timeout so logging never blocks the app
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Security log timeout')), 3000)
+        );
 
-        const logEntry = {
-            user_id: user?.id || null,
-            user_email: user?.email || null,
-            event_type: eventType,
-            event_description: description,
-            resource_type: options.resourceType || null,
-            resource_id: options.resourceId || null,
-            severity: options.severity || 'info',
-            owasp_category: options.owaspCategory || null,
-            metadata: options.metadata || null,
-            ip_address: null, // Filled server-side
-            user_agent: navigator.userAgent,
-        };
+        const logPromise = (async () => {
+            const { data: { user } } = await supabase.auth.getUser();
 
-        await supabase.from('security_audit_logs').insert(logEntry);
+            const logEntry = {
+                user_id: user?.id || null,
+                user_email: user?.email || null,
+                event_type: eventType,
+                event_description: description,
+                resource_type: options.resourceType || null,
+                resource_id: options.resourceId || null,
+                severity: options.severity || 'info',
+                owasp_category: options.owaspCategory || null,
+                metadata: options.metadata || null,
+                ip_address: null, // Filled server-side
+                user_agent: navigator.userAgent,
+            };
+
+            await supabase.from('security_audit_logs').insert(logEntry);
+        })();
+
+        await Promise.race([logPromise, timeoutPromise]);
     } catch (err) {
         // Silent fail — logging should never break the app
         console.warn('[SecurityAudit] Failed to log event:', err.message);
