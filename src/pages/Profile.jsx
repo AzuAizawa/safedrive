@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { FiUser, FiMail, FiPhone, FiMapPin, FiUpload, FiCheckCircle, FiClock, FiShield } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import BackButton from '../components/BackButton';
 
 export default function Profile() {
     const { profile, updateProfile } = useAuth();
@@ -91,6 +92,8 @@ export default function Profile() {
 
     return (
         <div style={{ maxWidth: 800, margin: '0 auto' }}>
+            <BackButton />
+
             <div className="page-header">
                 <h1>👤 My Profile</h1>
                 <p>Manage your personal information and identity verification</p>

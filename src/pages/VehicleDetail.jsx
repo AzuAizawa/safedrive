@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { FiMapPin, FiUsers, FiSettings, FiStar, FiCalendar, FiShield, FiCheckCircle, FiChevronLeft } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import VerificationGate from '../components/VerificationGate';
+import BackButton from '../components/BackButton';
 
 export default function VehicleDetail() {
     const { id } = useParams();
@@ -15,6 +17,7 @@ export default function VehicleDetail() {
     const [loading, setLoading] = useState(true);
     const [booking, setBooking] = useState({ start_date: '', end_date: '' });
     const [bookingLoading, setBookingLoading] = useState(false);
+    const [showVerifyGate, setShowVerifyGate] = useState(false);
 
     useEffect(() => {
         fetchVehicle();
@@ -68,8 +71,7 @@ export default function VehicleDetail() {
             return;
         }
         if (!isVerified) {
-            toast.error('Please complete identity verification before booking');
-            navigate('/profile');
+            setShowVerifyGate(true);
             return;
         }
         if (user.id === vehicle.owner_id) {
@@ -130,9 +132,7 @@ export default function VehicleDetail() {
 
     return (
         <div>
-            <button className="btn btn-ghost" onClick={() => navigate(-1)} style={{ marginBottom: 16 }}>
-                <FiChevronLeft /> Back
-            </button>
+            <BackButton />
 
             <div className="vehicle-detail-hero">
                 {/* Image Gallery */}
@@ -377,6 +377,13 @@ export default function VehicleDetail() {
                     </div>
                 </div>
             </div>
+
+            {/* Verification Gate Modal */}
+            <VerificationGate
+                isOpen={showVerifyGate}
+                onClose={() => setShowVerifyGate(false)}
+                action="rent a car"
+            />
         </div>
     );
 }

@@ -4,9 +4,10 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { FiCalendar, FiCheck, FiX, FiFileText } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import BackButton from '../components/BackButton';
 
 export default function Bookings() {
-    const { user, profile, isOwner, isAdmin } = useAuth();
+    const { user, profile, isRenter, isAdmin } = useAuth();
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('all');
@@ -22,7 +23,7 @@ export default function Bookings() {
                 .select('*, vehicles(make, model, year, thumbnail_url, plate_number), profiles!bookings_renter_id_fkey(full_name, email)')
                 .order('created_at', { ascending: false });
 
-            if (isOwner && !isAdmin) query = query.eq('owner_id', user.id);
+            if (isRenter && !isAdmin) query = query.eq('owner_id', user.id);
             else if (!isAdmin) query = query.eq('renter_id', user.id);
 
             const { data, error } = await query;
@@ -54,9 +55,11 @@ export default function Bookings() {
 
     return (
         <div>
+            <BackButton />
+
             <div className="page-header">
-                <h1>📋 {isOwner ? 'Rental Requests' : 'My Bookings'}</h1>
-                <p>{isOwner ? 'Manage incoming rental requests for your vehicles' : 'Track and manage your vehicle rental bookings'}</p>
+                <h1>📋 {isRenter ? 'Rental Requests' : 'My Bookings'}</h1>
+                <p>{isRenter ? 'Manage incoming rental requests for your vehicles' : 'Track and manage your vehicle rental bookings'}</p>
             </div>
 
             <div className="tabs">
@@ -73,7 +76,7 @@ export default function Bookings() {
                     <div className="empty-state-icon"><FiCalendar /></div>
                     <h3>No bookings found</h3>
                     <p>{activeTab === 'all' ? 'No bookings yet. Start browsing vehicles!' : `No ${activeTab} bookings.`}</p>
-                    {!isOwner && <Link to="/vehicles" className="btn btn-primary">Browse Vehicles</Link>}
+                    {!isRenter && <Link to="/vehicles" className="btn btn-primary">Browse Vehicles</Link>}
                 </div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -88,7 +91,7 @@ export default function Bookings() {
                                                 {booking.vehicles?.year} {booking.vehicles?.make} {booking.vehicles?.model}
                                             </h3>
                                             <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                                                {isOwner && <>Renter: <strong>{booking.profiles?.full_name}</strong> • </>}
+                                                {isRenter && <>Rentee: <strong>{booking.profiles?.full_name}</strong> • </>}
                                                 {booking.vehicles?.plate_number}
                                             </div>
                                             <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
@@ -107,7 +110,7 @@ export default function Bookings() {
                                             {booking.status}
                                         </span>
 
-                                        {isOwner && booking.status === 'pending' && (
+                                        {isRenter && booking.status === 'pending' && (
                                             <div style={{ display: 'flex', gap: 8 }}>
                                                 <button className="btn btn-success btn-sm" onClick={() => updateBookingStatus(booking.id, 'confirmed')}>
                                                     <FiCheck /> Accept

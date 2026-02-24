@@ -11,7 +11,7 @@
 -- Role-based permission matrix
 CREATE TABLE public.permissions (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'owner', 'renter', 'super_admin')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'renter', 'rentee', 'super_admin')),
   resource TEXT NOT NULL,           -- e.g., 'vehicles', 'bookings', 'profiles', 'admin_panel'
   action TEXT NOT NULL CHECK (action IN ('create', 'read', 'update', 'delete', 'manage', 'export')),
   is_allowed BOOLEAN DEFAULT FALSE,
@@ -55,22 +55,22 @@ INSERT INTO public.permissions (role, resource, action, is_allowed, conditions) 
   ('admin', 'security_logs', 'read', true, null),
   ('admin', 'security_incidents', 'create', true, null),
   
-  -- Owner
-  ('owner', 'profiles', 'read', true, '{"own_only": true}'),
-  ('owner', 'profiles', 'update', true, '{"own_only": true}'),
-  ('owner', 'vehicles', 'create', true, null),
-  ('owner', 'vehicles', 'read', true, null),
-  ('owner', 'vehicles', 'update', true, '{"own_only": true}'),
-  ('owner', 'vehicles', 'delete', true, '{"own_only": true}'),
-  ('owner', 'bookings', 'read', true, '{"own_only": true}'),
-  ('owner', 'bookings', 'update', true, '{"own_only": true}'),
-  
-  -- Renter
+  -- Renter (vehicle owner who lists cars)
   ('renter', 'profiles', 'read', true, '{"own_only": true}'),
   ('renter', 'profiles', 'update', true, '{"own_only": true}'),
+  ('renter', 'vehicles', 'create', true, null),
   ('renter', 'vehicles', 'read', true, null),
-  ('renter', 'bookings', 'create', true, null),
-  ('renter', 'bookings', 'read', true, '{"own_only": true}');
+  ('renter', 'vehicles', 'update', true, '{"own_only": true}'),
+  ('renter', 'vehicles', 'delete', true, '{"own_only": true}'),
+  ('renter', 'bookings', 'read', true, '{"own_only": true}'),
+  ('renter', 'bookings', 'update', true, '{"own_only": true}'),
+  
+  -- Rentee (person who rents cars)
+  ('rentee', 'profiles', 'read', true, '{"own_only": true}'),
+  ('rentee', 'profiles', 'update', true, '{"own_only": true}'),
+  ('rentee', 'vehicles', 'read', true, null),
+  ('rentee', 'bookings', 'create', true, null),
+  ('rentee', 'bookings', 'read', true, '{"own_only": true}');
 
 -- =============================================
 -- A02:2021 - CRYPTOGRAPHIC FAILURES
@@ -613,7 +613,7 @@ CREATE TABLE public.iso_compliance_controls (
 -- Insert ISO 27001 Annex A controls relevant to SafeDrive
 INSERT INTO public.iso_compliance_controls (control_id, control_name, control_description, iso_section, status, implementation_details) VALUES
   ('A.5.1.1', 'Policies for information security', 'Set of policies approved by management for information security', 'A.5 Security Policies', 'implemented', 'Security policies defined in data_classification and security_config tables'),
-  ('A.6.1.2', 'Segregation of duties', 'Conflicting duties separated to reduce unauthorized modification', 'A.6 Organization of IS', 'implemented', 'Role-based access control via permissions table with admin/owner/renter segregation'),
+  ('A.6.1.2', 'Segregation of duties', 'Conflicting duties separated to reduce unauthorized modification', 'A.6 Organization of IS', 'implemented', 'Role-based access control via permissions table with admin/renter/rentee segregation'),
   ('A.8.2.1', 'Classification of information', 'Information classified in terms of value and sensitivity', 'A.8 Asset Management', 'implemented', 'Data classification register in data_classification table'),
   ('A.9.1.1', 'Access control policy', 'Access control policy established and reviewed', 'A.9 Access Control', 'implemented', 'RBAC permissions matrix and Supabase RLS policies'),
   ('A.9.2.1', 'User registration and de-registration', 'Formal user registration and de-registration process', 'A.9 Access Control', 'implemented', 'Supabase Auth with email verification and profile creation trigger'),

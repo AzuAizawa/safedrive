@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { FiChevronLeft, FiUpload } from 'react-icons/fi';
+import { FiUpload } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import VerificationGate from '../../components/VerificationGate';
+import BackButton from '../../components/BackButton';
 
 export default function CreateVehicle() {
     const { user, profile, isVerified } = useAuth();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
+    const [showVerifyGate, setShowVerifyGate] = useState(false);
     const [formData, setFormData] = useState({
         make: '', model: '', year: new Date().getFullYear(), color: '', plate_number: '',
         body_type: 'Sedan', transmission: 'Automatic', fuel_type: 'Gasoline',
@@ -33,7 +36,7 @@ export default function CreateVehicle() {
         e.preventDefault();
 
         if (!isVerified) {
-            toast.error('You must be verified to list a vehicle');
+            setShowVerifyGate(true);
             return;
         }
 
@@ -82,9 +85,7 @@ export default function CreateVehicle() {
 
     return (
         <div style={{ maxWidth: 800, margin: '0 auto' }}>
-            <button className="btn btn-ghost" onClick={() => navigate(-1)} style={{ marginBottom: 16 }}>
-                <FiChevronLeft /> Back
-            </button>
+            <BackButton />
 
             <div className="page-header">
                 <h1>🚗 List Your Vehicle</h1>
@@ -250,6 +251,13 @@ export default function CreateVehicle() {
                     </button>
                 </div>
             </form>
+
+            {/* Verification Gate Modal */}
+            <VerificationGate
+                isOpen={showVerifyGate}
+                onClose={() => setShowVerifyGate(false)}
+                action="list a vehicle"
+            />
         </div>
     );
 }

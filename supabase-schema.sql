@@ -19,7 +19,7 @@ CREATE TABLE public.profiles (
   province TEXT,
   date_of_birth DATE,
   avatar_url TEXT,
-  role TEXT NOT NULL DEFAULT 'renter' CHECK (role IN ('admin', 'owner', 'renter')),
+  role TEXT NOT NULL DEFAULT 'rentee' CHECK (role IN ('admin', 'renter', 'rentee')),
   
   -- Verification status
   verification_status TEXT NOT NULL DEFAULT 'pending' CHECK (verification_status IN ('pending', 'submitted', 'verified', 'rejected')),

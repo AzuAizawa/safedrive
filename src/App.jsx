@@ -31,11 +31,18 @@ function AdminRoute() {
   return <Outlet />;
 }
 
-function OwnerRoute() {
-  const { user, isOwner, isAdmin, loading } = useAuth();
+function RenterRoute() {
+  const { user, isRenter, isAdmin, loading } = useAuth();
   if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (!isOwner && !isAdmin) return <Navigate to="/dashboard" replace />;
+  if (!isRenter && !isAdmin) return <Navigate to="/dashboard" replace />;
+  return <Outlet />;
+}
+
+function RedirectIfAuth() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
+  if (user) return <Navigate to="/dashboard" replace />;
   return <Outlet />;
 }
 
@@ -84,11 +91,15 @@ function App() {
           <Route element={<AppLayout />}>
             {/* Public Routes */}
             <Route path="/" element={<Landing />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/vehicles" element={<Vehicles />} />
             <Route path="/vehicles/:id" element={<VehicleDetail />} />
+
+            {/* Auth Routes — redirect to dashboard if already logged in */}
+            <Route element={<RedirectIfAuth />}>
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+            </Route>
+            <Route path="/auth/callback" element={<AuthCallback />} />
 
             {/* Protected Routes */}
             <Route element={<ProtectedRoute />}>
@@ -98,8 +109,8 @@ function App() {
               <Route path="/agreements/:bookingId" element={<RentalAgreement />} />
             </Route>
 
-            {/* Owner Routes */}
-            <Route element={<OwnerRoute />}>
+            {/* Renter (vehicle owner) Routes */}
+            <Route element={<RenterRoute />}>
               <Route path="/vehicles/new" element={<CreateVehicle />} />
               <Route path="/my-vehicles" element={<MyVehicles />} />
             </Route>

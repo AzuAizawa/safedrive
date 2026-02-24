@@ -36,7 +36,6 @@ export function AuthProvider({ children }) {
                 if (session?.user) {
                     await fetchProfile(session.user.id);
 
-                    // A09: Log authentication events
                     if (event === 'SIGNED_IN') {
                         logSecurityEvent('auth.login', 'User signed in successfully', {
                             severity: 'info',
@@ -57,10 +56,9 @@ export function AuthProvider({ children }) {
         return () => subscription.unsubscribe();
     }, []);
 
-    // A09: Initialize session idle monitor when user is authenticated
     useEffect(() => {
         if (user) {
-            const cleanup = initSessionMonitor(30 * 60 * 1000); // 30 min idle timeout
+            const cleanup = initSessionMonitor(30 * 60 * 1000);
             return cleanup;
         }
     }, [user]);
@@ -75,13 +73,12 @@ export function AuthProvider({ children }) {
 
             if (error) {
                 console.warn('Profile fetch error (may not exist yet):', error.message);
-                // Build a minimal profile from auth metadata so the UI isn't stuck
                 const { data: { user } } = await supabase.auth.getUser();
                 if (user) {
                     setProfile({
                         id: user.id,
                         full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
-                        role: user.user_metadata?.role || 'renter',
+                        role: user.user_metadata?.role || 'rentee',
                         verification_status: 'pending',
                         email: user.email,
                     });
@@ -97,12 +94,10 @@ export function AuthProvider({ children }) {
     };
 
     const signUp = async ({ email, password, fullName, role, phone }) => {
-        // A04: Rate limit registration attempts
         if (!clientRateLimit('register', 3, 3600000)) {
             return { data: null, error: { message: 'Too many registration attempts. Please try again later.' } };
         }
 
-        // A03: Sanitize inputs & detect injection
         const sanitizedName = sanitizeInput(fullName);
         const nameThreats = detectThreats(fullName);
         if (!nameThreats.safe) {
@@ -110,7 +105,6 @@ export function AuthProvider({ children }) {
             return { data: null, error: { message: 'Invalid characters detected in name.' } };
         }
 
-        // A07: Check password strength (min 8 chars with uppercase, lowercase, number, special char)
         const strength = checkPasswordStrength(password);
         if (!strength.passing) {
             return { data: null, error: { message: `Password too weak: ${strength.feedback.join(', ')}` } };
@@ -125,17 +119,16 @@ export function AuthProvider({ children }) {
                 emailRedirectTo: redirectUrl,
                 data: {
                     full_name: sanitizedName,
-                    role: role || 'renter',
+                    role: role || 'rentee',
                     phone: phone,
                 },
             },
         });
 
         if (!error) {
-            // A09: Log successful registration
-            logSecurityEvent('auth.login', `New user registered: ${email}`, {
+            logSecurityEvent('auth.register', `New user registered: ${email}`, {
                 severity: 'info',
-                metadata: { role: role || 'renter' },
+                metadata: { role: role || 'rentee' },
             });
         }
 
@@ -143,7 +136,6 @@ export function AuthProvider({ children }) {
     };
 
     const signIn = async ({ email, password }) => {
-        // A04: Rate limit login attempts (5 per 5 min)
         if (!clientRateLimit('login', 5, 300000)) {
             logSecurityEvent('security.brute_force', `Login rate limit exceeded for ${email}`, {
                 severity: 'critical',
@@ -159,7 +151,6 @@ export function AuthProvider({ children }) {
         });
 
         if (error) {
-            // A07/A09: Log failed login attempt
             logFailedLogin(email, 'invalid_password');
         }
 
@@ -167,7 +158,6 @@ export function AuthProvider({ children }) {
     };
 
     const signOut = async () => {
-        // A09: Log sign out — fire-and-forget so it never blocks sign-out
         try {
             logSecurityEvent('auth.logout', 'User initiated sign out', { severity: 'info' }).catch(() => { });
         } catch (e) {
@@ -176,12 +166,10 @@ export function AuthProvider({ children }) {
 
         try {
             const { error } = await supabase.auth.signOut();
-            // Always clear local state regardless of error
             setUser(null);
             setProfile(null);
             return { error };
         } catch (err) {
-            // Force clear state even on unexpected errors
             setUser(null);
             setProfile(null);
             return { error: err };
@@ -189,7 +177,6 @@ export function AuthProvider({ children }) {
     };
 
     const updateProfile = async (updates) => {
-        // A03: Sanitize all string fields
         const sanitizedUpdates = {};
         for (const [key, value] of Object.entries(updates)) {
             if (typeof value === 'string') {
@@ -213,7 +200,6 @@ export function AuthProvider({ children }) {
 
         if (!error) {
             setProfile(data);
-            // A09: Log profile update
             logSecurityEvent('data.update', 'Profile updated', {
                 severity: 'info',
                 resourceType: 'profile',
@@ -236,9 +222,11 @@ export function AuthProvider({ children }) {
         fetchProfile: () => user && fetchProfile(user.id),
         isAdmin: profile?.role === 'admin',
         isSuperAdmin: profile?.role === 'super_admin',
-        isOwner: profile?.role === 'owner',
-        isRenter: profile?.role === 'renter',
+        isRenter: profile?.role === 'renter',    // Vehicle owner who lists cars
+        isRentee: profile?.role === 'rentee',     // Person who rents cars
         isVerified: profile?.verification_status === 'verified',
+        // Legacy aliases for backward compat during transition
+        isOwner: profile?.role === 'renter',
     };
 
     return (

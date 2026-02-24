@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 import { FiTruck, FiCalendar, FiStar, FiAlertTriangle, FiArrowRight, FiCheckCircle, FiClock, FiUsers, FiShield } from 'react-icons/fi';
 
 export default function Dashboard() {
-    const { profile, isAdmin, isOwner, isRenter } = useAuth();
+    const { profile, isAdmin, isRenter, isRentee } = useAuth();
     const [stats, setStats] = useState({ vehicles: 0, bookings: 0, reviews: 0, pendingUsers: 0 });
     const [recentBookings, setRecentBookings] = useState([]);
     const [dataLoading, setDataLoading] = useState(true);
@@ -45,7 +45,7 @@ export default function Dashboard() {
                     reviews: userCount,
                     pendingUsers: pendingCount,
                 });
-            } else if (isOwner) {
+            } else if (isRenter) {
                 const [vehicleCount, bookingCount, reviewCount] = await Promise.all([
                     safeCount(() => supabase.from('vehicles').select('id', { count: 'exact', head: true }).eq('owner_id', profile.id)),
                     safeCount(() => supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('owner_id', profile.id)),
@@ -77,8 +77,8 @@ export default function Dashboard() {
                     .order('created_at', { ascending: false })
                     .limit(5);
 
-                if (isOwner) query.eq('owner_id', profile.id);
-                else if (isRenter) query.eq('renter_id', profile.id);
+                if (isRenter) query.eq('owner_id', profile.id);
+                else if (isRentee) query.eq('renter_id', profile.id);
 
                 const { data } = await query;
                 setRecentBookings(data || []);
@@ -187,13 +187,13 @@ export default function Dashboard() {
 
             <div className="page-header">
                 <h1>
-                    {isAdmin ? '🛡️ Admin Dashboard' : isOwner ? '🚘 Owner Dashboard' : '👋 Welcome back'}
+                    {isAdmin ? '🛡️ Admin Dashboard' : isRenter ? '🚘 Renter Dashboard' : '👋 Welcome back'}
                     {profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}
                 </h1>
                 <p>
                     {isAdmin
                         ? 'Manage users, vehicles, and platform operations'
-                        : isOwner
+                        : isRenter
                             ? 'Manage your vehicles and track bookings'
                             : 'Browse verified vehicles and manage your rentals'}
                 </p>
@@ -240,7 +240,7 @@ export default function Dashboard() {
                             </div>
                         </div>
                     </>
-                ) : isOwner ? (
+                ) : isRenter ? (
                     <>
                         <div className="stat-card">
                             <div className="stat-icon blue"><FiTruck /></div>
@@ -313,7 +313,7 @@ export default function Dashboard() {
                         </Link>
                     </>
                 )}
-                {(isOwner || isAdmin) && (
+                {(isRenter || isAdmin) && (
                     <Link to="/vehicles/new" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer', background: 'linear-gradient(135deg, var(--accent-50), var(--warning-50))', borderColor: 'rgba(249,115,22,0.2)' }}>
                         <div className="stat-icon orange" style={{ width: 44, height: 44 }}>🚗</div>
                         <div>
