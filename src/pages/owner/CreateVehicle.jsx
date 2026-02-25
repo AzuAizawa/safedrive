@@ -118,7 +118,7 @@ export default function CreateVehicle() {
                         </div>
                         <div className="form-row" style={{ marginBottom: 16 }}>
                             <div className="form-group">
-                                <label className="form-label">Year * (0-5 years old only)</label>
+                                <label className="form-label">Year Model *</label>
                                 <input type="number" className="form-input" style={{ width: '100%' }} min={currentYear - 5} max={currentYear + 1} value={formData.year} onChange={(e) => setFormData({ ...formData, year: e.target.value })} required />
                             </div>
                             <div className="form-group">

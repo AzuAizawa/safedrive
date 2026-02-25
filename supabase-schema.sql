@@ -107,6 +107,30 @@ CREATE TABLE public.vehicles (
 );
 
 -- =============================================
+-- VEHICLE AVAILABILITY TABLE
+-- =============================================
+CREATE TABLE public.vehicle_availability (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  vehicle_id UUID REFERENCES public.vehicles(id) ON DELETE CASCADE NOT NULL,
+  unavailable_date DATE NOT NULL,
+  reason TEXT NOT NULL DEFAULT 'blocked' CHECK (reason IN ('blocked', 'maintenance', 'booked')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  
+  UNIQUE(vehicle_id, unavailable_date)
+);
+
+-- RLS: vehicle owners can manage their own availability
+ALTER TABLE public.vehicle_availability ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Anyone can view availability" ON public.vehicle_availability
+  FOR SELECT USING (true);
+
+CREATE POLICY "Owners can manage their vehicle availability" ON public.vehicle_availability
+  FOR ALL USING (
+    vehicle_id IN (SELECT id FROM public.vehicles WHERE owner_id = auth.uid())
+  );
+
+-- =============================================
 -- 3. BOOKINGS TABLE
 -- =============================================
 CREATE TABLE public.bookings (

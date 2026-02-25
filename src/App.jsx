@@ -13,6 +13,7 @@ import RentalAgreement from './pages/RentalAgreement';
 import Profile from './pages/Profile';
 import CreateVehicle from './pages/owner/CreateVehicle';
 import MyVehicles from './pages/owner/MyVehicles';
+import ManageAvailability from './pages/owner/ManageAvailability';
 import AdminPanel from './pages/admin/AdminPanel';
 import AuthCallback from './pages/auth/AuthCallback';
 
@@ -113,6 +114,7 @@ function App() {
             <Route element={<RenterRoute />}>
               <Route path="/vehicles/new" element={<CreateVehicle />} />
               <Route path="/my-vehicles" element={<MyVehicles />} />
+              <Route path="/vehicles/:id/availability" element={<ManageAvailability />} />
             </Route>
 
             {/* Admin Routes */}

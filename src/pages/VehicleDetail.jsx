@@ -6,6 +6,7 @@ import { FiMapPin, FiUsers, FiSettings, FiStar, FiCalendar, FiShield, FiCheckCir
 import toast from 'react-hot-toast';
 import VerificationGate from '../components/VerificationGate';
 import BackButton from '../components/BackButton';
+import AvailabilityCalendar from '../components/AvailabilityCalendar';
 
 export default function VehicleDetail() {
     const { id } = useParams();
@@ -18,6 +19,7 @@ export default function VehicleDetail() {
     const [booking, setBooking] = useState({ start_date: '', end_date: '' });
     const [bookingLoading, setBookingLoading] = useState(false);
     const [showVerifyGate, setShowVerifyGate] = useState(false);
+    const [blockedDates, setBlockedDates] = useState([]);
 
     useEffect(() => {
         fetchVehicle();
@@ -83,6 +85,23 @@ export default function VehicleDetail() {
         if (days <= 0) {
             toast.error('Please select valid dates');
             return;
+        }
+
+        // Check for date conflicts with blocked/booked dates
+        try {
+            const { data: conflicts } = await supabase
+                .from('vehicle_availability')
+                .select('unavailable_date')
+                .eq('vehicle_id', vehicle.id)
+                .gte('unavailable_date', booking.start_date)
+                .lte('unavailable_date', booking.end_date);
+
+            if (conflicts && conflicts.length > 0) {
+                toast.error(`Some of your selected dates are unavailable. Check the availability calendar.`);
+                return;
+            }
+        } catch (err) {
+            console.warn('Could not check availability:', err);
         }
 
         setBookingLoading(true);
@@ -376,6 +395,11 @@ export default function VehicleDetail() {
                         </div>
                     </div>
                 </div>
+            </div>
+
+            {/* Availability Calendar */}
+            <div style={{ marginTop: 24 }}>
+                <AvailabilityCalendar vehicleId={vehicle.id} editable={false} />
             </div>
 
             {/* Verification Gate Modal */}
