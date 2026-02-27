@@ -13,6 +13,39 @@ const COLOR_OPTIONS = [
     'Maroon', 'Bronze', 'Champagne', 'Other'
 ];
 
+// Seating capacity ranges per body type
+const SEATING_BY_BODY_TYPE = {
+    Sedan: [4, 5],
+    Hatchback: [4, 5],
+    Coupe: [2, 4],
+    SUV: [5, 7],
+    Crossover: [5, 7],
+    MPV: [7, 8],
+    Van: [8, 10, 12, 15],
+    Pickup: [2, 4, 5],
+};
+
+// MMDA/LTO Number Coding — based on last digit of plate number
+function getCodingDay(plateNumber) {
+    if (!plateNumber) return null;
+    const digits = plateNumber.replace(/\D/g, '');
+    if (digits.length === 0) return null;
+    const lastDigit = parseInt(digits[digits.length - 1]);
+    const coding = {
+        1: { day: 'Monday', color: '#ef4444' },
+        2: { day: 'Monday', color: '#ef4444' },
+        3: { day: 'Tuesday', color: '#f97316' },
+        4: { day: 'Tuesday', color: '#f97316' },
+        5: { day: 'Wednesday', color: '#eab308' },
+        6: { day: 'Wednesday', color: '#eab308' },
+        7: { day: 'Thursday', color: '#22c55e' },
+        8: { day: 'Thursday', color: '#22c55e' },
+        9: { day: 'Friday', color: '#3b82f6' },
+        0: { day: 'Friday', color: '#3b82f6' },
+    };
+    return coding[lastDigit] || null;
+}
+
 export default function CreateVehicle() {
     const { user, profile, isVerified } = useAuth();
     const navigate = useNavigate();
@@ -24,6 +57,7 @@ export default function CreateVehicle() {
     const [models, setModels] = useState([]);
     const [filteredModels, setFilteredModels] = useState([]);
     const [catalogLoading, setCatalogLoading] = useState(true);
+    const [codingDay, setCodingDay] = useState(null);
 
     const [formData, setFormData] = useState({
         make: '', model: '', year: new Date().getFullYear(), color: '', plate_number: '',
@@ -86,6 +120,21 @@ export default function CreateVehicle() {
             }
         }
     }, [formData.model, filteredModels]);
+
+    // When body type changes, auto-adjust seating capacity
+    useEffect(() => {
+        if (formData.body_type) {
+            const validSeats = SEATING_BY_BODY_TYPE[formData.body_type] || [5];
+            if (!validSeats.includes(parseInt(formData.seating_capacity))) {
+                setFormData(prev => ({ ...prev, seating_capacity: validSeats[0] }));
+            }
+        }
+    }, [formData.body_type]);
+
+    // Compute LTO coding day when plate number changes
+    useEffect(() => {
+        setCodingDay(getCodingDay(formData.plate_number));
+    }, [formData.plate_number]);
 
     const toggleFeature = (feature) => {
         setFormData(prev => ({
@@ -260,7 +309,17 @@ export default function CreateVehicle() {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Plate Number *</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="ABC 1234" value={formData.plate_number} onChange={(e) => setFormData({ ...formData, plate_number: e.target.value })} required />
+                                <input className="form-input" style={{ width: '100%' }} placeholder="ABC 1234" value={formData.plate_number} onChange={(e) => setFormData({ ...formData, plate_number: e.target.value.toUpperCase() })} required />
+                                {codingDay && (
+                                    <div style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                                        marginTop: 6, padding: '4px 10px', borderRadius: 'var(--radius-md)',
+                                        background: codingDay.color + '15', border: `1px solid ${codingDay.color}40`,
+                                        fontSize: 12, fontWeight: 600, color: codingDay.color,
+                                    }}>
+                                        🚦 Coding Day: {codingDay.day}
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <div className="form-row" style={{ marginBottom: 16 }}>
@@ -291,7 +350,7 @@ export default function CreateVehicle() {
                                     onChange={(e) => setFormData({ ...formData, seating_capacity: e.target.value })}
                                     required
                                 >
-                                    {[2, 4, 5, 6, 7, 8, 9, 10, 12, 15].map(n => (
+                                    {(SEATING_BY_BODY_TYPE[formData.body_type] || [2, 4, 5, 6, 7, 8]).map(n => (
                                         <option key={n} value={n}>{n} seats</option>
                                     ))}
                                 </select>
