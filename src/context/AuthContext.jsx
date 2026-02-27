@@ -21,26 +21,9 @@ export function AuthProvider({ children }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Check if user opted for "Remember Me"
-        const remembered = localStorage.getItem('safedrive_remember_me');
-
         supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
             if (session?.user) {
-                // If there's a session but user didn't check "Remember Me", sign them out
-                if (remembered !== 'true') {
-                    // Session exists from a previous login without "Remember Me"
-                    // Only auto-clear if this is a fresh browser open (no sessionStorage flag)
-                    const isActiveSession = sessionStorage.getItem('safedrive_active');
-                    if (!isActiveSession) {
-                        // Fresh browser open + no remember me = sign out
-                        supabase.auth.signOut();
-                        setUser(null);
-                        setProfile(null);
-                        setLoading(false);
-                        return;
-                    }
-                }
-                setUser(session.user);
                 fetchProfile(session.user.id);
             } else {
                 setLoading(false);
@@ -52,7 +35,6 @@ export function AuthProvider({ children }) {
                 setUser(session?.user ?? null);
                 if (session?.user) {
                     await fetchProfile(session.user.id);
-                    // Mark this browser tab as having an active session
                     sessionStorage.setItem('safedrive_active', 'true');
 
                     if (event === 'SIGNED_IN') {
@@ -75,6 +57,31 @@ export function AuthProvider({ children }) {
 
         return () => subscription.unsubscribe();
     }, []);
+
+    // Remember Me: if user didn't check "Remember Me" and this is a fresh browser open, sign out
+    useEffect(() => {
+        if (!loading && user) {
+            const remembered = localStorage.getItem('safedrive_remember_me');
+            const isActiveSession = sessionStorage.getItem('safedrive_active');
+            if (remembered !== 'true' && !isActiveSession) {
+                // Fresh browser open without "Remember Me" → sign out
+                const doSignOut = async () => {
+                    try { await supabase.auth.signOut(); } catch (e) { }
+                    try {
+                        Object.keys(localStorage).forEach(key => {
+                            if (key.startsWith('sb-')) localStorage.removeItem(key);
+                        });
+                    } catch (e) { }
+                    setUser(null);
+                    setProfile(null);
+                };
+                doSignOut();
+            } else {
+                // Mark session as active for this browser tab
+                sessionStorage.setItem('safedrive_active', 'true');
+            }
+        }
+    }, [loading, user]);
 
     useEffect(() => {
         if (user) {
