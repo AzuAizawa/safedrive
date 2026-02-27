@@ -58,30 +58,24 @@ export function AuthProvider({ children }) {
         return () => subscription.unsubscribe();
     }, []);
 
-    // Remember Me: if user didn't check "Remember Me" and this is a fresh browser open, sign out
+    // Remember Me: if user didn't check "Remember Me", sign out when browser/tab closes
     useEffect(() => {
-        if (!loading && user) {
-            const remembered = localStorage.getItem('safedrive_remember_me');
-            const isActiveSession = sessionStorage.getItem('safedrive_active');
-            if (remembered !== 'true' && !isActiveSession) {
-                // Fresh browser open without "Remember Me" → sign out
-                const doSignOut = async () => {
-                    try { await supabase.auth.signOut(); } catch (e) { }
-                    try {
-                        Object.keys(localStorage).forEach(key => {
-                            if (key.startsWith('sb-')) localStorage.removeItem(key);
-                        });
-                    } catch (e) { }
-                    setUser(null);
-                    setProfile(null);
-                };
-                doSignOut();
-            } else {
-                // Mark session as active for this browser tab
-                sessionStorage.setItem('safedrive_active', 'true');
-            }
-        }
-    }, [loading, user]);
+        if (!user) return;
+        const remembered = localStorage.getItem('safedrive_remember_me');
+        if (remembered === 'true') return; // User wants to stay logged in
+
+        const handleUnload = () => {
+            // Clear Supabase session tokens so next open requires login
+            try {
+                Object.keys(localStorage).forEach(key => {
+                    if (key.startsWith('sb-')) localStorage.removeItem(key);
+                });
+            } catch (e) { }
+        };
+
+        window.addEventListener('beforeunload', handleUnload);
+        return () => window.removeEventListener('beforeunload', handleUnload);
+    }, [user]);
 
     useEffect(() => {
         if (user) {

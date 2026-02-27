@@ -301,7 +301,7 @@ export default function Dashboard() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20, marginBottom: 32 }}>
                 {isAdmin && (
                     <>
-                        <Link to="/admin/users" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
+                        <Link to="/admin?tab=users" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
                             <div className="stat-icon blue" style={{ width: 44, height: 44 }}><FiUsers /></div>
                             <div>
                                 <h3 style={{ fontSize: 15, fontWeight: 700 }}>Manage Users</h3>
@@ -309,7 +309,7 @@ export default function Dashboard() {
                             </div>
                             <FiArrowRight style={{ marginLeft: 'auto', color: 'var(--text-tertiary)' }} />
                         </Link>
-                        <Link to="/admin/vehicles" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
+                        <Link to="/admin?tab=vehicles" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
                             <div className="stat-icon green" style={{ width: 44, height: 44 }}><FiTruck /></div>
                             <div>
                                 <h3 style={{ fontSize: 15, fontWeight: 700 }}>Manage Vehicles</h3>

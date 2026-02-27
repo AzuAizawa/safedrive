@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { FiUsers, FiTruck, FiCalendar, FiShield, FiCheck, FiX, FiEye, FiSearch, FiImage, FiPlus, FiToggleLeft, FiToggleRight, FiAlertCircle, FiClock, FiTrash2 } from 'react-icons/fi';
@@ -7,7 +8,8 @@ import BackButton from '../../components/BackButton';
 
 export default function AdminPanel() {
     const { user } = useAuth();
-    const [activeTab, setActiveTab] = useState('users');
+    const [searchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'users');
     const [users, setUsers] = useState([]);
     const [vehicles, setVehicles] = useState([]);
     const [bookings, setBookings] = useState([]);
