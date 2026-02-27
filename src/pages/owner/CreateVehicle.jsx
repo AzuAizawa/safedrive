@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { FiUpload } from 'react-icons/fi';
+import { FiUpload, FiX, FiCamera } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import VerificationGate from '../../components/VerificationGate';
 import BackButton from '../../components/BackButton';
@@ -58,6 +58,8 @@ export default function CreateVehicle() {
     const [filteredModels, setFilteredModels] = useState([]);
     const [catalogLoading, setCatalogLoading] = useState(true);
     const [codingDay, setCodingDay] = useState(null);
+    const [photos, setPhotos] = useState([]);
+    const [photoPreviews, setPhotoPreviews] = useState([]);
 
     const [formData, setFormData] = useState({
         make: '', model: '', year: new Date().getFullYear(), color: '', plate_number: '',
@@ -145,6 +147,30 @@ export default function CreateVehicle() {
         }));
     };
 
+    const handlePhotoSelect = (e) => {
+        const files = Array.from(e.target.files);
+        const remaining = 4 - photos.length;
+        if (remaining <= 0) {
+            toast.error('Maximum 4 photos allowed');
+            return;
+        }
+        const validFiles = files.slice(0, remaining).filter(f => {
+            if (!f.type.startsWith('image/')) { toast.error(`${f.name} is not an image`); return false; }
+            if (f.size > 5 * 1024 * 1024) { toast.error(`${f.name} exceeds 5MB limit`); return false; }
+            return true;
+        });
+        const newPreviews = validFiles.map(f => URL.createObjectURL(f));
+        setPhotos(prev => [...prev, ...validFiles]);
+        setPhotoPreviews(prev => [...prev, ...newPreviews]);
+        e.target.value = '';
+    };
+
+    const removePhoto = (index) => {
+        URL.revokeObjectURL(photoPreviews[index]);
+        setPhotos(prev => prev.filter((_, i) => i !== index));
+        setPhotoPreviews(prev => prev.filter((_, i) => i !== index));
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
 
@@ -166,6 +192,24 @@ export default function CreateVehicle() {
 
         setLoading(true);
         try {
+            // Upload photos to Supabase Storage
+            let imageUrls = [];
+            if (photos.length > 0) {
+                for (let i = 0; i < photos.length; i++) {
+                    const file = photos[i];
+                    const fileExt = file.name.split('.').pop();
+                    const filePath = `${user.id}/${Date.now()}_${i}.${fileExt}`;
+                    const { error: uploadError } = await supabase.storage
+                        .from('vehicle-images')
+                        .upload(filePath, file);
+                    if (uploadError) throw uploadError;
+                    const { data: urlData } = supabase.storage
+                        .from('vehicle-images')
+                        .getPublicUrl(filePath);
+                    imageUrls.push(urlData.publicUrl);
+                }
+            }
+
             const { error } = await supabase.from('vehicles').insert({
                 owner_id: user.id,
                 make: formData.make,
@@ -187,6 +231,8 @@ export default function CreateVehicle() {
                 mileage: formData.mileage ? parseInt(formData.mileage) : null,
                 description: formData.description,
                 features: formData.features,
+                images: imageUrls,
+                thumbnail_url: imageUrls[0] || null,
                 status: 'pending',
             });
 
@@ -438,6 +484,58 @@ export default function CreateVehicle() {
                             <label className="form-label">Description</label>
                             <textarea className="form-textarea" style={{ width: '100%' }} rows={4} placeholder="Describe your vehicle's condition, special features, and any rental terms..." value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
                         </div>
+                    </div>
+                </div>
+
+                {/* Vehicle Photos */}
+                <div className="card" style={{ marginBottom: 24 }}>
+                    <div className="card-header">
+                        <h2 style={{ fontSize: 16, fontWeight: 700 }}>📸 Vehicle Photos</h2>
+                        <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{photos.length}/4 photos</span>
+                    </div>
+                    <div className="card-body">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            {photoPreviews.map((url, i) => (
+                                <div key={i} style={{
+                                    position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+                                    aspectRatio: '4/3', border: '2px solid var(--neutral-200)',
+                                }}>
+                                    <img src={url} alt={`Photo ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    {i === 0 && (
+                                        <span style={{
+                                            position: 'absolute', top: 8, left: 8, background: 'var(--primary-500)',
+                                            color: '#fff', fontSize: 10, fontWeight: 700, padding: '2px 8px',
+                                            borderRadius: 'var(--radius-sm)',
+                                        }}>COVER</span>
+                                    )}
+                                    <button type="button" onClick={() => removePhoto(i)} style={{
+                                        position: 'absolute', top: 8, right: 8, width: 28, height: 28,
+                                        borderRadius: '50%', background: 'rgba(0,0,0,0.6)', color: '#fff',
+                                        border: 'none', cursor: 'pointer', display: 'flex',
+                                        alignItems: 'center', justifyContent: 'center',
+                                    }}>
+                                        <FiX size={14} />
+                                    </button>
+                                </div>
+                            ))}
+                            {photos.length < 4 && (
+                                <label style={{
+                                    aspectRatio: '4/3', border: '2px dashed var(--neutral-300)',
+                                    borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column',
+                                    alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer',
+                                    background: 'var(--neutral-50)', transition: 'all 0.2s ease',
+                                    color: 'var(--text-tertiary)',
+                                }}>
+                                    <FiCamera size={28} />
+                                    <span style={{ fontSize: 13, fontWeight: 600 }}>Add Photo</span>
+                                    <span style={{ fontSize: 11 }}>JPG, PNG · Max 5MB</span>
+                                    <input type="file" accept="image/*" multiple onChange={handlePhotoSelect} style={{ display: 'none' }} />
+                                </label>
+                            )}
+                        </div>
+                        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 12 }}>
+                            📌 First photo will be used as the cover image on your listing. We recommend uploading front, rear, interior, and dashboard photos.
+                        </p>
                     </div>
                 </div>
 
