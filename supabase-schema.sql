@@ -7,6 +7,79 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- =============================================
+-- CAR BRANDS & MODELS (Dynamic Catalog)
+-- =============================================
+CREATE TABLE public.car_brands (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  logo_emoji TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE public.car_models (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  brand_id UUID REFERENCES public.car_brands(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  body_type TEXT DEFAULT 'Sedan' CHECK (body_type IN ('Sedan', 'SUV', 'MPV', 'Van', 'Hatchback', 'Pickup', 'Crossover', 'Coupe')),
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(brand_id, name)
+);
+
+-- RLS
+ALTER TABLE public.car_brands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.car_models ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Anyone can view brands" ON public.car_brands FOR SELECT USING (true);
+CREATE POLICY "Admins can manage brands" ON public.car_brands FOR ALL USING (
+  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+);
+
+CREATE POLICY "Anyone can view models" ON public.car_models FOR SELECT USING (true);
+CREATE POLICY "Admins can manage models" ON public.car_models FOR ALL USING (
+  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+);
+
+-- Seed Philippine car brands
+INSERT INTO public.car_brands (name) VALUES
+  ('Toyota'), ('Honda'), ('Mitsubishi'), ('Nissan'), ('Ford'),
+  ('Hyundai'), ('Kia'), ('Suzuki'), ('Mazda'), ('MG'),
+  ('Geely'), ('Chery'), ('BMW'), ('Mercedes-Benz'), ('Chevrolet'),
+  ('Isuzu'), ('Subaru'), ('Volkswagen')
+  ON CONFLICT (name) DO NOTHING;
+
+-- Seed popular models
+INSERT INTO public.car_models (brand_id, name, body_type)
+SELECT b.id, m.name, m.body_type FROM public.car_brands b
+CROSS JOIN (VALUES
+  ('Toyota', 'Vios', 'Sedan'), ('Toyota', 'Fortuner', 'SUV'), ('Toyota', 'Innova', 'MPV'),
+  ('Toyota', 'Hilux', 'Pickup'), ('Toyota', 'Wigo', 'Hatchback'), ('Toyota', 'Rush', 'SUV'),
+  ('Toyota', 'Corolla Altis', 'Sedan'), ('Toyota', 'Avanza', 'MPV'), ('Toyota', 'Raize', 'Crossover'),
+  ('Honda', 'Civic', 'Sedan'), ('Honda', 'City', 'Sedan'), ('Honda', 'CR-V', 'SUV'),
+  ('Honda', 'BR-V', 'SUV'), ('Honda', 'HR-V', 'Crossover'), ('Honda', 'Brio', 'Hatchback'),
+  ('Mitsubishi', 'Montero Sport', 'SUV'), ('Mitsubishi', 'Xpander', 'MPV'), ('Mitsubishi', 'Mirage', 'Hatchback'),
+  ('Mitsubishi', 'Mirage G4', 'Sedan'), ('Mitsubishi', 'Strada', 'Pickup'), ('Mitsubishi', 'Xpander Cross', 'Crossover'),
+  ('Nissan', 'Navara', 'Pickup'), ('Nissan', 'Terra', 'SUV'), ('Nissan', 'Almera', 'Sedan'),
+  ('Nissan', 'Kicks', 'Crossover'), ('Nissan', 'Urvan', 'Van'),
+  ('Ford', 'Ranger', 'Pickup'), ('Ford', 'Everest', 'SUV'), ('Ford', 'Territory', 'Crossover'),
+  ('Ford', 'EcoSport', 'Crossover'),
+  ('Hyundai', 'Accent', 'Sedan'), ('Hyundai', 'Tucson', 'SUV'), ('Hyundai', 'Creta', 'Crossover'),
+  ('Hyundai', 'Stargazer', 'MPV'), ('Hyundai', 'Staria', 'Van'),
+  ('Kia', 'Seltos', 'Crossover'), ('Kia', 'Stonic', 'Crossover'), ('Kia', 'Carnival', 'MPV'),
+  ('Kia', 'Picanto', 'Hatchback'),
+  ('Suzuki', 'Ertiga', 'MPV'), ('Suzuki', 'Swift', 'Hatchback'), ('Suzuki', 'Dzire', 'Sedan'),
+  ('Suzuki', 'Jimny', 'SUV'), ('Suzuki', 'S-Presso', 'Hatchback'),
+  ('Mazda', 'CX-5', 'SUV'), ('Mazda', 'Mazda3', 'Sedan'), ('Mazda', 'CX-30', 'Crossover'),
+  ('MG', 'ZS', 'Crossover'), ('MG', 'MG 5', 'Sedan'), ('MG', 'RX5', 'SUV'),
+  ('Geely', 'Coolray', 'Crossover'), ('Geely', 'Emgrand', 'Sedan'), ('Geely', 'Azkarra', 'SUV'),
+  ('Chery', 'Tiggo 5X', 'Crossover'), ('Chery', 'Tiggo 7 Pro', 'SUV'), ('Chery', 'Tiggo 8 Pro', 'SUV'),
+  ('Isuzu', 'D-Max', 'Pickup'), ('Isuzu', 'mu-X', 'SUV')
+) AS m(brand, name, body_type)
+WHERE b.name = m.brand
+ON CONFLICT (brand_id, name) DO NOTHING;
+
+-- =============================================
 -- 1. PROFILES TABLE (extends auth.users)
 -- =============================================
 CREATE TABLE public.profiles (

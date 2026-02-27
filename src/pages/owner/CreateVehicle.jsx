@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
@@ -7,11 +7,24 @@ import toast from 'react-hot-toast';
 import VerificationGate from '../../components/VerificationGate';
 import BackButton from '../../components/BackButton';
 
+const COLOR_OPTIONS = [
+    'White', 'Black', 'Silver', 'Gray', 'Red', 'Blue',
+    'Brown', 'Beige', 'Green', 'Orange', 'Yellow', 'Gold',
+    'Maroon', 'Bronze', 'Champagne', 'Other'
+];
+
 export default function CreateVehicle() {
     const { user, profile, isVerified } = useAuth();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [showVerifyGate, setShowVerifyGate] = useState(false);
+
+    // Dynamic brand/model data
+    const [brands, setBrands] = useState([]);
+    const [models, setModels] = useState([]);
+    const [filteredModels, setFilteredModels] = useState([]);
+    const [catalogLoading, setCatalogLoading] = useState(true);
+
     const [formData, setFormData] = useState({
         make: '', model: '', year: new Date().getFullYear(), color: '', plate_number: '',
         body_type: 'Sedan', transmission: 'Automatic', fuel_type: 'Gasoline',
@@ -22,6 +35,57 @@ export default function CreateVehicle() {
 
     const currentYear = new Date().getFullYear();
     const featureOptions = ['ABS', 'Airbags', 'GPS Navigation', 'Dashcam', 'Reverse Camera', 'Bluetooth', 'USB Ports', 'Leather Seats', 'Sunroof', 'Cruise Control', 'Parking Sensors', 'Keyless Entry'];
+
+    // Fetch brands and models on mount
+    useEffect(() => {
+        fetchCatalog();
+    }, []);
+
+    const fetchCatalog = async () => {
+        setCatalogLoading(true);
+        try {
+            const [brandsRes, modelsRes] = await Promise.all([
+                supabase.from('car_brands').select('*').eq('is_active', true).order('name'),
+                supabase.from('car_models').select('*').eq('is_active', true).order('name'),
+            ]);
+            setBrands(brandsRes.data || []);
+            setModels(modelsRes.data || []);
+        } catch (err) {
+            console.error('Error fetching catalog:', err);
+        } finally {
+            setCatalogLoading(false);
+        }
+    };
+
+    // When brand changes, filter models
+    useEffect(() => {
+        if (formData.make) {
+            const brand = brands.find(b => b.name === formData.make);
+            if (brand) {
+                const filtered = models.filter(m => m.brand_id === brand.id);
+                setFilteredModels(filtered);
+                // Reset model if current selection doesn't belong to new brand
+                if (!filtered.some(m => m.name === formData.model)) {
+                    setFormData(prev => ({ ...prev, model: '', body_type: 'Sedan' }));
+                }
+            } else {
+                setFilteredModels([]);
+            }
+        } else {
+            setFilteredModels([]);
+            setFormData(prev => ({ ...prev, model: '', body_type: 'Sedan' }));
+        }
+    }, [formData.make, brands, models]);
+
+    // When model changes, auto-fill body_type if available
+    useEffect(() => {
+        if (formData.model) {
+            const model = filteredModels.find(m => m.name === formData.model);
+            if (model?.body_type) {
+                setFormData(prev => ({ ...prev, body_type: model.body_type }));
+            }
+        }
+    }, [formData.model, filteredModels]);
 
     const toggleFeature = (feature) => {
         setFormData(prev => ({
@@ -37,6 +101,11 @@ export default function CreateVehicle() {
 
         if (!isVerified) {
             setShowVerifyGate(true);
+            return;
+        }
+
+        if (!formData.make || !formData.model) {
+            toast.error('Please select a brand and model');
             return;
         }
 
@@ -108,22 +177,73 @@ export default function CreateVehicle() {
                     <div className="card-body">
                         <div className="form-row" style={{ marginBottom: 16 }}>
                             <div className="form-group">
-                                <label className="form-label">Make *</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="e.g., Toyota" value={formData.make} onChange={(e) => setFormData({ ...formData, make: e.target.value })} required />
+                                <label className="form-label">Brand *</label>
+                                <select
+                                    className="form-select"
+                                    style={{ width: '100%' }}
+                                    value={formData.make}
+                                    onChange={(e) => setFormData({ ...formData, make: e.target.value })}
+                                    required
+                                    disabled={catalogLoading}
+                                >
+                                    <option value="">
+                                        {catalogLoading ? 'Loading brands...' : '— Select Brand —'}
+                                    </option>
+                                    {brands.map(b => (
+                                        <option key={b.id} value={b.name}>
+                                            {b.logo_emoji ? `${b.logo_emoji} ` : ''}{b.name}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Model *</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="e.g., Vios" value={formData.model} onChange={(e) => setFormData({ ...formData, model: e.target.value })} required />
+                                <select
+                                    className="form-select"
+                                    style={{ width: '100%' }}
+                                    value={formData.model}
+                                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                                    required
+                                    disabled={!formData.make || catalogLoading}
+                                >
+                                    <option value="">
+                                        {!formData.make ? '— Select brand first —' : filteredModels.length === 0 ? 'No models available' : '— Select Model —'}
+                                    </option>
+                                    {filteredModels.map(m => (
+                                        <option key={m.id} value={m.name}>{m.name}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
                         <div className="form-row" style={{ marginBottom: 16 }}>
                             <div className="form-group">
                                 <label className="form-label">Year Model *</label>
-                                <input type="number" className="form-input" style={{ width: '100%' }} min={currentYear - 5} max={currentYear + 1} value={formData.year} onChange={(e) => setFormData({ ...formData, year: e.target.value })} required />
+                                <select
+                                    className="form-select"
+                                    style={{ width: '100%' }}
+                                    value={formData.year}
+                                    onChange={(e) => setFormData({ ...formData, year: e.target.value })}
+                                    required
+                                >
+                                    {Array.from({ length: 7 }, (_, i) => currentYear + 1 - i).map(y => (
+                                        <option key={y} value={y}>{y}</option>
+                                    ))}
+                                </select>
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Color *</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="e.g., White" value={formData.color} onChange={(e) => setFormData({ ...formData, color: e.target.value })} required />
+                                <select
+                                    className="form-select"
+                                    style={{ width: '100%' }}
+                                    value={formData.color}
+                                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                                    required
+                                >
+                                    <option value="">— Select Color —</option>
+                                    {COLOR_OPTIONS.map(c => (
+                                        <option key={c} value={c}>{c}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
                         <div className="form-row" style={{ marginBottom: 16 }}>
@@ -134,6 +254,10 @@ export default function CreateVehicle() {
                                     <option value="SUV">SUV</option>
                                     <option value="MPV">MPV</option>
                                     <option value="Van">Van</option>
+                                    <option value="Hatchback">Hatchback</option>
+                                    <option value="Pickup">Pickup</option>
+                                    <option value="Crossover">Crossover</option>
+                                    <option value="Coupe">Coupe</option>
                                 </select>
                             </div>
                             <div className="form-group">
@@ -162,7 +286,17 @@ export default function CreateVehicle() {
                         <div className="form-row">
                             <div className="form-group">
                                 <label className="form-label">Seating Capacity *</label>
-                                <input type="number" className="form-input" style={{ width: '100%' }} min={2} max={15} value={formData.seating_capacity} onChange={(e) => setFormData({ ...formData, seating_capacity: e.target.value })} required />
+                                <select
+                                    className="form-select"
+                                    style={{ width: '100%' }}
+                                    value={formData.seating_capacity}
+                                    onChange={(e) => setFormData({ ...formData, seating_capacity: e.target.value })}
+                                    required
+                                >
+                                    {[2, 4, 5, 6, 7, 8, 9, 10, 12, 15].map(n => (
+                                        <option key={n} value={n}>{n} seats</option>
+                                    ))}
+                                </select>
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Mileage (km)</label>

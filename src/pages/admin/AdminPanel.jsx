@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { FiUsers, FiTruck, FiCalendar, FiShield, FiCheck, FiX, FiEye, FiSearch, FiImage, FiUserPlus } from 'react-icons/fi';
+import { FiUsers, FiTruck, FiCalendar, FiShield, FiCheck, FiX, FiEye, FiSearch, FiImage, FiUserPlus, FiPlus, FiToggleLeft, FiToggleRight } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import BackButton from '../../components/BackButton';
 
@@ -16,6 +16,15 @@ export default function AdminPanel() {
     const [selectedUser, setSelectedUser] = useState(null);
     const [userDocs, setUserDocs] = useState([]);
     const [docsLoading, setDocsLoading] = useState(false);
+
+    // Car Catalog state
+    const [carBrands, setCarBrands] = useState([]);
+    const [carModels, setCarModels] = useState([]);
+    const [catalogLoading, setCatalogLoading] = useState(false);
+    const [newBrandName, setNewBrandName] = useState('');
+    const [newModelName, setNewModelName] = useState('');
+    const [newModelBodyType, setNewModelBodyType] = useState('Sedan');
+    const [selectedBrandId, setSelectedBrandId] = useState('');
 
     useEffect(() => {
         fetchData();
@@ -36,6 +45,8 @@ export default function AdminPanel() {
                     .select('*, vehicles(make, model, year), profiles!bookings_renter_id_fkey(full_name)')
                     .order('created_at', { ascending: false });
                 setBookings(data || []);
+            } else if (activeTab === 'catalog') {
+                await fetchCatalog();
             }
         } catch (err) {
             console.error('Error:', err);
@@ -189,6 +200,83 @@ export default function AdminPanel() {
         }
     };
 
+    // ===== CAR CATALOG FUNCTIONS =====
+    const fetchCatalog = async () => {
+        setCatalogLoading(true);
+        try {
+            const [brandsRes, modelsRes] = await Promise.all([
+                supabase.from('car_brands').select('*').order('name'),
+                supabase.from('car_models').select('*, car_brands(name)').order('name'),
+            ]);
+            setCarBrands(brandsRes.data || []);
+            setCarModels(modelsRes.data || []);
+        } catch (err) {
+            console.error('Error fetching catalog:', err);
+        } finally {
+            setCatalogLoading(false);
+        }
+    };
+
+    const addBrand = async () => {
+        const name = newBrandName.trim();
+        if (!name) return toast.error('Brand name is required');
+        try {
+            const { error } = await supabase.from('car_brands').insert({ name, is_active: true });
+            if (error) throw error;
+            toast.success(`Brand "${name}" added`);
+            setNewBrandName('');
+            fetchCatalog();
+        } catch (err) {
+            toast.error(err.message?.includes('duplicate') ? 'Brand already exists' : 'Failed to add brand');
+        }
+    };
+
+    const addModel = async () => {
+        const name = newModelName.trim();
+        if (!name) return toast.error('Model name is required');
+        if (!selectedBrandId) return toast.error('Select a brand first');
+        try {
+            const { error } = await supabase.from('car_models').insert({
+                brand_id: selectedBrandId,
+                name,
+                body_type: newModelBodyType,
+                is_active: true,
+            });
+            if (error) throw error;
+            toast.success(`Model "${name}" added`);
+            setNewModelName('');
+            fetchCatalog();
+        } catch (err) {
+            toast.error(err.message?.includes('duplicate') ? 'Model already exists for this brand' : 'Failed to add model');
+        }
+    };
+
+    const toggleBrandActive = async (brandId, current) => {
+        try {
+            const { error } = await supabase.from('car_brands').update({ is_active: !current }).eq('id', brandId);
+            if (error) throw error;
+            toast.success(current ? 'Brand deactivated' : 'Brand activated');
+            fetchCatalog();
+        } catch (err) {
+            toast.error('Failed to update brand');
+        }
+    };
+
+    const toggleModelActive = async (modelId, current) => {
+        try {
+            const { error } = await supabase.from('car_models').update({ is_active: !current }).eq('id', modelId);
+            if (error) throw error;
+            toast.success(current ? 'Model deactivated' : 'Model activated');
+            fetchCatalog();
+        } catch (err) {
+            toast.error('Failed to update model');
+        }
+    };
+
+    const filteredCatalogModels = selectedBrandId
+        ? carModels.filter(m => m.brand_id === selectedBrandId)
+        : carModels;
+
     return (
         <div>
             <BackButton to="/dashboard" label="Back to Dashboard" />
@@ -199,7 +287,7 @@ export default function AdminPanel() {
             </div>
 
             {/* Admin Tabs */}
-            <div className="tabs" style={{ maxWidth: 500 }}>
+            <div className="tabs" style={{ maxWidth: 650 }}>
                 <button className={`tab ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>
                     <FiUsers style={{ marginRight: 6 }} /> Users ({users.length})
                 </button>
@@ -209,13 +297,18 @@ export default function AdminPanel() {
                 <button className={`tab ${activeTab === 'bookings' ? 'active' : ''}`} onClick={() => setActiveTab('bookings')}>
                     <FiCalendar style={{ marginRight: 6 }} /> Bookings ({bookings.length})
                 </button>
+                <button className={`tab ${activeTab === 'catalog' ? 'active' : ''}`} onClick={() => setActiveTab('catalog')}>
+                    🚘 Car Catalog
+                </button>
             </div>
 
-            {/* Search */}
-            <div className="search-input-wrapper" style={{ marginBottom: 24, maxWidth: 400 }}>
-                <FiSearch className="search-icon" />
-                <input className="form-input" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-            </div>
+            {/* Search — hide on catalog tab */}
+            {activeTab !== 'catalog' && (
+                <div className="search-input-wrapper" style={{ marginBottom: 24, maxWidth: 400 }}>
+                    <FiSearch className="search-icon" />
+                    <input className="form-input" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                </div>
+            )}
 
             {loading ? (
                 <div className="loading-spinner"><div className="spinner" /></div>
@@ -495,6 +588,177 @@ export default function AdminPanel() {
                     </div>
                 </div>
             )}
-        </div>
+
+            {/* ===== CAR CATALOG TAB ===== */}
+            {activeTab === 'catalog' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 24 }}>
+                    {/* Brands Column */}
+                    <div>
+                        <div className="card">
+                            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <h2 style={{ fontSize: 16, fontWeight: 700 }}>🏭 Brands ({carBrands.length})</h2>
+                            </div>
+                            <div className="card-body">
+                                {/* Add Brand Form */}
+                                <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                                    <input
+                                        className="form-input"
+                                        style={{ flex: 1 }}
+                                        placeholder="New brand name (e.g., Toyota)"
+                                        value={newBrandName}
+                                        onChange={(e) => setNewBrandName(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && addBrand()}
+                                    />
+                                    <button className="btn btn-accent btn-sm" onClick={addBrand}>
+                                        <FiPlus /> Add
+                                    </button>
+                                </div>
+
+                                {/* Brands List */}
+                                {catalogLoading ? (
+                                    <div style={{ textAlign: 'center', padding: 24 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+                                ) : carBrands.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)' }}>No brands yet. Add your first brand above.</div>
+                                ) : (
+                                    <div style={{ maxHeight: 450, overflowY: 'auto' }}>
+                                        {carBrands.map(brand => (
+                                            <div
+                                                key={brand.id}
+                                                onClick={() => setSelectedBrandId(brand.id === selectedBrandId ? '' : brand.id)}
+                                                style={{
+                                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                                    padding: '10px 12px', borderRadius: 'var(--radius-md)', marginBottom: 4,
+                                                    cursor: 'pointer', transition: 'all 0.15s ease',
+                                                    background: selectedBrandId === brand.id ? 'var(--primary-50)' : 'transparent',
+                                                    border: selectedBrandId === brand.id ? '1px solid var(--primary-200)' : '1px solid transparent',
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <span style={{ fontWeight: 600, fontSize: 14, opacity: brand.is_active ? 1 : 0.5 }}>{brand.name}</span>
+                                                    {!brand.is_active && <span className="badge badge-neutral" style={{ fontSize: 10 }}>Inactive</span>}
+                                                    <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                                                        ({carModels.filter(m => m.brand_id === brand.id).length} models)
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    className="btn btn-ghost btn-sm"
+                                                    onClick={(e) => { e.stopPropagation(); toggleBrandActive(brand.id, brand.is_active); }}
+                                                    title={brand.is_active ? 'Deactivate' : 'Activate'}
+                                                    style={{ color: brand.is_active ? 'var(--success-500)' : 'var(--neutral-400)' }}
+                                                >
+                                                    {brand.is_active ? <FiToggleRight size={18} /> : <FiToggleLeft size={18} />}
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Models Column */}
+                    <div>
+                        <div className="card">
+                            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <h2 style={{ fontSize: 16, fontWeight: 700 }}>
+                                    🚗 Models
+                                    {selectedBrandId && ` — ${carBrands.find(b => b.id === selectedBrandId)?.name || ''}`}
+                                    {` (${filteredCatalogModels.length})`}
+                                </h2>
+                            </div>
+                            <div className="card-body">
+                                {/* Add Model Form */}
+                                <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                                    <select
+                                        className="form-select"
+                                        style={{ width: 180 }}
+                                        value={selectedBrandId}
+                                        onChange={(e) => setSelectedBrandId(e.target.value)}
+                                    >
+                                        <option value="">All Brands</option>
+                                        {carBrands.filter(b => b.is_active).map(b => (
+                                            <option key={b.id} value={b.id}>{b.name}</option>
+                                        ))}
+                                    </select>
+                                    <input
+                                        className="form-input"
+                                        style={{ flex: 1, minWidth: 120 }}
+                                        placeholder="New model (e.g., Vios)"
+                                        value={newModelName}
+                                        onChange={(e) => setNewModelName(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && addModel()}
+                                    />
+                                    <select
+                                        className="form-select"
+                                        style={{ width: 130 }}
+                                        value={newModelBodyType}
+                                        onChange={(e) => setNewModelBodyType(e.target.value)}
+                                    >
+                                        <option value="Sedan">Sedan</option>
+                                        <option value="SUV">SUV</option>
+                                        <option value="MPV">MPV</option>
+                                        <option value="Van">Van</option>
+                                        <option value="Hatchback">Hatchback</option>
+                                        <option value="Pickup">Pickup</option>
+                                        <option value="Crossover">Crossover</option>
+                                        <option value="Coupe">Coupe</option>
+                                    </select>
+                                    <button className="btn btn-accent btn-sm" onClick={addModel} disabled={!selectedBrandId}>
+                                        <FiPlus /> Add
+                                    </button>
+                                </div>
+
+                                {/* Models Table */}
+                                {catalogLoading ? (
+                                    <div style={{ textAlign: 'center', padding: 24 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+                                ) : filteredCatalogModels.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)' }}>
+                                        {selectedBrandId ? 'No models for this brand yet. Add one above.' : 'Select a brand to filter or view all models.'}
+                                    </div>
+                                ) : (
+                                    <div className="table-container">
+                                        <table className="table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Model</th>
+                                                    <th>Brand</th>
+                                                    <th>Body Type</th>
+                                                    <th>Status</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {filteredCatalogModels.map(model => (
+                                                    <tr key={model.id}>
+                                                        <td style={{ fontWeight: 600 }}>{model.name}</td>
+                                                        <td style={{ color: 'var(--text-secondary)' }}>{model.car_brands?.name || '—'}</td>
+                                                        <td><span className="badge badge-info">{model.body_type}</span></td>
+                                                        <td>
+                                                            <span className={`badge ${model.is_active ? 'badge-success' : 'badge-neutral'}`}>
+                                                                {model.is_active ? 'Active' : 'Inactive'}
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <button
+                                                                className="btn btn-ghost btn-sm"
+                                                                onClick={() => toggleModelActive(model.id, model.is_active)}
+                                                                style={{ color: model.is_active ? 'var(--success-500)' : 'var(--neutral-400)' }}
+                                                            >
+                                                                {model.is_active ? <FiToggleRight size={16} /> : <FiToggleLeft size={16} />}
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )
+            }
+        </div >
     );
 }
