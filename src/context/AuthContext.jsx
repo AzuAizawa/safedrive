@@ -158,22 +158,32 @@ export function AuthProvider({ children }) {
     };
 
     const signOut = async () => {
+        // Clear state immediately — never let logging block sign-out
+        setUser(null);
+        setProfile(null);
+
         try {
             logSecurityEvent('auth.logout', 'User initiated sign out', { severity: 'info' }).catch(() => { });
         } catch (e) {
-            // Security logging must never block sign-out
+            // Ignore — security logging must never block sign-out
         }
 
         try {
-            const { error } = await supabase.auth.signOut();
-            setUser(null);
-            setProfile(null);
-            return { error };
+            await supabase.auth.signOut();
         } catch (err) {
-            setUser(null);
-            setProfile(null);
-            return { error: err };
+            console.warn('Sign out error:', err);
         }
+
+        // Failsafe: clear any remaining Supabase tokens from storage
+        try {
+            Object.keys(localStorage).forEach(key => {
+                if (key.startsWith('sb-')) localStorage.removeItem(key);
+            });
+        } catch (e) {
+            // Ignore storage errors
+        }
+
+        return { error: null };
     };
 
     const updateProfile = async (updates) => {

@@ -2,9 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { FiPlus, FiEdit, FiEye, FiTrash2, FiCalendar } from 'react-icons/fi';
+import { FiPlus, FiEdit, FiEye, FiTrash2 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import BackButton from '../../components/BackButton';
 
 export default function MyVehicles() {
     const { user } = useAuth();
@@ -50,8 +49,6 @@ export default function MyVehicles() {
 
     return (
         <div>
-            <BackButton />
-
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
                 <div className="page-header" style={{ marginBottom: 0 }}>
                     <h1>🚘 My Vehicles</h1>
@@ -111,7 +108,6 @@ export default function MyVehicles() {
                                     <td>
                                         <div style={{ display: 'flex', gap: 8 }}>
                                             <Link to={`/vehicles/${v.id}`} className="btn btn-ghost btn-sm btn-icon"><FiEye /></Link>
-                                            <Link to={`/vehicles/${v.id}/availability`} className="btn btn-ghost btn-sm btn-icon" title="Manage Schedule"><FiCalendar /></Link>
                                             <button className="btn btn-ghost btn-sm btn-icon" onClick={() => deleteVehicle(v.id)} style={{ color: 'var(--error-500)' }}><FiTrash2 /></button>
                                         </div>
                                     </td>
