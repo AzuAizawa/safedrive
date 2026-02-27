@@ -21,9 +21,26 @@ export function AuthProvider({ children }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        // Check if user opted for "Remember Me"
+        const remembered = localStorage.getItem('safedrive_remember_me');
+
         supabase.auth.getSession().then(({ data: { session } }) => {
-            setUser(session?.user ?? null);
             if (session?.user) {
+                // If there's a session but user didn't check "Remember Me", sign them out
+                if (remembered !== 'true') {
+                    // Session exists from a previous login without "Remember Me"
+                    // Only auto-clear if this is a fresh browser open (no sessionStorage flag)
+                    const isActiveSession = sessionStorage.getItem('safedrive_active');
+                    if (!isActiveSession) {
+                        // Fresh browser open + no remember me = sign out
+                        supabase.auth.signOut();
+                        setUser(null);
+                        setProfile(null);
+                        setLoading(false);
+                        return;
+                    }
+                }
+                setUser(session.user);
                 fetchProfile(session.user.id);
             } else {
                 setLoading(false);
@@ -35,6 +52,8 @@ export function AuthProvider({ children }) {
                 setUser(session?.user ?? null);
                 if (session?.user) {
                     await fetchProfile(session.user.id);
+                    // Mark this browser tab as having an active session
+                    sessionStorage.setItem('safedrive_active', 'true');
 
                     if (event === 'SIGNED_IN') {
                         logSecurityEvent('auth.login', 'User signed in successfully', {
@@ -45,6 +64,7 @@ export function AuthProvider({ children }) {
                 } else {
                     setProfile(null);
                     setLoading(false);
+                    sessionStorage.removeItem('safedrive_active');
 
                     if (event === 'SIGNED_OUT') {
                         logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
@@ -135,7 +155,7 @@ export function AuthProvider({ children }) {
         return { data, error };
     };
 
-    const signIn = async ({ email, password }) => {
+    const signIn = async ({ email, password }, rememberMe = false) => {
         if (!clientRateLimit('login', 5, 300000)) {
             logSecurityEvent('security.brute_force', `Login rate limit exceeded for ${email}`, {
                 severity: 'critical',
@@ -152,6 +172,15 @@ export function AuthProvider({ children }) {
 
         if (error) {
             logFailedLogin(email, 'invalid_password');
+        } else {
+            // Store "Remember Me" preference
+            if (rememberMe) {
+                localStorage.setItem('safedrive_remember_me', 'true');
+            } else {
+                localStorage.removeItem('safedrive_remember_me');
+            }
+            // Mark this session as active (for session-only persistence)
+            sessionStorage.setItem('safedrive_active', 'true');
         }
 
         return { data, error };
@@ -179,6 +208,8 @@ export function AuthProvider({ children }) {
             Object.keys(localStorage).forEach(key => {
                 if (key.startsWith('sb-')) localStorage.removeItem(key);
             });
+            localStorage.removeItem('safedrive_remember_me');
+            sessionStorage.removeItem('safedrive_active');
         } catch (e) {
             // Ignore storage errors
         }

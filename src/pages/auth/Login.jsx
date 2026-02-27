@@ -14,6 +14,7 @@ export default function Login() {
     const [error, setError] = useState('');
     const [verified, setVerified] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const [rememberMe, setRememberMe] = useState(false);
 
     // Forgot password state
     const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -37,7 +38,7 @@ export default function Login() {
         setLoading(true);
 
         try {
-            const { error: signInError } = await signIn(formData);
+            const { error: signInError } = await signIn(formData, rememberMe);
             if (signInError) throw signInError;
             toast.success('Welcome back to SafeDrive!');
             navigate('/dashboard');
@@ -308,6 +309,20 @@ export default function Login() {
                                 {showPassword ? <FiEyeOff size={16} /> : <FiEye size={16} />}
                             </button>
                         </div>
+                    </div>
+
+                    {/* Remember Me */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                        <input
+                            type="checkbox"
+                            id="rememberMe"
+                            checked={rememberMe}
+                            onChange={(e) => setRememberMe(e.target.checked)}
+                            style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-500)' }}
+                        />
+                        <label htmlFor="rememberMe" style={{ fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                            Remember me — stay signed in on this device
+                        </label>
                     </div>
 
                     <button
