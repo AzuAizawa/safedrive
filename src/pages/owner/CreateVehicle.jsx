@@ -309,7 +309,13 @@ export default function CreateVehicle() {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Plate Number *</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="ABC 1234" value={formData.plate_number} onChange={(e) => setFormData({ ...formData, plate_number: e.target.value.toUpperCase() })} required />
+                                <input className="form-input" style={{ width: '100%' }} placeholder="ABC 1234" value={formData.plate_number} onChange={(e) => {
+                                    const val = e.target.value.toUpperCase().replace(/[^A-Z0-9 ]/g, '');
+                                    if (val.replace(/\s/g, '').length <= 7) setFormData({ ...formData, plate_number: val });
+                                }} required />
+                                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                    Max 7 characters (letters + digits). Format: ABC 1234 or NAB 1234
+                                </div>
                                 {codingDay && (
                                     <div style={{
                                         display: 'inline-flex', alignItems: 'center', gap: 6,

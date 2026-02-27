@@ -16,6 +16,7 @@
 8. [Why Supabase Over Custom Backend](#8-why-supabase)
 9. [Why Row Level Security (RLS) Over API Middleware](#9-why-rls)
 10. [Security Logging & Audit Trail](#10-audit-trail)
+11. [Plate Number Validation & LTO Number Coding](#11-plate-number)
 
 ---
 
@@ -334,6 +335,66 @@ SafeDrive maintains a comprehensive audit trail through multiple logging tables:
 
 ---
 
+## 11. Plate Number Validation & LTO Number Coding {#11-plate-number}
+
+### Panelist Question
+> *"Why did you limit the plate number to 7 characters? What about 8-character protocol plates? How does the number coding feature work?"*
+
+### Answer
+SafeDrive enforces a **maximum of 7 alphanumeric characters** for plate numbers. This aligns with the Land Transportation Office (LTO) standard plate formats for **privately-owned motor vehicles** in the Philippines.
+
+### LTO Plate Number Formats (Private Vehicles)
+
+| Format | Example | Characters (excl. space) | Vehicle Type |
+|--------|---------|-------------------------|--------------|
+| **Old format** | ABC 1234 | 7 (3 letters + 4 digits) | Private cars |
+| **New format (2014+)** | NAB 1234 | 7 (3 letters + 4 digits) | All new registrations |
+| **Motorcycle** | AB 12345 | 7 (2 letters + 5 digits) | Private motorcycles |
+| **Protocol plates** | 8 | 8 | Government/diplomatic only |
+
+### Why 7 Characters, Not 8
+
+1. **SafeDrive is a private vehicle rental platform** — Only privately-owned vehicles can be listed for peer-to-peer rental.
+2. **Protocol plates (8 characters)** are issued exclusively to:
+   - Government officials (senators, congressmen, cabinet members)
+   - Diplomatic vehicles (foreign embassy cars)
+   - Military vehicles
+3. **Government vehicles cannot be rented out** — Republic Act No. 9184 (Government Procurement Reform Act) and COA Circular No. 2017-004 prohibit the private use or sub-leasing of government-owned vehicles. It would be illegal to list a government vehicle on a rental platform.
+4. **Diplomatic vehicles have immunity** — Vienna Convention on Diplomatic Relations (1961) grants diplomatic vehicles special status. These cannot legally participate in commercial rental.
+5. **Data integrity** — Limiting to 7 characters prevents erroneous entries, typos, and invalid plate numbers from being stored.
+
+### LTO Number Coding Day Feature
+
+SafeDrive also displays the **MMDA Number Coding scheme** based on the plate number's last digit:
+
+| Last Digit | Coding Day | Restricted Hours |
+|-----------|------------|-------------------|
+| 1 or 2 | Monday | 7:00 AM – 8:00 PM |
+| 3 or 4 | Tuesday | 7:00 AM – 8:00 PM |
+| 5 or 6 | Wednesday | 7:00 AM – 8:00 PM |
+| 7 or 8 | Thursday | 7:00 AM – 8:00 PM |
+| 9 or 0 | Friday | 7:00 AM – 8:00 PM |
+
+**Why include this?** It provides useful information for renters — if someone rents a car with plate ending in "8", they should know it cannot be driven in Metro Manila on Thursdays during restricted hours. This reduces the risk of traffic violations.
+
+### Input Validation Rules
+
+| Rule | Implementation | Purpose |
+|------|---------------|----------|
+| Max 7 alphanumeric chars | Client-side character limit | Matches LTO private plate format |
+| Auto-uppercase | `toUpperCase()` on input | LTO plates use uppercase letters only |
+| Letters + digits only | Regex strips special characters | Prevents invalid characters |
+| Spaces allowed (for formatting) | Spaces not counted in the 7-char limit | Allows readable format like "ABC 1234" |
+
+### Legal Basis
+- **RA 4136 (Land Transportation and Traffic Code), Section 5**: All motor vehicles must be registered with the LTO and assigned a plate number following the prescribed format
+- **LTFRB Memorandum Circular No. 2018-017**: Private vehicles used for transportation network companies (TNCs) must have valid LTO registration — the same principle applies to P2P rental platforms
+- **RA 9184 (Government Procurement Reform Act), Section 4**: Government property, including vehicles, shall be used *"exclusively for public purposes"* — government vehicles with 8-digit protocol plates cannot legally be rented out
+- **COA Circular No. 2017-004**: Prohibits the *"use of government motor vehicles for personal or unofficial purposes"* — further supporting our exclusion of protocol plates
+- **MMDA Regulation No. 96-005 (Unified Vehicular Volume Reduction Program)**: Establishes the number coding scheme that SafeDrive displays to inform renters
+
+---
+
 ## Quick-Reference: Panelist Q&A Cheat Sheet
 
 | Question | Short Answer | Supporting Evidence |
@@ -348,3 +409,4 @@ SafeDrive maintains a comprehensive audit trail through multiple logging tables:
 | Why Supabase? | SOC 2 certified, enterprise security, development speed. | Section 8 |
 | How is data protected? | PostgreSQL RLS — enforced at database engine level. | Section 9 |
 | How do you track incidents? | 5 log tables, 50+ event types, ISO 27001 aligned. | Section 10 |
+| Why max 7 chars for plate number? | LTO standard. Protocol plates (8 chars) are gov't vehicles, not for rental. | Section 11 |
