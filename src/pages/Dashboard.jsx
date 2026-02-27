@@ -99,6 +99,36 @@ export default function Dashboard() {
     };
 
     const getVerificationBanner = () => {
+        if (isAdmin) {
+            return (
+                <div style={{
+                    background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                    border: '1px solid rgba(59,130,246,0.3)',
+                    borderRadius: 'var(--radius-lg, 12px)',
+                    padding: '20px 24px',
+                    marginBottom: 24,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 16,
+                }}>
+                    <div style={{
+                        width: 48, height: 48, borderRadius: 12,
+                        background: '#dbeafe', color: '#2563eb',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 22, flexShrink: 0,
+                    }}>
+                        <FiShield />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>You're the Admin</h3>
+                        <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>Manage users, verify identities, and approve vehicle listings from the Admin Panel.</p>
+                    </div>
+                    <Link to="/admin" className="btn btn-primary btn-sm" style={{ flexShrink: 0 }}>
+                        Go to Admin Panel <FiArrowRight />
+                    </Link>
+                </div>
+            );
+        }
         if (profile?.verification_status === 'verified') return null;
 
         const messages = {
@@ -319,7 +349,7 @@ export default function Dashboard() {
                         </Link>
                     </>
                 )}
-                {(isRenter || isAdmin) && (
+                {isRenter && !isAdmin && (
                     <Link to="/vehicles/new" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer', background: 'linear-gradient(135deg, var(--accent-50), var(--warning-50))', borderColor: 'rgba(249,115,22,0.2)' }}>
                         <div className="stat-icon orange" style={{ width: 44, height: 44 }}>🚗</div>
                         <div>
@@ -332,8 +362,8 @@ export default function Dashboard() {
                 <Link to="/vehicles" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
                     <div className="stat-icon blue" style={{ width: 44, height: 44 }}>🔍</div>
                     <div>
-                        <h3 style={{ fontSize: 15, fontWeight: 700 }}>Browse Vehicles</h3>
-                        <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Find your perfect rental car</p>
+                        <h3 style={{ fontSize: 15, fontWeight: 700 }}>{isAdmin ? 'View All Vehicles' : 'Browse Vehicles'}</h3>
+                        <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{isAdmin ? 'See all listed vehicles on the platform' : 'Find your perfect rental car'}</p>
                     </div>
                     <FiArrowRight style={{ marginLeft: 'auto', color: 'var(--text-tertiary)' }} />
                 </Link>

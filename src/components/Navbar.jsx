@@ -63,14 +63,16 @@ export default function Navbar() {
                     <Link to="/vehicles" className={`navbar-link ${location.pathname.startsWith('/vehicles') ? 'active' : ''}`}>
                         <FiSearch /> Browse Cars
                     </Link>
-                    {(isRenter || isAdmin) && (
+                    {isRenter && !isAdmin && (
                         <Link to="/my-vehicles" className={`navbar-link ${location.pathname === '/my-vehicles' ? 'active' : ''}`}>
                             <FiTruck /> My Vehicles
                         </Link>
                     )}
-                    <Link to="/bookings" className={`navbar-link ${location.pathname === '/bookings' ? 'active' : ''}`}>
-                        <FiCalendar /> Bookings
-                    </Link>
+                    {!isAdmin && (
+                        <Link to="/bookings" className={`navbar-link ${location.pathname === '/bookings' ? 'active' : ''}`}>
+                            <FiCalendar /> Bookings
+                        </Link>
+                    )}
                     {isAdmin && (
                         <Link to="/admin" className={`navbar-link ${location.pathname.startsWith('/admin') ? 'active' : ''}`}>
                             <FiShield /> Admin
@@ -80,7 +82,7 @@ export default function Navbar() {
             </div>
 
             <div className="navbar-actions">
-                {(isRenter || isAdmin) && (
+                {isRenter && !isAdmin && (
                     <Link to="/vehicles/new" className="btn btn-accent btn-sm">
                         <FiPlus /> List a Car
                     </Link>
@@ -101,22 +103,28 @@ export default function Navbar() {
                             <div style={{ padding: '12px 16px' }}>
                                 <div style={{ fontWeight: 700, fontSize: 14 }}>{profile?.full_name || 'User'}</div>
                                 <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{user?.email}</div>
-                                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                                    <span className={`badge ${profile?.verification_status === 'verified' ? 'badge-verified' : 'badge-pending'}`} style={{ display: 'inline-flex' }}>
-                                        {profile?.verification_status || 'pending'}
-                                    </span>
-                                    <span className="badge badge-info" style={{ display: 'inline-flex' }}>
-                                        {profile?.role === 'user' ? 'Not Verified' : profile?.role === 'verified' ? 'Verified' : profile?.role || 'user'}
-                                    </span>
-                                </div>
+                                {isAdmin ? (
+                                    <span className="badge badge-error" style={{ display: 'inline-flex' }}>Admin Account</span>
+                                ) : (
+                                    <>
+                                        <span className={`badge ${profile?.verification_status === 'verified' ? 'badge-verified' : 'badge-pending'}`} style={{ display: 'inline-flex' }}>
+                                            {profile?.verification_status || 'pending'}
+                                        </span>
+                                        <span className="badge badge-info" style={{ display: 'inline-flex' }}>
+                                            {profile?.role === 'user' ? 'Not Verified' : profile?.role === 'verified' ? 'Verified' : profile?.role || 'user'}
+                                        </span>
+                                    </>
+                                )}
                             </div>
                             <div className="user-dropdown-divider" />
                             <button className="user-dropdown-item" onClick={() => { navigate('/profile'); setShowDropdown(false); }}>
                                 <FiUser /> Profile
                             </button>
-                            <button className="user-dropdown-item" onClick={() => { navigate('/bookings'); setShowDropdown(false); }}>
-                                <FiCalendar /> My Bookings
-                            </button>
+                            {!isAdmin && (
+                                <button className="user-dropdown-item" onClick={() => { navigate('/bookings'); setShowDropdown(false); }}>
+                                    <FiCalendar /> My Bookings
+                                </button>
+                            )}
                             <button className="user-dropdown-item" onClick={() => { navigate('/settings'); setShowDropdown(false); }}>
                                 <FiSettings /> Settings
                             </button>

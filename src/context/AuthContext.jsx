@@ -58,24 +58,8 @@ export function AuthProvider({ children }) {
         return () => subscription.unsubscribe();
     }, []);
 
-    // Remember Me: if user didn't check "Remember Me", sign out when browser/tab closes
-    useEffect(() => {
-        if (!user) return;
-        const remembered = localStorage.getItem('safedrive_remember_me');
-        if (remembered === 'true') return; // User wants to stay logged in
-
-        const handleUnload = () => {
-            // Clear Supabase session tokens so next open requires login
-            try {
-                Object.keys(localStorage).forEach(key => {
-                    if (key.startsWith('sb-')) localStorage.removeItem(key);
-                });
-            } catch (e) { }
-        };
-
-        window.addEventListener('beforeunload', handleUnload);
-        return () => window.removeEventListener('beforeunload', handleUnload);
-    }, [user]);
+    // Session persists normally via Supabase localStorage tokens.
+    // Sign out explicitly clears everything. No need to clear on page close.
 
     useEffect(() => {
         if (user) {
