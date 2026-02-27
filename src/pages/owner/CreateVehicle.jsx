@@ -110,8 +110,8 @@ export default function CreateVehicle() {
         }
 
         const yearNum = parseInt(formData.year);
-        if (yearNum < currentYear - 5 || yearNum > currentYear + 1) {
-            toast.error(`Vehicle must be between ${currentYear - 5} and ${currentYear + 1} years old`);
+        if (yearNum < 1990 || yearNum > currentYear + 1) {
+            toast.error(`Year model must be between 1990 and ${currentYear + 1}`);
             return;
         }
 
@@ -225,7 +225,7 @@ export default function CreateVehicle() {
                                     onChange={(e) => setFormData({ ...formData, year: e.target.value })}
                                     required
                                 >
-                                    {Array.from({ length: 7 }, (_, i) => currentYear + 1 - i).map(y => (
+                                    {Array.from({ length: currentYear + 1 - 1990 + 1 }, (_, i) => currentYear + 1 - i).map(y => (
                                         <option key={y} value={y}>{y}</option>
                                     ))}
                                 </select>
@@ -248,17 +248,15 @@ export default function CreateVehicle() {
                         </div>
                         <div className="form-row" style={{ marginBottom: 16 }}>
                             <div className="form-group">
-                                <label className="form-label">Body Type *</label>
-                                <select className="form-select" style={{ width: '100%' }} value={formData.body_type} onChange={(e) => setFormData({ ...formData, body_type: e.target.value })}>
-                                    <option value="Sedan">Sedan</option>
-                                    <option value="SUV">SUV</option>
-                                    <option value="MPV">MPV</option>
-                                    <option value="Van">Van</option>
-                                    <option value="Hatchback">Hatchback</option>
-                                    <option value="Pickup">Pickup</option>
-                                    <option value="Crossover">Crossover</option>
-                                    <option value="Coupe">Coupe</option>
-                                </select>
+                                <label className="form-label">Body Type</label>
+                                <input
+                                    className="form-input"
+                                    style={{ width: '100%', background: 'var(--neutral-50)', cursor: 'not-allowed' }}
+                                    value={formData.body_type || '—'}
+                                    readOnly
+                                    disabled
+                                    title="Auto-detected from selected model"
+                                />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Plate Number *</label>
