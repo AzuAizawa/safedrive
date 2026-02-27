@@ -34,8 +34,8 @@ export function AuthProvider({ children }) {
             async (event, session) => {
                 setUser(session?.user ?? null);
                 if (session?.user) {
-                    await fetchProfile(session.user.id);
                     sessionStorage.setItem('safedrive_active', 'true');
+                    await fetchProfile(session.user.id);
 
                     if (event === 'SIGNED_IN') {
                         logSecurityEvent('auth.login', 'User signed in successfully', {
