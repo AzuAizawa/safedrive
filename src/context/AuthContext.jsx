@@ -249,9 +249,9 @@ export function AuthProvider({ children }) {
         isAdmin: profile?.role === 'admin',
         isSuperAdmin: profile?.role === 'super_admin',
         isVerified: profile?.role === 'verified' || profile?.role === 'admin',
-        isRenter: profile?.role === 'verified' || profile?.role === 'admin',  // Verified users can list cars
-        isRentee: profile?.role === 'verified' || profile?.role === 'admin',  // Verified users can rent cars
-        isOwner: profile?.role === 'verified' || profile?.role === 'admin',   // Alias
+        isRenter: profile?.role === 'verified',   // Only verified users can list cars (not admin)
+        isRentee: profile?.role === 'verified',   // Only verified users can rent cars (not admin)
+        isOwner: profile?.role === 'verified',    // Admin is management-only
     };
 
     return (
