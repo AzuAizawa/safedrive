@@ -14,11 +14,17 @@ export default function Dashboard() {
         if (profile) {
             fetchDashboardData();
         } else {
-            // Even if profile hasn't loaded, stop blocking the UI after a brief delay
-            const timer = setTimeout(() => setDataLoading(false), 1500);
+            // Don't block UI waiting for profile — stop loading quickly
+            const timer = setTimeout(() => setDataLoading(false), 500);
             return () => clearTimeout(timer);
         }
     }, [profile]);
+
+    // Safety: never show loading forever, even if queries hang
+    useEffect(() => {
+        const safety = setTimeout(() => setDataLoading(false), 5000);
+        return () => clearTimeout(safety);
+    }, []);
 
     const fetchDashboardData = async () => {
         if (!profile) { setDataLoading(false); return; }
