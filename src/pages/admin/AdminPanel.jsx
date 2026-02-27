@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { FiUsers, FiTruck, FiCalendar, FiShield, FiCheck, FiX, FiEye, FiSearch, FiImage, FiPlus, FiToggleLeft, FiToggleRight, FiAlertCircle, FiClock } from 'react-icons/fi';
+import { FiUsers, FiTruck, FiCalendar, FiShield, FiCheck, FiX, FiEye, FiSearch, FiImage, FiPlus, FiToggleLeft, FiToggleRight, FiAlertCircle, FiClock, FiTrash2 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import BackButton from '../../components/BackButton';
 
@@ -169,9 +169,38 @@ export default function AdminPanel() {
         } catch (err) { toast.error('Failed to update model'); }
     };
 
+    const deleteBrand = async (brandId, brandName) => {
+        const modelCount = carModels.filter(m => m.brand_id === brandId).length;
+        const msg = modelCount > 0
+            ? `Delete "${brandName}" and its ${modelCount} model(s)? This cannot be undone.`
+            : `Delete "${brandName}"? This cannot be undone.`;
+        if (!window.confirm(msg)) return;
+        try {
+            if (modelCount > 0) {
+                const { error: modelsErr } = await supabase.from('car_models').delete().eq('brand_id', brandId);
+                if (modelsErr) throw modelsErr;
+            }
+            const { error } = await supabase.from('car_brands').delete().eq('id', brandId);
+            if (error) throw error;
+            toast.success(`"${brandName}" deleted`);
+            if (selectedBrandId === brandId) setSelectedBrandId('');
+            fetchCatalog();
+        } catch (err) { toast.error('Failed to delete brand. It may be referenced by vehicles.'); }
+    };
+
+    const deleteModel = async (modelId, modelName) => {
+        if (!window.confirm(`Delete model "${modelName}"? This cannot be undone.`)) return;
+        try {
+            const { error } = await supabase.from('car_models').delete().eq('id', modelId);
+            if (error) throw error;
+            toast.success(`"${modelName}" deleted`);
+            fetchCatalog();
+        } catch (err) { toast.error('Failed to delete model. It may be referenced by vehicles.'); }
+    };
+
     // ===== COMPUTED =====
     const handleViewUser = (u) => { setSelectedUser(u); fetchUserDocs(u.id); };
-    const getRoleBadgeClass = (role) => ({ admin: 'badge-error', renter: 'badge-success', rentee: 'badge-info' }[role] || 'badge-neutral');
+    const getRoleBadgeClass = (role) => ({ admin: 'badge-error', verified: 'badge-success', user: 'badge-info' }[role] || 'badge-neutral');
     const getStatusBadge = (status) => ({ verified: 'badge-success', submitted: 'badge-pending', rejected: 'badge-error' }[status] || 'badge-neutral');
     const filteredCatalogModels = selectedBrandId ? carModels.filter(m => m.brand_id === selectedBrandId) : carModels;
 
@@ -204,7 +233,7 @@ export default function AdminPanel() {
                     </div>
                 </div>
             </td>
-            <td><span className={`badge ${getRoleBadgeClass(u.role)}`}>{u.role}</span></td>
+            <td><span className={`badge ${getRoleBadgeClass(u.role)}`}>{u.role === 'user' ? 'Not Verified' : u.role}</span></td>
             <td><span className={`badge ${getStatusBadge(u.verification_status)}`}>{u.verification_status || 'none'}</span></td>
             <td style={{ fontSize: 13 }}>{new Date(u.created_at).toLocaleDateString()}</td>
             <td>
@@ -498,6 +527,9 @@ export default function AdminPanel() {
                                             <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); toggleBrandActive(brand.id, brand.is_active); }} style={{ color: brand.is_active ? 'var(--success-500)' : 'var(--neutral-400)' }}>
                                                 {brand.is_active ? <FiToggleRight size={18} /> : <FiToggleLeft size={18} />}
                                             </button>
+                                            <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); deleteBrand(brand.id, brand.name); }} style={{ color: 'var(--error-400)' }} title="Delete brand">
+                                                <FiTrash2 size={15} />
+                                            </button>
                                         </div>
                                     ))}
                                 </div>
@@ -536,9 +568,14 @@ export default function AdminPanel() {
                                                     <td><span className="badge badge-info">{m.body_type}</span></td>
                                                     <td><span className={`badge ${m.is_active ? 'badge-success' : 'badge-neutral'}`}>{m.is_active ? 'Active' : 'Inactive'}</span></td>
                                                     <td>
-                                                        <button className="btn btn-ghost btn-sm" onClick={() => toggleModelActive(m.id, m.is_active)} style={{ color: m.is_active ? 'var(--success-500)' : 'var(--neutral-400)' }}>
-                                                            {m.is_active ? <FiToggleRight size={16} /> : <FiToggleLeft size={16} />}
-                                                        </button>
+                                                        <div style={{ display: 'flex', gap: 4 }}>
+                                                            <button className="btn btn-ghost btn-sm" onClick={() => toggleModelActive(m.id, m.is_active)} style={{ color: m.is_active ? 'var(--success-500)' : 'var(--neutral-400)' }}>
+                                                                {m.is_active ? <FiToggleRight size={16} /> : <FiToggleLeft size={16} />}
+                                                            </button>
+                                                            <button className="btn btn-ghost btn-sm" onClick={() => deleteModel(m.id, m.name)} style={{ color: 'var(--error-400)' }} title="Delete model">
+                                                                <FiTrash2 size={14} />
+                                                            </button>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -569,7 +606,7 @@ export default function AdminPanel() {
                                     <h3 style={{ fontSize: 18, fontWeight: 700 }}>{selectedUser.full_name}</h3>
                                     <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{selectedUser.email}</p>
                                     <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                                        <span className={`badge ${getRoleBadgeClass(selectedUser.role)}`}>{selectedUser.role}</span>
+                                        <span className={`badge ${getRoleBadgeClass(selectedUser.role)}`}>{selectedUser.role === 'user' ? 'Not Verified' : selectedUser.role}</span>
                                         <span className={`badge ${getStatusBadge(selectedUser.verification_status)}`}>{selectedUser.verification_status || 'none'}</span>
                                     </div>
                                 </div>
@@ -632,9 +669,9 @@ export default function AdminPanel() {
                             <div style={{ marginBottom: 16 }}>
                                 <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}><FiShield /> Role Management</h3>
                                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                    {['rentee', 'renter', 'admin'].map(role => (
+                                    {['user', 'verified', 'admin'].map(role => (
                                         <button key={role} className={`btn btn-sm ${selectedUser.role === role ? 'btn-primary' : 'btn-secondary'}`} onClick={() => selectedUser.role !== role && changeRole(selectedUser.id, role)} disabled={selectedUser.role === role || selectedUser.id === user.id} style={{ textTransform: 'capitalize' }}>
-                                            {selectedUser.role === role ? `✓ ${role}` : role}
+                                            {selectedUser.role === role ? `✓ ${role === 'user' ? 'Not Verified' : role}` : (role === 'user' ? 'Not Verified' : role)}
                                         </button>
                                     ))}
                                 </div>

@@ -79,7 +79,7 @@ export default function Register() {
     const { signUp } = useAuth();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const initialRole = searchParams.get('role') || 'rentee';
+    const initialRole = 'user';
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -212,28 +212,7 @@ export default function Register() {
                         </div>
                     )}
 
-                    {/* Role Selector */}
-                    <div className="form-group">
-                        <label className="form-label">I want to</label>
-                        <div className="role-selector">
-                            <div
-                                className={`role-option ${formData.role === 'rentee' ? 'selected' : ''}`}
-                                onClick={() => setFormData({ ...formData, role: 'rentee' })}
-                            >
-                                <div className="role-icon">🔑</div>
-                                <div className="role-name">Rent a Car</div>
-                                <div className="role-desc">Browse & book vehicles</div>
-                            </div>
-                            <div
-                                className={`role-option ${formData.role === 'renter' ? 'selected' : ''}`}
-                                onClick={() => setFormData({ ...formData, role: 'renter' })}
-                            >
-                                <div className="role-icon">🚘</div>
-                                <div className="role-name">List My Car</div>
-                                <div className="role-desc">Earn from your vehicle</div>
-                            </div>
-                        </div>
-                    </div>
+                    {/* Role is automatically set to 'user' — no selector needed */}
 
                     {/* Full Name */}
                     <div className="form-group">

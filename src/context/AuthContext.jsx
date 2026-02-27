@@ -105,7 +105,7 @@ export function AuthProvider({ children }) {
                     setProfile({
                         id: user.id,
                         full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
-                        role: user.user_metadata?.role || 'rentee',
+                        role: user.user_metadata?.role || 'user',
                         verification_status: 'pending',
                         email: user.email,
                     });
@@ -146,7 +146,7 @@ export function AuthProvider({ children }) {
                 emailRedirectTo: redirectUrl,
                 data: {
                     full_name: sanitizedName,
-                    role: role || 'rentee',
+                    role: role || 'user',
                     phone: phone,
                 },
             },
@@ -155,7 +155,7 @@ export function AuthProvider({ children }) {
         if (!error) {
             logSecurityEvent('auth.register', `New user registered: ${email}`, {
                 severity: 'info',
-                metadata: { role: role || 'rentee' },
+                metadata: { role: role || 'user' },
             });
         }
 
@@ -270,11 +270,10 @@ export function AuthProvider({ children }) {
         fetchProfile: () => user && fetchProfile(user.id),
         isAdmin: profile?.role === 'admin',
         isSuperAdmin: profile?.role === 'super_admin',
-        isRenter: profile?.role === 'renter',    // Vehicle owner who lists cars
-        isRentee: profile?.role === 'rentee',     // Person who rents cars
-        isVerified: profile?.verification_status === 'verified',
-        // Legacy aliases for backward compat during transition
-        isOwner: profile?.role === 'renter',
+        isVerified: profile?.role === 'verified' || profile?.role === 'admin',
+        isRenter: profile?.role === 'verified' || profile?.role === 'admin',  // Verified users can list cars
+        isRentee: profile?.role === 'verified' || profile?.role === 'admin',  // Verified users can rent cars
+        isOwner: profile?.role === 'verified' || profile?.role === 'admin',   // Alias
     };
 
     return (

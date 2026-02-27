@@ -106,7 +106,7 @@ export default function Navbar() {
                                         {profile?.verification_status || 'pending'}
                                     </span>
                                     <span className="badge badge-info" style={{ display: 'inline-flex' }}>
-                                        {profile?.role || 'rentee'}
+                                        {profile?.role === 'user' ? 'Not Verified' : profile?.role === 'verified' ? 'Verified' : profile?.role || 'user'}
                                     </span>
                                 </div>
                             </div>
