@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { supabase } from '../../lib/supabase';
+import { supabaseAdmin } from '../../lib/supabase';
 import { FiShield, FiMail, FiLock, FiAlertCircle, FiEye, FiEyeOff, FiArrowLeft } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 
@@ -34,7 +34,7 @@ export default function AdminLogin() {
             if (signInError) throw signInError;
 
             // After sign in, check if this is actually an admin account
-            const { data: profileData } = await supabase
+            const { data: profileData } = await supabaseAdmin
                 .from('profiles')
                 .select('role, full_name')
                 .eq('id', data.user.id)

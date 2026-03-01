@@ -137,7 +137,7 @@ export function AuthProvider({ children }) {
 
         const redirectUrl = `${window.location.origin}/auth/callback`;
 
-        const { data, error } = await supabase.auth.signUp({
+        const { data, error } = await activeClient.auth.signUp({
             email: sanitizedEmail,
             password,
             options: {
@@ -171,7 +171,7 @@ export function AuthProvider({ children }) {
             return { data: null, error: { message: 'Too many login attempts. Account temporarily locked. Try again in 5 minutes.' } };
         }
 
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await activeClient.auth.signInWithPassword({ email, password });
 
         if (error) {
             logFailedLogin(email, 'invalid_password');
@@ -197,7 +197,7 @@ export function AuthProvider({ children }) {
         } catch (e) { }
 
         try {
-            await supabase.auth.signOut();
+            await activeClient.auth.signOut();
         } catch (err) {
             console.warn('Sign out error:', err);
         }
@@ -233,7 +233,7 @@ export function AuthProvider({ children }) {
             }
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await activeClient
             .from('profiles')
             .update(sanitizedUpdates)
             .eq('id', user.id)
