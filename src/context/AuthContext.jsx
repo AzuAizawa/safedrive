@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase as supabaseUser, supabaseAdmin } from '../lib/supabase';
 import {
     logSecurityEvent,
     logFailedLogin,
@@ -20,8 +20,16 @@ export function AuthProvider({ children }) {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
 
+    // Determine the correct client for this portal session
+    const getActiveClient = () => {
+        const isAdminRoute = typeof window !== 'undefined' &&
+            (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/admin-login'));
+        return isAdminRoute ? supabaseAdmin : supabaseUser;
+    };
+
+    const activeClient = getActiveClient();
+
     // ── Ultimate Failsafe Timeout ──────────────────────────────────────────
-    // If Supabase drops the ball or the network hangs, force render after 4s
     useEffect(() => {
         const timeout = setTimeout(() => {
             setLoading(false);
@@ -32,7 +40,7 @@ export function AuthProvider({ children }) {
     // ── Fetch profile from DB ──────────────────────────────────────────────
     const fetchProfile = async (userId) => {
         try {
-            const { data, error } = await supabase
+            const { data, error } = await activeClient
                 .from('profiles')
                 .select('*')
                 .eq('id', userId)
@@ -41,8 +49,7 @@ export function AuthProvider({ children }) {
             if (!error && data) {
                 setProfile(data);
             } else {
-                // Profile row missing — create a fallback from auth metadata
-                const { data: { user: authUser } } = await supabase.auth.getUser();
+                const { data: { user: authUser } } = await activeClient.auth.getUser();
                 if (authUser) {
                     setProfile({
                         id: authUser.id,
@@ -75,16 +82,15 @@ export function AuthProvider({ children }) {
             }
         };
 
-        supabase.auth.getSession().then(({ data: { session }, error }) => {
+        activeClient.auth.getSession().then(({ data: { session }, error }) => {
             if (error) console.error('Session get error:', error);
             if (mounted) syncSession(session);
         });
 
-        // Auth state change listener
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        const { data: { subscription } } = activeClient.auth.onAuthStateChange(
             async (event, session) => {
                 if (!mounted) return;
-                if (event === 'INITIAL_SESSION') return; // Handled by getSession
+                if (event === 'INITIAL_SESSION') return;
 
                 try {
                     await syncSession(session);
