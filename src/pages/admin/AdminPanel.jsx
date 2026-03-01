@@ -551,27 +551,30 @@ export default function AdminPanel() {
                                     <tbody>
                                         {auditLogs.length === 0 ? (
                                             <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-tertiary)' }}>No audit logs yet. Admin actions will appear here.</td></tr>
-                                        ) : auditLogs.map(log => (
-                                            <tr key={log.id}>
-                                                <td style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                                                    {new Date(log.created_at).toLocaleString()}
-                                                </td>
-                                                <td>
-                                                    <div style={{ fontWeight: 600, fontSize: 13 }}>{log.performer_name || '—'}</div>
-                                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{log.performer_email || ''}</div>
-                                                </td>
-                                                <td>
-                                                    <span className={`badge ${log.action?.includes('APPROVE') || log.action?.includes('VERIFY') ? 'badge-success' :
-                                                            log.action?.includes('REJECT') || log.action?.includes('DELETE') ? 'badge-error' :
-                                                                'badge-info'
-                                                        }`} style={{ fontSize: 11 }}>{log.action}</span>
-                                                </td>
-                                                <td style={{ fontSize: 13 }}>
-                                                    <span className="badge badge-neutral" style={{ fontSize: 11 }}>{log.entity_type}</span>
-                                                </td>
-                                                <td style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 280 }}>{log.description}</td>
-                                            </tr>
-                                        ))}
+                                        ) : auditLogs.map(log => {
+                                            let badgeClass = 'badge-info';
+                                            if (log.action?.includes('APPROVE') || log.action?.includes('VERIFY')) badgeClass = 'badge-success';
+                                            if (log.action?.includes('REJECT') || log.action?.includes('DELETE')) badgeClass = 'badge-error';
+
+                                            return (
+                                                <tr key={log.id}>
+                                                    <td style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                                                        {new Date(log.created_at).toLocaleString()}
+                                                    </td>
+                                                    <td>
+                                                        <div style={{ fontWeight: 600, fontSize: 13 }}>{log.performer_name || '—'}</div>
+                                                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{log.performer_email || ''}</div>
+                                                    </td>
+                                                    <td>
+                                                        <span className={`badge ${badgeClass}`} style={{ fontSize: 11 }}>{log.action}</span>
+                                                    </td>
+                                                    <td style={{ fontSize: 13 }}>
+                                                        <span className="badge badge-neutral" style={{ fontSize: 11 }}>{log.entity_type}</span>
+                                                    </td>
+                                                    <td style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 280 }}>{log.description}</td>
+                                                </tr>
+                                            )
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
