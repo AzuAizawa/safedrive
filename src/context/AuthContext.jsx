@@ -64,54 +64,41 @@ export function AuthProvider({ children }) {
     useEffect(() => {
         let mounted = true;
 
-        const initSession = async () => {
-            try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (!mounted) return;
-
-                if (session?.user) {
-                    setUser(session.user);
-                    await fetchProfile(session.user.id);
-                } else {
-                    setUser(null);
-                    setProfile(null);
-                    setLoading(false);
-                }
-            } catch (err) {
-                console.error('Session init error:', err);
+        const syncSession = async (session) => {
+            if (session?.user) {
+                setUser(session.user);
+                await fetchProfile(session.user.id);
+            } else {
+                setUser(null);
+                setProfile(null);
                 if (mounted) setLoading(false);
             }
         };
 
-        initSession();
+        supabase.auth.getSession().then(({ data: { session }, error }) => {
+            if (error) console.error('Session get error:', error);
+            if (mounted) syncSession(session);
+        });
 
         // Auth state change listener
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (event, session) => {
                 if (!mounted) return;
+                if (event === 'INITIAL_SESSION') return; // Handled by getSession
 
                 try {
-                    if (session?.user) {
-                        setUser(session.user);
-                        if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-                            await fetchProfile(session.user.id);
-                            if (event === 'SIGNED_IN') {
-                                logSecurityEvent('auth.login', 'User signed in successfully', {
-                                    severity: 'info',
-                                    metadata: { method: 'password', userId: session.user.id },
-                                });
-                            }
-                        }
-                    } else {
-                        setUser(null);
-                        setProfile(null);
-                        if (event === 'SIGNED_OUT') {
-                            logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
-                        }
+                    await syncSession(session);
+
+                    if (event === 'SIGNED_IN') {
+                        logSecurityEvent('auth.login', 'User signed in successfully', {
+                            severity: 'info',
+                            metadata: { method: 'password', userId: session?.user?.id },
+                        });
+                    } else if (event === 'SIGNED_OUT') {
+                        logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
                     }
                 } catch (err) {
                     console.error('Auth state change error:', err);
-                } finally {
                     if (mounted) setLoading(false);
                 }
             }

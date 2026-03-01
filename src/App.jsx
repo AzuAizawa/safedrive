@@ -19,9 +19,10 @@ import AdminPanel from './pages/admin/AdminPanel';
 import AuthCallback from './pages/auth/AuthCallback';
 
 function ProtectedRoute() {
-  const { user, loading } = useAuth();
+  const { user, isAdmin, loading } = useAuth();
   if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
   if (!user) return <Navigate to="/login" replace />;
+  if (isAdmin) return <Navigate to="/admin" replace />;
   return <Outlet />;
 }
 
@@ -42,9 +43,12 @@ function RenterRoute() {
 }
 
 function RedirectIfAuth() {
-  const { user, loading } = useAuth();
+  const { user, isAdmin, loading } = useAuth();
   if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) {
+    if (isAdmin) return <Navigate to="/admin" replace />;
+    return <Navigate to="/dashboard" replace />;
+  }
   return <Outlet />;
 }
 
