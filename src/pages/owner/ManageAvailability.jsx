@@ -14,7 +14,10 @@ export default function ManageAvailability() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        let mounted = true;
         fetchVehicle();
+        const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
+        return () => { mounted = false; clearTimeout(safety); };
     }, [id]);
 
     const fetchVehicle = async () => {

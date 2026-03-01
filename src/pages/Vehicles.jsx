@@ -31,9 +31,13 @@ export default function Vehicles() {
     const [brands, setBrands] = useState([]);
 
     useEffect(() => {
+        let mounted = true;
         fetchVehicles();
         fetchBrands();
         if (user) fetchFavorites();
+
+        const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
+        return () => { mounted = false; clearTimeout(safety); };
     }, []);
 
     const fetchVehicles = async () => {

@@ -22,7 +22,10 @@ export default function VehicleDetail() {
     const [blockedDates, setBlockedDates] = useState([]);
 
     useEffect(() => {
+        let mounted = true;
         fetchVehicle();
+        const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
+        return () => { mounted = false; clearTimeout(safety); };
     }, [id]);
 
     const fetchVehicle = async () => {

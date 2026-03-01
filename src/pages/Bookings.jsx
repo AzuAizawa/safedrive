@@ -13,7 +13,10 @@ export default function Bookings() {
     const [activeTab, setActiveTab] = useState('all');
 
     useEffect(() => {
+        let mounted = true;
         fetchBookings();
+        const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
+        return () => { mounted = false; clearTimeout(safety); };
     }, []);
 
     const fetchBookings = async () => {
