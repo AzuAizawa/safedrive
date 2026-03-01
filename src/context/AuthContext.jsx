@@ -64,13 +64,15 @@ export function AuthProvider({ children }) {
         let mounted = true;
         let subUser = null;
         let subAdmin = null;
+        let engineLock = null;
 
-const handleAuthStateChange = (targetClient) => async (event, session) => {
+        const handleAuthStateChange = (targetClient) => async (event, session) => {
             if (!mounted) return;
             if (event === 'INITIAL_SESSION') return;
 
             try {
                 if (session?.user) {
+                    engineLock = targetClient;
                     setActiveClient(targetClient);
                     setUser(session.user);
                     await fetchProfile(session.user.id, targetClient);
@@ -82,6 +84,12 @@ const handleAuthStateChange = (targetClient) => async (event, session) => {
                         });
                     }
                 } else {
+                    // Mutex: Do not allow the standby empty bucket to wipe the active session
+                    if (engineLock && engineLock !== targetClient) {
+                        return;
+                    }
+
+                    engineLock = null;
                     setUser(null);
                     setProfile(null);
                     if (mounted) setLoading(false);
@@ -103,10 +111,11 @@ const handleAuthStateChange = (targetClient) => async (event, session) => {
                 subUser = supabaseUser.auth.onAuthStateChange(handleAuthStateChange(supabaseUser)).data.subscription;
 
                 // 1. Check Admin storage strictly first
-                const { data: adminData, error: adminError } = await supabaseAdmin.auth.getSession();
-                
+                const { data: adminData } = await supabaseAdmin.auth.getSession();
+
                 if (adminData?.session?.user) {
                     if (!mounted) return;
+                    engineLock = supabaseAdmin;
                     setActiveClient(supabaseAdmin);
                     setUser(adminData.session.user);
                     await fetchProfile(adminData.session.user.id, supabaseAdmin);
@@ -114,15 +123,17 @@ const handleAuthStateChange = (targetClient) => async (event, session) => {
                 }
 
                 // 2. If no admin token, check User storage
-                const { data: userData, error: userError } = await supabaseUser.auth.getSession();
+                const { data: userData } = await supabaseUser.auth.getSession();
                 if (!mounted) return;
-                
+
                 if (userData?.session?.user) {
+                    engineLock = supabaseUser;
                     setActiveClient(supabaseUser);
                     setUser(userData.session.user);
                     await fetchProfile(userData.session.user.id, supabaseUser);
                 } else {
                     // 3. No sessions found anywhere
+                    engineLock = null;
                     setUser(null);
                     setProfile(null);
                     setLoading(false);
