@@ -55,7 +55,7 @@ function AppLayout() {
 
   return (
     <>
-      <Navbar />
+      {!location.pathname.startsWith('/admin-login') && <Navbar />}
       {user && !isLanding ? (
         <main className="main-content">
           <div className="container">
