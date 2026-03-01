@@ -19,15 +19,7 @@ export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
-
-    // Determine the correct client for this portal session
-    const getActiveClient = () => {
-        const isAdminRoute = typeof window !== 'undefined' &&
-            (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/admin-login'));
-        return isAdminRoute ? supabaseAdmin : supabaseUser;
-    };
-
-    const activeClient = getActiveClient();
+    const [activeClient, setActiveClient] = useState(supabaseUser); // Default to user client
 
     // ── Ultimate Failsafe Timeout ──────────────────────────────────────────
     useEffect(() => {
@@ -38,9 +30,9 @@ export function AuthProvider({ children }) {
     }, []);
 
     // ── Fetch profile from DB ──────────────────────────────────────────────
-    const fetchProfile = async (userId) => {
+    const fetchProfile = async (userId, targetClient = activeClient) => {
         try {
-            const { data, error } = await activeClient
+            const { data, error } = await targetClient
                 .from('profiles')
                 .select('*')
                 .eq('id', userId)
@@ -49,7 +41,7 @@ export function AuthProvider({ children }) {
             if (!error && data) {
                 setProfile(data);
             } else {
-                const { data: { user: authUser } } = await activeClient.auth.getUser();
+                const { data: { user: authUser } } = await targetClient.auth.getUser();
                 if (authUser) {
                     setProfile({
                         id: authUser.id,
@@ -67,52 +59,89 @@ export function AuthProvider({ children }) {
         }
     };
 
-    // ── Initialize session on mount (race-condition proof) ─────────────────
+    // ── Dual Session Detection Initialization ───────────────────────────────
     useEffect(() => {
         let mounted = true;
+        let subscriptionObj = null;
 
-        const syncSession = async (session) => {
-            if (session?.user) {
-                setUser(session.user);
-                await fetchProfile(session.user.id);
-            } else {
-                setUser(null);
-                setProfile(null);
+        const initializeAuthEngine = async () => {
+            try {
+                // 1. Check Admin storage strictly first
+                const { data: adminData, error: adminError } = await supabaseAdmin.auth.getSession();
+
+                if (adminData?.session?.user) {
+                    if (!mounted) return;
+                    setActiveClient(supabaseAdmin);
+                    setUser(adminData.session.user);
+                    await fetchProfile(adminData.session.user.id, supabaseAdmin);
+                    attachListener(supabaseAdmin);
+                    return;
+                }
+
+                // 2. If no admin token, check User storage
+                const { data: userData, error: userError } = await supabaseUser.auth.getSession();
+                if (!mounted) return;
+
+                if (userData?.session?.user) {
+                    setActiveClient(supabaseUser);
+                    setUser(userData.session.user);
+                    await fetchProfile(userData.session.user.id, supabaseUser);
+                    attachListener(supabaseUser);
+                } else {
+                    // 3. No sessions found anywhere
+                    setUser(null);
+                    setProfile(null);
+                    setLoading(false);
+                    attachListener(supabaseUser); // Default listener for purely public views
+                }
+            } catch (e) {
+                console.error('Dual session initialization failed:', e);
                 if (mounted) setLoading(false);
             }
         };
 
-        activeClient.auth.getSession().then(({ data: { session }, error }) => {
-            if (error) console.error('Session get error:', error);
-            if (mounted) syncSession(session);
-        });
+        const attachListener = (targetClient) => {
+            if (subscriptionObj) subscriptionObj.unsubscribe();
 
-        const { data: { subscription } } = activeClient.auth.onAuthStateChange(
-            async (event, session) => {
-                if (!mounted) return;
-                if (event === 'INITIAL_SESSION') return;
+            const { data: { subscription } } = targetClient.auth.onAuthStateChange(
+                async (event, session) => {
+                    if (!mounted) return;
+                    if (event === 'INITIAL_SESSION') return;
 
-                try {
-                    await syncSession(session);
+                    try {
+                        if (session?.user) {
+                            setUser(session.user);
+                            await fetchProfile(session.user.id, targetClient);
 
-                    if (event === 'SIGNED_IN') {
-                        logSecurityEvent('auth.login', 'User signed in successfully', {
-                            severity: 'info',
-                            metadata: { method: 'password', userId: session?.user?.id },
-                        });
-                    } else if (event === 'SIGNED_OUT') {
-                        logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
+                            if (event === 'SIGNED_IN') {
+                                logSecurityEvent('auth.login', 'User signed in successfully', {
+                                    severity: 'info',
+                                    metadata: { method: 'password', userId: session?.user?.id },
+                                });
+                            }
+                        } else {
+                            setUser(null);
+                            setProfile(null);
+                            if (mounted) setLoading(false);
+
+                            if (event === 'SIGNED_OUT') {
+                                logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Auth state change error:', err);
+                        if (mounted) setLoading(false);
                     }
-                } catch (err) {
-                    console.error('Auth state change error:', err);
-                    if (mounted) setLoading(false);
                 }
-            }
-        );
+            );
+            subscriptionObj = subscription;
+        };
+
+        initializeAuthEngine();
 
         return () => {
             mounted = false;
-            subscription.unsubscribe();
+            if (subscriptionObj) subscriptionObj.unsubscribe();
         };
     }, []);
 
