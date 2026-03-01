@@ -541,7 +541,7 @@ export default function CreateVehicle() {
 
                 <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                     <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)}>Cancel</button>
-                    <button type="submit" className="btn btn-accent btn-lg" disabled={loading || !isVerified}>
+                    <button type="submit" className="btn btn-accent btn-lg" disabled={loading}>
                         {loading ? 'Submitting...' : 'Submit for Approval'}
                     </button>
                 </div>

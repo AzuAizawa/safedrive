@@ -119,7 +119,7 @@ function App() {
             </Route>
 
             {/* Renter (vehicle owner) Routes */}
-            <Route element={<RenterRoute />}>
+            <Route element={<ProtectedRoute />}>
               <Route path="/vehicles/new" element={<CreateVehicle />} />
               <Route path="/my-vehicles" element={<MyVehicles />} />
               <Route path="/vehicles/:id/availability" element={<ManageAvailability />} />

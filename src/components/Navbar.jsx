@@ -63,7 +63,7 @@ export default function Navbar() {
                     <Link to="/vehicles" className={`navbar-link ${location.pathname.startsWith('/vehicles') ? 'active' : ''}`}>
                         <FiSearch /> Browse Cars
                     </Link>
-                    {isRenter && !isAdmin && (
+                    {!isAdmin && (
                         <Link to="/my-vehicles" className={`navbar-link ${location.pathname === '/my-vehicles' ? 'active' : ''}`}>
                             <FiTruck /> My Vehicles
                         </Link>
@@ -82,7 +82,7 @@ export default function Navbar() {
             </div>
 
             <div className="navbar-actions">
-                {isRenter && !isAdmin && (
+                {!isAdmin && (
                     <Link to="/vehicles/new" className="btn btn-accent btn-sm">
                         <FiPlus /> List a Car
                     </Link>
