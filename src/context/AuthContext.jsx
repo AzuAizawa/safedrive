@@ -195,10 +195,14 @@ export function AuthProvider({ children }) {
             console.warn('Sign out error:', err);
         }
 
-        // Failsafe: clear any remaining Supabase tokens
+        // Failsafe: clear any remaining Supabase tokens specific to this portal
         try {
+            const isAdminRoute = typeof window !== 'undefined' &&
+                (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/admin-login'));
+            const storageKey = isAdminRoute ? 'safedrive-admin-auth' : 'safedrive-auth';
+
             Object.keys(localStorage).forEach(key => {
-                if (key.startsWith('sb-') || key === 'safedrive-auth') localStorage.removeItem(key);
+                if (key.startsWith('sb-') || key === storageKey) localStorage.removeItem(key);
             });
             localStorage.removeItem('safedrive_remember_me');
         } catch (e) { }
