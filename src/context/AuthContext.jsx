@@ -20,6 +20,15 @@ export function AuthProvider({ children }) {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
 
+    // ── Ultimate Failsafe Timeout ──────────────────────────────────────────
+    // If Supabase drops the ball or the network hangs, force render after 4s
+    useEffect(() => {
+        const timeout = setTimeout(() => {
+            setLoading(false);
+        }, 4000);
+        return () => clearTimeout(timeout);
+    }, []);
+
     // ── Fetch profile from DB ──────────────────────────────────────────────
     const fetchProfile = async (userId) => {
         try {
@@ -206,8 +215,8 @@ export function AuthProvider({ children }) {
                 (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/admin-login'));
             const storageKey = isAdminRoute ? 'safedrive-admin-auth' : 'safedrive-auth';
 
-            Object.keys(localStorage).forEach(key => {
-                if (key.startsWith('sb-') || key === storageKey) localStorage.removeItem(key);
+            Object.keys(sessionStorage).forEach(key => {
+                if (key.startsWith('sb-') || key === storageKey) sessionStorage.removeItem(key);
             });
             localStorage.removeItem('safedrive_remember_me');
         } catch (e) { }

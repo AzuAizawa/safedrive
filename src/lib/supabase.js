@@ -19,6 +19,6 @@ export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
     storageKey: storageKey,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storage: window.localStorage,
+    storage: window.sessionStorage,
   },
 });
