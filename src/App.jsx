@@ -52,10 +52,15 @@ function AppLayout() {
   const { user } = useAuth();
   const location = useLocation();
   const isLanding = location.pathname === '/';
+  const isAdminLogin = location.pathname.startsWith('/admin-login');
+
+  if (isAdminLogin) {
+    return <Outlet />;
+  }
 
   return (
     <>
-      {!location.pathname.startsWith('/admin-login') && <Navbar />}
+      <Navbar />
       {user && !isLanding ? (
         <main className="main-content">
           <div className="container">
