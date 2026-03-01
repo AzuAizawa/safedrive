@@ -81,24 +81,29 @@ export function AuthProvider({ children }) {
             async (event, session) => {
                 if (!mounted) return;
 
-                if (session?.user) {
-                    setUser(session.user);
-                    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-                        await fetchProfile(session.user.id);
-                        if (event === 'SIGNED_IN') {
-                            logSecurityEvent('auth.login', 'User signed in successfully', {
-                                severity: 'info',
-                                metadata: { method: 'password', userId: session.user.id },
-                            });
+                try {
+                    if (session?.user) {
+                        setUser(session.user);
+                        if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                            await fetchProfile(session.user.id);
+                            if (event === 'SIGNED_IN') {
+                                logSecurityEvent('auth.login', 'User signed in successfully', {
+                                    severity: 'info',
+                                    metadata: { method: 'password', userId: session.user.id },
+                                });
+                            }
+                        }
+                    } else {
+                        setUser(null);
+                        setProfile(null);
+                        if (event === 'SIGNED_OUT') {
+                            logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
                         }
                     }
-                } else {
-                    setUser(null);
-                    setProfile(null);
-                    setLoading(false);
-                    if (event === 'SIGNED_OUT') {
-                        logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
-                    }
+                } catch (err) {
+                    console.error('Auth state change error:', err);
+                } finally {
+                    if (mounted) setLoading(false);
                 }
             }
         );
