@@ -20,54 +20,7 @@ export function AuthProvider({ children }) {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setUser(session?.user ?? null);
-            if (session?.user) {
-                fetchProfile(session.user.id);
-            } else {
-                setLoading(false);
-            }
-        });
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, session) => {
-                setUser(session?.user ?? null);
-                if (session?.user) {
-                    sessionStorage.setItem('safedrive_active', 'true');
-                    await fetchProfile(session.user.id);
-
-                    if (event === 'SIGNED_IN') {
-                        logSecurityEvent('auth.login', 'User signed in successfully', {
-                            severity: 'info',
-                            metadata: { method: 'password' },
-                        });
-                    }
-                } else {
-                    setProfile(null);
-                    setLoading(false);
-                    sessionStorage.removeItem('safedrive_active');
-
-                    if (event === 'SIGNED_OUT') {
-                        logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
-                    }
-                }
-            }
-        );
-
-        return () => subscription.unsubscribe();
-    }, []);
-
-    // Session persists normally via Supabase localStorage tokens.
-    // Sign out explicitly clears everything. No need to clear on page close.
-
-    useEffect(() => {
-        if (user) {
-            const cleanup = initSessionMonitor(30 * 60 * 1000);
-            return cleanup;
-        }
-    }, [user]);
-
+    // ── Fetch profile from DB ──────────────────────────────────────────────
     const fetchProfile = async (userId) => {
         try {
             const { data, error } = await supabase
@@ -76,49 +29,109 @@ export function AuthProvider({ children }) {
                 .eq('id', userId)
                 .single();
 
-            if (error) {
-                console.warn('Profile fetch error (may not exist yet):', error.message);
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
+            if (!error && data) {
+                setProfile(data);
+            } else {
+                // Profile row missing — create a fallback from auth metadata
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                if (authUser) {
                     setProfile({
-                        id: user.id,
-                        full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
-                        role: user.user_metadata?.role || 'user',
+                        id: authUser.id,
+                        full_name: authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'User',
+                        role: authUser.user_metadata?.role || 'user',
                         verification_status: 'pending',
-                        email: user.email,
+                        email: authUser.email,
                     });
                 }
-            } else {
-                setProfile(data);
             }
-        } catch (error) {
-            console.error('Error fetching profile:', error);
+        } catch (err) {
+            console.error('fetchProfile error:', err);
         } finally {
             setLoading(false);
         }
     };
 
-    const signUp = async ({ email, password, fullName, role, phone }) => {
-        if (!clientRateLimit('register', 3, 3600000)) {
-            return { data: null, error: { message: 'Too many registration attempts. Please try again later.' } };
-        }
+    // ── Initialize session on mount (race-condition proof) ─────────────────
+    useEffect(() => {
+        let mounted = true;
 
-        const sanitizedName = sanitizeInput(fullName);
-        const nameThreats = detectThreats(fullName);
-        if (!nameThreats.safe) {
-            logInjectionAttempt(nameThreats.threats[0], fullName, 'full_name');
+        const initSession = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!mounted) return;
+
+                if (session?.user) {
+                    setUser(session.user);
+                    await fetchProfile(session.user.id);
+                } else {
+                    setUser(null);
+                    setProfile(null);
+                    setLoading(false);
+                }
+            } catch (err) {
+                console.error('Session init error:', err);
+                if (mounted) setLoading(false);
+            }
+        };
+
+        initSession();
+
+        // Auth state change listener
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            async (event, session) => {
+                if (!mounted) return;
+
+                if (session?.user) {
+                    setUser(session.user);
+                    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                        await fetchProfile(session.user.id);
+                        if (event === 'SIGNED_IN') {
+                            logSecurityEvent('auth.login', 'User signed in successfully', {
+                                severity: 'info',
+                                metadata: { method: 'password', userId: session.user.id },
+                            });
+                        }
+                    }
+                } else {
+                    setUser(null);
+                    setProfile(null);
+                    setLoading(false);
+                    if (event === 'SIGNED_OUT') {
+                        logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
+                    }
+                }
+            }
+        );
+
+        return () => {
+            mounted = false;
+            subscription.unsubscribe();
+        };
+    }, []);
+
+    // ── Session monitor ────────────────────────────────────────────────────
+    useEffect(() => {
+        if (user) {
+            const cleanup = initSessionMonitor(30 * 60 * 1000);
+            return cleanup;
+        }
+    }, [user]);
+
+    // ── Sign Up ────────────────────────────────────────────────────────────
+    const signUp = async ({ email, password, fullName, phone, role }) => {
+        const sanitizedName = sanitizeInput(fullName || '');
+        const sanitizedEmail = sanitizeInput(email || '');
+
+        const threats = detectThreats(sanitizedName);
+        if (!threats.safe) {
+            logInjectionAttempt(threats.threats[0], sanitizedName, 'fullName');
             return { data: null, error: { message: 'Invalid characters detected in name.' } };
-        }
-
-        const strength = checkPasswordStrength(password);
-        if (!strength.passing) {
-            return { data: null, error: { message: `Password too weak: ${strength.feedback.join(', ')}` } };
         }
 
         const redirectUrl = `${window.location.origin}/auth/callback`;
 
         const { data, error } = await supabase.auth.signUp({
-            email,
+            email: sanitizedEmail,
             password,
             options: {
                 emailRedirectTo: redirectUrl,
@@ -131,7 +144,7 @@ export function AuthProvider({ children }) {
         });
 
         if (!error) {
-            logSecurityEvent('auth.register', `New user registered: ${email}`, {
+            logSecurityEvent('auth.register', `New user registered: ${sanitizedEmail}`, {
                 severity: 'info',
                 metadata: { role: role || 'user' },
             });
@@ -140,6 +153,7 @@ export function AuthProvider({ children }) {
         return { data, error };
     };
 
+    // ── Sign In ────────────────────────────────────────────────────────────
     const signIn = async ({ email, password }, rememberMe = false) => {
         if (!clientRateLimit('login', 5, 300000)) {
             logSecurityEvent('security.brute_force', `Login rate limit exceeded for ${email}`, {
@@ -150,37 +164,30 @@ export function AuthProvider({ children }) {
             return { data: null, error: { message: 'Too many login attempts. Account temporarily locked. Try again in 5 minutes.' } };
         }
 
-        const { data, error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
         if (error) {
             logFailedLogin(email, 'invalid_password');
         } else {
-            // Store "Remember Me" preference
             if (rememberMe) {
                 localStorage.setItem('safedrive_remember_me', 'true');
             } else {
                 localStorage.removeItem('safedrive_remember_me');
             }
-            // Mark this session as active (for session-only persistence)
-            sessionStorage.setItem('safedrive_active', 'true');
         }
 
         return { data, error };
     };
 
+    // ── Sign Out ───────────────────────────────────────────────────────────
     const signOut = async () => {
-        // Clear state immediately — never let logging block sign-out
+        // Clear local state immediately
         setUser(null);
         setProfile(null);
 
         try {
             logSecurityEvent('auth.logout', 'User initiated sign out', { severity: 'info' }).catch(() => { });
-        } catch (e) {
-            // Ignore — security logging must never block sign-out
-        }
+        } catch (e) { }
 
         try {
             await supabase.auth.signOut();
@@ -188,20 +195,18 @@ export function AuthProvider({ children }) {
             console.warn('Sign out error:', err);
         }
 
-        // Failsafe: clear any remaining Supabase tokens from storage
+        // Failsafe: clear any remaining Supabase tokens
         try {
             Object.keys(localStorage).forEach(key => {
-                if (key.startsWith('sb-')) localStorage.removeItem(key);
+                if (key.startsWith('sb-') || key === 'safedrive-auth') localStorage.removeItem(key);
             });
             localStorage.removeItem('safedrive_remember_me');
-            sessionStorage.removeItem('safedrive_active');
-        } catch (e) {
-            // Ignore storage errors
-        }
+        } catch (e) { }
 
         return { error: null };
     };
 
+    // ── Update Profile ─────────────────────────────────────────────────────
     const updateProfile = async (updates) => {
         const sanitizedUpdates = {};
         for (const [key, value] of Object.entries(updates)) {
@@ -246,12 +251,13 @@ export function AuthProvider({ children }) {
         signOut,
         updateProfile,
         fetchProfile: () => user && fetchProfile(user.id),
+        // Role helpers — admin is STRICTLY management only
         isAdmin: profile?.role === 'admin',
         isSuperAdmin: profile?.role === 'super_admin',
-        isVerified: profile?.role === 'verified' || profile?.role === 'admin',
-        isRenter: profile?.role === 'verified',   // Only verified users can list cars (not admin)
-        isRentee: profile?.role === 'verified',   // Only verified users can rent cars (not admin)
-        isOwner: profile?.role === 'verified',    // Admin is management-only
+        isVerified: profile?.role === 'verified',
+        isRenter: profile?.role === 'verified',   // Only verified non-admin users can list cars
+        isRentee: profile?.role === 'verified',   // Only verified non-admin users can rent cars
+        isOwner: profile?.role === 'verified',    // Alias for isRenter
     };
 
     return (

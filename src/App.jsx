@@ -5,6 +5,7 @@ import Navbar from './components/Navbar';
 import Landing from './pages/Landing';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
+import AdminLogin from './pages/auth/AdminLogin';
 import Dashboard from './pages/Dashboard';
 import Vehicles from './pages/Vehicles';
 import VehicleDetail from './pages/VehicleDetail';
@@ -27,16 +28,16 @@ function ProtectedRoute() {
 function AdminRoute() {
   const { user, isAdmin, loading } = useAuth();
   if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/admin-login" replace />;
   if (!isAdmin) return <Navigate to="/dashboard" replace />;
   return <Outlet />;
 }
 
 function RenterRoute() {
-  const { user, isRenter, isAdmin, loading } = useAuth();
+  const { user, isRenter, loading } = useAuth();
   if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (!isRenter && !isAdmin) return <Navigate to="/dashboard" replace />;
+  if (!isRenter) return <Navigate to="/dashboard" replace />;
   return <Outlet />;
 }
 
@@ -100,6 +101,8 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
             </Route>
+            {/* Admin login portal — completely separate */}
+            <Route path="/admin-login" element={<AdminLogin />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
 
             {/* Protected Routes */}

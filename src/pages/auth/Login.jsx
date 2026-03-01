@@ -6,7 +6,7 @@ import { FiMail, FiLock, FiAlertCircle, FiCheckCircle, FiArrowLeft, FiEye, FiEye
 import toast from 'react-hot-toast';
 
 export default function Login() {
-    const { signIn } = useAuth();
+    const { signIn, signOut } = useAuth();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const [loading, setLoading] = useState(false);
@@ -38,8 +38,23 @@ export default function Login() {
         setLoading(true);
 
         try {
-            const { error: signInError } = await signIn(formData, rememberMe);
+            const { data, error: signInError } = await signIn(formData, rememberMe);
             if (signInError) throw signInError;
+
+            // Check if this is an admin account trying to use the user portal
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('role')
+                .eq('id', data.user.id)
+                .single();
+
+            if (profileData?.role === 'admin') {
+                // Admin trying to use user portal — reject and redirect
+                await signOut();
+                setError('Admin accounts must use the Admin Portal. Please go to /admin-login to access the admin panel.');
+                return;
+            }
+
             toast.success('Welcome back to SafeDrive!');
             navigate('/dashboard');
         } catch (err) {

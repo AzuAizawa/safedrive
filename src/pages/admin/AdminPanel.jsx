@@ -2,21 +2,27 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { FiUsers, FiTruck, FiCalendar, FiShield, FiCheck, FiX, FiEye, FiSearch, FiImage, FiPlus, FiToggleLeft, FiToggleRight, FiAlertCircle, FiClock, FiTrash2 } from 'react-icons/fi';
+import { FiUsers, FiTruck, FiCalendar, FiShield, FiCheck, FiX, FiEye, FiSearch, FiImage, FiPlus, FiToggleLeft, FiToggleRight, FiAlertCircle, FiClock, FiTrash2, FiActivity } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import BackButton from '../../components/BackButton';
+import { logAudit } from '../../lib/auditLogger';
 
 export default function AdminPanel() {
-    const { user } = useAuth();
+    const { user, profile } = useAuth();
     const [searchParams] = useSearchParams();
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'users');
     const [users, setUsers] = useState([]);
     const [vehicles, setVehicles] = useState([]);
     const [bookings, setBookings] = useState([]);
+    const [auditLogs, setAuditLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedUser, setSelectedUser] = useState(null);
+    const [userDetailTab, setUserDetailTab] = useState('overview');
     const [userDocs, setUserDocs] = useState([]);
+    const [userVehicles, setUserVehicles] = useState([]);
+    const [userBookings, setUserBookings] = useState([]);
+    const [userDetailLoading, setUserDetailLoading] = useState(false);
     const [docsLoading, setDocsLoading] = useState(false);
     const [selectedVehicle, setSelectedVehicle] = useState(null);
 
@@ -45,12 +51,29 @@ export default function AdminPanel() {
                 setBookings(data || []);
             } else if (activeTab === 'catalog') {
                 await fetchCatalog();
+            } else if (activeTab === 'audit') {
+                const { data } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200);
+                setAuditLogs(data || []);
             }
         } catch (err) { console.error('Error:', err); }
         finally { setLoading(false); }
     };
 
-    // ===== USER FUNCTIONS =====
+    const fetchUserDetails = async (u) => {
+        setUserDetailLoading(true);
+        setUserVehicles([]);
+        setUserBookings([]);
+        try {
+            const [vehiclesRes, bookingsRes] = await Promise.all([
+                supabase.from('vehicles').select('id, make, model, year, status, daily_rate, plate_number').eq('owner_id', u.id).order('created_at', { ascending: false }),
+                supabase.from('bookings').select('id, start_date, end_date, status, total_amount, vehicles(make, model, year)').eq('renter_id', u.id).order('created_at', { ascending: false }),
+            ]);
+            setUserVehicles(vehiclesRes.data || []);
+            setUserBookings(bookingsRes.data || []);
+        } catch (err) { console.error('fetchUserDetails error:', err); }
+        finally { setUserDetailLoading(false); }
+    };
+
     const fetchUserDocs = async (userId) => {
         setDocsLoading(true);
         setUserDocs([]);
@@ -82,6 +105,7 @@ export default function AdminPanel() {
             if (error) throw error;
             try { await supabase.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: `User ${action === 'approve' ? 'verified' : 'rejected'} by admin` }); } catch (e) { }
             try { await supabase.from('notifications').insert({ user_id: userId, title: action === 'approve' ? 'Identity Verified!' : 'Verification Rejected', message: action === 'approve' ? 'Your identity has been verified. You can now access all SafeDrive features!' : 'Your identity verification was not approved. Please resubmit your documents.', type: 'verification' }); } catch (e) { }
+            await logAudit({ action: action === 'approve' ? 'VERIFY_USER' : 'REJECT_USER', entityType: 'user', entityId: userId, description: `Admin ${action === 'approve' ? 'approved' : 'rejected'} identity verification for user ${selectedUser?.full_name || userId}`, newValue: { verification_status: action === 'approve' ? 'verified' : 'rejected' }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
             toast.success(`User ${action === 'approve' ? 'verified' : 'rejected'} successfully`);
             fetchData();
             setSelectedUser(null);
@@ -89,11 +113,13 @@ export default function AdminPanel() {
     };
 
     const changeRole = async (userId, newRole) => {
-        if (!window.confirm(`Change this user's role to "${newRole}"?`)) return;
+        if (!window.confirm(`Change this user's role to "${newRole === 'user' ? 'Not Verified' : newRole}"?`)) return;
+        const oldRole = selectedUser?.role;
         try {
             const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
             if (error) throw error;
-            toast.success(`Role changed to ${newRole}`);
+            await logAudit({ action: 'CHANGE_USER_ROLE', entityType: 'user', entityId: userId, description: `Admin changed role of ${selectedUser?.full_name || userId} from ${oldRole} to ${newRole}`, oldValue: { role: oldRole }, newValue: { role: newRole }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
+            toast.success(`Role changed to ${newRole === 'user' ? 'Not Verified' : newRole}`);
             fetchData();
             setSelectedUser(null);
         } catch (err) { toast.error('Failed to change role'); }
@@ -102,12 +128,14 @@ export default function AdminPanel() {
     // ===== VEHICLE FUNCTIONS =====
     const approveVehicle = async (vehicleId, action) => {
         try {
+            const veh = vehicles.find(v => v.id === vehicleId) || selectedVehicle;
             const { error } = await supabase.from('vehicles').update({
                 status: action === 'approve' ? 'approved' : 'rejected',
                 approved_by: user.id,
                 approved_at: new Date().toISOString(),
             }).eq('id', vehicleId);
             if (error) throw error;
+            await logAudit({ action: action === 'approve' ? 'APPROVE_VEHICLE' : 'REJECT_VEHICLE', entityType: 'vehicle', entityId: vehicleId, description: `Admin ${action === 'approve' ? 'approved' : 'rejected'} vehicle ${veh?.year || ''} ${veh?.make || ''} ${veh?.model || ''}`, oldValue: { status: 'pending' }, newValue: { status: action === 'approve' ? 'approved' : 'rejected' }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
             toast.success(`Vehicle ${action === 'approve' ? 'approved' : 'rejected'}`);
             fetchData();
             setSelectedVehicle(null);
@@ -201,7 +229,12 @@ export default function AdminPanel() {
     };
 
     // ===== COMPUTED =====
-    const handleViewUser = (u) => { setSelectedUser(u); fetchUserDocs(u.id); };
+    const handleViewUser = (u) => {
+        setSelectedUser(u);
+        setUserDetailTab('overview');
+        fetchUserDocs(u.id);
+        fetchUserDetails(u);
+    };
     const getRoleBadgeClass = (role) => ({ admin: 'badge-error', verified: 'badge-success', user: 'badge-info' }[role] || 'badge-neutral');
     const getStatusBadge = (status) => ({ verified: 'badge-success', submitted: 'badge-pending', rejected: 'badge-error' }[status] || 'badge-neutral');
     const filteredCatalogModels = selectedBrandId ? carModels.filter(m => m.brand_id === selectedBrandId) : carModels;
@@ -325,6 +358,7 @@ export default function AdminPanel() {
                     { id: 'vehicles', icon: <FiTruck />, label: 'Vehicles', count: pendingVehicles.length },
                     { id: 'bookings', icon: <FiCalendar />, label: 'Bookings' },
                     { id: 'catalog', icon: null, label: '🚘 Car Catalog' },
+                    { id: 'audit', icon: <FiActivity />, label: 'Audit Trail' },
                 ].map(tab => (
                     <button key={tab.id} className={`tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
                         {tab.icon && <span style={{ marginRight: 6 }}>{tab.icon}</span>}
@@ -489,6 +523,53 @@ export default function AdminPanel() {
                                                         {b.status}
                                                     </span>
                                                 </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                    {/* ========== AUDIT TRAIL TAB ========== */}
+                    {activeTab === 'audit' && (
+                        <div className="card">
+                            <div className="card-header">
+                                <h2 style={{ fontSize: 16, fontWeight: 700 }}>🕵️ Audit Trail ({auditLogs.length})</h2>
+                                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>All admin actions — who did what and when</span>
+                            </div>
+                            <div className="table-container">
+                                <table className="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Timestamp</th>
+                                            <th>Admin</th>
+                                            <th>Action</th>
+                                            <th>Entity</th>
+                                            <th>Description</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {auditLogs.length === 0 ? (
+                                            <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-tertiary)' }}>No audit logs yet. Admin actions will appear here.</td></tr>
+                                        ) : auditLogs.map(log => (
+                                            <tr key={log.id}>
+                                                <td style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                                                    {new Date(log.created_at).toLocaleString()}
+                                                </td>
+                                                <td>
+                                                    <div style={{ fontWeight: 600, fontSize: 13 }}>{log.performer_name || '—'}</div>
+                                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{log.performer_email || ''}</div>
+                                                </td>
+                                                <td>
+                                                    <span className={`badge ${log.action?.includes('APPROVE') || log.action?.includes('VERIFY') ? 'badge-success' :
+                                                            log.action?.includes('REJECT') || log.action?.includes('DELETE') ? 'badge-error' :
+                                                                'badge-info'
+                                                        }`} style={{ fontSize: 11 }}>{log.action}</span>
+                                                </td>
+                                                <td style={{ fontSize: 13 }}>
+                                                    <span className="badge badge-neutral" style={{ fontSize: 11 }}>{log.entity_type}</span>
+                                                </td>
+                                                <td style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 280 }}>{log.description}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -667,18 +748,62 @@ export default function AdminPanel() {
                                 )}
                             </div>
 
-                            {/* Role Management */}
+                            {/* Role Management — only user <-> verified, no admin promotion */}
                             <div style={{ marginBottom: 16 }}>
                                 <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}><FiShield /> Role Management</h3>
+                                <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>Admin accounts are created separately and cannot be assigned through this panel.</p>
                                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                    {['user', 'verified', 'admin'].map(role => (
-                                        <button key={role} className={`btn btn-sm ${selectedUser.role === role ? 'btn-primary' : 'btn-secondary'}`} onClick={() => selectedUser.role !== role && changeRole(selectedUser.id, role)} disabled={selectedUser.role === role || selectedUser.id === user.id} style={{ textTransform: 'capitalize' }}>
-                                            {selectedUser.role === role ? `✓ ${role === 'user' ? 'Not Verified' : role}` : (role === 'user' ? 'Not Verified' : role)}
+                                    {['user', 'verified'].map(role => (
+                                        <button key={role} className={`btn btn-sm ${selectedUser.role === role ? 'btn-primary' : 'btn-secondary'}`} onClick={() => selectedUser.role !== role && changeRole(selectedUser.id, role)} disabled={selectedUser.role === role || selectedUser.id === user.id || selectedUser.role === 'admin'} style={{ textTransform: 'capitalize' }}>
+                                            {selectedUser.role === role ? `✓ ${role === 'user' ? 'Not Verified' : 'Verified'}` : (role === 'user' ? 'Set Not Verified' : 'Set Verified')}
                                         </button>
                                     ))}
+                                    {selectedUser.role === 'admin' && <span className="badge badge-error" style={{ padding: '8px 12px' }}>Admin — role cannot be changed here</span>}
                                 </div>
                                 {selectedUser.id === user.id && <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>⚠️ You cannot change your own role</p>}
                             </div>
+
+                            {/* User's Vehicles */}
+                            <div style={{ marginBottom: 16 }}>
+                                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}><FiTruck /> Listed Vehicles ({userVehicles.length})</h3>
+                                {userDetailLoading ? <div style={{ textAlign: 'center', padding: 16 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+                                    : userVehicles.length === 0 ? <p style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '8px 0' }}>No vehicles listed</p>
+                                        : (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                {userVehicles.map(v => (
+                                                    <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--neutral-50)', borderRadius: 8 }}>
+                                                        <div>
+                                                            <div style={{ fontWeight: 600, fontSize: 13 }}>{v.year} {v.make} {v.model}</div>
+                                                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{v.plate_number} • ₱{v.daily_rate?.toLocaleString()}/day</div>
+                                                        </div>
+                                                        <span className={`badge ${v.status === 'approved' ? 'badge-success' : v.status === 'pending' ? 'badge-pending' : 'badge-error'}`}>{v.status}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                            </div>
+
+                            {/* User's Bookings */}
+                            <div style={{ marginBottom: 8 }}>
+                                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}><FiCalendar /> Booking History ({userBookings.length})</h3>
+                                {userDetailLoading ? <div style={{ textAlign: 'center', padding: 16 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+                                    : userBookings.length === 0 ? <p style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '8px 0' }}>No bookings yet</p>
+                                        : (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                {userBookings.slice(0, 5).map(b => (
+                                                    <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--neutral-50)', borderRadius: 8 }}>
+                                                        <div>
+                                                            <div style={{ fontWeight: 600, fontSize: 13 }}>{b.vehicles?.year} {b.vehicles?.make} {b.vehicles?.model}</div>
+                                                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{new Date(b.start_date).toLocaleDateString()} → {new Date(b.end_date).toLocaleDateString()} • ₱{b.total_amount?.toLocaleString()}</div>
+                                                        </div>
+                                                        <span className={`badge ${b.status === 'completed' ? 'badge-success' : b.status === 'confirmed' ? 'badge-info' : b.status === 'cancelled' ? 'badge-error' : 'badge-pending'}`}>{b.status}</span>
+                                                    </div>
+                                                ))}
+                                                {userBookings.length > 5 && <p style={{ fontSize: 12, color: 'var(--text-tertiary)', textAlign: 'center' }}>+{userBookings.length - 5} more bookings</p>}
+                                            </div>
+                                        )}
+                            </div>
+
                         </div>
 
                         {/* Verification Actions in Footer */}
