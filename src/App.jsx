@@ -53,8 +53,9 @@ function AppLayout() {
   const location = useLocation();
   const isLanding = location.pathname === '/';
   const isAdminLogin = location.pathname.startsWith('/admin-login');
+  const isAdminPanel = location.pathname.startsWith('/admin') && !isAdminLogin;
 
-  if (isAdminLogin) {
+  if (isAdminLogin || isAdminPanel) {
     return <Outlet />;
   }
 

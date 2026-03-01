@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '../../lib/supabase';
+import { supabaseAdmin } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { FiUsers, FiTruck, FiCalendar, FiShield, FiCheck, FiX, FiEye, FiSearch, FiImage, FiPlus, FiToggleLeft, FiToggleRight, FiAlertCircle, FiClock, FiTrash2, FiActivity } from 'react-icons/fi';
 import toast from 'react-hot-toast';
@@ -41,18 +41,18 @@ export default function AdminPanel() {
         setLoading(true);
         try {
             if (activeTab === 'users') {
-                const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+                const { data } = await supabaseAdmin.from('profiles').select('*').order('created_at', { ascending: false });
                 setUsers(data || []);
             } else if (activeTab === 'vehicles') {
-                const { data } = await supabase.from('vehicles').select('*, profiles!vehicles_owner_id_fkey(full_name)').order('created_at', { ascending: false });
+                const { data } = await supabaseAdmin.from('vehicles').select('*, profiles!vehicles_owner_id_fkey(full_name)').order('created_at', { ascending: false });
                 setVehicles(data || []);
             } else if (activeTab === 'bookings') {
-                const { data } = await supabase.from('bookings').select('*, vehicles(make, model, year), profiles!bookings_renter_id_fkey(full_name)').order('created_at', { ascending: false });
+                const { data } = await supabaseAdmin.from('bookings').select('*, vehicles(make, model, year), profiles!bookings_renter_id_fkey(full_name)').order('created_at', { ascending: false });
                 setBookings(data || []);
             } else if (activeTab === 'catalog') {
                 await fetchCatalog();
             } else if (activeTab === 'audit') {
-                const { data } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200);
+                const { data } = await supabaseAdmin.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200);
                 setAuditLogs(data || []);
             }
         } catch (err) { console.error('Error:', err); }
@@ -65,8 +65,8 @@ export default function AdminPanel() {
         setUserBookings([]);
         try {
             const [vehiclesRes, bookingsRes] = await Promise.all([
-                supabase.from('vehicles').select('id, make, model, year, status, daily_rate, plate_number').eq('owner_id', u.id).order('created_at', { ascending: false }),
-                supabase.from('bookings').select('id, start_date, end_date, status, total_amount, vehicles(make, model, year)').eq('renter_id', u.id).order('created_at', { ascending: false }),
+                supabaseAdmin.from('vehicles').select('id, make, model, year, status, daily_rate, plate_number').eq('owner_id', u.id).order('created_at', { ascending: false }),
+                supabaseAdmin.from('bookings').select('id, start_date, end_date, status, total_amount, vehicles(make, model, year)').eq('renter_id', u.id).order('created_at', { ascending: false }),
             ]);
             setUserVehicles(vehiclesRes.data || []);
             setUserBookings(bookingsRes.data || []);
@@ -81,10 +81,10 @@ export default function AdminPanel() {
             const allDocs = [];
             for (const bucket of ['documents', 'selfies']) {
                 try {
-                    const { data, error } = await supabase.storage.from(bucket).list(userId, { limit: 20 });
+                    const { data, error } = await supabaseAdmin.storage.from(bucket).list(userId, { limit: 20 });
                     if (!error && data) {
                         for (const file of data) {
-                            const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(`${userId}/${file.name}`);
+                            const { data: urlData } = supabaseAdmin.storage.from(bucket).getPublicUrl(`${userId}/${file.name}`);
                             allDocs.push({ name: file.name, bucket, url: urlData?.publicUrl });
                         }
                     }
@@ -97,14 +97,14 @@ export default function AdminPanel() {
 
     const verifyUser = async (userId, action) => {
         try {
-            const { error } = await supabase.from('profiles').update({
+            const { error } = await supabaseAdmin.from('profiles').update({
                 verification_status: action === 'approve' ? 'verified' : 'rejected',
                 verified_by: user.id,
                 verified_at: new Date().toISOString(),
             }).eq('id', userId);
             if (error) throw error;
-            try { await supabase.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: `User ${action === 'approve' ? 'verified' : 'rejected'} by admin` }); } catch (e) { }
-            try { await supabase.from('notifications').insert({ user_id: userId, title: action === 'approve' ? 'Identity Verified!' : 'Verification Rejected', message: action === 'approve' ? 'Your identity has been verified. You can now access all SafeDrive features!' : 'Your identity verification was not approved. Please resubmit your documents.', type: 'verification' }); } catch (e) { }
+            try { await supabaseAdmin.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: `User ${action === 'approve' ? 'verified' : 'rejected'} by admin` }); } catch (e) { }
+            try { await supabaseAdmin.from('notifications').insert({ user_id: userId, title: action === 'approve' ? 'Identity Verified!' : 'Verification Rejected', message: action === 'approve' ? 'Your identity has been verified. You can now access all SafeDrive features!' : 'Your identity verification was not approved. Please resubmit your documents.', type: 'verification' }); } catch (e) { }
             await logAudit({ action: action === 'approve' ? 'VERIFY_USER' : 'REJECT_USER', entityType: 'user', entityId: userId, description: `Admin ${action === 'approve' ? 'approved' : 'rejected'} identity verification for user ${selectedUser?.full_name || userId}`, newValue: { verification_status: action === 'approve' ? 'verified' : 'rejected' }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
             toast.success(`User ${action === 'approve' ? 'verified' : 'rejected'} successfully`);
             fetchData();
@@ -116,7 +116,7 @@ export default function AdminPanel() {
         if (!window.confirm(`Change this user's role to "${newRole === 'user' ? 'Not Verified' : newRole}"?`)) return;
         const oldRole = selectedUser?.role;
         try {
-            const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+            const { error } = await supabaseAdmin.from('profiles').update({ role: newRole }).eq('id', userId);
             if (error) throw error;
             await logAudit({ action: 'CHANGE_USER_ROLE', entityType: 'user', entityId: userId, description: `Admin changed role of ${selectedUser?.full_name || userId} from ${oldRole} to ${newRole}`, oldValue: { role: oldRole }, newValue: { role: newRole }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
             toast.success(`Role changed to ${newRole === 'user' ? 'Not Verified' : newRole}`);
@@ -129,7 +129,7 @@ export default function AdminPanel() {
     const approveVehicle = async (vehicleId, action) => {
         try {
             const veh = vehicles.find(v => v.id === vehicleId) || selectedVehicle;
-            const { error } = await supabase.from('vehicles').update({
+            const { error } = await supabaseAdmin.from('vehicles').update({
                 status: action === 'approve' ? 'approved' : 'rejected',
                 approved_by: user.id,
                 approved_at: new Date().toISOString(),
@@ -147,8 +147,8 @@ export default function AdminPanel() {
         setCatalogLoading(true);
         try {
             const [brandsRes, modelsRes] = await Promise.all([
-                supabase.from('car_brands').select('*').order('name'),
-                supabase.from('car_models').select('*, car_brands(name)').order('name'),
+                supabaseAdmin.from('car_brands').select('*').order('name'),
+                supabaseAdmin.from('car_models').select('*, car_brands(name)').order('name'),
             ]);
             setCarBrands(brandsRes.data || []);
             setCarModels(modelsRes.data || []);
@@ -160,7 +160,7 @@ export default function AdminPanel() {
         const name = newBrandName.trim();
         if (!name) return toast.error('Brand name is required');
         try {
-            const { error } = await supabase.from('car_brands').insert({ name, is_active: true });
+            const { error } = await supabaseAdmin.from('car_brands').insert({ name, is_active: true });
             if (error) throw error;
             toast.success(`Brand "${name}" added`);
             setNewBrandName('');
@@ -173,7 +173,7 @@ export default function AdminPanel() {
         if (!name) return toast.error('Model name is required');
         if (!selectedBrandId) return toast.error('Select a brand first');
         try {
-            const { error } = await supabase.from('car_models').insert({ brand_id: selectedBrandId, name, body_type: newModelBodyType, is_active: true });
+            const { error } = await supabaseAdmin.from('car_models').insert({ brand_id: selectedBrandId, name, body_type: newModelBodyType, is_active: true });
             if (error) throw error;
             toast.success(`Model "${name}" added`);
             setNewModelName('');
@@ -183,7 +183,7 @@ export default function AdminPanel() {
 
     const toggleBrandActive = async (brandId, current) => {
         try {
-            const { error } = await supabase.from('car_brands').update({ is_active: !current }).eq('id', brandId);
+            const { error } = await supabaseAdmin.from('car_brands').update({ is_active: !current }).eq('id', brandId);
             if (error) throw error;
             toast.success(current ? 'Brand deactivated' : 'Brand activated');
             fetchCatalog();
@@ -192,7 +192,7 @@ export default function AdminPanel() {
 
     const toggleModelActive = async (modelId, current) => {
         try {
-            const { error } = await supabase.from('car_models').update({ is_active: !current }).eq('id', modelId);
+            const { error } = await supabaseAdmin.from('car_models').update({ is_active: !current }).eq('id', modelId);
             if (error) throw error;
             toast.success(current ? 'Model deactivated' : 'Model activated');
             fetchCatalog();
@@ -207,10 +207,10 @@ export default function AdminPanel() {
         if (!window.confirm(msg)) return;
         try {
             if (modelCount > 0) {
-                const { error: modelsErr } = await supabase.from('car_models').delete().eq('brand_id', brandId);
+                const { error: modelsErr } = await supabaseAdmin.from('car_models').delete().eq('brand_id', brandId);
                 if (modelsErr) throw modelsErr;
             }
-            const { error } = await supabase.from('car_brands').delete().eq('id', brandId);
+            const { error } = await supabaseAdmin.from('car_brands').delete().eq('id', brandId);
             if (error) throw error;
             toast.success(`"${brandName}" deleted`);
             if (selectedBrandId === brandId) setSelectedBrandId('');
@@ -221,7 +221,7 @@ export default function AdminPanel() {
     const deleteModel = async (modelId, modelName) => {
         if (!window.confirm(`Delete model "${modelName}"? This cannot be undone.`)) return;
         try {
-            const { error } = await supabase.from('car_models').delete().eq('id', modelId);
+            const { error } = await supabaseAdmin.from('car_models').delete().eq('id', modelId);
             if (error) throw error;
             toast.success(`"${modelName}" deleted`);
             fetchCatalog();
