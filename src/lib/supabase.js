@@ -7,18 +7,32 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Missing Supabase environment variables. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file.');
 }
 
-// Determine if we are currently in the admin portal by checking the URL
-const isAdminRoute = typeof window !== 'undefined' &&
-  (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/admin-login'));
-
-const storageKey = isAdminRoute ? 'safedrive-admin-auth' : 'safedrive-auth';
+// Custom storage adapter guarantees the right token is pulled even if the 
+// JS bundle executes before React Router fully hydrates the pathname on Vercel
+const dynamicStorage = {
+  getItem: (key) => {
+    const isAdmin = typeof window !== 'undefined' && (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/admin-login'));
+    const actualKey = isAdmin ? key.replace('safedrive-auth', 'safedrive-admin-auth') : key;
+    return window.sessionStorage.getItem(actualKey);
+  },
+  setItem: (key, value) => {
+    const isAdmin = typeof window !== 'undefined' && (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/admin-login'));
+    const actualKey = isAdmin ? key.replace('safedrive-auth', 'safedrive-admin-auth') : key;
+    window.sessionStorage.setItem(actualKey, value);
+  },
+  removeItem: (key) => {
+    const isAdmin = typeof window !== 'undefined' && (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/admin-login'));
+    const actualKey = isAdmin ? key.replace('safedrive-auth', 'safedrive-admin-auth') : key;
+    window.sessionStorage.removeItem(actualKey);
+  }
+};
 
 export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
   auth: {
     persistSession: true,
-    storageKey: storageKey,
+    storageKey: 'safedrive-auth', // Base key to be mutated by dynamicStorage
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storage: window.sessionStorage,
+    storage: dynamicStorage,
   },
 });
