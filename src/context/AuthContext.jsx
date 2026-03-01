@@ -62,37 +62,70 @@ export function AuthProvider({ children }) {
     // ── Dual Session Detection Initialization ───────────────────────────────
     useEffect(() => {
         let mounted = true;
-        let subscriptionObj = null;
+        let subUser = null;
+        let subAdmin = null;
+
+const handleAuthStateChange = (targetClient) => async (event, session) => {
+            if (!mounted) return;
+            if (event === 'INITIAL_SESSION') return;
+
+            try {
+                if (session?.user) {
+                    setActiveClient(targetClient);
+                    setUser(session.user);
+                    await fetchProfile(session.user.id, targetClient);
+
+                    if (event === 'SIGNED_IN') {
+                        logSecurityEvent('auth.login', 'User signed in successfully', {
+                            severity: 'info',
+                            metadata: { method: 'password', userId: session?.user?.id },
+                        });
+                    }
+                } else {
+                    setUser(null);
+                    setProfile(null);
+                    if (mounted) setLoading(false);
+
+                    if (event === 'SIGNED_OUT') {
+                        logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
+                    }
+                }
+            } catch (err) {
+                console.error('Auth state change error:', err);
+                if (mounted) setLoading(false);
+            }
+        };
 
         const initializeAuthEngine = async () => {
             try {
+                // Attach listeners immediately to BOTH engines
+                subAdmin = supabaseAdmin.auth.onAuthStateChange(handleAuthStateChange(supabaseAdmin)).data.subscription;
+                subUser = supabaseUser.auth.onAuthStateChange(handleAuthStateChange(supabaseUser)).data.subscription;
+
                 // 1. Check Admin storage strictly first
                 const { data: adminData, error: adminError } = await supabaseAdmin.auth.getSession();
-
+                
                 if (adminData?.session?.user) {
                     if (!mounted) return;
                     setActiveClient(supabaseAdmin);
                     setUser(adminData.session.user);
                     await fetchProfile(adminData.session.user.id, supabaseAdmin);
-                    attachListener(supabaseAdmin);
                     return;
                 }
 
                 // 2. If no admin token, check User storage
                 const { data: userData, error: userError } = await supabaseUser.auth.getSession();
                 if (!mounted) return;
-
+                
                 if (userData?.session?.user) {
                     setActiveClient(supabaseUser);
                     setUser(userData.session.user);
                     await fetchProfile(userData.session.user.id, supabaseUser);
-                    attachListener(supabaseUser);
                 } else {
                     // 3. No sessions found anywhere
                     setUser(null);
                     setProfile(null);
                     setLoading(false);
-                    attachListener(supabaseUser); // Default listener for purely public views
                 }
             } catch (e) {
                 console.error('Dual session initialization failed:', e);
@@ -100,50 +133,15 @@ export function AuthProvider({ children }) {
             }
         };
 
-        const attachListener = (targetClient) => {
-            if (subscriptionObj) subscriptionObj.unsubscribe();
-
-            const { data: { subscription } } = targetClient.auth.onAuthStateChange(
-                async (event, session) => {
-                    if (!mounted) return;
-                    if (event === 'INITIAL_SESSION') return;
-
-                    try {
-                        if (session?.user) {
-                            setUser(session.user);
-                            await fetchProfile(session.user.id, targetClient);
-
-                            if (event === 'SIGNED_IN') {
-                                logSecurityEvent('auth.login', 'User signed in successfully', {
-                                    severity: 'info',
-                                    metadata: { method: 'password', userId: session?.user?.id },
-                                });
-                            }
-                        } else {
-                            setUser(null);
-                            setProfile(null);
-                            if (mounted) setLoading(false);
-
-                            if (event === 'SIGNED_OUT') {
-                                logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
-                            }
-                        }
-                    } catch (err) {
-                        console.error('Auth state change error:', err);
-                        if (mounted) setLoading(false);
-                    }
-                }
-            );
-            subscriptionObj = subscription;
-        };
-
         initializeAuthEngine();
 
         return () => {
             mounted = false;
-            if (subscriptionObj) subscriptionObj.unsubscribe();
+            if (subUser) subUser.unsubscribe();
+            if (subAdmin) subAdmin.unsubscribe();
         };
     }, []);
+
 
     // ── Session monitor ────────────────────────────────────────────────────
     useEffect(() => {
@@ -190,7 +188,7 @@ export function AuthProvider({ children }) {
     };
 
     // ── Sign In ────────────────────────────────────────────────────────────
-    const signIn = async ({ email, password }, rememberMe = false) => {
+    const signIn = async ({ email, password }, rememberMe = false, asAdmin = false) => {
         if (!clientRateLimit('login', 5, 300000)) {
             logSecurityEvent('security.brute_force', `Login rate limit exceeded for ${email}`, {
                 severity: 'critical',
@@ -200,7 +198,8 @@ export function AuthProvider({ children }) {
             return { data: null, error: { message: 'Too many login attempts. Account temporarily locked. Try again in 5 minutes.' } };
         }
 
-        const { data, error } = await activeClient.auth.signInWithPassword({ email, password });
+        const targetClient = asAdmin ? supabaseAdmin : activeClient;
+        const { data, error } = await targetClient.auth.signInWithPassword({ email, password });
 
         if (error) {
             logFailedLogin(email, 'invalid_password');

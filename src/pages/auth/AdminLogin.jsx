@@ -30,7 +30,7 @@ export default function AdminLogin() {
         setFormLoading(true);
 
         try {
-            const { data, error: signInError } = await signIn(formData, true);
+            const { data, error: signInError } = await signIn(formData, true, true);
             if (signInError) throw signInError;
 
             // After sign in, check if this is actually an admin account
