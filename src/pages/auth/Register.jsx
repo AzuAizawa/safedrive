@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { FiMail, FiLock, FiUser, FiPhone, FiAlertCircle, FiCheck, FiX, FiEye, FiEyeOff } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { validateRegistrationForm } from '../../lib/validation';
 
 // Password rules config
 const PASSWORD_RULES = [
@@ -83,6 +84,7 @@ export default function Register() {
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [fieldErrors, setFieldErrors] = useState({});
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [formData, setFormData] = useState({
@@ -130,26 +132,25 @@ export default function Register() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setFieldErrors({});
 
-        // Validate email
-        if (!emailValidation.valid && !emailValidation.isInfo) {
-            setError(emailValidation.message || 'Please enter a valid email address');
-            return;
-        }
+        // Comprehensive validation using centralized validation module
+        const { valid, errors } = validateRegistrationForm({
+            fullName: formData.fullName,
+            email: formData.email,
+            phone: formData.phone,
+            password: formData.password,
+            confirmPassword: formData.confirmPassword,
+        });
 
-        // Validate password rules
-        if (!allPasswordRulesPassed) {
-            setError('Password does not meet all requirements');
-            return;
-        }
-
-        if (formData.password !== formData.confirmPassword) {
-            setError('Passwords do not match');
+        if (!valid) {
+            setFieldErrors(errors);
+            setError('Please fix the errors below before continuing.');
             return;
         }
 
         if (!formData.agreeTerms) {
-            setError('You must agree to the terms and conditions');
+            setError('You must agree to the terms and conditions.');
             return;
         }
 

@@ -410,3 +410,140 @@ SafeDrive also displays the **MMDA Number Coding scheme** based on the plate num
 | How is data protected? | PostgreSQL RLS — enforced at database engine level. | Section 9 |
 | How do you track incidents? | 5 log tables, 50+ event types, ISO 27001 aligned. | Section 10 |
 | Why max 7 chars for plate number? | LTO standard. Protocol plates (8 chars) are gov't vehicles, not for rental. | Section 11 |
+| Why is name validation rejecting numbers? | Names do not contain digits. ISO 27001 A.14.2.5 input validation. OWASP A03. | Section 12 |
+| Why require admin approval for listings? | Consumer protection. RA 7394 Consumer Act. DTI E-Commerce Act (RA 8792). | Section 13 |
+| Why is agreement document upload optional but encouraged? | Digital contracts are valid under RA 8792 §7. Provides legal protection for both parties. | Section 14 |
+| Why does admin refresh not transfer to user side? | Single-listener auth architecture. Promise.all session detection eliminates race conditions. | Section 15 |
+
+---
+
+## 12. Centralized Input Validation Architecture {#12-input-validation}
+
+### Panelist Question
+> *"How do you ensure data integrity from user inputs? Can a user enter a fake name or an invalid plate number?"*
+
+### Answer
+SafeDrive implements **three layers of validation**, each more authoritative than the last:
+
+| Layer | Location | Mechanism | Strength |
+|---|---|---|---|
+| **Layer 1** | Browser (client) | `validation.js` — typed rules per field | Immediate UX feedback |
+| **Layer 2** | Browser (client) | `security.js` — XSS/SQL injection detection | Security hardening |
+| **Layer 3** | Database | PostgreSQL RLS + CHECK constraints | Enforced at engine level |
+
+### Field-Level Rules (src/lib/validation.js)
+
+| Field | Rule | Error if violated |
+|---|---|---|
+| **Full Name** | Letters, spaces, hyphens, apostrophes only — **NO digits** | "Name cannot contain numbers" |
+| **Phone** | Philippine format: 09XXXXXXXXX or +639XXXXXXXXX | "Enter a valid PH mobile number" |
+| **Email** | Standard RFC format, max 254 chars | "Enter a valid email address" |
+| **Password** | 8–128 chars, upper + lower + number + special, not in common list | Specific rule feedback |
+| **Plate Number** | 1–3 letters + space + 3–4 digits, **max 7 alphanumeric** | "Enter a valid plate number (e.g. ABC 1234)" |
+| **Daily Rate** | ₱100 – ₱100,000, up to 2 decimal places | "Daily rate must be at least ₱100" |
+| **Security Deposit** | Optional; if provided: 0 – ₱200,000 | "Security deposit must not exceed ₱200,000" |
+| **Mileage** | Optional; if provided: 0 – 9,999,999 km | "Mileage value seems too high" |
+| **Address** | 5–200 chars, no HTML markup | "Address must be at least 5 characters" |
+| **Description** | Max 2,000 chars | Character count limit message |
+| **Image Upload** | JPEG/PNG/WebP/GIF only, max 5MB | "Only JPG, PNG, WebP, or GIF images allowed" |
+| **Agreement Doc** | PDF/DOC/DOCX only, max 10MB | "Only PDF, DOC, or DOCX documents allowed" |
+
+### Legal Basis
+- **OWASP ASVS 4.0, V5 — Validation, Sanitization & Encoding**: Requires all user-supplied inputs to be validated before processing.
+- **NIST SP 800-53 Rev. 5 — SI-10 (Information Input Validation)**: "The information system checks the validity of the following information inputs."
+- **ISO/IEC 27001:2013 — A.14.2.5 (Secure system engineering principles)**: Input validation is a mandatory secure coding practice.
+- **Republic Act 10173 (Data Privacy Act), Section 11(a) — Data Quality**: "Personal information shall be collected for a specified, explicit and legitimate purpose... accurate, relevant, and where necessary... current."
+
+---
+
+## 13. Vehicle Listing Workflow & Admin Approval {#13-listing-workflow}
+
+### Panelist Question
+> *"Why can't anyone just list a car immediately? Why do listings need admin approval?"*
+
+### Answer
+SafeDrive enforces a **4-stage listing workflow**:
+
+```
+User registers → Gets verified (ID + selfie) → Submits listing (pending) → Admin approves → Goes live
+```
+
+**Stage 1 — Verification Gate**: Users must pass identity verification before they can even submit a listing. This is enforced both client-side (VerificationGate component) and server-side (RLS policy checking `profile.role = 'verified'`).
+
+**Stage 2 — Admin Review**: Every new listing enters `status = 'pending'`. Admin staff manually checks:
+- Vehicle photos (must show actual vehicle, not stock images)
+- Plate number legitimacy
+- OR/CR document validity
+- Description accuracy
+- Agreement document quality
+
+**Stage 3 — Selective Public Display**: Only **approved** listings appear in public search results. The Vehicles page query filters `status = 'approved'` only.
+
+**Stage 4 — Information Separation**: Admin-sensitive fields (plate number, OR/CR, mileage) are visible **only to admins** in the Admin Panel. The public vehicle detail page shows only renter-relevant fields (make, model, year, price, features, location, agreement doc).
+
+### Legal Basis
+- **Republic Act 7394 (Consumer Act of the Philippines), Chapter 1, Section 4**: Mandates that businesses ensure products/services offered to consumers meet quality and authenticity standards.
+- **Republic Act 8792 (E-Commerce Act), Section 16**: E-commerce platforms bear responsibility for content posted on their platform. Admin review reduces platform liability for fraudulent listings.
+- **Department of Trade and Industry (DTI) E-Commerce Rules**: Platforms must implement reasonable measures to prevent deceptive listings.
+- **OWASP A01:2021 — Broken Access Control**: Backend enforcement prevents listings from being approved without proper admin authorization.
+
+---
+
+## 14. Agreement Document (Rental Terms & Conditions) {#14-agreement-document}
+
+### Panelist Question
+> *"Why include a rental agreement in the listing? Is a digital document legally binding in the Philippines?"*
+
+### Answer
+**Yes — digital agreements are fully legally binding in the Philippines** under RA 8792 (E-Commerce Act of 2000).
+
+The agreement document feature allows vehicle owners to upload their terms and conditions as a PDF or Word document. Renters can view and download this document before completing a booking. This provides:
+
+1. **Legal clarity**: Both parties have a documented record of agreed terms
+2. **Dispute resolution**: In case of damage or disputes, the signed agreement acts as evidence
+3. **Owner protection**: Owners can specify fuel policy, scratch tolerance, late return fees, etc.
+4. **Renter protection**: Renters know exactly what they are agreeing to before paying
+
+### Legal Basis
+- **Republic Act 8792 (E-Commerce Act of 2000), Section 7 — Legal Recognition of Electronic Data Messages**: *"Electronic documents shall have the legal effect, validity or enforceability as any other document or legal writing."*
+- **Republic Act 8792, Section 18**: Electronic signatures (clicking "confirm booking") are legally equivalent to handwritten signatures.
+- **Civil Code of the Philippines, Article 1305**: A contract is perfected by mere consent of the parties. Digital consent (clicking "confirm") constitutes valid consent.
+- **Republic Act 10173 (Data Privacy Act)**: Agreement document storage complies with data minimization — document is stored in isolated Supabase Storage, accessible only via a signed URL.
+
+---
+
+## 15. Admin Session Isolation & Refresh Stability {#15-session-isolation}
+
+### Panelist Question
+> *"Why does the admin panel have separate session storage from the user side? What prevents a race condition on page refresh?"*
+
+### Answer
+SafeDrive uses **two completely isolated Supabase clients** with separate storage keys:
+
+| Client | Storage Key | Storage Type |
+|---|---|---|
+| `supabaseUser` | `safedrive-auth` | `sessionStorage` |
+| `supabaseAdmin` | `safedrive-admin-auth` | `sessionStorage` |
+
+**The Race Condition Problem (Prior Architecture):**
+When both clients had `onAuthStateChange` listeners attached simultaneously, the empty user bucket would fire `SIGNED_OUT` and wipe the admin session mid-restoration on page refresh.
+
+**The Fix (Current Architecture — Promise.all Pattern):**
+```
+Page loads → Check BOTH buckets simultaneously (Promise.all, no listeners)
+           → If admin token found: attach listener ONLY to admin client
+           → If user token found: attach listener ONLY to user client  
+           → If neither: attach user client listener for future logins
+```
+This guarantees that only **one listener** ever exists at a time. The idle bucket is completely ignored.
+
+**Why sessionStorage instead of localStorage?**
+- `sessionStorage` is cleared when the tab closes; `localStorage` persists indefinitely.
+- If a user closes the admin tab, they are required to log in again on the next session.
+- This satisfies **OWASP A07:2021 — Identification and Authentication Failures**: "Session data is invalidated after logout or session timeout."
+
+### Legal Basis
+- **ISO/IEC 27001:2013 — A.9.4.2 (Secure log-on procedures)**: System shall control access to systems and applications through secure authentication mechanisms.
+- **OWASP A07:2021 — Authentication Failures**: Session tokens must be invalidated properly and not accessible across different security contexts.
+- **NIST SP 800-53 Rev. 5 — AC-3 (Access Enforcement)**: The information system enforces approved authorizations for logical access to information.
+
