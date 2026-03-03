@@ -1,11 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { FiUpload, FiX, FiCamera } from 'react-icons/fi';
+import { FiUpload, FiX, FiCamera, FiFileText, FiCheckCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import VerificationGate from '../../components/VerificationGate';
 import BackButton from '../../components/BackButton';
+import { sanitizeInput, detectThreats } from '../../lib/security';
+
+// ── Constants ────────────────────────────────────────────────────────────────
 
 const COLOR_OPTIONS = [
     'White', 'Black', 'Silver', 'Gray', 'Red', 'Blue',
@@ -13,38 +16,53 @@ const COLOR_OPTIONS = [
     'Maroon', 'Bronze', 'Champagne', 'Other'
 ];
 
-// Seating capacity ranges per body type
+/**
+ * Seating by body type — each entry has a numeric capacity (stored in DB)
+ * and a human-readable label displayed in the form.
+ */
 const SEATING_BY_BODY_TYPE = {
-    Sedan: [4, 5],
-    Hatchback: [4, 5],
-    Coupe: [2, 4],
-    SUV: [5, 7],
-    Crossover: [5, 7],
-    MPV: [7, 8],
-    Van: [8, 10, 12, 15],
-    Pickup: [2, 4, 5],
+    Sedan: { options: [{ value: 5, label: '4–5 seater' }] },
+    Hatchback: { options: [{ value: 5, label: '4–5 seater' }] },
+    Coupe: { options: [{ value: 4, label: '2–4 seater' }] },
+    SUV: { options: [{ value: 7, label: '5–7 seater' }, { value: 8, label: '8 seater' }] },
+    Crossover: { options: [{ value: 5, label: '5 seater' }, { value: 7, label: '5–7 seater' }] },
+    MPV: { options: [{ value: 7, label: '7 seater' }, { value: 8, label: '8 seater' }] },
+    Van: { options: [{ value: 10, label: '10 seater' }, { value: 12, label: '12 seater' }, { value: 15, label: '15 seater' }] },
+    Pickup: { options: [{ value: 2, label: '2 seater (single cab)' }, { value: 5, label: '4–5 seater (crew cab)' }] },
 };
 
-// MMDA/LTO Number Coding — based on last digit of plate number
-function getCodingDay(plateNumber) {
-    if (!plateNumber) return null;
-    const digits = plateNumber.replace(/\D/g, '');
-    if (digits.length === 0) return null;
-    const lastDigit = parseInt(digits[digits.length - 1]);
-    const coding = {
-        1: { day: 'Monday', color: '#ef4444' },
-        2: { day: 'Monday', color: '#ef4444' },
-        3: { day: 'Tuesday', color: '#f97316' },
-        4: { day: 'Tuesday', color: '#f97316' },
-        5: { day: 'Wednesday', color: '#eab308' },
-        6: { day: 'Wednesday', color: '#eab308' },
-        7: { day: 'Thursday', color: '#22c55e' },
-        8: { day: 'Thursday', color: '#22c55e' },
-        9: { day: 'Friday', color: '#3b82f6' },
-        0: { day: 'Friday', color: '#3b82f6' },
+const FEATURE_OPTIONS = [
+    'ABS', 'Airbags', 'GPS Navigation', 'Dashcam', 'Reverse Camera',
+    'Bluetooth', 'USB Ports', 'Leather Seats', 'Sunroof', 'Cruise Control',
+    'Parking Sensors', 'Keyless Entry',
+];
+
+const DURATION_OPTIONS = [
+    { key: '1_day', label: '1 Day' },
+    { key: '2_days', label: '2 Days' },
+    { key: '3_days', label: '3 Days' },
+    { key: '1_week', label: '1 Week' },
+    { key: '2_weeks', label: '2 Weeks' },
+    { key: '1_month', label: '1 Month' },
+];
+
+// Compute MMDA/LTO number coding day from plate number
+function getCodingDay(plate) {
+    if (!plate) return null;
+    const digits = plate.replace(/\D/g, '');
+    if (!digits.length) return null;
+    const last = parseInt(digits[digits.length - 1]);
+    const map = {
+        1: { day: 'Monday', color: '#ef4444' }, 2: { day: 'Monday', color: '#ef4444' },
+        3: { day: 'Tuesday', color: '#f97316' }, 4: { day: 'Tuesday', color: '#f97316' },
+        5: { day: 'Wednesday', color: '#eab308' }, 6: { day: 'Wednesday', color: '#eab308' },
+        7: { day: 'Thursday', color: '#22c55e' }, 8: { day: 'Thursday', color: '#22c55e' },
+        9: { day: 'Friday', color: '#3b82f6' }, 0: { day: 'Friday', color: '#3b82f6' },
     };
-    return coding[lastDigit] || null;
+    return map[last] || null;
 }
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 export default function CreateVehicle() {
     const { user, profile, isVerified } = useAuth();
@@ -52,30 +70,35 @@ export default function CreateVehicle() {
     const [loading, setLoading] = useState(false);
     const [showVerifyGate, setShowVerifyGate] = useState(false);
 
-    // Dynamic brand/model data
+    // Catalog data
     const [brands, setBrands] = useState([]);
     const [models, setModels] = useState([]);
     const [filteredModels, setFilteredModels] = useState([]);
     const [catalogLoading, setCatalogLoading] = useState(true);
+
+    // UI
     const [codingDay, setCodingDay] = useState(null);
     const [photos, setPhotos] = useState([]);
     const [photoPreviews, setPhotoPreviews] = useState([]);
+    const [agreementFile, setAgreementFile] = useState(null);
+    const agreementInputRef = useRef(null);
 
     const [formData, setFormData] = useState({
-        make: '', model: '', year: new Date().getFullYear(), color: '', plate_number: '',
-        body_type: 'Sedan', transmission: 'Automatic', fuel_type: 'Gasoline',
-        seating_capacity: 5, daily_rate: '', weekly_rate: '', monthly_rate: '',
-        security_deposit: '', pickup_location: '', pickup_city: '', pickup_province: '',
+        make: '', model: '', year: new Date().getFullYear(),
+        color: '', plate_number: '',
+        body_type: 'Sedan', transmission: 'Automatic',
+        fuel_type: 'Gasoline', seating_capacity: 5,
+        daily_rate: '',
+        available_durations: ['1_day'],
+        security_deposit: '',
+        pickup_location: '', pickup_city: '', pickup_province: '',
         mileage: '', description: '', features: [],
     });
 
     const currentYear = new Date().getFullYear();
-    const featureOptions = ['ABS', 'Airbags', 'GPS Navigation', 'Dashcam', 'Reverse Camera', 'Bluetooth', 'USB Ports', 'Leather Seats', 'Sunroof', 'Cruise Control', 'Parking Sensors', 'Keyless Entry'];
 
-    // Fetch brands and models on mount
-    useEffect(() => {
-        fetchCatalog();
-    }, []);
+    // ── Fetchers ────────────────────────────────────────────────────────────
+    useEffect(() => { fetchCatalog(); }, []);
 
     const fetchCatalog = async () => {
         setCatalogLoading(true);
@@ -87,20 +110,19 @@ export default function CreateVehicle() {
             setBrands(brandsRes.data || []);
             setModels(modelsRes.data || []);
         } catch (err) {
-            console.error('Error fetching catalog:', err);
+            console.error('Catalog fetch error:', err);
         } finally {
             setCatalogLoading(false);
         }
     };
 
-    // When brand changes, filter models
+    // Filter models when brand changes
     useEffect(() => {
         if (formData.make) {
             const brand = brands.find(b => b.name === formData.make);
             if (brand) {
                 const filtered = models.filter(m => m.brand_id === brand.id);
                 setFilteredModels(filtered);
-                // Reset model if current selection doesn't belong to new brand
                 if (!filtered.some(m => m.name === formData.model)) {
                     setFormData(prev => ({ ...prev, model: '', body_type: 'Sedan' }));
                 }
@@ -113,7 +135,7 @@ export default function CreateVehicle() {
         }
     }, [formData.make, brands, models]);
 
-    // When model changes, auto-fill body_type if available
+    // Auto-fill body_type from selected model
     useEffect(() => {
         if (formData.model) {
             const model = filteredModels.find(m => m.name === formData.model);
@@ -123,54 +145,79 @@ export default function CreateVehicle() {
         }
     }, [formData.model, filteredModels]);
 
-    // When body type changes, auto-adjust seating capacity
+    // Auto-adjust seating when body type changes
     useEffect(() => {
-        if (formData.body_type) {
-            const validSeats = SEATING_BY_BODY_TYPE[formData.body_type] || [5];
-            if (!validSeats.includes(parseInt(formData.seating_capacity))) {
-                setFormData(prev => ({ ...prev, seating_capacity: validSeats[0] }));
-            }
+        const seatOptions = SEATING_BY_BODY_TYPE[formData.body_type]?.options || [{ value: 5, label: '5 seater' }];
+        // Reset to the first valid option if current value isn't valid
+        if (!seatOptions.some(o => o.value === parseInt(formData.seating_capacity))) {
+            setFormData(prev => ({ ...prev, seating_capacity: seatOptions[0].value }));
         }
     }, [formData.body_type]);
 
-    // Compute LTO coding day when plate number changes
+    // Compute coding day from plate
     useEffect(() => {
         setCodingDay(getCodingDay(formData.plate_number));
     }, [formData.plate_number]);
 
-    const toggleFeature = (feature) => {
+    // ── Helpers ─────────────────────────────────────────────────────────────
+    const toggleFeature = (feat) => {
         setFormData(prev => ({
             ...prev,
-            features: prev.features.includes(feature)
-                ? prev.features.filter(f => f !== feature)
-                : [...prev.features, feature]
+            features: prev.features.includes(feat)
+                ? prev.features.filter(f => f !== feat)
+                : [...prev.features, feat],
         }));
+    };
+
+    const toggleDuration = (key) => {
+        setFormData(prev => {
+            const durations = prev.available_durations.includes(key)
+                ? prev.available_durations.filter(d => d !== key)
+                : [...prev.available_durations, key];
+            // Always keep at least one
+            return { ...prev, available_durations: durations.length ? durations : prev.available_durations };
+        });
     };
 
     const handlePhotoSelect = (e) => {
         const files = Array.from(e.target.files);
         const remaining = 4 - photos.length;
-        if (remaining <= 0) {
-            toast.error('Maximum 4 photos allowed');
-            return;
-        }
-        const validFiles = files.slice(0, remaining).filter(f => {
+        if (remaining <= 0) { toast.error('Maximum 4 photos allowed'); return; }
+        const valid = files.slice(0, remaining).filter(f => {
             if (!f.type.startsWith('image/')) { toast.error(`${f.name} is not an image`); return false; }
-            if (f.size > 5 * 1024 * 1024) { toast.error(`${f.name} exceeds 5MB limit`); return false; }
+            if (f.size > 5 * 1024 * 1024) { toast.error(`${f.name} exceeds 5MB`); return false; }
             return true;
         });
-        const newPreviews = validFiles.map(f => URL.createObjectURL(f));
-        setPhotos(prev => [...prev, ...validFiles]);
-        setPhotoPreviews(prev => [...prev, ...newPreviews]);
+        setPhotos(prev => [...prev, ...valid]);
+        setPhotoPreviews(prev => [...prev, ...valid.map(f => URL.createObjectURL(f))]);
         e.target.value = '';
     };
 
-    const removePhoto = (index) => {
-        URL.revokeObjectURL(photoPreviews[index]);
-        setPhotos(prev => prev.filter((_, i) => i !== index));
-        setPhotoPreviews(prev => prev.filter((_, i) => i !== index));
+    const removePhoto = (i) => {
+        URL.revokeObjectURL(photoPreviews[i]);
+        setPhotos(prev => prev.filter((_, idx) => idx !== i));
+        setPhotoPreviews(prev => prev.filter((_, idx) => idx !== i));
     };
 
+    const handleAgreementSelect = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const allowed = ['application/pdf', 'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+        if (!allowed.includes(file.type)) {
+            toast.error('Please upload a PDF or Word document (.pdf, .doc, .docx)');
+            return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            toast.error('Agreement file must be under 10MB');
+            return;
+        }
+        setAgreementFile(file);
+        toast.success(`"${file.name}" selected`);
+        e.target.value = '';
+    };
+
+    // ── Submit ───────────────────────────────────────────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
 
@@ -180,40 +227,68 @@ export default function CreateVehicle() {
         }
 
         if (!formData.make || !formData.model) {
-            toast.error('Please select a brand and model');
-            return;
+            toast.error('Please select a brand and model'); return;
         }
 
         const yearNum = parseInt(formData.year);
         if (yearNum < 1990 || yearNum > currentYear + 1) {
-            toast.error(`Year model must be between 1990 and ${currentYear + 1}`);
-            return;
+            toast.error(`Year must be between 1990 and ${currentYear + 1}`); return;
+        }
+
+        if (!formData.daily_rate || parseFloat(formData.daily_rate) < 1) {
+            toast.error('Please enter a valid daily rate'); return;
+        }
+
+        if (formData.available_durations.length === 0) {
+            toast.error('Please select at least one rental duration'); return;
+        }
+
+        // Sanitize freetext fields
+        const textFields = ['pickup_location', 'pickup_city', 'pickup_province', 'description'];
+        for (const key of textFields) {
+            const val = formData[key] || '';
+            if (val) {
+                const threats = detectThreats(val);
+                if (!threats.safe) {
+                    toast.error(`Invalid characters detected in ${key.replace(/_/g, ' ')}`);
+                    return;
+                }
+            }
         }
 
         setLoading(true);
+
         try {
-            // Upload photos to Supabase Storage
+            // 1. Upload vehicle photos
             let imageUrls = [];
-            if (photos.length > 0) {
-                for (let i = 0; i < photos.length; i++) {
-                    const file = photos[i];
-                    const fileExt = file.name.split('.').pop();
-                    const filePath = `${user.id}/${Date.now()}_${i}.${fileExt}`;
-                    const { error: uploadError } = await supabase.storage
-                        .from('vehicle-images')
-                        .upload(filePath, file);
-                    if (uploadError) throw uploadError;
-                    const { data: urlData } = supabase.storage
-                        .from('vehicle-images')
-                        .getPublicUrl(filePath);
-                    imageUrls.push(urlData.publicUrl);
-                }
+            for (let i = 0; i < photos.length; i++) {
+                const file = photos[i];
+                const ext = file.name.split('.').pop();
+                const path = `${user.id}/${Date.now()}_${i}.${ext}`;
+                const { error: upErr } = await supabase.storage.from('vehicle-images').upload(path, file);
+                if (upErr) throw upErr;
+                const { data: urlData } = supabase.storage.from('vehicle-images').getPublicUrl(path);
+                imageUrls.push(urlData.publicUrl);
             }
 
+            // 2. Upload agreement document (if provided)
+            let agreementUrl = null;
+            if (agreementFile) {
+                const ext = agreementFile.name.split('.').pop();
+                const path = `${user.id}/${Date.now()}_agreement.${ext}`;
+                const { error: agErr } = await supabase.storage
+                    .from('vehicle-agreements')
+                    .upload(path, agreementFile, { contentType: agreementFile.type });
+                if (agErr) throw agErr;
+                const { data: agUrl } = supabase.storage.from('vehicle-agreements').getPublicUrl(path);
+                agreementUrl = agUrl.publicUrl;
+            }
+
+            // 3. Insert vehicle (status: pending for admin review)
             const { error } = await supabase.from('vehicles').insert({
                 owner_id: user.id,
-                make: formData.make,
-                model: formData.model,
+                make: sanitizeInput(formData.make),
+                model: sanitizeInput(formData.model),
                 year: yearNum,
                 color: formData.color,
                 plate_number: formData.plate_number.toUpperCase(),
@@ -222,104 +297,129 @@ export default function CreateVehicle() {
                 fuel_type: formData.fuel_type,
                 seating_capacity: parseInt(formData.seating_capacity),
                 daily_rate: parseFloat(formData.daily_rate),
-                weekly_rate: formData.weekly_rate ? parseFloat(formData.weekly_rate) : null,
-                monthly_rate: formData.monthly_rate ? parseFloat(formData.monthly_rate) : null,
+                available_durations: formData.available_durations,
                 security_deposit: formData.security_deposit ? parseFloat(formData.security_deposit) : 0,
-                pickup_location: formData.pickup_location,
-                pickup_city: formData.pickup_city,
-                pickup_province: formData.pickup_province,
+                pickup_location: sanitizeInput(formData.pickup_location),
+                pickup_city: sanitizeInput(formData.pickup_city),
+                pickup_province: sanitizeInput(formData.pickup_province),
                 mileage: formData.mileage ? parseInt(formData.mileage) : null,
-                description: formData.description,
+                description: sanitizeInput(formData.description || ''),
                 features: formData.features,
                 images: imageUrls,
                 thumbnail_url: imageUrls[0] || null,
+                agreement_url: agreementUrl,
                 status: 'pending',
             });
 
             if (error) throw error;
-            toast.success('Vehicle submitted for approval!');
+
+            toast.success('Vehicle submitted for admin review!');
             navigate('/my-vehicles');
         } catch (err) {
-            console.error('Error:', err);
-            toast.error(err.message || 'Failed to create listing');
+            console.error('Listing error:', err);
+            toast.error(err.message || 'Failed to submit listing');
         } finally {
             setLoading(false);
         }
     };
 
+    // ── Render ───────────────────────────────────────────────────────────────
+    const seatOptions = SEATING_BY_BODY_TYPE[formData.body_type]?.options || [{ value: 5, label: '5 seater' }];
+
     return (
-        <div style={{ maxWidth: 800, margin: '0 auto' }}>
+        <div style={{ maxWidth: 820, margin: '0 auto', paddingBottom: 48 }}>
             <BackButton />
 
             <div className="page-header">
                 <h1>🚗 List Your Vehicle</h1>
-                <p>Add your car to SafeDrive. It will be reviewed by our admin before going live.</p>
+                <p>Fill in your vehicle details. Our admin team will review and approve your listing before it goes live.</p>
             </div>
 
+            {/* Verification warning banner */}
             {!isVerified && (
-                <div className="verification-card" style={{ marginBottom: 24 }}>
-                    <div className="verification-card-icon">⚠️</div>
+                <div style={{
+                    background: 'var(--warning-50)', border: '1px solid var(--warning-200)',
+                    borderRadius: 'var(--radius-lg)', padding: '16px 20px',
+                    display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 24,
+                }}>
+                    <span style={{ fontSize: 22 }}>⚠️</span>
                     <div>
-                        <h3 style={{ fontSize: 16, fontWeight: 700 }}>Verification Required</h3>
-                        <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>You must complete identity verification before listing a vehicle.</p>
+                        <div style={{ fontWeight: 700, color: 'var(--warning-700)', marginBottom: 4 }}>
+                            Identity Verification Required
+                        </div>
+                        <div style={{ fontSize: 14, color: 'var(--warning-600)' }}>
+                            You must be verified to list a vehicle. Go to your Profile to upload your ID and selfie.
+                        </div>
+                        <button
+                            className="btn btn-sm"
+                            style={{ marginTop: 10, background: 'var(--warning-500)', color: '#fff', border: 'none' }}
+                            onClick={() => navigate('/profile')}
+                        >
+                            Go to Profile & Verify
+                        </button>
                     </div>
                 </div>
             )}
 
+            {/* Process Steps */}
+            <div style={{
+                display: 'flex', gap: 0, marginBottom: 28, background: 'var(--surface-secondary)',
+                borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--border-light)',
+            }}>
+                {[
+                    { icon: '✅', label: 'Get Verified', done: isVerified },
+                    { icon: '📋', label: 'Fill Listing Form', done: false },
+                    { icon: '🔍', label: 'Admin Review', done: false },
+                    { icon: '🚀', label: 'Go Live', done: false },
+                ].map((step, i) => (
+                    <div key={i} style={{
+                        flex: 1, padding: '12px 8px', textAlign: 'center',
+                        borderRight: i < 3 ? '1px solid var(--border-light)' : 'none',
+                        background: step.done ? 'var(--success-50)' : 'transparent',
+                    }}>
+                        <div style={{ fontSize: 18 }}>{step.icon}</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: step.done ? 'var(--success-700)' : 'var(--text-secondary)' }}>
+                            {step.label}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
             <form onSubmit={handleSubmit}>
-                <div className="card" style={{ marginBottom: 24 }}>
-                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>Vehicle Information</h2></div>
+                {/* ── Section 1: Vehicle Info ─────────────────────────── */}
+                <div className="card" style={{ marginBottom: 20 }}>
+                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>🚘 Vehicle Information</h2></div>
                     <div className="card-body">
+                        {/* Brand + Model */}
                         <div className="form-row" style={{ marginBottom: 16 }}>
                             <div className="form-group">
                                 <label className="form-label">Brand *</label>
-                                <select
-                                    className="form-select"
-                                    style={{ width: '100%' }}
-                                    value={formData.make}
-                                    onChange={(e) => setFormData({ ...formData, make: e.target.value })}
-                                    required
-                                    disabled={catalogLoading}
-                                >
-                                    <option value="">
-                                        {catalogLoading ? 'Loading brands...' : '— Select Brand —'}
-                                    </option>
+                                <select className="form-select" style={{ width: '100%' }}
+                                    value={formData.make} required disabled={catalogLoading}
+                                    onChange={e => setFormData({ ...formData, make: e.target.value })}>
+                                    <option value="">{catalogLoading ? 'Loading...' : '— Select Brand —'}</option>
                                     {brands.map(b => (
-                                        <option key={b.id} value={b.name}>
-                                            {b.logo_emoji ? `${b.logo_emoji} ` : ''}{b.name}
-                                        </option>
+                                        <option key={b.id} value={b.name}>{b.logo_emoji ? `${b.logo_emoji} ` : ''}{b.name}</option>
                                     ))}
                                 </select>
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Model *</label>
-                                <select
-                                    className="form-select"
-                                    style={{ width: '100%' }}
-                                    value={formData.model}
-                                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                                    required
-                                    disabled={!formData.make || catalogLoading}
-                                >
-                                    <option value="">
-                                        {!formData.make ? '— Select brand first —' : filteredModels.length === 0 ? 'No models available' : '— Select Model —'}
-                                    </option>
-                                    {filteredModels.map(m => (
-                                        <option key={m.id} value={m.name}>{m.name}</option>
-                                    ))}
+                                <select className="form-select" style={{ width: '100%' }}
+                                    value={formData.model} required disabled={!formData.make || catalogLoading}
+                                    onChange={e => setFormData({ ...formData, model: e.target.value })}>
+                                    <option value="">{!formData.make ? '— Select brand first —' : filteredModels.length === 0 ? 'No models available' : '— Select Model —'}</option>
+                                    {filteredModels.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
                                 </select>
                             </div>
                         </div>
+
+                        {/* Year + Color */}
                         <div className="form-row" style={{ marginBottom: 16 }}>
                             <div className="form-group">
                                 <label className="form-label">Year Model *</label>
-                                <select
-                                    className="form-select"
-                                    style={{ width: '100%' }}
-                                    value={formData.year}
-                                    onChange={(e) => setFormData({ ...formData, year: e.target.value })}
-                                    required
-                                >
+                                <select className="form-select" style={{ width: '100%' }} value={formData.year} required
+                                    onChange={e => setFormData({ ...formData, year: e.target.value })}>
                                     {Array.from({ length: currentYear + 1 - 1990 + 1 }, (_, i) => currentYear + 1 - i).map(y => (
                                         <option key={y} value={y}>{y}</option>
                                     ))}
@@ -327,46 +427,37 @@ export default function CreateVehicle() {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Color *</label>
-                                <select
-                                    className="form-select"
-                                    style={{ width: '100%' }}
-                                    value={formData.color}
-                                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                                    required
-                                >
+                                <select className="form-select" style={{ width: '100%' }} value={formData.color} required
+                                    onChange={e => setFormData({ ...formData, color: e.target.value })}>
                                     <option value="">— Select Color —</option>
-                                    {COLOR_OPTIONS.map(c => (
-                                        <option key={c} value={c}>{c}</option>
-                                    ))}
+                                    {COLOR_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
                                 </select>
                             </div>
                         </div>
+
+                        {/* Body Type (read-only) + Plate Number */}
                         <div className="form-row" style={{ marginBottom: 16 }}>
                             <div className="form-group">
-                                <label className="form-label">Body Type</label>
-                                <input
-                                    className="form-input"
-                                    style={{ width: '100%', background: 'var(--neutral-50)', cursor: 'not-allowed' }}
-                                    value={formData.body_type || '—'}
-                                    readOnly
-                                    disabled
-                                    title="Auto-detected from selected model"
-                                />
+                                <label className="form-label">Body Type <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>(auto-detected)</span></label>
+                                <input className="form-input" style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed' }}
+                                    value={formData.body_type || '—'} readOnly disabled />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Plate Number *</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="ABC 1234" value={formData.plate_number} onChange={(e) => {
-                                    const val = e.target.value.toUpperCase().replace(/[^A-Z0-9 ]/g, '');
-                                    if (val.replace(/\s/g, '').length <= 7) setFormData({ ...formData, plate_number: val });
-                                }} required />
+                                <input className="form-input" style={{ width: '100%' }} placeholder="ABC 1234"
+                                    value={formData.plate_number}
+                                    onChange={e => {
+                                        const val = e.target.value.toUpperCase().replace(/[^A-Z0-9 ]/g, '');
+                                        if (val.replace(/\s/g, '').length <= 7) setFormData({ ...formData, plate_number: val });
+                                    }} required />
                                 <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-                                    Max 7 characters (letters + digits). Format: ABC 1234 or NAB 1234
+                                    Max 7 alphanumeric chars. Format: ABC 1234
                                 </div>
                                 {codingDay && (
                                     <div style={{
-                                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                                        marginTop: 6, padding: '4px 10px', borderRadius: 'var(--radius-md)',
-                                        background: codingDay.color + '15', border: `1px solid ${codingDay.color}40`,
+                                        display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6,
+                                        padding: '4px 10px', borderRadius: 'var(--radius-md)',
+                                        background: codingDay.color + '18', border: `1px solid ${codingDay.color}40`,
                                         fontSize: 12, fontWeight: 600, color: codingDay.color,
                                     }}>
                                         🚦 Coding Day: {codingDay.day}
@@ -374,17 +465,21 @@ export default function CreateVehicle() {
                                 )}
                             </div>
                         </div>
+
+                        {/* Transmission + Fuel */}
                         <div className="form-row" style={{ marginBottom: 16 }}>
                             <div className="form-group">
                                 <label className="form-label">Transmission *</label>
-                                <select className="form-select" style={{ width: '100%' }} value={formData.transmission} onChange={(e) => setFormData({ ...formData, transmission: e.target.value })}>
+                                <select className="form-select" style={{ width: '100%' }} value={formData.transmission}
+                                    onChange={e => setFormData({ ...formData, transmission: e.target.value })}>
                                     <option value="Automatic">Automatic</option>
                                     <option value="Manual">Manual</option>
                                 </select>
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Fuel Type *</label>
-                                <select className="form-select" style={{ width: '100%' }} value={formData.fuel_type} onChange={(e) => setFormData({ ...formData, fuel_type: e.target.value })}>
+                                <select className="form-select" style={{ width: '100%' }} value={formData.fuel_type}
+                                    onChange={e => setFormData({ ...formData, fuel_type: e.target.value })}>
                                     <option value="Gasoline">Gasoline</option>
                                     <option value="Diesel">Diesel</option>
                                     <option value="Hybrid">Hybrid</option>
@@ -392,89 +487,137 @@ export default function CreateVehicle() {
                                 </select>
                             </div>
                         </div>
+
+                        {/* Seating + Mileage */}
                         <div className="form-row">
                             <div className="form-group">
                                 <label className="form-label">Seating Capacity *</label>
-                                <select
-                                    className="form-select"
-                                    style={{ width: '100%' }}
-                                    value={formData.seating_capacity}
-                                    onChange={(e) => setFormData({ ...formData, seating_capacity: e.target.value })}
-                                    required
-                                >
-                                    {(SEATING_BY_BODY_TYPE[formData.body_type] || [2, 4, 5, 6, 7, 8]).map(n => (
-                                        <option key={n} value={n}>{n} seats</option>
-                                    ))}
-                                </select>
+                                {seatOptions.length === 1 ? (
+                                    // Only one valid option — show as non-editable badge
+                                    <div style={{
+                                        padding: '10px 14px', background: 'var(--neutral-50)',
+                                        border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)',
+                                        fontWeight: 600, color: 'var(--text-primary)',
+                                    }}>
+                                        {seatOptions[0].label}
+                                        <input type="hidden" value={seatOptions[0].value} />
+                                    </div>
+                                ) : (
+                                    <select className="form-select" style={{ width: '100%' }}
+                                        value={formData.seating_capacity}
+                                        onChange={e => setFormData({ ...formData, seating_capacity: parseInt(e.target.value) })}>
+                                        {seatOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                    </select>
+                                )}
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Mileage (km)</label>
-                                <input type="number" className="form-input" style={{ width: '100%' }} placeholder="Optional" value={formData.mileage} onChange={(e) => setFormData({ ...formData, mileage: e.target.value })} />
+                                <label className="form-label">Mileage (km) <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>optional</span></label>
+                                <input type="number" className="form-input" style={{ width: '100%' }}
+                                    placeholder="e.g. 45000" value={formData.mileage}
+                                    onChange={e => setFormData({ ...formData, mileage: e.target.value })} min={0} />
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="card" style={{ marginBottom: 24 }}>
-                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>Pricing</h2></div>
+                {/* ── Section 2: Pricing & Availability ──────────────── */}
+                <div className="card" style={{ marginBottom: 20 }}>
+                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>💰 Pricing & Availability</h2></div>
                     <div className="card-body">
-                        <div className="form-row" style={{ marginBottom: 16 }}>
+                        <div className="form-row" style={{ marginBottom: 20 }}>
                             <div className="form-group">
                                 <label className="form-label">Daily Rate (₱) *</label>
-                                <input type="number" className="form-input" style={{ width: '100%' }} placeholder="2500" value={formData.daily_rate} onChange={(e) => setFormData({ ...formData, daily_rate: e.target.value })} required min={1} />
+                                <input type="number" className="form-input" style={{ width: '100%' }}
+                                    placeholder="e.g. 2500" value={formData.daily_rate}
+                                    onChange={e => setFormData({ ...formData, daily_rate: e.target.value })}
+                                    required min={1} />
+                                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                    This is the base daily rate. Multi-day rates are automatically calculated.
+                                </div>
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Security Deposit (₱)</label>
-                                <input type="number" className="form-input" style={{ width: '100%' }} placeholder="5000" value={formData.security_deposit} onChange={(e) => setFormData({ ...formData, security_deposit: e.target.value })} />
+                                <label className="form-label">Security Deposit (₱) <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>optional</span></label>
+                                <input type="number" className="form-input" style={{ width: '100%' }}
+                                    placeholder="e.g. 5000" value={formData.security_deposit}
+                                    onChange={e => setFormData({ ...formData, security_deposit: e.target.value })} min={0} />
                             </div>
                         </div>
-                        <div className="form-row">
-                            <div className="form-group">
-                                <label className="form-label">Weekly Rate (₱) - Optional</label>
-                                <input type="number" className="form-input" style={{ width: '100%' }} placeholder="15000" value={formData.weekly_rate} onChange={(e) => setFormData({ ...formData, weekly_rate: e.target.value })} />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Monthly Rate (₱) - Optional</label>
-                                <input type="number" className="form-input" style={{ width: '100%' }} placeholder="50000" value={formData.monthly_rate} onChange={(e) => setFormData({ ...formData, monthly_rate: e.target.value })} />
+
+                        {/* Duration options */}
+                        <div>
+                            <label className="form-label" style={{ marginBottom: 10, display: 'block' }}>
+                                Available Rental Durations * <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Select all that apply</span>
+                            </label>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                                {DURATION_OPTIONS.map(d => {
+                                    const selected = formData.available_durations.includes(d.key);
+                                    return (
+                                        <button
+                                            key={d.key}
+                                            type="button"
+                                            onClick={() => toggleDuration(d.key)}
+                                            style={{
+                                                padding: '8px 16px', borderRadius: 'var(--radius-md)',
+                                                border: `2px solid ${selected ? 'var(--primary-500)' : 'var(--border-light)'}`,
+                                                background: selected ? 'var(--primary-50)' : 'var(--surface-secondary)',
+                                                color: selected ? 'var(--primary-700)' : 'var(--text-secondary)',
+                                                fontWeight: selected ? 700 : 400,
+                                                cursor: 'pointer', fontSize: 14, transition: 'all 0.15s',
+                                                display: 'flex', alignItems: 'center', gap: 6,
+                                            }}
+                                        >
+                                            {selected && <FiCheckCircle size={14} />}
+                                            {d.label}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="card" style={{ marginBottom: 24 }}>
-                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>Pickup Location</h2></div>
+                {/* ── Section 3: Pickup Location ─────────────────────── */}
+                <div className="card" style={{ marginBottom: 20 }}>
+                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>📍 Pickup Location</h2></div>
                     <div className="card-body">
                         <div className="form-group" style={{ marginBottom: 16 }}>
                             <label className="form-label">Address / Landmark *</label>
-                            <input className="form-input" style={{ width: '100%' }} placeholder="Exact address or nearby landmark" value={formData.pickup_location} onChange={(e) => setFormData({ ...formData, pickup_location: e.target.value })} required />
+                            <input className="form-input" style={{ width: '100%' }}
+                                placeholder="Exact address or nearby landmark"
+                                value={formData.pickup_location}
+                                onChange={e => setFormData({ ...formData, pickup_location: e.target.value })} required />
                         </div>
                         <div className="form-row">
                             <div className="form-group">
                                 <label className="form-label">City *</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="e.g., Quezon City" value={formData.pickup_city} onChange={(e) => setFormData({ ...formData, pickup_city: e.target.value })} required />
+                                <input className="form-input" style={{ width: '100%' }}
+                                    placeholder="e.g., Quezon City"
+                                    value={formData.pickup_city}
+                                    onChange={e => setFormData({ ...formData, pickup_city: e.target.value })} required />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Province *</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="e.g., Metro Manila" value={formData.pickup_province} onChange={(e) => setFormData({ ...formData, pickup_province: e.target.value })} required />
+                                <input className="form-input" style={{ width: '100%' }}
+                                    placeholder="e.g., Metro Manila"
+                                    value={formData.pickup_province}
+                                    onChange={e => setFormData({ ...formData, pickup_province: e.target.value })} required />
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="card" style={{ marginBottom: 24 }}>
-                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>Features & Description</h2></div>
+                {/* ── Section 4: Features & Description ─────────────── */}
+                <div className="card" style={{ marginBottom: 20 }}>
+                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>🛠️ Features & Description</h2></div>
                     <div className="card-body">
                         <div className="form-group" style={{ marginBottom: 16 }}>
                             <label className="form-label">Vehicle Features</label>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                {featureOptions.map(f => (
-                                    <button
-                                        key={f}
-                                        type="button"
+                                {FEATURE_OPTIONS.map(f => (
+                                    <button key={f} type="button"
                                         className={`badge ${formData.features.includes(f) ? 'badge-info' : 'badge-neutral'}`}
-                                        style={{ cursor: 'pointer', padding: '6px 12px', fontSize: 13 }}
-                                        onClick={() => toggleFeature(f)}
-                                    >
+                                        style={{ cursor: 'pointer', padding: '6px 14px', fontSize: 13 }}
+                                        onClick={() => toggleFeature(f)}>
                                         {formData.features.includes(f) ? '✓ ' : ''}{f}
                                     </button>
                                 ))}
@@ -482,12 +625,72 @@ export default function CreateVehicle() {
                         </div>
                         <div className="form-group">
                             <label className="form-label">Description</label>
-                            <textarea className="form-textarea" style={{ width: '100%' }} rows={4} placeholder="Describe your vehicle's condition, special features, and any rental terms..." value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
+                            <textarea className="form-textarea" style={{ width: '100%' }} rows={4}
+                                placeholder="Describe the vehicle's condition, history, and any special notes for renters..."
+                                value={formData.description}
+                                onChange={e => setFormData({ ...formData, description: e.target.value })} />
                         </div>
                     </div>
                 </div>
 
-                {/* Vehicle Photos */}
+                {/* ── Section 5: Agreement Document ─────────────────── */}
+                <div className="card" style={{ marginBottom: 20 }}>
+                    <div className="card-header">
+                        <div>
+                            <h2 style={{ fontSize: 16, fontWeight: 700 }}>📄 Rental Agreement / Terms & Conditions</h2>
+                            <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>optional but recommended</div>
+                        </div>
+                    </div>
+                    <div className="card-body">
+                        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                            Upload a PDF or Word document containing your rental terms and conditions.
+                            Renters will be able to view and download this document before booking.
+                        </p>
+                        <div
+                            onClick={() => agreementInputRef.current?.click()}
+                            style={{
+                                border: `2px dashed ${agreementFile ? 'var(--success-400)' : 'var(--neutral-300)'}`,
+                                borderRadius: 'var(--radius-lg)', padding: '28px 20px',
+                                textAlign: 'center', cursor: 'pointer',
+                                background: agreementFile ? 'var(--success-50)' : 'var(--neutral-50)',
+                                transition: 'all 0.2s ease',
+                            }}>
+                            {agreementFile ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                                    <FiFileText size={28} color="var(--success-600)" />
+                                    <div style={{ textAlign: 'left' }}>
+                                        <div style={{ fontWeight: 700, color: 'var(--success-700)' }}>{agreementFile.name}</div>
+                                        <div style={{ fontSize: 12, color: 'var(--success-600)' }}>
+                                            {(agreementFile.size / 1024).toFixed(0)} KB · Click to replace
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <FiUpload size={32} color="var(--text-tertiary)" />
+                                    <div style={{ marginTop: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                                        Click to upload agreement document
+                                    </div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                        PDF, DOC, or DOCX · Max 10MB
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <input ref={agreementInputRef} type="file"
+                            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            onChange={handleAgreementSelect} style={{ display: 'none' }} />
+                        {agreementFile && (
+                            <button type="button"
+                                style={{ marginTop: 10, fontSize: 13, color: 'var(--error-600)', background: 'none', border: 'none', cursor: 'pointer' }}
+                                onClick={() => setAgreementFile(null)}>
+                                ✕ Remove document
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* ── Section 6: Vehicle Photos ──────────────────────── */}
                 <div className="card" style={{ marginBottom: 24 }}>
                     <div className="card-header">
                         <h2 style={{ fontSize: 16, fontWeight: 700 }}>📸 Vehicle Photos</h2>
@@ -497,14 +700,16 @@ export default function CreateVehicle() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                             {photoPreviews.map((url, i) => (
                                 <div key={i} style={{
-                                    position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden',
-                                    aspectRatio: '4/3', border: '2px solid var(--neutral-200)',
+                                    position: 'relative', borderRadius: 'var(--radius-lg)',
+                                    overflow: 'hidden', aspectRatio: '4/3',
+                                    border: '2px solid var(--neutral-200)',
                                 }}>
                                     <img src={url} alt={`Photo ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                     {i === 0 && (
                                         <span style={{
-                                            position: 'absolute', top: 8, left: 8, background: 'var(--primary-500)',
-                                            color: '#fff', fontSize: 10, fontWeight: 700, padding: '2px 8px',
+                                            position: 'absolute', top: 8, left: 8,
+                                            background: 'var(--primary-500)', color: '#fff',
+                                            fontSize: 10, fontWeight: 700, padding: '2px 8px',
                                             borderRadius: 'var(--radius-sm)',
                                         }}>COVER</span>
                                     )}
@@ -522,9 +727,9 @@ export default function CreateVehicle() {
                                 <label style={{
                                     aspectRatio: '4/3', border: '2px dashed var(--neutral-300)',
                                     borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column',
-                                    alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer',
-                                    background: 'var(--neutral-50)', transition: 'all 0.2s ease',
-                                    color: 'var(--text-tertiary)',
+                                    alignItems: 'center', justifyContent: 'center', gap: 8,
+                                    cursor: 'pointer', background: 'var(--neutral-50)',
+                                    color: 'var(--text-tertiary)', transition: 'all 0.2s ease',
                                 }}>
                                     <FiCamera size={28} />
                                     <span style={{ fontSize: 13, fontWeight: 600 }}>Add Photo</span>
@@ -534,20 +739,28 @@ export default function CreateVehicle() {
                             )}
                         </div>
                         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 12 }}>
-                            📌 First photo will be used as the cover image on your listing. We recommend uploading front, rear, interior, and dashboard photos.
+                            📌 First photo will be used as the cover image. Upload front, rear, interior, and dashboard photos for best results.
                         </p>
                     </div>
                 </div>
 
+                {/* ── Submit ─────────────────────────────────────────── */}
                 <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                    <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)}>Cancel</button>
-                    <button type="submit" className="btn btn-accent btn-lg" disabled={loading}>
-                        {loading ? 'Submitting...' : 'Submit for Approval'}
+                    <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)} disabled={loading}>
+                        Cancel
+                    </button>
+                    <button type="submit" className="btn btn-primary btn-lg" disabled={loading || !isVerified}>
+                        {loading ? '⏳ Submitting...' : '📋 Submit for Admin Review'}
                     </button>
                 </div>
+
+                {!isVerified && (
+                    <p style={{ textAlign: 'right', fontSize: 13, color: 'var(--text-tertiary)', marginTop: 8 }}>
+                        You must be verified to submit a listing.
+                    </p>
+                )}
             </form>
 
-            {/* Verification Gate Modal */}
             <VerificationGate
                 isOpen={showVerifyGate}
                 onClose={() => setShowVerifyGate(false)}

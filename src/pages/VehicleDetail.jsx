@@ -274,9 +274,9 @@ export default function VehicleDetail() {
                                     { label: 'Color', value: vehicle.color },
                                     { label: 'Fuel Type', value: vehicle.fuel_type },
                                     { label: 'Transmission', value: vehicle.transmission },
-                                    { label: 'Plate Number', value: vehicle.plate_number },
-                                    { label: 'Mileage', value: vehicle.mileage ? `${vehicle.mileage.toLocaleString()} km` : 'N/A' },
+                                    { label: 'Seating', value: `${vehicle.seating_capacity} seats` },
                                     { label: 'Body Type', value: vehicle.body_type },
+                                    { label: 'Year', value: vehicle.year },
                                 ].map((spec, i) => (
                                     <div key={i} style={{ padding: 12, background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
                                         <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{spec.label}</div>
@@ -296,6 +296,29 @@ export default function VehicleDetail() {
                                         ))}
                                     </div>
                                 </>
+                            )}
+                            {vehicle.agreement_url && (
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: 12,
+                                    padding: '14px 18px', background: 'var(--primary-50)',
+                                    border: '1px solid var(--primary-200)', borderRadius: 'var(--radius-lg)',
+                                    marginBottom: 24,
+                                }}>
+                                    <span style={{ fontSize: 22 }}>📄</span>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--primary-700)' }}>Rental Terms & Conditions</div>
+                                        <div style={{ fontSize: 12, color: 'var(--primary-500)' }}>The owner has uploaded a rental agreement. Please review before booking.</div>
+                                    </div>
+                                    <a
+                                        href={vehicle.agreement_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="btn btn-sm"
+                                        style={{ background: 'var(--primary-600)', color: '#fff', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                                    >
+                                        View Document
+                                    </a>
+                                </div>
                             )}
                         </div>
                     </div>
@@ -372,29 +395,30 @@ export default function VehicleDetail() {
                     {/* Pricing Card */}
                     <div className="card">
                         <div className="card-body">
-                            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Pricing</h3>
+                            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Pricing & Durations</h3>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
                                     <span style={{ color: 'var(--text-secondary)' }}>Daily Rate</span>
                                     <span style={{ fontWeight: 700 }}>₱{vehicle.daily_rate?.toLocaleString()}</span>
                                 </div>
-                                {vehicle.weekly_rate && (
+                                {vehicle.security_deposit > 0 && (
                                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-                                        <span style={{ color: 'var(--text-secondary)' }}>Weekly Rate</span>
-                                        <span style={{ fontWeight: 700 }}>₱{vehicle.weekly_rate?.toLocaleString()}</span>
+                                        <span style={{ color: 'var(--text-secondary)' }}>Security Deposit</span>
+                                        <span style={{ fontWeight: 700 }}>₱{vehicle.security_deposit?.toLocaleString()}</span>
                                     </div>
                                 )}
-                                {vehicle.monthly_rate && (
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-                                        <span style={{ color: 'var(--text-secondary)' }}>Monthly Rate</span>
-                                        <span style={{ fontWeight: 700 }}>₱{vehicle.monthly_rate?.toLocaleString()}</span>
-                                    </div>
-                                )}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-                                    <span style={{ color: 'var(--text-secondary)' }}>Security Deposit</span>
-                                    <span style={{ fontWeight: 700 }}>₱{vehicle.security_deposit?.toLocaleString() || '0'}</span>
-                                </div>
                             </div>
+                            {vehicle.available_durations?.length > 0 && (
+                                <div style={{ marginTop: 16 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Available Durations</div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                        {vehicle.available_durations.map(d => {
+                                            const label = { '1_day': '1 Day', '2_days': '2 Days', '3_days': '3 Days', '1_week': '1 Week', '2_weeks': '2 Weeks', '1_month': '1 Month' }[d] || d;
+                                            return <span key={d} className="badge badge-info" style={{ fontSize: 12 }}>{label}</span>;
+                                        })}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

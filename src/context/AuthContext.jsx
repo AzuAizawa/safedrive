@@ -1,11 +1,10 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase as supabaseUser, supabaseAdmin } from '../lib/supabase';
 import {
     logSecurityEvent,
     logFailedLogin,
     initSessionMonitor,
     sanitizeInput,
-    checkPasswordStrength,
     clientRateLimit,
     detectThreats,
     logInjectionAttempt,
@@ -19,30 +18,36 @@ export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [activeClient, setActiveClient] = useState(supabaseUser); // Default to user client
+    const [activeClient, setActiveClient] = useState(supabaseUser);
 
-    // ── Ultimate Failsafe Timeout ──────────────────────────────────────────
+    // Use a ref for the active client so auth-state listener always has current value
+    const activeClientRef = useRef(supabaseUser);
+    const subscriptionRef = useRef(null);
+    const mountedRef = useRef(true);
+
+    // ── Failsafe timeout — never spin forever ──────────────────────────────
     useEffect(() => {
-        const timeout = setTimeout(() => {
-            setLoading(false);
-        }, 4000);
-        return () => clearTimeout(timeout);
+        const t = setTimeout(() => { if (mountedRef.current) setLoading(false); }, 5000);
+        return () => clearTimeout(t);
     }, []);
 
     // ── Fetch profile from DB ──────────────────────────────────────────────
-    const fetchProfile = async (userId, targetClient = activeClient) => {
+    const fetchProfile = async (userId, client) => {
         try {
-            const { data, error } = await targetClient
+            const { data, error } = await client
                 .from('profiles')
                 .select('*')
                 .eq('id', userId)
                 .single();
 
+            if (!mountedRef.current) return;
+
             if (!error && data) {
                 setProfile(data);
             } else {
-                const { data: { user: authUser } } = await targetClient.auth.getUser();
-                if (authUser) {
+                // Fallback: build a minimal profile from the auth user
+                const { data: { user: authUser } } = await client.auth.getUser();
+                if (authUser && mountedRef.current) {
                     setProfile({
                         id: authUser.id,
                         full_name: authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'User',
@@ -55,106 +60,108 @@ export function AuthProvider({ children }) {
         } catch (err) {
             console.error('fetchProfile error:', err);
         } finally {
-            setLoading(false);
+            if (mountedRef.current) setLoading(false);
         }
     };
 
-    // ── Dual Session Detection Initialization ───────────────────────────────
-    useEffect(() => {
-        let mounted = true;
-        let subUser = null;
-        let subAdmin = null;
-        let engineLock = null;
+    // ── Attach ONE listener to whichever client won the session check ──────
+    const attachListener = (client) => {
+        // Remove prior subscription if any
+        if (subscriptionRef.current) {
+            subscriptionRef.current.unsubscribe();
+            subscriptionRef.current = null;
+        }
 
-        const handleAuthStateChange = (targetClient) => async (event, session) => {
-            if (!mounted) return;
-            if (event === 'INITIAL_SESSION') return;
+        const { data: { subscription } } = client.auth.onAuthStateChange(async (event, session) => {
+            if (!mountedRef.current) return;
+            if (event === 'INITIAL_SESSION') return; // Already handled in initializeAuth
 
             try {
                 if (session?.user) {
-                    engineLock = targetClient;
-                    setActiveClient(targetClient);
                     setUser(session.user);
-                    await fetchProfile(session.user.id, targetClient);
+                    await fetchProfile(session.user.id, client);
 
                     if (event === 'SIGNED_IN') {
-                        logSecurityEvent('auth.login', 'User signed in successfully', {
+                        logSecurityEvent('auth.login', 'User signed in', {
                             severity: 'info',
-                            metadata: { method: 'password', userId: session?.user?.id },
+                            metadata: { userId: session.user.id },
                         });
                     }
                 } else {
-                    // Mutex: Do not allow the standby empty bucket to wipe the active session
-                    if (engineLock && engineLock !== targetClient) {
-                        return;
-                    }
-
-                    engineLock = null;
+                    // Only the active listener fires here, so clearing state is safe
                     setUser(null);
                     setProfile(null);
-                    if (mounted) setLoading(false);
+                    if (mountedRef.current) setLoading(false);
 
                     if (event === 'SIGNED_OUT') {
                         logSecurityEvent('auth.logout', 'User signed out', { severity: 'info' });
                     }
                 }
             } catch (err) {
-                console.error('Auth state change error:', err);
-                if (mounted) setLoading(false);
+                console.error('Auth state listener error:', err);
+                if (mountedRef.current) setLoading(false);
             }
-        };
+        });
 
-        const initializeAuthEngine = async () => {
+        subscriptionRef.current = subscription;
+    };
+
+    // ── Core: check BOTH sessions first, then pick a single winner ─────────
+    useEffect(() => {
+        mountedRef.current = true;
+
+        const initializeAuth = async () => {
             try {
-                // Attach listeners immediately to BOTH engines
-                subAdmin = supabaseAdmin.auth.onAuthStateChange(handleAuthStateChange(supabaseAdmin)).data.subscription;
-                subUser = supabaseUser.auth.onAuthStateChange(handleAuthStateChange(supabaseUser)).data.subscription;
+                // Read both buckets in parallel — no listeners yet, no race
+                const [adminResult, userResult] = await Promise.all([
+                    supabaseAdmin.auth.getSession(),
+                    supabaseUser.auth.getSession(),
+                ]);
 
-                // 1. Check Admin storage strictly first
-                const { data: adminData } = await supabaseAdmin.auth.getSession();
+                if (!mountedRef.current) return;
 
-                if (adminData?.session?.user) {
-                    if (!mounted) return;
-                    engineLock = supabaseAdmin;
+                const adminSession = adminResult.data?.session;
+                const userSession = userResult.data?.session;
+
+                if (adminSession?.user) {
+                    // ✅ Admin is logged in — bind ONLY to the admin client
+                    activeClientRef.current = supabaseAdmin;
                     setActiveClient(supabaseAdmin);
-                    setUser(adminData.session.user);
-                    await fetchProfile(adminData.session.user.id, supabaseAdmin);
-                    return;
-                }
-
-                // 2. If no admin token, check User storage
-                const { data: userData } = await supabaseUser.auth.getSession();
-                if (!mounted) return;
-
-                if (userData?.session?.user) {
-                    engineLock = supabaseUser;
+                    setUser(adminSession.user);
+                    attachListener(supabaseAdmin);
+                    await fetchProfile(adminSession.user.id, supabaseAdmin);
+                } else if (userSession?.user) {
+                    // ✅ Regular user is logged in — bind ONLY to the user client
+                    activeClientRef.current = supabaseUser;
                     setActiveClient(supabaseUser);
-                    setUser(userData.session.user);
-                    await fetchProfile(userData.session.user.id, supabaseUser);
+                    setUser(userSession.user);
+                    attachListener(supabaseUser);
+                    await fetchProfile(userSession.user.id, supabaseUser);
                 } else {
-                    // 3. No sessions found anywhere
-                    engineLock = null;
+                    // ✅ Nobody logged in — attach user client listener for future logins
+                    attachListener(supabaseUser);
                     setUser(null);
                     setProfile(null);
                     setLoading(false);
                 }
-            } catch (e) {
-                console.error('Dual session initialization failed:', e);
-                if (mounted) setLoading(false);
+            } catch (err) {
+                console.error('Auth initialization error:', err);
+                if (mountedRef.current) setLoading(false);
             }
         };
 
-        initializeAuthEngine();
+        initializeAuth();
 
         return () => {
-            mounted = false;
-            if (subUser) subUser.unsubscribe();
-            if (subAdmin) subAdmin.unsubscribe();
+            mountedRef.current = false;
+            if (subscriptionRef.current) {
+                subscriptionRef.current.unsubscribe();
+                subscriptionRef.current = null;
+            }
         };
     }, []);
 
-
-    // ── Session monitor ────────────────────────────────────────────────────
+    // ── Session monitor — warn user before expiry ──────────────────────────
     useEffect(() => {
         if (user) {
             const cleanup = initSessionMonitor(30 * 60 * 1000);
@@ -174,17 +181,12 @@ export function AuthProvider({ children }) {
         }
 
         const redirectUrl = `${window.location.origin}/auth/callback`;
-
-        const { data, error } = await activeClient.auth.signUp({
+        const { data, error } = await activeClientRef.current.auth.signUp({
             email: sanitizedEmail,
             password,
             options: {
                 emailRedirectTo: redirectUrl,
-                data: {
-                    full_name: sanitizedName,
-                    role: role || 'user',
-                    phone: phone,
-                },
+                data: { full_name: sanitizedName, role: role || 'user', phone },
             },
         });
 
@@ -209,12 +211,23 @@ export function AuthProvider({ children }) {
             return { data: null, error: { message: 'Too many login attempts. Account temporarily locked. Try again in 5 minutes.' } };
         }
 
-        const targetClient = asAdmin ? supabaseAdmin : activeClient;
+        const targetClient = asAdmin ? supabaseAdmin : supabaseUser;
         const { data, error } = await targetClient.auth.signInWithPassword({ email, password });
 
         if (error) {
             logFailedLogin(email, 'invalid_password');
         } else {
+            // After a successful admin sign-in, re-attach the listener to the admin client
+            if (asAdmin && data?.session) {
+                activeClientRef.current = supabaseAdmin;
+                setActiveClient(supabaseAdmin);
+                attachListener(supabaseAdmin);
+            } else if (!asAdmin && data?.session) {
+                activeClientRef.current = supabaseUser;
+                setActiveClient(supabaseUser);
+                attachListener(supabaseUser);
+            }
+
             if (rememberMe) {
                 localStorage.setItem('safedrive_remember_me', 'true');
             } else {
@@ -227,7 +240,6 @@ export function AuthProvider({ children }) {
 
     // ── Sign Out ───────────────────────────────────────────────────────────
     const signOut = async () => {
-        // Clear local state immediately
         setUser(null);
         setProfile(null);
 
@@ -236,22 +248,25 @@ export function AuthProvider({ children }) {
         } catch (e) { }
 
         try {
-            await activeClient.auth.signOut();
+            await activeClientRef.current.auth.signOut();
         } catch (err) {
             console.warn('Sign out error:', err);
         }
 
-        // Failsafe: clear any remaining Supabase tokens specific to this portal
+        // Clear all session storage tokens for a clean slate
         try {
-            const isAdminRoute = typeof window !== 'undefined' &&
-                (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/admin-login'));
-            const storageKey = isAdminRoute ? 'safedrive-admin-auth' : 'safedrive-auth';
-
             Object.keys(sessionStorage).forEach(key => {
-                if (key.startsWith('sb-') || key === storageKey) sessionStorage.removeItem(key);
+                if (key.startsWith('sb-')) sessionStorage.removeItem(key);
             });
+            sessionStorage.removeItem('safedrive-auth');
+            sessionStorage.removeItem('safedrive-admin-auth');
             localStorage.removeItem('safedrive_remember_me');
         } catch (e) { }
+
+        // Reset to the user client and re-attach a fresh listener
+        activeClientRef.current = supabaseUser;
+        setActiveClient(supabaseUser);
+        attachListener(supabaseUser);
 
         return { error: null };
     };
@@ -272,7 +287,7 @@ export function AuthProvider({ children }) {
             }
         }
 
-        const { data, error } = await activeClient
+        const { data, error } = await activeClientRef.current
             .from('profiles')
             .update(sanitizedUpdates)
             .eq('id', user.id)
@@ -296,18 +311,19 @@ export function AuthProvider({ children }) {
         user,
         profile,
         loading,
+        activeClient: activeClientRef.current,
         signUp,
         signIn,
         signOut,
         updateProfile,
-        fetchProfile: () => user && fetchProfile(user.id),
-        // Role helpers — admin is STRICTLY management only
+        fetchProfile: () => user && fetchProfile(user.id, activeClientRef.current),
+        // Role helpers
         isAdmin: profile?.role === 'admin',
         isSuperAdmin: profile?.role === 'super_admin',
         isVerified: profile?.role === 'verified',
-        isRenter: profile?.role === 'verified',   // Only verified non-admin users can list cars
-        isRentee: profile?.role === 'verified',   // Only verified non-admin users can rent cars
-        isOwner: profile?.role === 'verified',    // Alias for isRenter
+        isRenter: profile?.role === 'verified',
+        isRentee: profile?.role === 'verified',
+        isOwner: profile?.role === 'verified',
     };
 
     return (
