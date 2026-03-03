@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { FiPlus, FiEdit, FiEye, FiTrash2 } from 'react-icons/fi';
+import { FiPlus, FiEye, FiTrash2, FiStar, FiToggleLeft, FiToggleRight } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { isSubscriptionActive, FREE_LISTING_LIMIT } from '../../lib/paymongo';
 
 export default function MyVehicles() {
-    const { user } = useAuth();
+    const { user, profile } = useAuth();
+    const navigate = useNavigate();
     const [vehicles, setVehicles] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [togglingId, setTogglingId] = useState(null);
+
+    const isSubscribed = isSubscriptionActive(profile);
 
     useEffect(() => {
         let mounted = true;
@@ -23,7 +28,7 @@ export default function MyVehicles() {
                 .from('vehicles')
                 .select('*')
                 .eq('owner_id', user.id)
-                .order('created_at', { ascending: false });
+                .order('created_at', { ascending: true }); // oldest first (free tier keeps oldest active)
             if (error) throw error;
             setVehicles(data || []);
         } catch (err) {
@@ -33,15 +38,44 @@ export default function MyVehicles() {
         }
     };
 
-    const toggleAvailability = async (vehicleId, currentStatus) => {
-        const { error } = await supabase.from('vehicles').update({ is_available: !currentStatus }).eq('id', vehicleId);
-        if (error) { toast.error('Failed to update'); return; }
-        toast.success(currentStatus ? 'Vehicle unlisted' : 'Vehicle listed');
-        fetchMyVehicles();
+    const activeCount = vehicles.filter(v => v.is_active_listing !== false && v.is_available).length;
+
+    /**
+     * Toggle a vehicle's active/inactive listing state.
+     * Free users: max FREE_LISTING_LIMIT (1) active at a time.
+     * Subscribed users: unlimited.
+     */
+    const toggleActiveListing = async (vehicle) => {
+        const currentlyActive = vehicle.is_active_listing !== false && vehicle.is_available;
+
+        if (!currentlyActive && !isSubscribed && activeCount >= FREE_LISTING_LIMIT) {
+            toast.error(
+                `Free users can only have ${FREE_LISTING_LIMIT} active listing. ` +
+                `Deactivate another vehicle first, or subscribe for unlimited listings.`,
+                { duration: 5000 }
+            );
+            return;
+        }
+
+        setTogglingId(vehicle.id);
+        try {
+            const { error } = await supabase.from('vehicles').update({
+                is_available: !currentlyActive,
+                is_active_listing: !currentlyActive,
+            }).eq('id', vehicle.id);
+
+            if (error) throw error;
+            toast.success(currentlyActive ? 'Listing deactivated' : 'Listing activated ✅');
+            fetchMyVehicles();
+        } catch (err) {
+            toast.error('Failed to update listing');
+        } finally {
+            setTogglingId(null);
+        }
     };
 
     const deleteVehicle = async (vehicleId) => {
-        if (!confirm('Are you sure you want to delete this vehicle?')) return;
+        if (!confirm('Are you sure you want to delete this vehicle? This cannot be undone.')) return;
         const { error } = await supabase.from('vehicles').delete().eq('id', vehicleId);
         if (error) { toast.error('Failed to delete'); return; }
         toast.success('Vehicle deleted');
@@ -52,13 +86,50 @@ export default function MyVehicles() {
 
     return (
         <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                 <div className="page-header" style={{ marginBottom: 0 }}>
                     <h1>🚘 My Vehicles</h1>
                     <p>Manage your vehicle listings on SafeDrive</p>
                 </div>
-                <Link to="/vehicles/new" className="btn btn-accent"><FiPlus /> Add Vehicle</Link>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    {!isSubscribed && (
+                        <div style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'right' }}>
+                            <div style={{ fontWeight: 700 }}>{activeCount}/{FREE_LISTING_LIMIT} active (free)</div>
+                            <button className="btn btn-sm btn-ghost" style={{ fontSize: 12, color: 'var(--primary-500)', padding: '2px 0' }}
+                                onClick={() => navigate('/subscribe')}>
+                                ⭐ Get unlimited →
+                            </button>
+                        </div>
+                    )}
+                    {isSubscribed && (
+                        <div style={{ fontSize: 12, color: 'var(--success-600)', fontWeight: 700, background: 'var(--success-50)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--success-200)' }}>
+                            ⭐ Premium — {activeCount} active
+                        </div>
+                    )}
+                    <Link to="/vehicles/new" className="btn btn-accent"><FiPlus /> Add Vehicle</Link>
+                </div>
             </div>
+
+            {/* Subscribe CTA for free users with multiple vehicles */}
+            {!isSubscribed && vehicles.length >= 1 && (
+                <div style={{
+                    background: 'linear-gradient(135deg, #1e3a5f, #1a2e4a)',
+                    borderRadius: 'var(--radius-lg)', padding: '16px 20px',
+                    marginBottom: 20, display: 'flex', alignItems: 'center', gap: 16, color: '#fff',
+                }}>
+                    <FiStar style={{ fontSize: 24, color: '#fbbf24', flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>Unlock Unlimited Listings for ₱399/month</div>
+                        <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
+                            Free tier: {FREE_LISTING_LIMIT} active listing at a time. Subscribe to activate all your vehicles.
+                        </div>
+                    </div>
+                    <button className="btn" style={{ background: '#3b82f6', color: '#fff', border: 'none', whiteSpace: 'nowrap', fontSize: 13 }}
+                        onClick={() => navigate('/subscribe')}>
+                        Subscribe Now
+                    </button>
+                </div>
+            )}
 
             {vehicles.length === 0 ? (
                 <div className="empty-state">
@@ -73,49 +144,60 @@ export default function MyVehicles() {
                         <thead>
                             <tr>
                                 <th>Vehicle</th>
-                                <th>Body Type</th>
                                 <th>Daily Rate</th>
-                                <th>Status</th>
-                                <th>Available</th>
+                                <th>Admin Status</th>
+                                <th style={{ textAlign: 'center' }}>Active Listing</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {vehicles.map(v => (
-                                <tr key={v.id}>
-                                    <td>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                            <div style={{ width: 48, height: 48, borderRadius: 10, background: 'var(--neutral-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🚗</div>
-                                            <div>
-                                                <div style={{ fontWeight: 700 }}>{v.year} {v.make} {v.model}</div>
-                                                <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{v.plate_number} • {v.color}</div>
+                            {vehicles.map((v, idx) => {
+                                const isActive = v.is_active_listing !== false && v.is_available;
+                                const isOldest = idx === 0;
+                                return (
+                                    <tr key={v.id} style={{ opacity: isActive ? 1 : 0.6 }}>
+                                        <td>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                <div style={{ width: 48, height: 48, borderRadius: 10, background: 'var(--neutral-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🚗</div>
+                                                <div>
+                                                    <div style={{ fontWeight: 700 }}>{v.year} {v.make} {v.model}</div>
+                                                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                                                        {v.plate_number} • {v.color}
+                                                        {isOldest && !isSubscribed && <span style={{ marginLeft: 6, color: 'var(--primary-500)', fontWeight: 700 }}>• Default</span>}
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </td>
-                                    <td><span className="badge badge-info">{v.body_type}</span></td>
-                                    <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>₱{v.daily_rate?.toLocaleString()}</td>
-                                    <td>
-                                        <span className={`badge ${v.status === 'approved' || v.status === 'listed' ? 'badge-success' : v.status === 'pending' ? 'badge-pending' : 'badge-error'}`}>
-                                            {v.status}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <button
-                                            className={`btn btn-sm ${v.is_available ? 'btn-success' : 'btn-secondary'}`}
-                                            onClick={() => toggleAvailability(v.id, v.is_available)}
-                                            disabled={v.status !== 'approved' && v.status !== 'listed'}
-                                        >
-                                            {v.is_available ? 'Listed' : 'Unlisted'}
-                                        </button>
-                                    </td>
-                                    <td>
-                                        <div style={{ display: 'flex', gap: 8 }}>
-                                            <Link to={`/vehicles/${v.id}`} className="btn btn-ghost btn-sm btn-icon"><FiEye /></Link>
-                                            <button className="btn btn-ghost btn-sm btn-icon" onClick={() => deleteVehicle(v.id)} style={{ color: 'var(--error-500)' }}><FiTrash2 /></button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
+                                        </td>
+                                        <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>₱{v.daily_rate?.toLocaleString()}</td>
+                                        <td>
+                                            <span className={`badge ${v.status === 'approved' || v.status === 'listed' ? 'badge-success' : v.status === 'pending' ? 'badge-pending' : 'badge-error'}`}>
+                                                {v.status}
+                                            </span>
+                                        </td>
+                                        <td style={{ textAlign: 'center' }}>
+                                            <button
+                                                onClick={() => toggleActiveListing(v)}
+                                                disabled={togglingId === v.id || (v.status !== 'approved' && v.status !== 'listed')}
+                                                title={isActive ? 'Click to deactivate' : 'Click to activate'}
+                                                style={{
+                                                    background: 'none', border: 'none', cursor: 'pointer',
+                                                    color: isActive ? 'var(--success-500)' : 'var(--neutral-400)',
+                                                    fontSize: 28, display: 'flex', alignItems: 'center', margin: '0 auto',
+                                                    transition: 'color 0.15s',
+                                                }}
+                                            >
+                                                {isActive ? <FiToggleRight /> : <FiToggleLeft />}
+                                            </button>
+                                        </td>
+                                        <td>
+                                            <div style={{ display: 'flex', gap: 8 }}>
+                                                <Link to={`/vehicles/${v.id}`} className="btn btn-ghost btn-sm btn-icon"><FiEye /></Link>
+                                                <button className="btn btn-ghost btn-sm btn-icon" onClick={() => deleteVehicle(v.id)} style={{ color: 'var(--error-500)' }}><FiTrash2 /></button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>

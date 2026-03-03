@@ -15,8 +15,9 @@ import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import Messages from './pages/Messages';
-import PaymentSuccess from './pages/PaymentSuccess';
-import PaymentFailed from './pages/PaymentFailed';
+import Subscribe from './pages/Subscribe';
+import SubscriptionSuccess from './pages/SubscriptionSuccess';
+import SubscriptionFailed from './pages/SubscriptionFailed';
 import CreateVehicle from './pages/owner/CreateVehicle';
 import MyVehicles from './pages/owner/MyVehicles';
 import ManageAvailability from './pages/owner/ManageAvailability';
@@ -125,8 +126,9 @@ function App() {
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/messages" element={<Messages />} />
               <Route path="/messages/:bookingId" element={<Messages />} />
-              <Route path="/payment/success" element={<PaymentSuccess />} />
-              <Route path="/payment/failed" element={<PaymentFailed />} />
+              <Route path="/subscribe" element={<Subscribe />} />
+              <Route path="/subscription/success" element={<SubscriptionSuccess />} />
+              <Route path="/subscription/failed" element={<SubscriptionFailed />} />
               <Route path="/agreements/:bookingId" element={<RentalAgreement />} />
             </Route>
 

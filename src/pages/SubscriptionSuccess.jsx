@@ -1,0 +1,74 @@
+import { useEffect } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import { FiCheckCircle, FiStar } from 'react-icons/fi';
+
+export default function SubscriptionSuccess() {
+    const [searchParams] = useSearchParams();
+    const userId = searchParams.get('user_id');
+
+    useEffect(() => {
+        if (!userId) return;
+
+        // Activate the subscription for 30 days
+        const subscriptionEnd = new Date();
+        subscriptionEnd.setDate(subscriptionEnd.getDate() + 30);
+
+        supabase.from('profiles')
+            .update({
+                subscription_status: 'active',
+                subscription_end_date: subscriptionEnd.toISOString(),
+            })
+            .eq('id', userId)
+            .then(({ error }) => {
+                if (error) console.error('Failed to activate subscription:', error);
+            });
+
+        // Also re-activate any inactive listings the user has
+        supabase.from('vehicles')
+            .update({ is_available: true })
+            .eq('owner_id', userId)
+            .then(() => { });
+    }, [userId]);
+
+    return (
+        <div style={{ maxWidth: 480, margin: '60px auto', textAlign: 'center', padding: '0 24px' }}>
+            <div style={{
+                background: 'var(--surface-primary)',
+                border: '2px solid var(--success-300)',
+                borderRadius: 'var(--radius-xl)',
+                padding: 48,
+            }}>
+                <div style={{ fontSize: 72, marginBottom: 16 }}>⭐</div>
+                <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--success-700)', marginBottom: 8 }}>
+                    Welcome to Premium!
+                </h1>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 24, lineHeight: 1.7 }}>
+                    Your ₱399 payment was successful. Your SafeDrive Premium subscription is now active for
+                    <strong> 30 days</strong>. You can now list unlimited vehicles simultaneously!
+                </p>
+
+                <div style={{
+                    background: 'var(--success-50)', borderRadius: 'var(--radius-lg)', padding: '16px 20px',
+                    marginBottom: 24, textAlign: 'left', border: '1px solid var(--success-200)',
+                }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--success-800)' }}>What you unlocked:</div>
+                    {['Unlimited active vehicle listings', 'All your vehicles are now active', 'Priority listing visibility', 'Premium support'].map((f, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 8, fontSize: 14, marginBottom: 6, color: 'var(--success-700)' }}>
+                            <FiCheckCircle style={{ flexShrink: 0 }} />{f}
+                        </div>
+                    ))}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <Link to="/owner/vehicles" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
+                        <FiStar /> Manage My Listings
+                    </Link>
+                    <Link to="/owner/create-vehicle" className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
+                        Add New Vehicle
+                    </Link>
+                </div>
+            </div>
+        </div>
+    );
+}

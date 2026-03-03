@@ -1,38 +1,39 @@
 /**
- * PayMongo Payment Service
- * ========================
- * PayMongo is a Philippine payment processor.
+ * PayMongo Payment Service — SafeDrive Subscription
+ * ==================================================
+ * SafeDrive's business model: Subscription-based (₱399/month)
  *
- * 💸 COST: FREE TO START
+ * HOW YOUR MONEY FLOW WORKS:
+ * 1. User clicks Subscribe on SafeDrive website
+ * 2. PayMongo creates a GCash/InstaPay checkout link for ₱399
+ * 3. User is redirected to GCash — taps "Pay" — money deducted instantly
+ * 4. PayMongo notifies SafeDrive of success → subscriptionexpiry set to +30 days
+ * 5. PayMongo sweeps collected funds to YOUR linked GCash/bank account
+ *
+ * TO LINK YOUR PERSONAL GCASH TO RECEIVE PAYMENTS:
+ * 1. Sign up at https://dashboard.paymongo.com/signup
+ * 2. Go to Dashboard → Settings → Payouts → Add GCash number
+ * 3. Verify your GCash number (they'll send a code)
+ * 4. All subscription payments will be auto-swept to your GCash (next business day)
+ *
+ * SUBSCRIPTION RULES:
+ * - Free users: max 1 active vehicle listing at a time
+ * - Subscribed users: unlimited active listings
+ * - When subscription expires: all listings except the earliest-created are deactivated
+ * - User can manually toggle listings on/off (must stay within their slot limit)
+ *
+ * COST TO USE PAYMONGO:
  * - No monthly fee, no setup fee
- * - Only charged per transaction:
- *   • Credit/Debit card: 3.5% per transaction
- *   • GCash (e-wallet): 2.5% per transaction
- *   • Maya (PayMaya): 2.5% per transaction
- *   • Bank transfers: ₱25 flat fee
- * - Sign up free at: https://dashboard.paymongo.com/signup
+ * - GCash transactions: 2.5% per successful payment
+ * - So per ₱399 subscription: PayMongo takes ₱9.98, you receive ₱389.02
  *
- * SETUP STEPS:
- * 1. Go to https://dashboard.paymongo.com/signup
- * 2. Register your business (can use student/personal for testing)
- * 3. Get your TEST API keys from Dashboard → Developers → API Keys
- * 4. Add to .env:
- *    VITE_PAYMONGO_PUBLIC_KEY=pk_test_xxxxxxxxxxxx
- *    VITE_PAYMONGO_SECRET_KEY=sk_test_xxxxxxxxxxxx  (add to Supabase Edge Function, NOT frontend)
- * 5. For production, get LIVE keys after KYC verification
- *
- * ARCHITECTURE:
- * - Frontend calls createPaymentLink() to get a checkout URL
- * - User is redirected to PayMongo's hosted checkout page (GCash/card/Maya)
- * - On success, PayMongo redirects to /payment/success?booking_id=xxx
- * - On failure, redirects to /payment/failed
- * - Webhook (via Supabase Edge Function) updates booking payment_status
+ * ENV SETUP (add to .env and Vercel environment variables):
+ *   VITE_PAYMONGO_PUBLIC_KEY=pk_test_xxxxxxxxxxxx  (or pk_live_xxx for production)
  */
 
 const PAYMONGO_API = 'https://api.paymongo.com/v1';
 const PUBLIC_KEY = import.meta.env.VITE_PAYMONGO_PUBLIC_KEY;
 
-// Encode credentials for Basic Auth
 const getAuthHeader = () => {
     if (!PUBLIC_KEY) {
         console.warn('⚠️ PayMongo public key not set. Add VITE_PAYMONGO_PUBLIC_KEY to .env');
@@ -41,29 +42,24 @@ const getAuthHeader = () => {
     return `Basic ${btoa(PUBLIC_KEY + ':')}`;
 };
 
+export const SUBSCRIPTION_PRICE = 399; // ₱399/month
+export const FREE_LISTING_LIMIT = 1;   // max active listings for free users
+
 /**
- * Create a PayMongo payment link for a booking.
- * Returns { url, linkId } on success, throws on error.
+ * Create a GCash subscription payment link for ₱399.
+ * Redirects user to GCash/InstaPay hosted checkout.
  *
- * @param {object} booking - The booking object from the database
- * @param {object} vehicle - The vehicle object (for description)
+ * @param {string} userId - The Supabase user ID (stored in payment metadata)
+ * @param {string} userEmail - User email for PayMongo receipt
  * @returns {{ url: string, linkId: string }}
  */
-export async function createPaymentLink(booking, vehicle) {
+export async function createSubscriptionPaymentLink(userId, userEmail) {
     const authHeader = getAuthHeader();
     if (!authHeader) {
-        throw new Error('Payment gateway not configured. Please contact support.');
+        throw new Error('Payment gateway not configured. Please contact support or try again later.');
     }
 
-    // Amount in centavos (PayMongo requires integer centavos)
-    const amountCentavos = Math.round((booking.total_amount || 0) * 100);
-    if (amountCentavos < 10000) { // Min ₱100
-        throw new Error('Payment amount too low. Minimum is ₱100.');
-    }
-
-    const description = `SafeDrive Rental: ${vehicle?.make || ''} ${vehicle?.model || ''} (${booking.total_days} day${booking.total_days !== 1 ? 's' : ''})`;
-    const successUrl = `${window.location.origin}/payment/success?booking_id=${booking.id}`;
-    const failedUrl = `${window.location.origin}/payment/failed?booking_id=${booking.id}`;
+    const amountCentavos = SUBSCRIPTION_PRICE * 100; // ₱399 → 39900 centavos
 
     const response = await fetch(`${PAYMONGO_API}/links`, {
         method: 'POST',
@@ -75,17 +71,20 @@ export async function createPaymentLink(booking, vehicle) {
             data: {
                 attributes: {
                     amount: amountCentavos,
-                    description,
+                    description: 'SafeDrive Premium Subscription — 1 Month Unlimited Listings',
                     currency: 'PHP',
                     redirect: {
-                        success: successUrl,
-                        failed: failedUrl,
+                        success: `${window.location.origin}/subscription/success?user_id=${userId}`,
+                        failed: `${window.location.origin}/subscription/failed`,
                     },
-                    payment_method_types: ['gcash', 'paymaya', 'card', 'dob', 'brankas_bdo', 'brankas_metrobank'],
+                    // GCash, Maya, InstaPay — your preferred Philippine payment methods
+                    payment_method_types: ['gcash', 'paymaya', 'dob'],
+                    remarks: 'SafeDrive Premium — Unlimited Car Listings',
                     metadata: {
-                        booking_id: booking.id,
-                        renter_id: booking.renter_id,
-                        vehicle_id: booking.vehicle_id,
+                        user_id: userId,
+                        user_email: userEmail,
+                        plan: 'monthly',
+                        amount_php: SUBSCRIPTION_PRICE,
                     },
                 },
             },
@@ -102,38 +101,42 @@ export async function createPaymentLink(booking, vehicle) {
     return {
         url: data?.data?.attributes?.checkout_url,
         linkId: data?.data?.id,
+        referenceNumber: data?.data?.attributes?.reference_number,
     };
 }
 
 /**
- * Verify a payment intent status (for post-redirect verification)
- * @param {string} paymentIntentId
- * @returns {string} - payment status: 'paid' | 'awaiting_payment_method' | 'processing'
+ * Check if a user's subscription is currently active
+ * @param {object} profile - User profile from DB
+ * @returns {boolean}
  */
-export async function getPaymentStatus(paymentIntentId) {
-    const authHeader = getAuthHeader();
-    if (!authHeader) return 'unknown';
+export function isSubscriptionActive(profile) {
+    if (!profile?.subscription_end_date) return false;
+    return new Date(profile.subscription_end_date) > new Date();
+}
 
-    try {
-        const response = await fetch(`${PAYMONGO_API}/payment_intents/${paymentIntentId}`, {
-            headers: { 'Authorization': authHeader },
-        });
-        const data = await response.json();
-        return data?.data?.attributes?.status || 'unknown';
-    } catch {
-        return 'unknown';
-    }
+/**
+ * Get the number of days remaining in the subscription
+ * @param {object} profile - User profile from DB
+ * @returns {number} days remaining (0 if expired)
+ */
+export function getSubscriptionDaysLeft(profile) {
+    if (!isSubscriptionActive(profile)) return 0;
+    const end = new Date(profile.subscription_end_date);
+    const now = new Date();
+    return Math.ceil((end - now) / (1000 * 60 * 60 * 24));
 }
 
 /**
  * Format Philippine Peso amount for display
  * @param {number} amount
- * @returns {string} e.g. "₱1,500.00"
+ * @returns {string} e.g. "₱399.00"
  */
 export function formatPHP(amount) {
     return new Intl.NumberFormat('en-PH', {
         style: 'currency',
         currency: 'PHP',
-        minimumFractionDigits: 2,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
     }).format(amount || 0);
 }
