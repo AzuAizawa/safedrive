@@ -20,6 +20,8 @@ export default function VehicleDetail() {
     const [bookingLoading, setBookingLoading] = useState(false);
     const [showVerifyGate, setShowVerifyGate] = useState(false);
     const [blockedDates, setBlockedDates] = useState([]);
+    const [insuranceOpted, setInsuranceOpted] = useState(false);
+    const INSURANCE_RATE = 200; // ₱200 per day flat
 
     useEffect(() => {
         let mounted = true;
@@ -58,14 +60,15 @@ export default function VehicleDetail() {
     };
 
     const calculateTotal = () => {
-        if (!booking.start_date || !booking.end_date || !vehicle) return { days: 0, subtotal: 0, fee: 0, total: 0 };
+        if (!booking.start_date || !booking.end_date || !vehicle) return { days: 0, subtotal: 0, fee: 0, total: 0, insuranceCost: 0 };
         const start = new Date(booking.start_date);
         const end = new Date(booking.end_date);
         const days = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
         const subtotal = days * vehicle.daily_rate;
-        const fee = subtotal * 0.1; // 10% service fee
-        const total = subtotal + fee + (vehicle.security_deposit || 0);
-        return { days, subtotal, fee, total };
+        const fee = subtotal * 0.1;
+        const insuranceCost = insuranceOpted ? days * INSURANCE_RATE : 0;
+        const total = subtotal + fee + (vehicle.security_deposit || 0) + insuranceCost;
+        return { days, subtotal, fee, total, insuranceCost };
     };
 
     const handleBooking = async (e) => {
@@ -121,6 +124,8 @@ export default function VehicleDetail() {
                 service_fee: fee,
                 security_deposit: vehicle.security_deposit || 0,
                 total_amount: total,
+                insurance_opted: insuranceOpted,
+                insurance_amount: insuranceCost,
                 pickup_location: vehicle.pickup_location,
                 status: 'pending',
             }).select().single();
@@ -150,7 +155,7 @@ export default function VehicleDetail() {
     if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
     if (!vehicle) return null;
 
-    const { days, subtotal, fee, total } = calculateTotal();
+    const { days, subtotal, fee, total, insuranceCost } = calculateTotal();
 
     return (
         <div>
@@ -205,7 +210,7 @@ export default function VehicleDetail() {
                         </div>
 
                         {days > 0 && (
-                            <div style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', padding: 16, marginBottom: 16, fontSize: 14 }}>
+                            <div style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', padding: 16, marginBottom: 12, fontSize: 14 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                                     <span>₱{vehicle.daily_rate.toLocaleString()} × {days} day{days > 1 ? 's' : ''}</span>
                                     <span style={{ fontWeight: 600 }}>₱{subtotal.toLocaleString()}</span>
@@ -220,12 +225,44 @@ export default function VehicleDetail() {
                                         <span style={{ fontWeight: 600 }}>₱{vehicle.security_deposit.toLocaleString()}</span>
                                     </div>
                                 )}
+                                {insuranceOpted && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, color: 'var(--success-700)' }}>
+                                        <span>🛡️ Insurance (₱{INSURANCE_RATE}/day × {days})</span>
+                                        <span style={{ fontWeight: 600 }}>₱{insuranceCost.toLocaleString()}</span>
+                                    </div>
+                                )}
                                 <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 8, marginTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 16 }}>
                                     <span>Total</span>
                                     <span style={{ color: 'var(--primary-700)', fontFamily: 'var(--font-display)' }}>₱{total.toLocaleString()}</span>
                                 </div>
                             </div>
                         )}
+
+                        {/* Insurance Opt-in */}
+                        <div
+                            onClick={() => setInsuranceOpted(!insuranceOpted)}
+                            style={{
+                                display: 'flex', alignItems: 'flex-start', gap: 10,
+                                padding: '12px 14px', marginBottom: 14,
+                                background: insuranceOpted ? 'var(--success-50)' : 'var(--surface-secondary)',
+                                borderRadius: 'var(--radius-md)',
+                                border: `1px solid ${insuranceOpted ? 'var(--success-300)' : 'var(--border-light)'}`,
+                                cursor: 'pointer', transition: 'all 0.15s',
+                            }}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={insuranceOpted}
+                                onChange={() => setInsuranceOpted(!insuranceOpted)}
+                                style={{ marginTop: 2, accentColor: 'var(--success-500)', cursor: 'pointer', flexShrink: 0 }}
+                            />
+                            <div>
+                                <div style={{ fontWeight: 700, fontSize: 13 }}>🛡️ Add Basic Insurance — ₱{INSURANCE_RATE}/day</div>
+                                <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, marginTop: 2 }}>
+                                    Covers accidental damage up to ₱50,000. Processed via SafeDrive partner insurer.
+                                </div>
+                            </div>
+                        </div>
 
                         <button
                             type="submit"

@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { supabaseAdmin } from '../../lib/supabase';
 import { FiShield, FiMail, FiLock, FiAlertCircle, FiEye, FiEyeOff, FiArrowLeft } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { Admin2FAVerify } from '../../components/Admin2FA';
 
 export default function AdminLogin() {
     const { signIn, signOut, isAdmin, user, loading } = useAuth();
@@ -12,6 +13,8 @@ export default function AdminLogin() {
     const [formData, setFormData] = useState({ email: '', password: '' });
     const [error, setError] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [show2FA, setShow2FA] = useState(false);
+    const [adminName, setAdminName] = useState('');
 
     // If already logged in as admin, redirect to admin panel
     useEffect(() => {
@@ -33,7 +36,6 @@ export default function AdminLogin() {
             const { data, error: signInError } = await signIn(formData, true, true);
             if (signInError) throw signInError;
 
-            // After sign in, check if this is actually an admin account
             const { data: profileData } = await supabaseAdmin
                 .from('profiles')
                 .select('role, full_name')
@@ -41,19 +43,30 @@ export default function AdminLogin() {
                 .single();
 
             if (profileData?.role !== 'admin') {
-                // Not an admin — sign them out and show error
                 await signOut();
-                setError('Access denied. This portal is for administrators only. If you are a regular user, please use the main login page.');
+                setError('Access denied. This portal is for administrators only.');
                 return;
             }
 
-            toast.success(`Welcome back, ${profileData.full_name || 'Admin'}!`);
-            navigate('/admin', { replace: true });
+            setAdminName(profileData.full_name || 'Admin');
+            // Show 2FA challenge if enrolled; Admin2FAVerify will auto-bypass if no 2FA
+            setShow2FA(true);
         } catch (err) {
             setError(err.message || 'Failed to sign in');
         } finally {
             setFormLoading(false);
         }
+    };
+
+    const handle2FASuccess = () => {
+        toast.success(`Welcome back, ${adminName}!`);
+        navigate('/admin', { replace: true });
+    };
+
+    const handle2FACancel = async () => {
+        await signOut();
+        setShow2FA(false);
+        setError('Login cancelled.');
     };
 
     if (loading) {
@@ -62,6 +75,11 @@ export default function AdminLogin() {
                 <div className="spinner" style={{ borderTopColor: '#ef4444' }} />
             </div>
         );
+    }
+
+    // Show 2FA verification screen after successful password login
+    if (show2FA) {
+        return <Admin2FAVerify onSuccess={handle2FASuccess} onCancel={handle2FACancel} />;
     }
 
     return (

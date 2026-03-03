@@ -8,6 +8,7 @@ import {
 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import BackButton from '../components/BackButton';
+import { Admin2FASetup } from '../components/Admin2FA';
 
 const SECTION_STYLE = {
     background: 'var(--surface-primary)',
@@ -192,6 +193,16 @@ export default function Settings() {
                     </form>
                 </div>
             </div>
+
+            {/* ── Admin 2FA Section (admin only) ──────────────── */}
+            {profile?.role === 'admin' && (
+                <div style={SECTION_STYLE}>
+                    <div style={HEADER_STYLE}><FiShield style={{ color: 'var(--primary-500)' }} /> Two-Factor Authentication (Admin)</div>
+                    <div style={{ padding: '20px 24px' }}>
+                        <Admin2FASetup />
+                    </div>
+                </div>
+            )}
 
             {/* ── Notification Preferences ────────────────────── */}
             <div style={SECTION_STYLE}>
