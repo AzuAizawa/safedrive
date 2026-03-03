@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { FiCalendar, FiCheck, FiX, FiFileText } from 'react-icons/fi';
+import { FiCalendar, FiCheck, FiX, FiFileText, FiCreditCard, FiMessageSquare } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import BackButton from '../components/BackButton';
+import { createPaymentLink, formatPHP } from '../lib/paymongo';
 
 export default function Bookings() {
     const { user, profile, isRenter, isAdmin } = useAuth();
+    const navigate = useNavigate();
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('all');
+    const [payingId, setPayingId] = useState(null);
 
     useEffect(() => {
         let mounted = true;
@@ -47,6 +50,22 @@ export default function Bookings() {
             fetchBookings();
         } catch (err) {
             toast.error('Failed to update booking');
+        }
+    };
+
+    const handlePayNow = async (booking) => {
+        setPayingId(booking.id);
+        try {
+            const { data: vehicle } = await supabase
+                .from('vehicles').select('make, model').eq('id', booking.vehicle_id).single();
+            const { url, linkId } = await createPaymentLink(booking, vehicle);
+            // Save the link ID for reference
+            await supabase.from('bookings').update({ payment_link_id: linkId, payment_status: 'pending' }).eq('id', booking.id);
+            window.location.href = url; // Redirect to PayMongo checkout
+        } catch (err) {
+            toast.error(err.message || 'Could not create payment link. Make sure PayMongo is configured.');
+        } finally {
+            setPayingId(null);
         }
     };
 
@@ -108,7 +127,14 @@ export default function Bookings() {
                                         </div>
                                     </div>
 
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                        {/* Payment status badge */}
+                                        {booking.payment_status === 'paid' && (
+                                            <span className="badge badge-success">💳 Paid</span>
+                                        )}
+                                        {booking.insurance_opted && (
+                                            <span className="badge badge-info">🛡️ Insured</span>
+                                        )}
                                         <span className={`badge badge-${booking.status === 'confirmed' || booking.status === 'completed' ? 'success' : booking.status === 'pending' ? 'pending' : booking.status === 'cancelled' ? 'error' : 'info'}`}>
                                             {booking.status}
                                         </span>
@@ -124,11 +150,31 @@ export default function Bookings() {
                                             </div>
                                         )}
 
+                                        {/* Pay Now button — shown for accepted bookings not yet paid */}
+                                        {!isRenter && booking.status === 'confirmed' && booking.payment_status !== 'paid' && (
+                                            <button
+                                                className="btn btn-primary btn-sm"
+                                                disabled={payingId === booking.id}
+                                                onClick={() => handlePayNow(booking)}
+                                            >
+                                                <FiCreditCard /> {payingId === booking.id ? 'Redirecting...' : 'Pay Now'}
+                                            </button>
+                                        )}
+
                                         {booking.status === 'confirmed' && (
-                                            <Link to={`/agreements/${booking.id}`} className="btn btn-primary btn-sm">
-                                                <FiFileText /> View Agreement
+                                            <Link to={`/agreements/${booking.id}`} className="btn btn-secondary btn-sm">
+                                                <FiFileText /> Agreement
                                             </Link>
                                         )}
+
+                                        {/* Message button */}
+                                        <button
+                                            className="btn btn-ghost btn-sm"
+                                            onClick={() => navigate(`/messages/${booking.id}`)}
+                                            title="Message"
+                                        >
+                                            <FiMessageSquare />
+                                        </button>
                                     </div>
                                 </div>
                             </div>

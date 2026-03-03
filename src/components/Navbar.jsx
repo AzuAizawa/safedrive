@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { FiHome, FiSearch, FiHeart, FiCalendar, FiBell, FiUser, FiLogOut, FiSettings, FiShield, FiTruck, FiPlus } from 'react-icons/fi';
+import { FiHome, FiSearch, FiHeart, FiCalendar, FiBell, FiUser, FiLogOut, FiSettings, FiShield, FiTruck, FiPlus, FiMessageSquare } from 'react-icons/fi';
 
 export default function Navbar() {
     const { user, profile, signOut, isAdmin, isRenter } = useAuth();
@@ -71,6 +71,11 @@ export default function Navbar() {
                     {!isAdmin && (
                         <Link to="/bookings" className={`navbar-link ${location.pathname === '/bookings' ? 'active' : ''}`}>
                             <FiCalendar /> Bookings
+                        </Link>
+                    )}
+                    {!isAdmin && (
+                        <Link to="/messages" className={`navbar-link ${location.pathname.startsWith('/messages') ? 'active' : ''}`}>
+                            <FiMessageSquare /> Messages
                         </Link>
                     )}
                     {isAdmin && (

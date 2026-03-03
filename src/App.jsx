@@ -14,6 +14,9 @@ import RentalAgreement from './pages/RentalAgreement';
 import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
+import Messages from './pages/Messages';
+import PaymentSuccess from './pages/PaymentSuccess';
+import PaymentFailed from './pages/PaymentFailed';
 import CreateVehicle from './pages/owner/CreateVehicle';
 import MyVehicles from './pages/owner/MyVehicles';
 import ManageAvailability from './pages/owner/ManageAvailability';
@@ -120,6 +123,10 @@ function App() {
               <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/notifications" element={<Notifications />} />
+              <Route path="/messages" element={<Messages />} />
+              <Route path="/messages/:bookingId" element={<Messages />} />
+              <Route path="/payment/success" element={<PaymentSuccess />} />
+              <Route path="/payment/failed" element={<PaymentFailed />} />
               <Route path="/agreements/:bookingId" element={<RentalAgreement />} />
             </Route>
 
