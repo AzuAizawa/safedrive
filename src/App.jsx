@@ -12,6 +12,8 @@ import VehicleDetail from './pages/VehicleDetail';
 import Bookings from './pages/Bookings';
 import RentalAgreement from './pages/RentalAgreement';
 import Profile from './pages/Profile';
+import Settings from './pages/Settings';
+import Notifications from './pages/Notifications';
 import CreateVehicle from './pages/owner/CreateVehicle';
 import MyVehicles from './pages/owner/MyVehicles';
 import ManageAvailability from './pages/owner/ManageAvailability';
@@ -116,6 +118,8 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/bookings" element={<Bookings />} />
               <Route path="/profile" element={<Profile />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/notifications" element={<Notifications />} />
               <Route path="/agreements/:bookingId" element={<RentalAgreement />} />
             </Route>
 

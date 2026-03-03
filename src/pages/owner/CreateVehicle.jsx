@@ -6,7 +6,14 @@ import { FiUpload, FiX, FiCamera, FiFileText, FiCheckCircle } from 'react-icons/
 import toast from 'react-hot-toast';
 import VerificationGate from '../../components/VerificationGate';
 import BackButton from '../../components/BackButton';
-import { sanitizeInput, detectThreats } from '../../lib/security';
+import { validateVehicleListingForm } from '../../lib/validation';
+
+// Simple sanitizer for freetext fields (strips HTML, trims whitespace)
+const sanitizeInput = (str) =>
+    typeof str === 'string'
+        ? str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').trim()
+        : '';
+
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
