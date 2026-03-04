@@ -768,7 +768,7 @@ export default function CreateVehicle() {
                     <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)} disabled={loading}>
                         Cancel
                     </button>
-                    <button type="submit" className="btn btn-primary btn-lg" disabled={loading || !isVerified}>
+                    <button type="submit" className="btn btn-primary btn-lg" disabled={loading}>
                         {loading ? '⏳ Submitting...' : '📋 Submit for Admin Review'}
                     </button>
                 </div>
