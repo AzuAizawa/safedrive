@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { supabaseAdmin } from '../../lib/supabase';
+
+
 import { FiShield, FiMail, FiLock, FiAlertCircle, FiEye, FiEyeOff, FiArrowLeft } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Admin2FAVerify } from '../../components/Admin2FA';
 
 export default function AdminLogin() {
-    const { signIn, signOut, isAdmin, user, loading } = useAuth();
+    const { signIn, signOut, isAdmin, user, loading, profile } = useAuth();
     const navigate = useNavigate();
     const [formLoading, setFormLoading] = useState(false);
     const [formData, setFormData] = useState({ email: '', password: '' });
@@ -18,47 +19,41 @@ export default function AdminLogin() {
     const [loginSuccess, setLoginSuccess] = useState(false); // tracks 2FA cleared
 
     // Navigate to admin panel ONLY when auth is fully settled
-    // This fires after both the user session AND profile (role) have loaded.
-    // Using loginSuccess flag prevents premature navigation before profile loads.
     useEffect(() => {
-        // Case 1: Fresh login — 2FA cleared, profile confirmed loaded
+        // Case 1: Fresh login — loginSuccess + isAdmin confirmed → go to admin
         if (!loading && user && isAdmin && loginSuccess) {
-            toast.success(`Welcome back, ${adminName || 'Admin'}!`);
+            toast.success(`Welcome back, ${adminName || profile?.full_name || 'Admin'}!`);
             navigate('/admin', { replace: true });
         }
-        // Case 2: Already logged in as admin (page refresh) — only when NOT mid-login
+        // Case 2: Fresh login — loginSuccess but NOT admin → reject
+        if (!loading && user && !isAdmin && loginSuccess && profile) {
+            signOut();
+            setLoginSuccess(false);
+            setShow2FA(false);
+            setError('Access denied. This portal is for administrators only.');
+        }
+        // Case 3: Already logged in as admin (page refresh) — skip during active login
         if (!loading && user && isAdmin && !show2FA && !loginSuccess && !formLoading) {
             navigate('/admin', { replace: true });
         }
-        // Case 3: Logged in but not admin — only show error when NOT mid-login
-        if (!loading && user && !isAdmin && !show2FA && !loginSuccess && !formLoading) {
+        // Case 4: Logged in as non-admin on page load
+        if (!loading && user && !isAdmin && !show2FA && !loginSuccess && !formLoading && profile) {
             setError('This portal is for administrators only. Please use the main login page.');
         }
-    }, [loading, user, isAdmin, loginSuccess, formLoading]);
+    }, [loading, user, isAdmin, loginSuccess, formLoading, profile]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setFormLoading(true);
-
         try {
             const { data, error: signInError } = await signIn(formData, true, true);
             if (signInError) throw signInError;
-
-            const { data: profileData } = await supabaseAdmin
-                .from('profiles')
-                .select('role, full_name')
-                .eq('id', data.user.id)
-                .single();
-
-            if (profileData?.role !== 'admin') {
-                await signOut();
-                setError('Access denied. This portal is for administrators only.');
-                return;
-            }
-
-            setAdminName(profileData.full_name || 'Admin');
-            // Show 2FA challenge if enrolled; Admin2FAVerify will auto-bypass if no 2FA
+            // signIn + attachListener(processInitialSession=true) will load the profile
+            // via INITIAL_SESSION. The useEffect above will then:
+            //   ✔ navigate to /admin if isAdmin=true
+            //   ✖ call signOut + show error if isAdmin=false (not an admin account)
+            // No raw DB query needed here — avoids RLS blocking the check.
             setShow2FA(true);
         } catch (err) {
             setError(err.message || 'Failed to sign in');
