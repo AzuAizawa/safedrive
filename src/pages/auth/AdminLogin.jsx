@@ -15,17 +15,24 @@ export default function AdminLogin() {
     const [showPassword, setShowPassword] = useState(false);
     const [show2FA, setShow2FA] = useState(false);
     const [adminName, setAdminName] = useState('');
+    const [loginSuccess, setLoginSuccess] = useState(false); // tracks 2FA cleared
 
-    // If already logged in as admin, redirect to admin panel
+    // Navigate to admin panel ONLY when auth is fully settled
+    // This fires after both the user session AND profile (role) have loaded.
+    // Using loginSuccess flag prevents premature navigation before profile loads.
     useEffect(() => {
-        if (!loading && user && isAdmin) {
+        if (!loading && user && isAdmin && loginSuccess) {
+            toast.success(`Welcome back, ${adminName || 'Admin'}!`);
             navigate('/admin', { replace: true });
         }
-        // If logged in as a non-admin, stay here with an error
-        if (!loading && user && !isAdmin) {
+        // Already logged in as admin on page load
+        if (!loading && user && isAdmin && !show2FA && !loginSuccess) {
+            navigate('/admin', { replace: true });
+        }
+        if (!loading && user && !isAdmin && !show2FA && !loginSuccess) {
             setError('This portal is for administrators only. Please use the main login page.');
         }
-    }, [loading, user, isAdmin]);
+    }, [loading, user, isAdmin, loginSuccess]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -59,8 +66,10 @@ export default function AdminLogin() {
     };
 
     const handle2FASuccess = () => {
-        toast.success(`Welcome back, ${adminName}!`);
-        navigate('/admin', { replace: true });
+        // Don't navigate here — profile may not have loaded yet.
+        // Set loginSuccess=true and let the useEffect navigate
+        // once AuthContext confirms user+isAdmin are both ready.
+        setLoginSuccess(true);
     };
 
     const handle2FACancel = async () => {

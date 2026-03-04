@@ -98,14 +98,14 @@ export default function AdminPanel() {
     const verifyUser = async (userId, action) => {
         try {
             const isApprove = action === 'approve';
-            // FIX: Must update BOTH verification_status AND role.
-            // The app's "Verified" badge reads profile.role, not just verification_status.
-            const { error } = await supabaseAdmin.from('profiles').update({
-                verification_status: isApprove ? 'verified' : 'rejected',
-                role: isApprove ? 'verified' : 'user', // ← This was missing — it's what controls the badge
-                verified_by: user.id,
-                verified_at: new Date().toISOString(),
-            }).eq('id', userId);
+            // Use RPC function (SECURITY DEFINER) to bypass RLS
+            // Direct .update() was silently blocked because supabaseAdmin uses the anon key
+            const { error } = await supabaseAdmin.rpc('admin_verify_user', {
+                target_user_id: userId,
+                new_verification_status: isApprove ? 'verified' : 'rejected',
+                new_role: isApprove ? 'verified' : 'user',
+                admin_user_id: user.id,
+            });
             if (error) throw error;
             try { await supabaseAdmin.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: `User ${isApprove ? 'verified' : 'rejected'} by admin` }); } catch (e) { }
             try { await supabaseAdmin.from('notifications').insert({ user_id: userId, title: isApprove ? 'Identity Verified! ✅' : 'Verification Rejected', message: isApprove ? 'Your identity has been verified. You can now list vehicles and access all SafeDrive features!' : 'Your identity verification was not approved. Please resubmit your documents with clearer photos.', type: 'verification' }); } catch (e) { }
@@ -113,20 +113,31 @@ export default function AdminPanel() {
             toast.success(`User ${isApprove ? 'verified ✅' : 'rejected'} successfully`);
             fetchData();
             setSelectedUser(null);
-        } catch (err) { toast.error('Failed to update verification'); }
+        } catch (err) {
+            console.error('verifyUser error:', err);
+            toast.error(`Failed to update verification: ${err.message || 'Unknown error'}`);
+        }
     };
 
     const changeRole = async (userId, newRole) => {
         if (!window.confirm(`Change this user's role to "${newRole === 'user' ? 'Not Verified' : newRole}"?`)) return;
         const oldRole = selectedUser?.role;
         try {
-            const { error } = await supabaseAdmin.from('profiles').update({ role: newRole }).eq('id', userId);
+            // Use RPC function (SECURITY DEFINER) to bypass RLS
+            const { error } = await supabaseAdmin.rpc('admin_change_role', {
+                target_user_id: userId,
+                new_role: newRole,
+                admin_user_id: user.id,
+            });
             if (error) throw error;
             await logAudit({ action: 'CHANGE_USER_ROLE', entityType: 'user', entityId: userId, description: `Admin changed role of ${selectedUser?.full_name || userId} from ${oldRole} to ${newRole}`, oldValue: { role: oldRole }, newValue: { role: newRole }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
             toast.success(`Role changed to ${newRole === 'user' ? 'Not Verified' : newRole}`);
             fetchData();
             setSelectedUser(null);
-        } catch (err) { toast.error('Failed to change role'); }
+        } catch (err) {
+            console.error('changeRole error:', err);
+            toast.error(`Failed to change role: ${err.message || 'Unknown error'}`);
+        }
     };
 
     // ===== VEHICLE FUNCTIONS =====
