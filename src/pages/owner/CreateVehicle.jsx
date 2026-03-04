@@ -252,16 +252,13 @@ export default function CreateVehicle() {
             toast.error('Please select at least one rental duration'); return;
         }
 
-        // Sanitize freetext fields
+        // Basic sanitization check — reject inputs containing HTML tags
         const textFields = ['pickup_location', 'pickup_city', 'pickup_province', 'description'];
         for (const key of textFields) {
             const val = formData[key] || '';
-            if (val) {
-                const threats = detectThreats(val);
-                if (!threats.safe) {
-                    toast.error(`Invalid characters detected in ${key.replace(/_/g, ' ')}`);
-                    return;
-                }
+            if (val && /<[^>]+>/.test(val)) {
+                toast.error(`Invalid characters detected in ${key.replace(/_/g, ' ')}`);
+                return;
             }
         }
 
