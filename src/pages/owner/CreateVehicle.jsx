@@ -228,7 +228,9 @@ export default function CreateVehicle() {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        if (!isVerified) {
+        // Check verified using both role and verification_status (SQL may not have synced yet)
+        const userIsVerified = isVerified || profile?.role === 'verified' || profile?.verification_status === 'verified';
+        if (!userIsVerified) {
             setShowVerifyGate(true);
             return;
         }
