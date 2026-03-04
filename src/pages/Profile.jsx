@@ -160,30 +160,32 @@ export default function Profile() {
                 <p>Manage your personal information and identity verification</p>
             </div>
 
-            {/* Verification Status Banner */}
-            <div className="card" style={{ marginBottom: 24, background: profile?.verification_status === 'verified' ? 'linear-gradient(135deg, var(--success-50), var(--success-100))' : undefined }}>
-                <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                    <div style={{ width: 48, height: 48, borderRadius: '50%', background: `${getStatusColor(profile?.verification_status)}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: getStatusColor(profile?.verification_status) }}>
-                        {profile?.verification_status === 'verified' ? <FiCheckCircle size={24} /> : profile?.verification_status === 'submitted' ? <FiClock size={24} /> : <FiShield size={24} />}
+            {/* Verification Status Banner — only two states: verified or not verified */}
+            {(() => {
+                const verified = profile?.role === 'verified' || profile?.verification_status === 'verified';
+                return (
+                    <div className="card" style={{ marginBottom: 24, background: verified ? 'linear-gradient(135deg, #f0fdf4, #dcfce7)' : undefined }}>
+                        <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <div style={{ width: 48, height: 48, borderRadius: '50%', background: verified ? '#bbf7d020' : '#f3f4f620', display: 'flex', alignItems: 'center', justifyContent: 'center', color: verified ? 'var(--success-500)' : 'var(--text-tertiary)' }}>
+                                {verified ? <FiCheckCircle size={24} /> : <FiShield size={24} />}
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>
+                                    {verified ? '✅ Identity Verified' : '🔒 Not Verified'}
+                                </h3>
+                                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                                    {verified
+                                        ? 'Your identity has been verified. You have full access — list vehicles, rent, and subscribe.'
+                                        : 'Submit your ID and selfie below to get verified and unlock all SafeDrive features.'}
+                                </p>
+                            </div>
+                            <span className={`badge ${verified ? 'badge-verified' : 'badge-neutral'}`}>
+                                {verified ? 'Verified' : 'Not Verified'}
+                            </span>
+                        </div>
                     </div>
-                    <div style={{ flex: 1 }}>
-                        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>
-                            {profile?.verification_status === 'verified' ? '✅ Identity Verified' :
-                                profile?.verification_status === 'submitted' ? '⏳ Verification Pending' :
-                                    profile?.verification_status === 'rejected' ? '❌ Verification Rejected' : '🔒 Unverified Account'}
-                        </h3>
-                        <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                            {profile?.verification_status === 'verified' ? 'Your identity has been verified. You have full access to SafeDrive features including listing and renting vehicles.' :
-                                profile?.verification_status === 'submitted' ? 'Your documents are being reviewed by our admin team. This usually takes 24-48 hours.' :
-                                    profile?.verification_status === 'rejected' ? 'Your verification was not approved. Please resubmit your documents with clearer images.' :
-                                        'Complete identity verification below to unlock all SafeDrive features.'}
-                        </p>
-                    </div>
-                    <span className={`badge ${profile?.verification_status === 'verified' ? 'badge-verified' : profile?.verification_status === 'submitted' ? 'badge-pending' : 'badge-neutral'}`}>
-                        {profile?.verification_status || 'pending'}
-                    </span>
-                </div>
-            </div>
+                );
+            })()}
 
             {/* Personal Information */}
             <div className="card" style={{ marginBottom: 24 }}>
@@ -241,84 +243,100 @@ export default function Profile() {
             </div>
 
             {/* Identity Verification Section */}
-            {profile?.verification_status !== 'verified' && (
-                <div className="card" style={{ marginBottom: 24 }}>
-                    <div className="card-header">
-                        <h2 style={{ fontSize: 16, fontWeight: 700 }}>🔐 Identity Verification</h2>
-                    </div>
-                    <div className="card-body">
-                        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20 }}>
-                            Submit your information and ID photos to get verified. Once approved by our team, you can list and rent vehicles.
-                        </p>
+            {(() => {
+                const verified = profile?.role === 'verified' || profile?.verification_status === 'verified';
+                if (verified) {
+                    return (
+                        <div className="card" style={{ marginBottom: 24, background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)', border: '1px solid #bbf7d0' }}>
+                            <div className="card-body" style={{ textAlign: 'center', padding: '36px 24px' }}>
+                                <div style={{ fontSize: 56, marginBottom: 12 }}>✅</div>
+                                <h2 style={{ fontSize: 20, fontWeight: 800, color: '#166534', marginBottom: 8 }}>You're Verified!</h2>
+                                <p style={{ fontSize: 14, color: '#15803d', maxWidth: 400, margin: '0 auto' }}>
+                                    Your identity has been confirmed by our admin team. You now have full access to list vehicles, rent vehicles, and subscribe to SafeDrive Premium.
+                                </p>
+                            </div>
+                        </div>
+                    );
+                }
+                return (
+                    <div className="card" style={{ marginBottom: 24 }}>
+                        <div className="card-header">
+                            <h2 style={{ fontSize: 16, fontWeight: 700 }}>🔐 Identity Verification</h2>
+                        </div>
+                        <div className="card-body">
+                            <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20 }}>
+                                Submit your information and ID photos to get verified. Once approved by our team, you can list and rent vehicles.
+                            </p>
 
-                        {/* Personal info summary shown in verification (so admin sees it) */}
-                        {(formData.full_name || formData.phone || formData.city) && (
-                            <div style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', padding: '14px 18px', marginBottom: 20, border: '1px solid var(--border-light)' }}>
-                                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--text-secondary)' }}>📋 Your Submitted Personal Info</div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px', fontSize: 13 }}>
-                                    {formData.full_name && <div><span style={{ color: 'var(--text-tertiary)' }}>Name: </span>{formData.full_name}</div>}
-                                    {formData.phone && <div><span style={{ color: 'var(--text-tertiary)' }}>Phone: </span>{formData.phone}</div>}
-                                    {formData.city && <div><span style={{ color: 'var(--text-tertiary)' }}>City: </span>{formData.city}</div>}
-                                    {formData.province && <div><span style={{ color: 'var(--text-tertiary)' }}>Province: </span>{formData.province}</div>}
-                                    {formData.date_of_birth && <div><span style={{ color: 'var(--text-tertiary)' }}>Birthday: </span>{formData.date_of_birth}</div>}
+                            {/* Personal info summary shown in verification (so admin sees it) */}
+                            {(formData.full_name || formData.phone || formData.city) && (
+                                <div style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', padding: '14px 18px', marginBottom: 20, border: '1px solid var(--border-light)' }}>
+                                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--text-secondary)' }}>📋 Your Submitted Personal Info</div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px', fontSize: 13 }}>
+                                        {formData.full_name && <div><span style={{ color: 'var(--text-tertiary)' }}>Name: </span>{formData.full_name}</div>}
+                                        {formData.phone && <div><span style={{ color: 'var(--text-tertiary)' }}>Phone: </span>{formData.phone}</div>}
+                                        {formData.city && <div><span style={{ color: 'var(--text-tertiary)' }}>City: </span>{formData.city}</div>}
+                                        {formData.province && <div><span style={{ color: 'var(--text-tertiary)' }}>Province: </span>{formData.province}</div>}
+                                        {formData.date_of_birth && <div><span style={{ color: 'var(--text-tertiary)' }}>Birthday: </span>{formData.date_of_birth}</div>}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>
+                                        ℹ️ This information will be included with your verification submission.
+                                    </div>
                                 </div>
-                                <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>
-                                    ℹ️ This information will be included with your verification submission.
+                            )}
+
+                            {/* ID Numbers */}
+                            <div className="form-row" style={{ marginBottom: 16 }}>
+                                <div className="form-group">
+                                    <label className="form-label">Driver's License Number</label>
+                                    <input className="form-input" style={{ width: '100%' }} placeholder="N01-23-456789" value={formData.drivers_license_number} onChange={(e) => setFormData({ ...formData, drivers_license_number: e.target.value })} />
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">National / UMID ID Number</label>
+                                    <input className="form-input" style={{ width: '100%' }} placeholder="0000-0000000-0" value={formData.national_id_number} onChange={(e) => setFormData({ ...formData, national_id_number: e.target.value })} />
                                 </div>
                             </div>
-                        )}
 
-                        {/* ID Numbers */}
-                        <div className="form-row" style={{ marginBottom: 16 }}>
-                            <div className="form-group">
-                                <label className="form-label">Driver's License Number</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="N01-23-456789" value={formData.drivers_license_number} onChange={(e) => setFormData({ ...formData, drivers_license_number: e.target.value })} />
+                            {/* ID Photos */}
+                            <div className="form-group" style={{ marginBottom: 16 }}>
+                                <label className="form-label">ID Photo (Front) <span style={{ color: 'var(--error-500)' }}>*</span></label>
+                                <div className="file-upload-area">
+                                    <FiUpload size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
+                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Upload front of your Government ID</p>
+                                    <input ref={idFrontRef} type="file" accept="image/*" style={{ marginTop: 8 }} />
+                                </div>
                             </div>
-                            <div className="form-group">
-                                <label className="form-label">National / UMID ID Number</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="0000-0000000-0" value={formData.national_id_number} onChange={(e) => setFormData({ ...formData, national_id_number: e.target.value })} />
+
+                            <div className="form-group" style={{ marginBottom: 16 }}>
+                                <label className="form-label">ID Photo (Back)</label>
+                                <div className="file-upload-area">
+                                    <FiUpload size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
+                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Upload back of your Government ID</p>
+                                    <input ref={idBackRef} type="file" accept="image/*" style={{ marginTop: 8 }} />
+                                </div>
                             </div>
+
+                            <div className="form-group" style={{ marginBottom: 24 }}>
+                                <label className="form-label">Selfie Photo (Face Verification) <span style={{ color: 'var(--error-500)' }}>*</span></label>
+                                <div className="file-upload-area">
+                                    <FiUpload size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
+                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Take a clear photo of your face for identity matching</p>
+                                    <input ref={selfieRef} type="file" accept="image/*" capture="user" style={{ marginTop: 8 }} />
+                                </div>
+                            </div>
+
+                            <button
+                                className="btn btn-accent btn-lg"
+                                style={{ width: '100%' }}
+                                onClick={handleSubmitVerification}
+                                disabled={submitLoading}
+                            >
+                                {submitLoading ? '⏳ Submitting... Please wait' : '🔐 Submit for Verification'}
+                            </button>
                         </div>
-
-                        {/* ID Photos */}
-                        <div className="form-group" style={{ marginBottom: 16 }}>
-                            <label className="form-label">ID Photo (Front) <span style={{ color: 'var(--error-500)' }}>*</span></label>
-                            <div className="file-upload-area">
-                                <FiUpload size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
-                                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Upload front of your Government ID</p>
-                                <input ref={idFrontRef} type="file" accept="image/*" style={{ marginTop: 8 }} />
-                            </div>
-                        </div>
-
-                        <div className="form-group" style={{ marginBottom: 16 }}>
-                            <label className="form-label">ID Photo (Back)</label>
-                            <div className="file-upload-area">
-                                <FiUpload size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
-                                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Upload back of your Government ID</p>
-                                <input ref={idBackRef} type="file" accept="image/*" style={{ marginTop: 8 }} />
-                            </div>
-                        </div>
-
-                        <div className="form-group" style={{ marginBottom: 24 }}>
-                            <label className="form-label">Selfie Photo (Face Verification) <span style={{ color: 'var(--error-500)' }}>*</span></label>
-                            <div className="file-upload-area">
-                                <FiUpload size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
-                                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Take a clear photo of your face for identity matching</p>
-                                <input ref={selfieRef} type="file" accept="image/*" capture="user" style={{ marginTop: 8 }} />
-                            </div>
-                        </div>
-
-                        <button
-                            className="btn btn-accent btn-lg"
-                            style={{ width: '100%' }}
-                            onClick={handleSubmitVerification}
-                            disabled={submitLoading}
-                        >
-                            {submitLoading ? '⏳ Submitting... Please wait' : '🔐 Submit for Verification'}
-                        </button>
                     </div>
-                </div>
-            )}
+                );
+            })()}
         </div>
     );
 }

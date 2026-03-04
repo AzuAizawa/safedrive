@@ -130,45 +130,22 @@ export default function Dashboard() {
                 </div>
             );
         }
-        if (profile?.verification_status === 'verified') return null;
+        // Hide banner when verified — check both role and verification_status
+        const userIsVerified = profile?.role === 'verified' || profile?.verification_status === 'verified';
+        if (userIsVerified) return null;
 
-        const messages = {
-            pending: {
-                icon: <FiAlertTriangle />,
-                title: 'Complete Your Verification',
-                desc: 'Submit your government IDs and selfie to get verified and start using SafeDrive.',
-                action: 'Submit Documents',
-                link: '/profile',
-                bgGradient: 'linear-gradient(135deg, #fff7ed 0%, #fef3c7 100%)',
-                borderColor: 'rgba(245,158,11,0.3)',
-                iconBg: '#fef3c7',
-                iconColor: '#d97706',
-            },
-            submitted: {
-                icon: <FiClock />,
-                title: 'Verification In Progress',
-                desc: 'Your documents have been submitted. Our admin team is reviewing your identity. This usually takes 24-48 hours.',
-                action: 'View Status',
-                link: '/profile',
-                bgGradient: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
-                borderColor: 'rgba(59,130,246,0.3)',
-                iconBg: '#dbeafe',
-                iconColor: '#2563eb',
-            },
-            rejected: {
-                icon: <FiAlertTriangle />,
-                title: 'Verification Rejected',
-                desc: 'Your verification was not approved. Please resubmit your documents with clearer photos.',
-                action: 'Resubmit',
-                link: '/profile',
-                bgGradient: 'linear-gradient(135deg, #fef2f2 0%, #fecaca 100%)',
-                borderColor: 'rgba(239,68,68,0.3)',
-                iconBg: '#fecaca',
-                iconColor: '#dc2626',
-            },
+        // Only two states: verified (hidden above) or not verified (show this)
+        const msg = {
+            icon: <FiAlertTriangle />,
+            title: 'Verify Your Identity',
+            desc: 'Submit your government ID and a selfie photo to get verified. Verified users can list and rent vehicles.',
+            action: 'Submit Documents',
+            link: '/profile',
+            bgGradient: 'linear-gradient(135deg, #fff7ed 0%, #fef3c7 100%)',
+            borderColor: 'rgba(245,158,11,0.3)',
+            iconBg: '#fef3c7',
+            iconColor: '#d97706',
         };
-
-        const msg = messages[profile?.verification_status || 'pending'];
 
         return (
             <div style={{
