@@ -267,31 +267,43 @@ export default function CreateVehicle() {
 
         try {
             // 1. Upload vehicle photos
+            // 1. Upload vehicle photos (best-effort — don't block listing if storage fails)
             let imageUrls = [];
             for (let i = 0; i < photos.length; i++) {
-                const file = photos[i];
-                const ext = file.name.split('.').pop();
-                const path = `${user.id}/${Date.now()}_${i}.${ext}`;
-                const { error: upErr } = await supabase.storage.from('vehicle-images').upload(path, file);
-                if (upErr) throw upErr;
-                const { data: urlData } = supabase.storage.from('vehicle-images').getPublicUrl(path);
-                imageUrls.push(urlData.publicUrl);
+                try {
+                    const file = photos[i];
+                    const ext = file.name.split('.').pop();
+                    const path = `${user.id}/${Date.now()}_${i}.${ext}`;
+                    const { error: upErr } = await supabase.storage.from('vehicle-images').upload(path, file);
+                    if (upErr) { console.warn('Photo upload failed:', upErr.message); continue; }
+                    const { data: urlData } = supabase.storage.from('vehicle-images').getPublicUrl(path);
+                    imageUrls.push(urlData.publicUrl);
+                } catch (photoErr) {
+                    console.warn('Photo upload threw:', photoErr.message);
+                }
             }
 
-            // 2. Upload agreement document (if provided)
+            // 2. Upload agreement document (best-effort)
             let agreementUrl = null;
             if (agreementFile) {
-                const ext = agreementFile.name.split('.').pop();
-                const path = `${user.id}/${Date.now()}_agreement.${ext}`;
-                const { error: agErr } = await supabase.storage
-                    .from('vehicle-agreements')
-                    .upload(path, agreementFile, { contentType: agreementFile.type });
-                if (agErr) throw agErr;
-                const { data: agUrl } = supabase.storage.from('vehicle-agreements').getPublicUrl(path);
-                agreementUrl = agUrl.publicUrl;
+                try {
+                    const ext = agreementFile.name.split('.').pop();
+                    const path = `${user.id}/${Date.now()}_agreement.${ext}`;
+                    const { error: agErr } = await supabase.storage
+                        .from('vehicle-agreements')
+                        .upload(path, agreementFile, { contentType: agreementFile.type });
+                    if (!agErr) {
+                        const { data: agUrl } = supabase.storage.from('vehicle-agreements').getPublicUrl(path);
+                        agreementUrl = agUrl.publicUrl;
+                    } else {
+                        console.warn('Agreement upload failed:', agErr.message);
+                    }
+                } catch (agErr) {
+                    console.warn('Agreement upload threw:', agErr.message);
+                }
             }
 
-            // 3. Insert vehicle (status: pending for admin review)
+            // 3. Insert vehicle (status: pending — always runs even if photos failed)
             const { error } = await supabase.from('vehicles').insert({
                 owner_id: user.id,
                 make: sanitizeInput(formData.make),
@@ -320,7 +332,7 @@ export default function CreateVehicle() {
 
             if (error) throw error;
 
-            toast.success('Vehicle submitted for admin review!');
+            toast.success('✅ Vehicle submitted for admin review! You\'ll be notified once it\'s approved.');
             navigate('/my-vehicles');
         } catch (err) {
             console.error('Listing error:', err);

@@ -161,17 +161,52 @@ export default function AdminPanel() {
     const approveVehicle = async (vehicleId, action) => {
         try {
             const veh = vehicles.find(v => v.id === vehicleId) || selectedVehicle;
+            const newStatus = action === 'approve' ? 'approved' : 'rejected';
+
+            // 1. Update vehicle status
             const { error } = await supabaseAdmin.from('vehicles').update({
-                status: action === 'approve' ? 'approved' : 'rejected',
+                status: newStatus,
                 approved_by: user.id,
                 approved_at: new Date().toISOString(),
             }).eq('id', vehicleId);
             if (error) throw error;
-            await logAudit({ action: action === 'approve' ? 'APPROVE_VEHICLE' : 'REJECT_VEHICLE', entityType: 'vehicle', entityId: vehicleId, description: `Admin ${action === 'approve' ? 'approved' : 'rejected'} vehicle ${veh?.year || ''} ${veh?.make || ''} ${veh?.model || ''}`, oldValue: { status: 'pending' }, newValue: { status: action === 'approve' ? 'approved' : 'rejected' }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
-            toast.success(`Vehicle ${action === 'approve' ? 'approved' : 'rejected'}`);
+
+            // 2. Send notification to vehicle owner
+            const vehicleName = `${veh?.year || ''} ${veh?.make || ''} ${veh?.model || ''}`.trim();
+            const notifMessage = action === 'approve'
+                ? `✅ Your vehicle listing "${vehicleName}" has been approved and is now live!`
+                : `❌ Your vehicle listing "${vehicleName}" was not approved by our team. Please review your listing details and resubmit.`;
+
+            try {
+                await supabaseAdmin.from('notifications').insert({
+                    user_id: veh?.owner_id,
+                    type: action === 'approve' ? 'vehicle_approved' : 'vehicle_rejected',
+                    title: action === 'approve' ? 'Vehicle Listing Approved' : 'Vehicle Listing Rejected',
+                    message: notifMessage,
+                    read: false,
+                    created_at: new Date().toISOString(),
+                });
+            } catch (notifErr) {
+                console.warn('Notification insert failed (non-critical):', notifErr.message);
+            }
+
+            // 3. Audit log
+            await logAudit({
+                action: action === 'approve' ? 'APPROVE_VEHICLE' : 'REJECT_VEHICLE',
+                entityType: 'vehicle', entityId: vehicleId,
+                description: `Admin ${action === 'approve' ? 'approved' : 'rejected'} vehicle ${vehicleName}`,
+                oldValue: { status: 'pending' },
+                newValue: { status: newStatus },
+                performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email
+            });
+
+            toast.success(`Vehicle ${action === 'approve' ? '✅ approved — now live!' : '❌ rejected — owner notified'}`);
             fetchData();
             setSelectedVehicle(null);
-        } catch (err) { toast.error('Failed to update vehicle'); }
+        } catch (err) {
+            console.error('approveVehicle error:', err);
+            toast.error(`Failed to ${action} vehicle: ${err.message || 'Unknown error'}`);
+        }
     };
 
     // ===== CATALOG FUNCTIONS =====

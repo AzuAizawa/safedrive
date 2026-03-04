@@ -173,9 +173,75 @@ DO $$ BEGIN
     END IF;
 END $$;
 
+-- ── STEP 10: Vehicle image/agreement storage buckets ────────────────────────────
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'vehicle-images', 'vehicle-images', true, 10485760,
+    ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/heic']
+) ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'vehicle-agreements', 'vehicle-agreements', false, 20971520,
+    ARRAY['application/pdf', 'image/jpeg', 'image/png']
+) ON CONFLICT (id) DO NOTHING;
+
+-- Storage policies for vehicle images (public read, owner write)
+DROP POLICY IF EXISTS "Vehicle image upload" ON storage.objects;
+CREATE POLICY "Vehicle image upload" ON storage.objects
+    FOR INSERT WITH CHECK (
+        bucket_id = 'vehicle-images' AND
+        auth.uid()::text = (storage.foldername(name))[1]
+    );
+
+DROP POLICY IF EXISTS "Vehicle images public read" ON storage.objects;
+CREATE POLICY "Vehicle images public read" ON storage.objects
+    FOR SELECT USING (bucket_id = 'vehicle-images');
+
+DROP POLICY IF EXISTS "Vehicle agreement upload" ON storage.objects;
+CREATE POLICY "Vehicle agreement upload" ON storage.objects
+    FOR INSERT WITH CHECK (
+        bucket_id = 'vehicle-agreements' AND
+        auth.uid()::text = (storage.foldername(name))[1]
+    );
+
+DROP POLICY IF EXISTS "Vehicle agreement read" ON storage.objects;
+CREATE POLICY "Vehicle agreement read" ON storage.objects
+    FOR SELECT USING (
+        bucket_id = 'vehicle-agreements' AND
+        (is_admin_user() OR auth.uid()::text = (storage.foldername(name))[1])
+    );
+
+-- ── STEP 11: Notifications table (for approve/reject vehicle alerts to users) ───
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    read BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can read own notifications" ON notifications;
+CREATE POLICY "Users can read own notifications" ON notifications
+    FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can mark own notifications read" ON notifications;
+CREATE POLICY "Users can mark own notifications read" ON notifications
+    FOR UPDATE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admins can insert notifications" ON notifications;
+CREATE POLICY "Admins can insert notifications" ON notifications
+    FOR INSERT WITH CHECK (is_admin_user());
+
 -- ── DONE ─────────────────────────────────────────────────────────────────────
 -- ✅ Profile save now works (UPDATE policy added)
 -- ✅ Document upload now works (storage buckets + policies created)
+-- ✅ Vehicle photo/agreement upload now works (vehicle-images/agreements buckets)
 -- ✅ Admin panel shows all users/vehicles/bookings (SELECT policies added)
 -- ✅ Admin Submitted Documents section loads photos (storage read policy)
 -- ✅ Verification toggle persists (RPC functions + admin UPDATE policy)
+-- ✅ Approve/Reject notifications delivered to vehicle owner
