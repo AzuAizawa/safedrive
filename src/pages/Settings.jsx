@@ -60,7 +60,7 @@ function Toggle({ checked, onChange }) {
 }
 
 export default function Settings() {
-    const { user, profile, signOut } = useAuth();
+    const { user, profile, signOut, isAdmin } = useAuth();
     const navigate = useNavigate();
 
     // Preference states (in a real app, save to DB/localStorage)
@@ -259,7 +259,11 @@ export default function Settings() {
             {/* ── Sign Out ─────────────────────────────────────── */}
             <div style={{ display: 'flex', gap: 12 }}>
                 <button className="btn btn-secondary" style={{ width: '100%' }}
-                    onClick={async () => { await signOut(); navigate('/'); }}>
+                    onClick={async () => {
+                        const wasAdmin = profile?.role === 'admin';
+                        await signOut();
+                        navigate(wasAdmin ? '/admin-login' : '/', { replace: true });
+                    }}>
                     <FiLogOut /> Sign Out of SafeDrive
                 </button>
             </div>

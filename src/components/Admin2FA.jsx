@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabaseAdmin } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { FiShield, FiSmartphone, FiCopy, FiCheck, FiAlertCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
@@ -228,10 +228,19 @@ export function Admin2FAVerify({ onSuccess, onCancel }) {
     }, []);
 
     const getFactorId = async () => {
-        const { data } = await supabase.auth.mfa.listFactors();
+        // Must use supabaseAdmin client — admin sessions live there
+        const { data } = await supabaseAdmin.auth.mfa.listFactors();
         const verified = data?.totp?.find(f => f.status === 'verified');
-        if (verified) setFactorId(verified.id);
-        else if (onSuccess) onSuccess(); // No 2FA enrolled — bypass
+        if (verified) {
+            setFactorId(verified.id);
+        } else {
+            // No 2FA enrolled — auto-bypass after a short delay
+            // The delay lets the AuthContext profile fetch finish settling
+            // before we navigate to /admin, avoiding the double-login bounce.
+            setTimeout(() => {
+                if (onSuccess) onSuccess();
+            }, 300);
+        }
     };
 
     const verify = async () => {

@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { FiHome, FiSearch, FiHeart, FiCalendar, FiBell, FiUser, FiLogOut, FiSettings, FiShield, FiTruck, FiPlus, FiMessageSquare } from 'react-icons/fi';
 
 export default function Navbar() {
-    const { user, profile, signOut, isAdmin, isRenter } = useAuth();
+    const { user, profile, signOut, isAdmin, isRenter, loading } = useAuth();
     const [showDropdown, setShowDropdown] = useState(false);
     const dropdownRef = useRef(null);
     const location = useLocation();
@@ -22,8 +22,10 @@ export default function Navbar() {
 
     const handleSignOut = async () => {
         setShowDropdown(false);
+        const wasAdmin = isAdmin; // capture before signOut clears state
         await signOut();
-        navigate('/');
+        // Admins always go back to the admin login portal
+        navigate(wasAdmin ? '/admin-login' : '/', { replace: true });
     };
 
     const getInitials = () => {
@@ -33,7 +35,19 @@ export default function Navbar() {
         return user?.email?.[0]?.toUpperCase() || 'U';
     };
 
-    // Landing page navbar
+    // While auth is resolving, show a minimal neutral nav to prevent flash
+    if (loading) {
+        return (
+            <nav className="landing-navbar" style={{ minHeight: 64 }}>
+                <Link to="/" className="navbar-brand">
+                    <div className="navbar-logo">SD</div>
+                    <span className="navbar-title">Safe<span>Drive</span></span>
+                </Link>
+            </nav>
+        );
+    }
+
+    // Landing page navbar (not logged in)
     if (!user) {
         return (
             <nav className="landing-navbar">
