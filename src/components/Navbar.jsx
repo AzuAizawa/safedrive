@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { FiHome, FiSearch, FiHeart, FiCalendar, FiBell, FiUser, FiLogOut, FiSettings, FiShield, FiTruck, FiPlus, FiMessageSquare } from 'react-icons/fi';
+import { FiHome, FiSearch, FiHeart, FiCalendar, FiBell, FiUser, FiLogOut, FiSettings, FiShield, FiTruck, FiPlus } from 'react-icons/fi';
 
 export default function Navbar() {
     const { user, profile, signOut, isAdmin, isRenter, loading } = useAuth();
@@ -87,11 +87,7 @@ export default function Navbar() {
                             <FiCalendar /> Bookings
                         </Link>
                     )}
-                    {!isAdmin && (
-                        <Link to="/messages" className={`navbar-link ${location.pathname.startsWith('/messages') ? 'active' : ''}`}>
-                            <FiMessageSquare /> Messages
-                        </Link>
-                    )}
+
                     {isAdmin && (
                         <Link to="/admin" className={`navbar-link ${location.pathname.startsWith('/admin') ? 'active' : ''}`}>
                             <FiShield /> Admin
@@ -125,14 +121,9 @@ export default function Navbar() {
                                 {isAdmin ? (
                                     <span className="badge badge-error" style={{ display: 'inline-flex' }}>Admin Account</span>
                                 ) : (
-                                    <>
-                                        <span className={`badge ${profile?.verification_status === 'verified' ? 'badge-verified' : 'badge-pending'}`} style={{ display: 'inline-flex' }}>
-                                            {profile?.verification_status || 'pending'}
-                                        </span>
-                                        <span className="badge badge-info" style={{ display: 'inline-flex' }}>
-                                            {profile?.role === 'user' ? 'Not Verified' : profile?.role === 'verified' ? 'Verified' : profile?.role || 'user'}
-                                        </span>
-                                    </>
+                                    <span className={`badge ${profile?.role === 'verified' ? 'badge-verified' : 'badge-pending'}`} style={{ display: 'inline-flex' }}>
+                                        {profile?.role === 'verified' ? 'Verified' : 'Not Verified'}
+                                    </span>
                                 )}
                             </div>
                             <div className="user-dropdown-divider" />

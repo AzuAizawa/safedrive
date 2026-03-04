@@ -25,6 +25,9 @@ export default function AdminPanel() {
     const [userDetailLoading, setUserDetailLoading] = useState(false);
     const [docsLoading, setDocsLoading] = useState(false);
     const [selectedVehicle, setSelectedVehicle] = useState(null);
+    const [showRejectModal, setShowRejectModal] = useState(null); // 'vehicle' | 'user'
+    const [rejectTarget, setRejectTarget] = useState(null);
+    const [rejectReason, setRejectReason] = useState('');
 
     // Car Catalog state
     const [carBrands, setCarBrands] = useState([]);
@@ -112,11 +115,9 @@ export default function AdminPanel() {
         }
     };
 
-    const verifyUser = async (userId, action) => {
+    const verifyUser = async (userId, action, reason = '') => {
         try {
             const isApprove = action === 'approve';
-            // Use RPC function (SECURITY DEFINER) to bypass RLS
-            // Direct .update() was silently blocked because supabaseAdmin uses the anon key
             const { error } = await supabaseAdmin.rpc('admin_verify_user', {
                 target_user_id: userId,
                 new_verification_status: isApprove ? 'verified' : 'rejected',
@@ -124,9 +125,10 @@ export default function AdminPanel() {
                 admin_user_id: user.id,
             });
             if (error) throw error;
-            try { await supabaseAdmin.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: `User ${isApprove ? 'verified' : 'rejected'} by admin` }); } catch (e) { }
-            try { await supabaseAdmin.from('notifications').insert({ user_id: userId, title: isApprove ? 'Identity Verified! ✅' : 'Verification Rejected', message: isApprove ? 'Your identity has been verified. You can now list vehicles and access all SafeDrive features!' : 'Your identity verification was not approved. Please resubmit your documents with clearer photos.', type: 'verification' }); } catch (e) { }
-            await logAudit({ action: isApprove ? 'VERIFY_USER' : 'REJECT_USER', entityType: 'user', entityId: userId, description: `Admin ${isApprove ? 'approved' : 'rejected'} identity verification for user ${selectedUser?.full_name || userId}`, newValue: { verification_status: isApprove ? 'verified' : 'rejected', role: isApprove ? 'verified' : 'user' }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
+            try { await supabaseAdmin.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: reason || `User ${isApprove ? 'verified' : 'rejected'} by admin` }); } catch (e) { }
+            const rejectionNote = reason ? `\n\nAdmin note: ${reason}` : '';
+            try { await supabaseAdmin.from('notifications').insert({ user_id: userId, title: isApprove ? 'Identity Verified! ✅' : 'Verification Rejected', message: isApprove ? 'Your identity has been verified. You can now list vehicles and access all SafeDrive features!' : `Your identity verification was not approved. Please resubmit your documents with clearer photos.${rejectionNote}`, type: 'verification' }); } catch (e) { }
+            await logAudit({ action: isApprove ? 'VERIFY_USER' : 'REJECT_USER', entityType: 'user', entityId: userId, description: `Admin ${isApprove ? 'approved' : 'rejected'} identity verification for user ${selectedUser?.full_name || userId}${reason ? ': ' + reason : ''}`, newValue: { verification_status: isApprove ? 'verified' : 'rejected', role: isApprove ? 'verified' : 'user' }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
             toast.success(`User ${isApprove ? 'verified ✅' : 'rejected'} successfully`);
             fetchData();
             setSelectedUser(null);
@@ -158,30 +160,29 @@ export default function AdminPanel() {
     };
 
     // ===== VEHICLE FUNCTIONS =====
-    const approveVehicle = async (vehicleId, action) => {
+    const approveVehicle = async (vehicleId, action, reason = '') => {
         try {
             const veh = vehicles.find(v => v.id === vehicleId) || selectedVehicle;
             const newStatus = action === 'approve' ? 'approved' : 'rejected';
 
-            // 1. Update vehicle status
+            // Update vehicle status
             const { error } = await supabaseAdmin.from('vehicles').update({
                 status: newStatus,
-                approved_by: user.id,
-                approved_at: new Date().toISOString(),
             }).eq('id', vehicleId);
             if (error) throw error;
 
-            // 2. Send notification to vehicle owner
+            // Send notification to vehicle owner
             const vehicleName = `${veh?.year || ''} ${veh?.make || ''} ${veh?.model || ''}`.trim();
+            const rejectionNote = reason ? `\n\nReason: ${reason}` : '';
             const notifMessage = action === 'approve'
                 ? `✅ Your vehicle listing "${vehicleName}" has been approved and is now live!`
-                : `❌ Your vehicle listing "${vehicleName}" was not approved by our team. Please review your listing details and resubmit.`;
+                : `❌ Your vehicle listing "${vehicleName}" was not approved.${rejectionNote} Please review and resubmit.`;
 
             try {
                 await supabaseAdmin.from('notifications').insert({
                     user_id: veh?.owner_id,
                     type: action === 'approve' ? 'vehicle_approved' : 'vehicle_rejected',
-                    title: action === 'approve' ? 'Vehicle Listing Approved' : 'Vehicle Listing Rejected',
+                    title: action === 'approve' ? 'Vehicle Listing Approved ✅' : 'Vehicle Listing Rejected',
                     message: notifMessage,
                     read: false,
                     created_at: new Date().toISOString(),
@@ -190,11 +191,11 @@ export default function AdminPanel() {
                 console.warn('Notification insert failed (non-critical):', notifErr.message);
             }
 
-            // 3. Audit log
+            // Audit log
             await logAudit({
                 action: action === 'approve' ? 'APPROVE_VEHICLE' : 'REJECT_VEHICLE',
                 entityType: 'vehicle', entityId: vehicleId,
-                description: `Admin ${action === 'approve' ? 'approved' : 'rejected'} vehicle ${vehicleName}`,
+                description: `Admin ${action === 'approve' ? 'approved' : 'rejected'} vehicle ${vehicleName}${reason ? ': ' + reason : ''}`,
                 oldValue: { status: 'pending' },
                 newValue: { status: newStatus },
                 performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email
@@ -207,6 +208,17 @@ export default function AdminPanel() {
             console.error('approveVehicle error:', err);
             toast.error(`Failed to ${action} vehicle: ${err.message || 'Unknown error'}`);
         }
+    };
+
+    const confirmReject = () => {
+        if (showRejectModal === 'vehicle') {
+            approveVehicle(rejectTarget, 'reject', rejectReason);
+        } else {
+            verifyUser(rejectTarget, 'reject', rejectReason);
+        }
+        setShowRejectModal(null);
+        setRejectReason('');
+        setRejectTarget(null);
     };
 
     // ===== CATALOG FUNCTIONS =====
@@ -343,7 +355,7 @@ export default function AdminPanel() {
                     {showActions && (
                         <>
                             <button className="btn btn-success btn-sm" onClick={() => verifyUser(u.id, 'approve')} title="Approve">✅ Approve</button>
-                            <button className="btn btn-danger btn-sm" onClick={() => verifyUser(u.id, 'reject')} title="Reject">❌ Reject</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => { setRejectTarget(u.id); setShowRejectModal('user'); }} title="Reject">❌ Reject</button>
                         </>
                     )}
                     <button className="btn btn-ghost btn-sm" onClick={() => handleViewUser(u)} title="View details"><FiEye /></button>
@@ -354,7 +366,7 @@ export default function AdminPanel() {
 
     // ===== VEHICLE ROW COMPONENT =====
     const VehicleRow = ({ v, showActions = false }) => (
-        <tr key={v.id} style={{ background: showActions ? 'var(--warning-50)' : undefined }}>
+        <tr key={v.id} style={{ background: showActions ? 'rgba(251,146,60,0.06)' : undefined }}>
             <td>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ width: 48, height: 36, borderRadius: 'var(--radius-sm)', background: 'var(--neutral-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, overflow: 'hidden', flexShrink: 0 }}>
@@ -370,22 +382,23 @@ export default function AdminPanel() {
             </td>
             <td style={{ fontSize: 14 }}>{v.profiles?.full_name || '—'}</td>
             <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>₱{v.daily_rate?.toLocaleString()}</td>
-            <td>
-                <span className={`badge ${v.status === 'approved' || v.status === 'listed' ? 'badge-success' : v.status === 'pending' ? 'badge-pending' : 'badge-error'}`}>
-                    {v.status}
-                </span>
-            </td>
+            {!showActions && (
+                <td>
+                    <span className={`badge ${v.status === 'approved' || v.status === 'listed' ? 'badge-success' : v.status === 'rejected' ? 'badge-error' : 'badge-info'}`}>
+                        {v.status}
+                    </span>
+                </td>
+            )}
+            {showActions && <td />}
             <td>
                 <div style={{ display: 'flex', gap: 6 }}>
                     {showActions && (
                         <>
                             <button className="btn btn-success btn-sm" onClick={() => approveVehicle(v.id, 'approve')}>✅ Approve</button>
-                            <button className="btn btn-danger btn-sm" onClick={() => approveVehicle(v.id, 'reject')}>❌ Reject</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => { setRejectTarget(v.id); setShowRejectModal('vehicle'); }}>❌ Reject</button>
                         </>
                     )}
-                    {v.images && v.images.length > 0 && (
-                        <button className="btn btn-ghost btn-sm" onClick={() => setSelectedVehicle(v)} title="View photos"><FiImage /></button>
-                    )}
+                    <button className="btn btn-ghost btn-sm" onClick={() => setSelectedVehicle(v)} title="View all details"><FiEye /></button>
                 </div>
             </td>
         </tr>
@@ -887,35 +900,162 @@ export default function AdminPanel() {
                 </div>
             )}
 
-            {/* ========== VEHICLE PHOTO MODAL ========== */}
+            {/* ========== VEHICLE DETAIL MODAL ========== */}
             {selectedVehicle && (
                 <div className="modal-overlay" onClick={() => setSelectedVehicle(null)}>
-                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: '92vh', overflow: 'auto' }}>
                         <div className="modal-header">
-                            <h2>{selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}</h2>
+                            <h2>🚗 {selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}</h2>
                             <button className="btn btn-ghost btn-sm" onClick={() => setSelectedVehicle(null)}>✕</button>
                         </div>
                         <div className="modal-body">
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                                {selectedVehicle.images?.map((url, i) => (
-                                    <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                                        <img src={url} alt={`Photo ${i + 1}`} style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', borderRadius: 'var(--radius-md)' }} />
-                                    </a>
+                            {/* Owner */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, padding: '10px 14px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
+                                <div>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>Owner</div>
+                                    <div style={{ fontWeight: 700, fontSize: 15 }}>{selectedVehicle.profiles?.full_name || '—'}</div>
+                                </div>
+                                <span className={`badge ${selectedVehicle.status === 'approved' ? 'badge-success' : selectedVehicle.status === 'rejected' ? 'badge-error' : 'badge-info'}`} style={{ fontSize: 13, padding: '6px 14px' }}>
+                                    {selectedVehicle.status?.toUpperCase()}
+                                </span>
+                            </div>
+
+                            {/* Photos */}
+                            {selectedVehicle.images?.length > 0 && (
+                                <div style={{ marginBottom: 20 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Photos</div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
+                                        {selectedVehicle.images.map((url, i) => (
+                                            <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                                                <img src={url} alt={`Photo ${i + 1}`} style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', borderRadius: 'var(--radius-md)' }} />
+                                            </a>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Vehicle Details Grid */}
+                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 10 }}>Vehicle Details</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+                                {[
+                                    { label: 'Brand', value: selectedVehicle.make },
+                                    { label: 'Model', value: selectedVehicle.model },
+                                    { label: 'Year', value: selectedVehicle.year },
+                                    { label: 'Color', value: selectedVehicle.color },
+                                    { label: 'Plate Number', value: selectedVehicle.plate_number },
+                                    { label: 'Body Type', value: selectedVehicle.body_type },
+                                    { label: 'Transmission', value: selectedVehicle.transmission },
+                                    { label: 'Fuel Type', value: selectedVehicle.fuel_type },
+                                    { label: 'Seating Capacity', value: selectedVehicle.seating_capacity ? `${selectedVehicle.seating_capacity} seats` : '—' },
+                                    { label: 'Mileage', value: selectedVehicle.mileage ? `${selectedVehicle.mileage?.toLocaleString()} km` : 'Not specified' },
+                                    { label: 'Daily Rate', value: `₱${selectedVehicle.daily_rate?.toLocaleString()}/day` },
+                                    { label: 'Security Deposit', value: selectedVehicle.security_deposit ? `₱${selectedVehicle.security_deposit?.toLocaleString()}` : 'None' },
+                                ].map((item, i) => (
+                                    <div key={i} style={{ padding: '10px 12px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
+                                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
+                                        <div style={{ fontSize: 13, fontWeight: 600, marginTop: 3 }}>{item.value || '—'}</div>
+                                    </div>
                                 ))}
                             </div>
-                            <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 13 }}>
-                                <div><strong>Plate:</strong> {selectedVehicle.plate_number}</div>
-                                <div><strong>Color:</strong> {selectedVehicle.color}</div>
-                                <div><strong>Body:</strong> {selectedVehicle.body_type}</div>
-                                <div><strong>Rate:</strong> ₱{selectedVehicle.daily_rate?.toLocaleString()}/day</div>
+
+                            {/* Pickup Location */}
+                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 10 }}>Pickup Location</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+                                {[
+                                    { label: 'Street / Landmark', value: selectedVehicle.pickup_location },
+                                    { label: 'City', value: selectedVehicle.pickup_city },
+                                    { label: 'Province', value: selectedVehicle.pickup_province },
+                                ].map((item, i) => (
+                                    <div key={i} style={{ padding: '10px 12px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
+                                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
+                                        <div style={{ fontSize: 13, fontWeight: 600, marginTop: 3 }}>{item.value || '—'}</div>
+                                    </div>
+                                ))}
                             </div>
+
+                            {/* Rental Durations */}
+                            {selectedVehicle.available_durations?.length > 0 && (
+                                <div style={{ marginBottom: 20 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Available Rental Durations</div>
+                                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                        {selectedVehicle.available_durations.map((d, i) => (
+                                            <span key={i} className="badge badge-info">{d.replace(/_/g, ' ')}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Features */}
+                            {selectedVehicle.features?.length > 0 && (
+                                <div style={{ marginBottom: 20 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Features</div>
+                                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                        {selectedVehicle.features.map((f, i) => (
+                                            <span key={i} style={{ background: 'var(--success-50)', color: 'var(--success-700)', borderRadius: 20, padding: '4px 10px', fontSize: 12, fontWeight: 600 }}>{f}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Description */}
+                            {selectedVehicle.description && (
+                                <div style={{ marginBottom: 20 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Owner's Description</div>
+                                    <div style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', padding: '12px 16px', fontSize: 13, lineHeight: 1.6 }}>
+                                        {selectedVehicle.description}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Agreement */}
+                            {selectedVehicle.agreement_url && (
+                                <div>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Agreement Document</div>
+                                    <a href={selectedVehicle.agreement_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
+                                        📄 View Agreement
+                                    </a>
+                                </div>
+                            )}
                         </div>
                         {selectedVehicle.status === 'pending' && (
                             <div className="modal-footer">
-                                <button className="btn btn-danger" onClick={() => approveVehicle(selectedVehicle.id, 'reject')}><FiX /> Reject</button>
-                                <button className="btn btn-success" onClick={() => approveVehicle(selectedVehicle.id, 'approve')}><FiCheck /> Approve</button>
+                                <button className="btn btn-danger" onClick={() => { setRejectTarget(selectedVehicle.id); setShowRejectModal('vehicle'); setSelectedVehicle(null); }}><FiX /> Reject</button>
+                                <button className="btn btn-success" onClick={() => approveVehicle(selectedVehicle.id, 'approve')}><FiCheck /> Approve Listing</button>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* ========== REJECTION REASON MODAL ========== */}
+            {showRejectModal && (
+                <div className="modal-overlay" onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+                        <div className="modal-header">
+                            <h2>❌ Reason for Rejection</h2>
+                            <button className="btn btn-ghost btn-sm" onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>✕</button>
+                        </div>
+                        <div className="modal-body">
+                            <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                                Provide a reason for rejecting this {showRejectModal === 'vehicle' ? 'vehicle listing' : 'verification request'}.
+                                This message will be sent to the {showRejectModal === 'vehicle' ? 'vehicle owner' : 'user'} as a notification.
+                            </p>
+                            <textarea
+                                className="form-input"
+                                style={{ width: '100%', height: 120, resize: 'vertical', fontFamily: 'inherit' }}
+                                placeholder={showRejectModal === 'vehicle'
+                                    ? 'e.g. Photos are unclear, plate number doesn\'t match registration, missing required documents...'
+                                    : 'e.g. ID photo is blurry, selfie doesn\'t match ID, expired document...'
+                                }
+                                value={rejectReason}
+                                onChange={(e) => setRejectReason(e.target.value)}
+                            />
+                            <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>You can leave this blank to use a generic rejection message.</p>
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn btn-secondary" onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>Cancel</button>
+                            <button className="btn btn-danger" onClick={confirmReject}><FiX /> Confirm Reject</button>
+                        </div>
                     </div>
                 </div>
             )}
