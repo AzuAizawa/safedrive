@@ -21,18 +21,20 @@ export default function AdminLogin() {
     // This fires after both the user session AND profile (role) have loaded.
     // Using loginSuccess flag prevents premature navigation before profile loads.
     useEffect(() => {
+        // Case 1: Fresh login — 2FA cleared, profile confirmed loaded
         if (!loading && user && isAdmin && loginSuccess) {
             toast.success(`Welcome back, ${adminName || 'Admin'}!`);
             navigate('/admin', { replace: true });
         }
-        // Already logged in as admin on page load
-        if (!loading && user && isAdmin && !show2FA && !loginSuccess) {
+        // Case 2: Already logged in as admin (page refresh) — only when NOT mid-login
+        if (!loading && user && isAdmin && !show2FA && !loginSuccess && !formLoading) {
             navigate('/admin', { replace: true });
         }
-        if (!loading && user && !isAdmin && !show2FA && !loginSuccess) {
+        // Case 3: Logged in but not admin — only show error when NOT mid-login
+        if (!loading && user && !isAdmin && !show2FA && !loginSuccess && !formLoading) {
             setError('This portal is for administrators only. Please use the main login page.');
         }
-    }, [loading, user, isAdmin, loginSuccess]);
+    }, [loading, user, isAdmin, loginSuccess, formLoading]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
