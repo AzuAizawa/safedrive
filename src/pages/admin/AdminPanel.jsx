@@ -70,8 +70,13 @@ export default function AdminPanel() {
             ]);
             setUserVehicles(vehiclesRes.data || []);
             setUserBookings(bookingsRes.data || []);
-        } catch (err) { console.error('fetchUserDetails error:', err); }
-        finally { setUserDetailLoading(false); }
+        } catch (err) {
+            console.warn('fetchUserDetails — run SUPABASE_ADMIN_VERIFY_FIX.sql to fix RLS:', err.message);
+            setUserVehicles([]);
+            setUserBookings([]);
+        } finally {
+            setUserDetailLoading(false);
+        }
     };
 
     const fetchUserDocs = async (userId) => {
@@ -79,20 +84,32 @@ export default function AdminPanel() {
         setUserDocs([]);
         try {
             const allDocs = [];
+            // Wrap each bucket call in a timeout so it never hangs
+            const withTimeout = (promise, ms = 5000) =>
+                Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
             for (const bucket of ['documents', 'selfies']) {
                 try {
-                    const { data, error } = await supabaseAdmin.storage.from(bucket).list(userId, { limit: 20 });
+                    const { data, error } = await withTimeout(
+                        supabaseAdmin.storage.from(bucket).list(userId, { limit: 20 })
+                    );
                     if (!error && data) {
                         for (const file of data) {
                             const { data: urlData } = supabaseAdmin.storage.from(bucket).getPublicUrl(`${userId}/${file.name}`);
                             allDocs.push({ name: file.name, bucket, url: urlData?.publicUrl });
                         }
                     }
-                } catch (e) { console.warn(`Could not list ${bucket}:`, e); }
+                } catch (e) {
+                    console.warn(`Could not list ${bucket} (run SUPABASE_ADMIN_VERIFY_FIX.sql to fix):`, e.message);
+                }
             }
             setUserDocs(allDocs);
-        } catch (err) { console.error('Error fetching docs:', err); }
-        finally { setDocsLoading(false); }
+        } catch (err) {
+            console.error('Error fetching docs:', err);
+            setUserDocs([]);
+        } finally {
+            setDocsLoading(false);
+        }
     };
 
     const verifyUser = async (userId, action) => {
