@@ -216,17 +216,25 @@ export function AuthProvider({ children }) {
 
         if (error) {
             logFailedLogin(email, 'invalid_password');
-        } else {
-            // After a successful admin sign-in, re-attach the listener to the admin client
-            if (asAdmin && data?.session) {
+        } else if (data?.session) {
+            // CRITICAL FIX: The SIGNED_IN auth event fires BEFORE we call attachListener,
+            // so the listener never receives it (only INITIAL_SESSION which we skip).
+            // Explicitly set the user and fetch the profile here instead of relying on the listener.
+            const sessionUser = data.session.user;
+            setUser(sessionUser);
+
+            if (asAdmin) {
                 activeClientRef.current = supabaseAdmin;
                 setActiveClient(supabaseAdmin);
                 attachListener(supabaseAdmin);
-            } else if (!asAdmin && data?.session) {
+            } else {
                 activeClientRef.current = supabaseUser;
                 setActiveClient(supabaseUser);
                 attachListener(supabaseUser);
             }
+
+            // Fetch profile immediately — this sets loading=false when done
+            await fetchProfile(sessionUser.id, targetClient);
 
             if (rememberMe) {
                 localStorage.setItem('safedrive_remember_me', 'true');
@@ -237,6 +245,7 @@ export function AuthProvider({ children }) {
 
         return { data, error };
     };
+
 
     // ── Sign Out ───────────────────────────────────────────────────────────
     const signOut = async () => {
