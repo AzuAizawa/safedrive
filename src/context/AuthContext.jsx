@@ -65,8 +65,10 @@ export function AuthProvider({ children }) {
     };
 
     // ── Attach ONE listener to whichever client won the session check ──────
-    const attachListener = (client) => {
-        // Remove prior subscription if any
+    // processInitialSession=true when called after a fresh login so that the
+    // INITIAL_SESSION event (which fires when listener attaches to an already-
+    // authenticated client) is processed rather than skipped.
+    const attachListener = (client, processInitialSession = false) => {
         if (subscriptionRef.current) {
             subscriptionRef.current.unsubscribe();
             subscriptionRef.current = null;
@@ -74,7 +76,9 @@ export function AuthProvider({ children }) {
 
         const { data: { subscription } } = client.auth.onAuthStateChange(async (event, session) => {
             if (!mountedRef.current) return;
-            if (event === 'INITIAL_SESSION') return; // Already handled in initializeAuth
+            // Skip INITIAL_SESSION on regular page-load attach (handled by initializeAuth).
+            // But process it when re-attaching after a fresh login (processInitialSession=true).
+            if (event === 'INITIAL_SESSION' && !processInitialSession) return;
 
             try {
                 if (session?.user) {
@@ -88,7 +92,6 @@ export function AuthProvider({ children }) {
                         });
                     }
                 } else {
-                    // Only the active listener fires here, so clearing state is safe
                     setUser(null);
                     setProfile(null);
                     if (mountedRef.current) setLoading(false);
@@ -217,24 +220,17 @@ export function AuthProvider({ children }) {
         if (error) {
             logFailedLogin(email, 'invalid_password');
         } else if (data?.session) {
-            // CRITICAL FIX: The SIGNED_IN auth event fires BEFORE we call attachListener,
-            // so the listener never receives it (only INITIAL_SESSION which we skip).
-            // Explicitly set the user and fetch the profile here instead of relying on the listener.
-            const sessionUser = data.session.user;
-            setUser(sessionUser);
-
             if (asAdmin) {
                 activeClientRef.current = supabaseAdmin;
                 setActiveClient(supabaseAdmin);
-                attachListener(supabaseAdmin);
             } else {
                 activeClientRef.current = supabaseUser;
                 setActiveClient(supabaseUser);
-                attachListener(supabaseUser);
             }
-
-            // Fetch profile immediately — this sets loading=false when done
-            await fetchProfile(sessionUser.id, targetClient);
+            // Pass processInitialSession=true so the INITIAL_SESSION event on this
+            // fresh listener attachment (after sign-in) triggers setUser+fetchProfile.
+            // Previously this was skipped unconditionally, leaving loading=true forever.
+            attachListener(targetClient, true);
 
             if (rememberMe) {
                 localStorage.setItem('safedrive_remember_me', 'true');
@@ -245,7 +241,6 @@ export function AuthProvider({ children }) {
 
         return { data, error };
     };
-
 
     // ── Sign Out ───────────────────────────────────────────────────────────
     const signOut = async () => {
