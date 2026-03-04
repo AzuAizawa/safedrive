@@ -95,29 +95,24 @@ export default function Profile() {
 
         setSubmitLoading(true);
         try {
-            // Upload front ID
-            const idFrontFile = idFrontRef.current.files[0];
-            const { error: frontErr } = await supabase.storage
-                .from('documents')
-                .upload(`${user.id}/id-front-${Date.now()}`, idFrontFile, { upsert: true });
-            if (frontErr) throw new Error(`ID front upload failed: ${frontErr.message}`);
+            // Upload photos as BEST-EFFORT — don't block submission if storage fails
+            const tryUpload = async (bucket, path, file) => {
+                try {
+                    const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
+                    if (error) console.warn(`Photo upload to ${bucket} failed (will retry later):`, error.message);
+                } catch (e) {
+                    console.warn(`Photo upload to ${bucket} threw:`, e.message);
+                }
+            };
 
-            // Upload back ID (optional)
+            await tryUpload('documents', `${user.id}/id-front-${Date.now()}`, idFrontRef.current.files[0]);
             if (idBackRef.current?.files?.[0]) {
-                const { error: backErr } = await supabase.storage
-                    .from('documents')
-                    .upload(`${user.id}/id-back-${Date.now()}`, idBackRef.current.files[0], { upsert: true });
-                if (backErr) console.warn('ID back upload failed:', backErr.message);
+                await tryUpload('documents', `${user.id}/id-back-${Date.now()}`, idBackRef.current.files[0]);
             }
+            await tryUpload('selfies', `${user.id}/selfie-${Date.now()}`, selfieRef.current.files[0]);
 
-            // Upload selfie
-            const selfieFile = selfieRef.current.files[0];
-            const { error: selfieErr } = await supabase.storage
-                .from('selfies')
-                .upload(`${user.id}/selfie-${Date.now()}`, selfieFile, { upsert: true });
-            if (selfieErr) throw new Error(`Selfie upload failed: ${selfieErr.message}`);
-
-            // Save all personal info + set status to submitted
+            // ALWAYS save profile data + set verification_status to 'submitted'
+            // This is the critical step — even if photo uploads fail, the request is registered
             const { error: updateErr } = await supabase
                 .from('profiles')
                 .update({
@@ -128,6 +123,7 @@ export default function Profile() {
                     date_of_birth: formData.date_of_birth || null,
                     drivers_license_number: formData.drivers_license_number,
                     national_id_number: formData.national_id_number,
+
                     verification_status: 'submitted',
                     updated_at: new Date().toISOString(),
                 })

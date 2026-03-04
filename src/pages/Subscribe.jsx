@@ -28,12 +28,14 @@ const FEATURES_PRO = [
 ];
 
 export default function Subscribe() {
-    const { user, profile } = useAuth();
+    const { user, profile, isVerified: ctxVerified } = useAuth();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [vehicleCount, setVehicleCount] = useState(0);
 
-    const isVerified = profile?.verification_status === 'verified';
+    // Check EITHER role='verified' OR verification_status='verified'
+    // Admin may have set role before verification_status depending on SQL state
+    const isVerified = ctxVerified || profile?.role === 'verified' || profile?.verification_status === 'verified';
     const isActive = isSubscriptionActive(profile);
     const daysLeft = getSubscriptionDaysLeft(profile);
 
