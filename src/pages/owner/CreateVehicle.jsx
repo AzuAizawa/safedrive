@@ -228,10 +228,10 @@ export default function CreateVehicle() {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        // Check verified using both role and verification_status (SQL may not have synced yet)
+        // Check verified using both role and verification_status
         const userIsVerified = isVerified || profile?.role === 'verified' || profile?.verification_status === 'verified';
         if (!userIsVerified) {
-            setShowVerifyGate(true);
+            toast.error('⚠️ You must be verified to list a vehicle. Go to Profile → complete identity verification first.');
             return;
         }
 
@@ -416,7 +416,7 @@ export default function CreateVehicle() {
                             <div className="form-group">
                                 <label className="form-label">Brand *</label>
                                 <select className="form-select" style={{ width: '100%' }}
-                                    value={formData.make} required disabled={catalogLoading}
+                                    value={formData.make} disabled={catalogLoading}
                                     onChange={e => setFormData({ ...formData, make: e.target.value })}>
                                     <option value="">{catalogLoading ? 'Loading...' : '— Select Brand —'}</option>
                                     {brands.map(b => (
@@ -427,7 +427,7 @@ export default function CreateVehicle() {
                             <div className="form-group">
                                 <label className="form-label">Model *</label>
                                 <select className="form-select" style={{ width: '100%' }}
-                                    value={formData.model} required disabled={!formData.make || catalogLoading}
+                                    value={formData.model} disabled={!formData.make || catalogLoading}
                                     onChange={e => setFormData({ ...formData, model: e.target.value })}>
                                     <option value="">{!formData.make ? '— Select brand first —' : filteredModels.length === 0 ? 'No models available' : '— Select Model —'}</option>
                                     {filteredModels.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
@@ -439,7 +439,7 @@ export default function CreateVehicle() {
                         <div className="form-row" style={{ marginBottom: 16 }}>
                             <div className="form-group">
                                 <label className="form-label">Year Model *</label>
-                                <select className="form-select" style={{ width: '100%' }} value={formData.year} required
+                                <select className="form-select" style={{ width: '100%' }} value={formData.year}
                                     onChange={e => setFormData({ ...formData, year: e.target.value })}>
                                     {Array.from({ length: currentYear + 1 - 1990 + 1 }, (_, i) => currentYear + 1 - i).map(y => (
                                         <option key={y} value={y}>{y}</option>

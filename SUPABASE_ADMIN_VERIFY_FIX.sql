@@ -48,6 +48,19 @@ DROP POLICY IF EXISTS "Admins can update any vehicle" ON vehicles;
 CREATE POLICY "Admins can update any vehicle" ON vehicles
     FOR UPDATE USING (auth.uid() = owner_id OR is_admin_user());
 
+-- Verified users can INSERT a vehicle listing
+DROP POLICY IF EXISTS "Verified users can list vehicles" ON vehicles;
+CREATE POLICY "Verified users can list vehicles" ON vehicles
+    FOR INSERT WITH CHECK (
+        auth.uid() IS NOT NULL AND (
+            EXISTS (
+                SELECT 1 FROM profiles
+                WHERE id = auth.uid()
+                AND (role = 'verified' OR verification_status = 'verified')
+            ) OR is_admin_user()
+        )
+    );
+
 -- ── STEP 4: Bookings RLS ────────────────────────────────────────────────────
 DROP POLICY IF EXISTS "Admins can view all bookings" ON bookings;
 CREATE POLICY "Admins can view all bookings" ON bookings
