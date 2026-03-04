@@ -33,8 +33,51 @@ export default function Subscribe() {
     const [loading, setLoading] = useState(false);
     const [vehicleCount, setVehicleCount] = useState(0);
 
+    const isVerified = profile?.verification_status === 'verified';
     const isActive = isSubscriptionActive(profile);
     const daysLeft = getSubscriptionDaysLeft(profile);
+
+    // --- Verification Gate ---
+    // Unverified users cannot subscribe. If they pay and can't list cars,
+    // they waste their money. Require verification first.
+    if (!isVerified) {
+        return (
+            <div style={{ maxWidth: 520, margin: '60px auto', padding: '0 16px', textAlign: 'center' }}>
+                <BackButton />
+                <div style={{
+                    background: 'linear-gradient(135deg, #fff7ed, #fef3c7)',
+                    border: '2px solid rgba(245,158,11,0.4)',
+                    borderRadius: 'var(--radius-xl)',
+                    padding: '40px 32px',
+                    marginTop: 16,
+                }}>
+                    <div style={{ fontSize: 52, marginBottom: 12 }}>🔒</div>
+                    <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 8, color: '#92400e' }}>
+                        Verification Required
+                    </h2>
+                    <p style={{ fontSize: 14, color: '#78350f', lineHeight: 1.7, marginBottom: 24 }}>
+                        You need to be <strong>verified</strong> before subscribing to SafeDrive Premium.
+                        <br /><br />
+                        This protects you — a subscription lets you list unlimited vehicles, but listing vehicles
+                        requires identity verification. We don't want you paying for features you can't use yet.
+                    </p>
+                    <div style={{
+                        background: 'rgba(245,158,11,0.1)', borderRadius: 'var(--radius-md)',
+                        padding: '12px 16px', marginBottom: 24, fontSize: 13, color: '#92400e',
+                    }}>
+                        {profile?.verification_status === 'submitted'
+                            ? '⏳ Your documents are currently under review (24–48 hours). Please check back soon!'
+                            : profile?.verification_status === 'rejected'
+                                ? '❌ Your verification was rejected. Please resubmit your documents with clearer photos.'
+                                : '📄 Please submit your government-issued ID and a selfie in your Profile to get verified.'}
+                    </div>
+                    <a href="/profile" className="btn btn-primary" style={{ display: 'inline-flex', gap: 8 }}>
+                        📋 Go to Profile & Submit Documents
+                    </a>
+                </div>
+            </div>
+        );
+    }
 
     useEffect(() => {
         if (user) fetchVehicleCount();

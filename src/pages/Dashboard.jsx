@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { FiTruck, FiCalendar, FiStar, FiAlertTriangle, FiArrowRight, FiCheckCircle, FiClock, FiUsers, FiShield } from 'react-icons/fi';
+import { isSubscriptionActive, getSubscriptionDaysLeft } from '../lib/paymongo';
 
 export default function Dashboard() {
     const { profile, isAdmin, isRenter, isRentee } = useAuth();
@@ -236,6 +237,51 @@ export default function Dashboard() {
             </div>
 
             {getVerificationBanner()}
+
+            {/* ── Subscription Banner (verified non-admin users only) ── */}
+            {!isAdmin && profile?.verification_status === 'verified' && (
+                isSubscriptionActive(profile) ? (
+                    <div style={{
+                        background: 'linear-gradient(135deg, #0f2d1f, #14532d)',
+                        border: '1px solid rgba(74,222,128,0.3)',
+                        borderRadius: 'var(--radius-lg, 12px)',
+                        padding: '14px 20px',
+                        marginBottom: 24,
+                        display: 'flex', alignItems: 'center', gap: 14,
+                    }}>
+                        <span style={{ fontSize: 22 }}>⭐</span>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: '#4ade80' }}>SafeDrive Premium Active</div>
+                            <div style={{ fontSize: 13, color: '#86efac' }}>
+                                {getSubscriptionDaysLeft(profile)} days remaining — Unlimited listings
+                            </div>
+                        </div>
+                        <Link to="/subscribe" className="btn btn-sm" style={{ background: 'rgba(74,222,128,0.2)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.4)', fontSize: 12 }}>
+                            Manage
+                        </Link>
+                    </div>
+                ) : (
+                    <div style={{
+                        background: 'linear-gradient(135deg, #1e3a5f, #1a2e4a)',
+                        border: '1px solid rgba(59,130,246,0.4)',
+                        borderRadius: 'var(--radius-lg, 12px)',
+                        padding: '16px 20px',
+                        marginBottom: 24,
+                        display: 'flex', alignItems: 'center', gap: 14,
+                    }}>
+                        <span style={{ fontSize: 24 }}>⭐</span>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: '#93c5fd' }}>Unlock Unlimited Listings</div>
+                            <div style={{ fontSize: 13, color: '#64748b' }}>
+                                Subscribe for ₱399/month via GCash — list as many cars as you want.
+                            </div>
+                        </div>
+                        <Link to="/subscribe" className="btn btn-primary btn-sm" style={{ flexShrink: 0, background: '#3b82f6', border: 'none', whiteSpace: 'nowrap' }}>
+                            Subscribe ₱399 →
+                        </Link>
+                    </div>
+                )
+            )}
 
             {/* Stats Grid */}
             <div className="stats-grid">

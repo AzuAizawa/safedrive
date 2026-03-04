@@ -97,16 +97,20 @@ export default function AdminPanel() {
 
     const verifyUser = async (userId, action) => {
         try {
+            const isApprove = action === 'approve';
+            // FIX: Must update BOTH verification_status AND role.
+            // The app's "Verified" badge reads profile.role, not just verification_status.
             const { error } = await supabaseAdmin.from('profiles').update({
-                verification_status: action === 'approve' ? 'verified' : 'rejected',
+                verification_status: isApprove ? 'verified' : 'rejected',
+                role: isApprove ? 'verified' : 'user', // ← This was missing — it's what controls the badge
                 verified_by: user.id,
                 verified_at: new Date().toISOString(),
             }).eq('id', userId);
             if (error) throw error;
-            try { await supabaseAdmin.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: `User ${action === 'approve' ? 'verified' : 'rejected'} by admin` }); } catch (e) { }
-            try { await supabaseAdmin.from('notifications').insert({ user_id: userId, title: action === 'approve' ? 'Identity Verified!' : 'Verification Rejected', message: action === 'approve' ? 'Your identity has been verified. You can now access all SafeDrive features!' : 'Your identity verification was not approved. Please resubmit your documents.', type: 'verification' }); } catch (e) { }
-            await logAudit({ action: action === 'approve' ? 'VERIFY_USER' : 'REJECT_USER', entityType: 'user', entityId: userId, description: `Admin ${action === 'approve' ? 'approved' : 'rejected'} identity verification for user ${selectedUser?.full_name || userId}`, newValue: { verification_status: action === 'approve' ? 'verified' : 'rejected' }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
-            toast.success(`User ${action === 'approve' ? 'verified' : 'rejected'} successfully`);
+            try { await supabaseAdmin.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: `User ${isApprove ? 'verified' : 'rejected'} by admin` }); } catch (e) { }
+            try { await supabaseAdmin.from('notifications').insert({ user_id: userId, title: isApprove ? 'Identity Verified! ✅' : 'Verification Rejected', message: isApprove ? 'Your identity has been verified. You can now list vehicles and access all SafeDrive features!' : 'Your identity verification was not approved. Please resubmit your documents with clearer photos.', type: 'verification' }); } catch (e) { }
+            await logAudit({ action: isApprove ? 'VERIFY_USER' : 'REJECT_USER', entityType: 'user', entityId: userId, description: `Admin ${isApprove ? 'approved' : 'rejected'} identity verification for user ${selectedUser?.full_name || userId}`, newValue: { verification_status: isApprove ? 'verified' : 'rejected', role: isApprove ? 'verified' : 'user' }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
+            toast.success(`User ${isApprove ? 'verified ✅' : 'rejected'} successfully`);
             fetchData();
             setSelectedUser(null);
         } catch (err) { toast.error('Failed to update verification'); }
