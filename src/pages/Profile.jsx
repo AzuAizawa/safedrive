@@ -151,6 +151,9 @@ export default function Profile() {
         }
     };
 
+    // Personal info is locked once submitted or verified; editable again only if rejected
+    const infoLocked = profile?.verification_status === 'submitted' || profile?.verification_status === 'verified';
+
     return (
         <div style={{ maxWidth: 800, margin: '0 auto' }}>
             <BackButton />
@@ -191,12 +194,31 @@ export default function Profile() {
             <div className="card" style={{ marginBottom: 24 }}>
                 <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>Personal Information</h2></div>
                 <div className="card-body">
+                    {/* Lock notice */}
+                    {infoLocked && (
+                        <div style={{
+                            background: 'var(--neutral-50)', border: '1px solid var(--border-light)',
+                            borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: 20,
+                            display: 'flex', alignItems: 'center', gap: 10, fontSize: 13,
+                            color: 'var(--text-secondary)',
+                        }}>
+                            <span style={{ fontSize: 18 }}>🔒</span>
+                            <span>
+                                Your personal information is <strong>locked</strong> because your verification was
+                                {profile?.verification_status === 'verified' ? ' approved.' : ' submitted and is pending review.'}
+                                {profile?.verification_status !== 'verified' && ' If it is rejected, you can edit and resubmit.'}
+                            </span>
+                        </div>
+                    )}
+
                     <div className="form-row" style={{ marginBottom: 16 }}>
                         <div className="form-group">
                             <label className="form-label">Full Name</label>
                             <div style={{ position: 'relative' }}>
                                 <FiUser style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                                <input className="form-input" style={{ paddingLeft: 40, width: '100%' }} value={formData.full_name} onChange={(e) => setFormData({ ...formData, full_name: e.target.value })} placeholder="Your full name" />
+                                <input className="form-input" style={{ paddingLeft: 40, width: '100%', opacity: infoLocked ? 0.7 : 1 }} value={formData.full_name}
+                                    onChange={(e) => !infoLocked && setFormData({ ...formData, full_name: e.target.value })}
+                                    placeholder="Your full name" readOnly={infoLocked} />
                             </div>
                         </div>
                         <div className="form-group">
@@ -212,14 +234,20 @@ export default function Profile() {
                             <label className="form-label">Phone Number</label>
                             <div style={{ position: 'relative' }}>
                                 <FiPhone style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                                <input className="form-input" style={{ paddingLeft: 40, width: '100%' }} placeholder="09XX XXX XXXX" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+                                <input className="form-input" style={{ paddingLeft: 40, width: '100%', opacity: infoLocked ? 0.7 : 1 }} placeholder="09XX XXX XXXX"
+                                    value={formData.phone}
+                                    onChange={(e) => !infoLocked && setFormData({ ...formData, phone: e.target.value })}
+                                    readOnly={infoLocked} />
                             </div>
                         </div>
                         <div className="form-group">
                             <label className="form-label">Date of Birth</label>
                             <div style={{ position: 'relative' }}>
                                 <FiCalendar style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                                <input type="date" className="form-input" style={{ paddingLeft: 40, width: '100%' }} value={formData.date_of_birth} onChange={(e) => setFormData({ ...formData, date_of_birth: e.target.value })} />
+                                <input type="date" className="form-input" style={{ paddingLeft: 40, width: '100%', opacity: infoLocked ? 0.7 : 1 }}
+                                    value={formData.date_of_birth}
+                                    onChange={(e) => !infoLocked && setFormData({ ...formData, date_of_birth: e.target.value })}
+                                    readOnly={infoLocked} />
                             </div>
                         </div>
                     </div>
@@ -228,17 +256,25 @@ export default function Profile() {
                             <label className="form-label">City</label>
                             <div style={{ position: 'relative' }}>
                                 <FiMapPin style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                                <input className="form-input" style={{ paddingLeft: 40, width: '100%' }} placeholder="Your city" value={formData.city} onChange={(e) => setFormData({ ...formData, city: e.target.value })} />
+                                <input className="form-input" style={{ paddingLeft: 40, width: '100%', opacity: infoLocked ? 0.7 : 1 }} placeholder="Your city"
+                                    value={formData.city}
+                                    onChange={(e) => !infoLocked && setFormData({ ...formData, city: e.target.value })}
+                                    readOnly={infoLocked} />
                             </div>
                         </div>
                         <div className="form-group">
                             <label className="form-label">Province</label>
-                            <input className="form-input" style={{ width: '100%' }} placeholder="Your province" value={formData.province} onChange={(e) => setFormData({ ...formData, province: e.target.value })} />
+                            <input className="form-input" style={{ width: '100%', opacity: infoLocked ? 0.7 : 1 }} placeholder="Your province"
+                                value={formData.province}
+                                onChange={(e) => !infoLocked && setFormData({ ...formData, province: e.target.value })}
+                                readOnly={infoLocked} />
                         </div>
                     </div>
-                    <button className="btn btn-primary" onClick={handleSaveProfile} disabled={saveLoading}>
-                        {saveLoading ? 'Saving...' : '💾 Save Profile'}
-                    </button>
+                    {!infoLocked && (
+                        <button className="btn btn-primary" onClick={handleSaveProfile} disabled={saveLoading}>
+                            {saveLoading ? 'Saving...' : '💾 Save Profile'}
+                        </button>
+                    )}
                 </div>
             </div>
 

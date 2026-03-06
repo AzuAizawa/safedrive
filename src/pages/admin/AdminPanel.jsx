@@ -47,7 +47,7 @@ export default function AdminPanel() {
                 const { data } = await supabaseAdmin.from('profiles').select('*').order('created_at', { ascending: false });
                 setUsers(data || []);
             } else if (activeTab === 'vehicles') {
-                const { data } = await supabaseAdmin.from('vehicles').select('*, profiles!vehicles_owner_id_fkey(full_name)').order('created_at', { ascending: false });
+                const { data } = await supabaseAdmin.from('vehicles').select('*, profiles!vehicles_owner_id_fkey(id, full_name, phone, date_of_birth, drivers_license_number, national_id_number, city, province, verification_status)').order('created_at', { ascending: false });
                 setVehicles(data || []);
             } else if (activeTab === 'bookings') {
                 const { data } = await supabaseAdmin.from('bookings').select('*, vehicles(make, model, year), profiles!bookings_renter_id_fkey(full_name)').order('created_at', { ascending: false });
@@ -87,7 +87,6 @@ export default function AdminPanel() {
         setUserDocs([]);
         try {
             const allDocs = [];
-            // Wrap each bucket call in a timeout so it never hangs
             const withTimeout = (promise, ms = 5000) =>
                 Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 
@@ -98,8 +97,14 @@ export default function AdminPanel() {
                     );
                     if (!error && data) {
                         for (const file of data) {
-                            const { data: urlData } = supabaseAdmin.storage.from(bucket).getPublicUrl(`${userId}/${file.name}`);
-                            allDocs.push({ name: file.name, bucket, url: urlData?.publicUrl });
+                            // Use createSignedUrl for private buckets — works with service role
+                            const { data: signedData, error: signErr } = await supabaseAdmin.storage
+                                .from(bucket)
+                                .createSignedUrl(`${userId}/${file.name}`, 3600);
+                            const url = !signErr && signedData?.signedUrl
+                                ? signedData.signedUrl
+                                : supabaseAdmin.storage.from(bucket).getPublicUrl(`${userId}/${file.name}`).data?.publicUrl;
+                            allDocs.push({ name: file.name, bucket, url });
                         }
                     }
                 } catch (e) {
@@ -318,9 +323,9 @@ export default function AdminPanel() {
     const getStatusBadge = (status) => ({ verified: 'badge-success', submitted: 'badge-pending', rejected: 'badge-error' }[status] || 'badge-neutral');
     const filteredCatalogModels = selectedBrandId ? carModels.filter(m => m.brand_id === selectedBrandId) : carModels;
 
-    // Separate pending items from the rest
+    // Show all users in one unified table (pending users card removed per requirement)
     const pendingUsers = users.filter(u => u.verification_status === 'submitted');
-    const allUsers = users.filter(u => u.verification_status !== 'submitted');
+    const allUsers = users; // Show everyone
     const pendingVehicles = vehicles.filter(v => v.status === 'pending');
     const allVehicles = vehicles.filter(v => v.status !== 'pending');
 
@@ -467,51 +472,30 @@ export default function AdminPanel() {
                     {/* ========== USERS TAB ========== */}
                     {activeTab === 'users' && (
                         <div>
-                            {/* PENDING REVIEW SECTION */}
-                            {pendingUsers.length > 0 && (
-                                <div className="card" style={{ marginBottom: 24, borderLeft: '4px solid var(--warning-500)' }}>
-                                    <div className="card-header" style={{ background: 'var(--warning-50)' }}>
-                                        <h2 style={{ fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            ⏳ Pending Verification ({pendingUsers.length})
-                                        </h2>
-                                        <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Users who submitted documents — review required</span>
-                                    </div>
-                                    <div className="table-container">
-                                        <table className="table">
-                                            <thead>
-                                                <tr>
-                                                    <th>User</th><th>Role</th><th>Status</th><th>Submitted</th><th>Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {searchFilter(pendingUsers, ['full_name', 'email']).map(u => (
-                                                    <UserRow key={u.id} u={u} showActions={true} />
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* ALL USERS SECTION */}
+                            {/* UNIFIED ALL USERS TABLE */}
                             <div className="card">
                                 <div className="card-header">
                                     <h2 style={{ fontSize: 16, fontWeight: 700 }}>
-                                        👥 All Users ({allUsers.length})
+                                        👥 All Users ({users.length})
+                                        {pendingUsers.length > 0 && (
+                                            <span style={{ marginLeft: 10, background: 'var(--warning-500)', color: '#fff', borderRadius: 20, padding: '2px 10px', fontSize: 12, fontWeight: 700 }}>
+                                                {pendingUsers.length} pending review
+                                            </span>
+                                        )}
                                     </h2>
                                 </div>
                                 <div className="table-container">
                                     <table className="table">
                                         <thead>
                                             <tr>
-                                                <th>User</th><th>Role</th><th>Verification</th><th>Joined</th><th>Actions</th>
+                                                <th>User</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {searchFilter(allUsers, ['full_name', 'email']).length === 0 ? (
                                                 <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-tertiary)' }}>No users found</td></tr>
                                             ) : searchFilter(allUsers, ['full_name', 'email']).map(u => (
-                                                <UserRow key={u.id} u={u} />
+                                                <UserRow key={u.id} u={u} showActions={u.verification_status === 'submitted'} />
                                             ))}
                                         </tbody>
                                     </table>
@@ -783,10 +767,10 @@ export default function AdminPanel() {
                                 {[
                                     { label: 'Phone', value: selectedUser.phone || 'N/A' },
                                     { label: 'City', value: selectedUser.city || 'N/A' },
+                                    { label: 'Province', value: selectedUser.province || 'N/A' },
                                     { label: 'Date of Birth', value: selectedUser.date_of_birth ? new Date(selectedUser.date_of_birth).toLocaleDateString() : 'N/A' },
-                                    { label: "Driver's License", value: selectedUser.drivers_license_number || 'Not submitted' },
-                                    { label: 'National ID', value: selectedUser.national_id_number || 'Not submitted' },
-                                    { label: 'Selfie Verified', value: selectedUser.selfie_verified ? '✅ Yes' : '❌ No' },
+                                    { label: "Driver's License #", value: selectedUser.drivers_license_number || 'Not submitted' },
+                                    { label: 'National / UMID ID #', value: selectedUser.national_id_number || 'Not submitted' },
                                 ].map((item, i) => (
                                     <div key={i} style={{ padding: 12, background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
                                         <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
@@ -798,34 +782,30 @@ export default function AdminPanel() {
                             {/* Submitted Documents */}
                             <div style={{ marginBottom: 24 }}>
                                 <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <FiImage /> Submitted Documents
+                                    <FiImage /> Submitted ID Documents
                                 </h3>
                                 {docsLoading ? (
                                     <div style={{ textAlign: 'center', padding: 24 }}><div className="spinner" style={{ margin: '0 auto 8px' }} /><p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Loading...</p></div>
-                                ) : userDocs.length === 0 && !selectedUser.national_id_front_url && !selectedUser.selfie_url ? (
+                                ) : userDocs.length === 0 ? (
                                     <div style={{ padding: 24, textAlign: 'center', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', color: 'var(--text-tertiary)' }}>No documents uploaded yet</div>
                                 ) : (
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
                                         {userDocs.map((doc, i) => (
-                                            <div key={i} style={{ border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-                                                {doc.url && <a href={doc.url} target="_blank" rel="noopener noreferrer"><img src={doc.url} alt={doc.name} style={{ width: '100%', height: 160, objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; }} /></a>}
+                                            <div key={i} style={{ border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', overflow: 'hidden', background: 'var(--surface-secondary)' }}>
+                                                {doc.url ? (
+                                                    <a href={doc.url} target="_blank" rel="noopener noreferrer">
+                                                        <img src={doc.url} alt={doc.name} style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }}
+                                                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
+                                                        <div style={{ display: 'none', height: 150, alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--text-tertiary)', padding: 8, textAlign: 'center' }}>
+                                                            🖼️ Click to view
+                                                        </div>
+                                                    </a>
+                                                ) : null}
                                                 <div style={{ padding: '8px 12px', fontSize: 12 }}>
-                                                    <div style={{ fontWeight: 600 }}>{doc.name}</div>
+                                                    <div style={{ fontWeight: 600, wordBreak: 'break-all' }}>{doc.name}</div>
                                                     <div style={{ color: 'var(--text-tertiary)' }}>{doc.bucket === 'selfies' ? '📸 Selfie' : '🪪 ID Document'}</div>
                                                 </div>
                                             </div>
-                                        ))}
-                                        {[
-                                            { label: 'National ID (Front)', url: selectedUser.national_id_front_url },
-                                            { label: 'National ID (Back)', url: selectedUser.national_id_back_url },
-                                            { label: "License (Front)", url: selectedUser.drivers_license_front_url },
-                                            { label: "License (Back)", url: selectedUser.drivers_license_back_url },
-                                            { label: 'Selfie', url: selectedUser.selfie_url },
-                                        ].filter(d => d.url).map((doc, i) => (
-                                            <a key={`p${i}`} href={doc.url} target="_blank" rel="noopener noreferrer" style={{ border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', overflow: 'hidden', textDecoration: 'none' }}>
-                                                <img src={doc.url} alt={doc.label} style={{ width: '100%', height: 140, objectFit: 'cover' }} />
-                                                <div style={{ padding: '8px 12px', fontSize: 12, fontWeight: 600 }}>{doc.label}</div>
-                                            </a>
                                         ))}
                                     </div>
                                 )}
@@ -946,9 +926,12 @@ export default function AdminPanel() {
                                     { label: 'Body Type', value: selectedVehicle.body_type },
                                     { label: 'Transmission', value: selectedVehicle.transmission },
                                     { label: 'Fuel Type', value: selectedVehicle.fuel_type },
-                                    { label: 'Seating Capacity', value: selectedVehicle.seating_capacity ? `${selectedVehicle.seating_capacity} seats` : '—' },
+                                    { label: 'Seating', value: selectedVehicle.seating_capacity ? `${selectedVehicle.seating_capacity} seats` : '—' },
                                     { label: 'Mileage', value: selectedVehicle.mileage ? `${selectedVehicle.mileage?.toLocaleString()} km` : 'Not specified' },
-                                    { label: 'Daily Rate', value: `₱${selectedVehicle.daily_rate?.toLocaleString()}/day` },
+                                    { label: 'Pricing Type', value: selectedVehicle.pricing_type === 'fixed' ? '📌 Fixed' : '🔄 Flexible' },
+                                    selectedVehicle.pricing_type === 'fixed'
+                                        ? { label: 'Fixed Price', value: selectedVehicle.fixed_price ? `₱${selectedVehicle.fixed_price?.toLocaleString()} for ${selectedVehicle.fixed_rental_days} day(s)` : '—' }
+                                        : { label: 'Daily Rate', value: `₱${selectedVehicle.daily_rate?.toLocaleString()}/day` },
                                     { label: 'Security Deposit', value: selectedVehicle.security_deposit ? `₱${selectedVehicle.security_deposit?.toLocaleString()}` : 'None' },
                                 ].map((item, i) => (
                                     <div key={i} style={{ padding: '10px 12px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
@@ -957,6 +940,14 @@ export default function AdminPanel() {
                                     </div>
                                 ))}
                             </div>
+
+                            {/* Contact Info */}
+                            {selectedVehicle.contact_info && (
+                                <div style={{ marginBottom: 20 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Owner Contact Info</div>
+                                    <div style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', padding: '12px 16px', fontSize: 13 }}>{selectedVehicle.contact_info}</div>
+                                </div>
+                            )}
 
                             {/* Pickup Location */}
                             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 10 }}>Pickup Location</div>
@@ -1009,10 +1000,48 @@ export default function AdminPanel() {
 
                             {/* Agreement */}
                             {selectedVehicle.agreement_url && (
-                                <div>
+                                <div style={{ marginBottom: 20 }}>
                                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Agreement Document</div>
                                     <a href={selectedVehicle.agreement_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
                                         📄 View Agreement
+                                    </a>
+                                </div>
+                            )}
+
+                            {/* Owner Verification Info — cross-check with ORCR */}
+                            <div style={{ marginBottom: 20, border: '1px solid var(--accent-200)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                                <div style={{ background: 'var(--accent-50)', padding: '10px 16px', fontSize: 12, fontWeight: 700, color: 'var(--accent-700)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                                    🔍 Owner Verification Info — Cross-check with ORCR
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: 12 }}>
+                                    {[
+                                        { label: 'Full Name', value: selectedVehicle.profiles?.full_name },
+                                        { label: 'Phone', value: selectedVehicle.profiles?.phone },
+                                        { label: 'Date of Birth', value: selectedVehicle.profiles?.date_of_birth ? new Date(selectedVehicle.profiles.date_of_birth).toLocaleDateString() : null },
+                                        { label: "Driver's License #", value: selectedVehicle.profiles?.drivers_license_number },
+                                        { label: 'National / UMID ID #', value: selectedVehicle.profiles?.national_id_number },
+                                        { label: 'Verification Status', value: selectedVehicle.profiles?.verification_status },
+                                        { label: 'City', value: selectedVehicle.profiles?.city },
+                                        { label: 'Province', value: selectedVehicle.profiles?.province },
+                                    ].map((item, i) => (
+                                        <div key={i} style={{ padding: '8px 10px', background: 'var(--surface-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
+                                            <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2, color: item.value ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{item.value || 'N/A'}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* ORCR Document (Admin Only) */}
+                            {selectedVehicle.orcr_url && (
+                                <div style={{ marginBottom: 20 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>🪪 ORCR Document (Admin Only)</div>
+                                    <a href={selectedVehicle.orcr_url} target="_blank" rel="noopener noreferrer">
+                                        <img src={selectedVehicle.orcr_url} alt="ORCR" style={{ maxWidth: '100%', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)', cursor: 'zoom-in', display: 'block' }}
+                                            onError={(e) => { e.target.style.display = 'none'; }} />
+                                    </a>
+                                    <a href={selectedVehicle.orcr_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: 'var(--primary-600)', marginTop: 6, display: 'inline-block' }}>
+                                        Open full image ↗
                                     </a>
                                 </div>
                             )}

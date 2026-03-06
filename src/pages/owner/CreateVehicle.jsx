@@ -6,7 +6,6 @@ import { FiUpload, FiX, FiCamera, FiFileText, FiCheckCircle } from 'react-icons/
 import toast from 'react-hot-toast';
 import VerificationGate from '../../components/VerificationGate';
 import BackButton from '../../components/BackButton';
-import { validateVehicleListingForm } from '../../lib/validation';
 
 // Simple sanitizer for freetext fields (strips HTML, trims whitespace)
 const sanitizeInput = (str) =>
@@ -88,16 +87,24 @@ export default function CreateVehicle() {
     const [photos, setPhotos] = useState([]);
     const [photoPreviews, setPhotoPreviews] = useState([]);
     const [agreementFile, setAgreementFile] = useState(null);
+    const [orcrFile, setOrcrFile] = useState(null);
     const agreementInputRef = useRef(null);
+    const orcrInputRef = useRef(null);
 
     const [formData, setFormData] = useState({
         make: '', model: '', year: new Date().getFullYear(),
         color: '', plate_number: '',
         body_type: 'Sedan', transmission: 'Automatic',
         fuel_type: 'Gasoline', seating_capacity: 5,
+        // Pricing mode
+        pricing_type: 'flexible',  // 'flexible' | 'fixed'
         daily_rate: '',
         available_durations: ['1_day'],
         security_deposit: '',
+        fixed_price: '',           // For fixed pricing mode
+        fixed_rental_days: '',     // Number of days for fixed deal
+        // Contact & Location
+        contact_info: '',
         pickup_location: '', pickup_city: '', pickup_province: '',
         mileage: '', description: '', features: [],
     });
@@ -224,6 +231,22 @@ export default function CreateVehicle() {
         e.target.value = '';
     };
 
+    const handleOrcrSelect = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            toast.error('ORCR must be an image file (JPG, PNG, etc.)');
+            return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            toast.error('ORCR photo must be under 10MB');
+            return;
+        }
+        setOrcrFile(file);
+        toast.success(`ORCR photo "${file.name}" selected`);
+        e.target.value = '';
+    };
+
     // ── Submit ───────────────────────────────────────────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -244,16 +267,30 @@ export default function CreateVehicle() {
             toast.error(`Year must be between 1990 and ${currentYear + 1}`); return;
         }
 
-        if (!formData.daily_rate || parseFloat(formData.daily_rate) < 1) {
-            toast.error('Please enter a valid daily rate'); return;
+        // Pricing validation depends on mode
+        if (formData.pricing_type === 'flexible') {
+            if (!formData.daily_rate || parseFloat(formData.daily_rate) < 1) {
+                toast.error('Please enter a valid daily rate'); return;
+            }
+            if (formData.available_durations.length === 0) {
+                toast.error('Please select at least one rental duration'); return;
+            }
+        } else {
+            // fixed pricing
+            if (!formData.fixed_price || parseFloat(formData.fixed_price) < 1) {
+                toast.error('Please enter a valid fixed price'); return;
+            }
+            if (!formData.fixed_rental_days || parseInt(formData.fixed_rental_days) < 1) {
+                toast.error('Please enter the number of rental days for this fixed deal'); return;
+            }
         }
 
-        if (formData.available_durations.length === 0) {
-            toast.error('Please select at least one rental duration'); return;
+        if (!formData.contact_info?.trim()) {
+            toast.error('Please provide your contact information for renters'); return;
         }
 
         // Basic sanitization check — reject inputs containing HTML tags
-        const textFields = ['pickup_location', 'pickup_city', 'pickup_province', 'description'];
+        const textFields = ['pickup_location', 'pickup_city', 'pickup_province', 'description', 'contact_info'];
         for (const key of textFields) {
             const val = formData[key] || '';
             if (val && /<[^>]+>/.test(val)) {
@@ -302,7 +339,32 @@ export default function CreateVehicle() {
                 }
             }
 
-            // 3. Insert vehicle (status: pending — always runs even if photos failed)
+            // 3. Upload ORCR document (admin-only, best-effort)
+            let orcrUrl = null;
+            if (orcrFile) {
+                try {
+                    const ext = orcrFile.name.split('.').pop();
+                    const path = `${user.id}/orcr_${Date.now()}.${ext}`;
+                    const { error: orcrErr } = await supabase.storage
+                        .from('vehicle-images')
+                        .upload(path, orcrFile);
+                    if (!orcrErr) {
+                        const { data: orcrData } = supabase.storage.from('vehicle-images').getPublicUrl(path);
+                        orcrUrl = orcrData.publicUrl;
+                    } else {
+                        console.warn('ORCR upload failed:', orcrErr.message);
+                    }
+                } catch (orcrErr) {
+                    console.warn('ORCR upload threw:', orcrErr.message);
+                }
+            }
+
+            // 4. Insert vehicle (status: pending)
+            // Compute daily_rate for fixed mode so DB stays consistent
+            const effectiveDailyRate = formData.pricing_type === 'fixed'
+                ? (parseFloat(formData.fixed_price) / parseInt(formData.fixed_rental_days))
+                : parseFloat(formData.daily_rate);
+
             const { error } = await supabase.from('vehicles').insert({
                 owner_id: user.id,
                 make: sanitizeInput(formData.make),
@@ -314,9 +376,13 @@ export default function CreateVehicle() {
                 transmission: formData.transmission,
                 fuel_type: formData.fuel_type,
                 seating_capacity: parseInt(formData.seating_capacity),
-                daily_rate: parseFloat(formData.daily_rate),
-                available_durations: formData.available_durations,
-                security_deposit: formData.security_deposit ? parseFloat(formData.security_deposit) : 0,
+                pricing_type: formData.pricing_type,
+                daily_rate: effectiveDailyRate,
+                available_durations: formData.pricing_type === 'flexible' ? formData.available_durations : [],
+                security_deposit: formData.pricing_type === 'flexible' && formData.security_deposit ? parseFloat(formData.security_deposit) : 0,
+                fixed_price: formData.pricing_type === 'fixed' ? parseFloat(formData.fixed_price) : null,
+                fixed_rental_days: formData.pricing_type === 'fixed' ? parseInt(formData.fixed_rental_days) : null,
+                contact_info: sanitizeInput(formData.contact_info || ''),
                 pickup_location: sanitizeInput(formData.pickup_location),
                 pickup_city: sanitizeInput(formData.pickup_city),
                 pickup_province: sanitizeInput(formData.pickup_province),
@@ -326,6 +392,7 @@ export default function CreateVehicle() {
                 images: imageUrls,
                 thumbnail_url: imageUrls[0] || null,
                 agreement_url: agreementUrl,
+                orcr_url: orcrUrl,
                 status: 'pending',
             });
 
@@ -540,57 +607,106 @@ export default function CreateVehicle() {
 
                 {/* ── Section 2: Pricing & Availability ──────────────── */}
                 <div className="card" style={{ marginBottom: 20 }}>
-                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>💰 Pricing & Availability</h2></div>
+                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>💰 Pricing &amp; Availability</h2></div>
                     <div className="card-body">
-                        <div className="form-row" style={{ marginBottom: 20 }}>
-                            <div className="form-group">
-                                <label className="form-label">Daily Rate (₱) *</label>
-                                <input type="number" className="form-input" style={{ width: '100%' }}
-                                    placeholder="e.g. 2500" value={formData.daily_rate}
-                                    onChange={e => setFormData({ ...formData, daily_rate: e.target.value })}
-                                    required min={1} />
-                                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-                                    This is the base daily rate. Multi-day rates are automatically calculated.
-                                </div>
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Security Deposit (₱) <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>optional</span></label>
-                                <input type="number" className="form-input" style={{ width: '100%' }}
-                                    placeholder="e.g. 5000" value={formData.security_deposit}
-                                    onChange={e => setFormData({ ...formData, security_deposit: e.target.value })} min={0} />
-                            </div>
-                        </div>
 
-                        {/* Duration options */}
-                        <div>
-                            <label className="form-label" style={{ marginBottom: 10, display: 'block' }}>
-                                Available Rental Durations * <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Select all that apply</span>
+                        {/* Pricing Mode Toggle */}
+                        <div style={{ marginBottom: 20 }}>
+                            <label className="form-label" style={{ marginBottom: 8, display: 'block' }}>
+                                Rental Type *
                             </label>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                                {DURATION_OPTIONS.map(d => {
-                                    const selected = formData.available_durations.includes(d.key);
+                            <div style={{ display: 'flex', gap: 10 }}>
+                                {[{ key: 'flexible', icon: '🔄', label: 'Flexible', sub: 'Renter picks the days at your daily rate' },
+                                { key: 'fixed', icon: '📌', label: 'Fixed', sub: 'One price for a set number of days' }].map(opt => {
+                                    const active = formData.pricing_type === opt.key;
                                     return (
-                                        <button
-                                            key={d.key}
-                                            type="button"
-                                            onClick={() => toggleDuration(d.key)}
-                                            style={{
-                                                padding: '8px 16px', borderRadius: 'var(--radius-md)',
-                                                border: `2px solid ${selected ? 'var(--primary-500)' : 'var(--border-light)'}`,
-                                                background: selected ? 'var(--primary-50)' : 'var(--surface-secondary)',
-                                                color: selected ? 'var(--primary-700)' : 'var(--text-secondary)',
-                                                fontWeight: selected ? 700 : 400,
-                                                cursor: 'pointer', fontSize: 14, transition: 'all 0.15s',
-                                                display: 'flex', alignItems: 'center', gap: 6,
-                                            }}
-                                        >
-                                            {selected && <FiCheckCircle size={14} />}
-                                            {d.label}
+                                        <button key={opt.key} type="button" onClick={() => setFormData({ ...formData, pricing_type: opt.key })} style={{
+                                            flex: 1, padding: '12px 16px', borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                                            border: `2px solid ${active ? 'var(--primary-500)' : 'var(--border-light)'}`,
+                                            background: active ? 'var(--primary-50)' : 'var(--surface-secondary)',
+                                            textAlign: 'left', transition: 'all 0.15s',
+                                        }}>
+                                            <div style={{ fontWeight: 700, fontSize: 14, color: active ? 'var(--primary-700)' : 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                {active && <FiCheckCircle size={14} />} {opt.icon} {opt.label}
+                                            </div>
+                                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{opt.sub}</div>
                                         </button>
                                     );
                                 })}
                             </div>
                         </div>
+
+                        {/* Flexible mode fields */}
+                        {formData.pricing_type === 'flexible' && (
+                            <>
+                                <div className="form-row" style={{ marginBottom: 20 }}>
+                                    <div className="form-group">
+                                        <label className="form-label">Daily Rate (₱) *</label>
+                                        <input type="number" className="form-input" style={{ width: '100%' }}
+                                            placeholder="e.g. 2500" value={formData.daily_rate}
+                                            onChange={e => setFormData({ ...formData, daily_rate: e.target.value })}
+                                            required min={1} />
+                                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                            Base daily rate. Renter picks how many days to rent.
+                                        </div>
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Security Deposit (₱) <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>optional</span></label>
+                                        <input type="number" className="form-input" style={{ width: '100%' }}
+                                            placeholder="e.g. 5000" value={formData.security_deposit}
+                                            onChange={e => setFormData({ ...formData, security_deposit: e.target.value })} min={0} />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="form-label" style={{ marginBottom: 10, display: 'block' }}>
+                                        Available Rental Durations * <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Select all that apply</span>
+                                    </label>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                                        {DURATION_OPTIONS.map(d => {
+                                            const selected = formData.available_durations.includes(d.key);
+                                            return (
+                                                <button key={d.key} type="button" onClick={() => toggleDuration(d.key)} style={{
+                                                    padding: '8px 16px', borderRadius: 'var(--radius-md)',
+                                                    border: `2px solid ${selected ? 'var(--primary-500)' : 'var(--border-light)'}`,
+                                                    background: selected ? 'var(--primary-50)' : 'var(--surface-secondary)',
+                                                    color: selected ? 'var(--primary-700)' : 'var(--text-secondary)',
+                                                    fontWeight: selected ? 700 : 400, cursor: 'pointer', fontSize: 14, transition: 'all 0.15s',
+                                                    display: 'flex', alignItems: 'center', gap: 6,
+                                                }}>
+                                                    {selected && <FiCheckCircle size={14} />}{d.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Fixed mode fields */}
+                        {formData.pricing_type === 'fixed' && (
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label className="form-label">Fixed Price (₱) *</label>
+                                    <input type="number" className="form-input" style={{ width: '100%' }}
+                                        placeholder="e.g. 1500" value={formData.fixed_price}
+                                        onChange={e => setFormData({ ...formData, fixed_price: e.target.value })} min={1} />
+                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                        Total price for the whole deal.
+                                    </div>
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Number of Rental Days *</label>
+                                    <input type="number" className="form-input" style={{ width: '100%' }}
+                                        placeholder="e.g. 3" value={formData.fixed_rental_days}
+                                        onChange={e => setFormData({ ...formData, fixed_rental_days: e.target.value })} min={1} />
+                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                        {formData.fixed_price && formData.fixed_rental_days ? (
+                                            <>Effective rate: ₱{(parseFloat(formData.fixed_price) / parseInt(formData.fixed_rental_days) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}/day</>
+                                        ) : 'How many days is this fixed deal for?'}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -619,6 +735,26 @@ export default function CreateVehicle() {
                                     placeholder="e.g., Metro Manila"
                                     value={formData.pickup_province}
                                     onChange={e => setFormData({ ...formData, pickup_province: e.target.value })} required />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* ── Section 3b: Owner Contact Info ─────────────────── */}
+                <div className="card" style={{ marginBottom: 20 }}>
+                    <div className="card-header">
+                        <h2 style={{ fontSize: 16, fontWeight: 700 }}>📞 Owner Contact Information</h2>
+                        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>Shown to renters so they can negotiate directly with you</div>
+                    </div>
+                    <div className="card-body">
+                        <div className="form-group">
+                            <label className="form-label">Contact Details *</label>
+                            <textarea className="form-textarea" style={{ width: '100%' }} rows={3}
+                                placeholder="e.g. 09XX-XXX-XXXX | Facebook: Juan Dela Cruz | Viber: 09XX-XXX-XXXX"
+                                value={formData.contact_info}
+                                onChange={e => setFormData({ ...formData, contact_info: e.target.value })} />
+                            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                Provide your preferred contact method so renters can reach you to coordinate and negotiate.
                             </div>
                         </div>
                     </div>
@@ -704,6 +840,48 @@ export default function CreateVehicle() {
                                 onClick={() => setAgreementFile(null)}>
                                 ✕ Remove document
                             </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* ── Section 5b: ORCR (Admin Review Only) ──────────── */}
+                <div className="card" style={{ marginBottom: 20, borderLeft: '3px solid var(--accent-400)' }}>
+                    <div className="card-header" style={{ background: 'var(--accent-50)' }}>
+                        <div>
+                            <h2 style={{ fontSize: 16, fontWeight: 700 }}>🪪 ORCR — Official Receipt &amp; Certificate of Registration</h2>
+                            <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>Required for admin verification only · Not shown in public listing</div>
+                        </div>
+                    </div>
+                    <div className="card-body">
+                        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                            Upload a clear photo of your vehicle's Official Receipt (OR) and Certificate of Registration (CR).
+                            This is <strong>only visible to admins</strong> for verification — renters will not see this.
+                        </p>
+                        <div onClick={() => orcrInputRef.current?.click()} style={{
+                            border: `2px dashed ${orcrFile ? 'var(--accent-400)' : 'var(--neutral-300)'}`,
+                            borderRadius: 'var(--radius-lg)', padding: '28px 20px', textAlign: 'center', cursor: 'pointer',
+                            background: orcrFile ? 'var(--accent-50)' : 'var(--neutral-50)', transition: 'all 0.2s ease',
+                        }}>
+                            {orcrFile ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                                    <FiFileText size={28} color="var(--accent-600)" />
+                                    <div style={{ textAlign: 'left' }}>
+                                        <div style={{ fontWeight: 700, color: 'var(--accent-700)' }}>{orcrFile.name}</div>
+                                        <div style={{ fontSize: 12, color: 'var(--accent-600)' }}>{(orcrFile.size / 1024).toFixed(0)} KB · Click to replace</div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <FiUpload size={32} color="var(--text-tertiary)" />
+                                    <div style={{ marginTop: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Click to upload ORCR photo</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>JPG, PNG · Max 10MB · Take a clear, full-page photo</div>
+                                </>
+                            )}
+                        </div>
+                        <input ref={orcrInputRef} type="file" accept="image/*" onChange={handleOrcrSelect} style={{ display: 'none' }} />
+                        {orcrFile && (
+                            <button type="button" style={{ marginTop: 10, fontSize: 13, color: 'var(--error-600)', background: 'none', border: 'none', cursor: 'pointer' }}
+                                onClick={() => setOrcrFile(null)}>✕ Remove ORCR photo</button>
                         )}
                     </div>
                 </div>
