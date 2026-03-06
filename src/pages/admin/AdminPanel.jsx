@@ -386,7 +386,19 @@ export default function AdminPanel() {
                 </div>
             </td>
             <td style={{ fontSize: 14 }}>{v.profiles?.full_name || '—'}</td>
-            <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>₱{v.daily_rate?.toLocaleString()}</td>
+            <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>
+                {v.pricing_type === 'fixed' ? (
+                    <div style={{ lineHeight: 1.2 }}>
+                        <div>₱{v.fixed_price?.toLocaleString()}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>Fixed • {v.fixed_rental_days}d</div>
+                    </div>
+                ) : (
+                    <div style={{ lineHeight: 1.2 }}>
+                        <div>₱{v.daily_rate?.toLocaleString()}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>/day</div>
+                    </div>
+                )}
+            </td>
             {!showActions && (
                 <td>
                     <span className={`badge ${v.status === 'approved' || v.status === 'listed' ? 'badge-success' : v.status === 'rejected' ? 'badge-error' : 'badge-info'}`}>
@@ -520,7 +532,7 @@ export default function AdminPanel() {
                                         <table className="table">
                                             <thead>
                                                 <tr>
-                                                    <th>Vehicle</th><th>Owner</th><th>Rate</th><th>Status</th><th>Actions</th>
+                                                    <th>Vehicle</th><th>Owner</th><th>Price</th><th>Status</th><th>Actions</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -544,7 +556,7 @@ export default function AdminPanel() {
                                     <table className="table">
                                         <thead>
                                             <tr>
-                                                <th>Vehicle</th><th>Owner</th><th>Rate</th><th>Status</th><th>Actions</th>
+                                                <th>Vehicle</th><th>Owner</th><th>Price</th><th>Status</th><th>Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>

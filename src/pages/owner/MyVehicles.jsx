@@ -144,7 +144,7 @@ export default function MyVehicles() {
                         <thead>
                             <tr>
                                 <th>Vehicle</th>
-                                <th>Daily Rate</th>
+                                <th>Price</th>
                                 <th>Admin Status</th>
                                 <th style={{ textAlign: 'center' }}>Active Listing</th>
                                 <th>Actions</th>
@@ -168,7 +168,19 @@ export default function MyVehicles() {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>₱{v.daily_rate?.toLocaleString()}</td>
+                                        <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>
+                                            {v.pricing_type === 'fixed' ? (
+                                                <div style={{ lineHeight: 1.2 }}>
+                                                    <div>₱{v.fixed_price?.toLocaleString()}</div>
+                                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>Fixed • {v.fixed_rental_days}d</div>
+                                                </div>
+                                            ) : (
+                                                <div style={{ lineHeight: 1.2 }}>
+                                                    <div>₱{v.daily_rate?.toLocaleString()}</div>
+                                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>/day</div>
+                                                </div>
+                                            )}
+                                        </td>
                                         <td>
                                             <span className={`badge ${v.status === 'approved' || v.status === 'listed' ? 'badge-success' : v.status === 'pending' ? 'badge-pending' : 'badge-error'}`}>
                                                 {v.status}

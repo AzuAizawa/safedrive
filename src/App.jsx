@@ -32,10 +32,11 @@ function ProtectedRoute() {
 }
 
 function AdminRoute() {
-  const { user, isAdmin, loading } = useAuth();
-  if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
+  const { user, isAdmin, isSuperAdmin, loading, profile } = useAuth();
+  // Wait for both the user session AND profile to fully load before redirecting
+  if (loading || (user && !profile)) return <div className="loading-spinner"><div className="spinner" /></div>;
   if (!user) return <Navigate to="/admin-login" replace />;
-  if (!isAdmin) return <Navigate to="/dashboard" replace />;
+  if (!isAdmin && !isSuperAdmin) return <Navigate to="/dashboard" replace />;
   return <Outlet />;
 }
 

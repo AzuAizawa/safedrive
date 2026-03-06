@@ -216,7 +216,7 @@ export default function Dashboard() {
             {getVerificationBanner()}
 
             {/* ── Subscription Banner (verified non-admin users only) ── */}
-            {!isAdmin && profile?.verification_status === 'verified' && (
+            {!isAdmin && (profile?.role === 'verified' || profile?.verification_status === 'verified') && (
                 isSubscriptionActive(profile) ? (
                     <div style={{
                         background: 'linear-gradient(135deg, #0f2d1f, #14532d)',

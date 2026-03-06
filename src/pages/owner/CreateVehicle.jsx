@@ -304,20 +304,24 @@ export default function CreateVehicle() {
         try {
             // 1. Upload vehicle photos
             // 1. Upload vehicle photos (best-effort — don't block listing if storage fails)
+            console.log("Starting photo upload...", photos?.length);
             let imageUrls = [];
-            for (let i = 0; i < photos.length; i++) {
-                try {
-                    const file = photos[i];
-                    const ext = file.name.split('.').pop();
-                    const path = `${user.id}/${Date.now()}_${i}.${ext}`;
-                    const { error: upErr } = await supabase.storage.from('vehicle-images').upload(path, file);
-                    if (upErr) { console.warn('Photo upload failed:', upErr.message); continue; }
-                    const { data: urlData } = supabase.storage.from('vehicle-images').getPublicUrl(path);
-                    imageUrls.push(urlData.publicUrl);
-                } catch (photoErr) {
-                    console.warn('Photo upload threw:', photoErr.message);
+            if (photos && photos.length > 0) {
+                for (let i = 0; i < photos.length; i++) {
+                    try {
+                        const file = photos[i];
+                        const ext = file.name.split('.').pop();
+                        const path = `${user.id}/${Date.now()}_${i}.${ext}`;
+                        const { error: upErr } = await supabase.storage.from('vehicle-images').upload(path, file);
+                        if (upErr) { console.warn('Photo upload failed:', upErr.message); continue; }
+                        const { data: urlData } = supabase.storage.from('vehicle-images').getPublicUrl(path);
+                        imageUrls.push(urlData.publicUrl);
+                    } catch (photoErr) {
+                        console.warn('Photo upload threw:', photoErr.message);
+                    }
                 }
             }
+            console.log("Finished photo upload:",  imageUrls.length, "images");
 
             // 2. Upload agreement document (best-effort)
             let agreementUrl = null;
@@ -343,6 +347,7 @@ export default function CreateVehicle() {
             let orcrUrl = null;
             if (orcrFile) {
                 try {
+                    console.log("Starting ORCR upload...");
                     const ext = orcrFile.name.split('.').pop();
                     const path = `${user.id}/orcr_${Date.now()}.${ext}`;
                     const { error: orcrErr } = await supabase.storage
@@ -358,6 +363,7 @@ export default function CreateVehicle() {
                     console.warn('ORCR upload threw:', orcrErr.message);
                 }
             }
+            console.log("Setup complete, inserting vehicle...");
 
             // 4. Insert vehicle (status: pending)
             // Compute daily_rate for fixed mode so DB stays consistent
@@ -365,7 +371,7 @@ export default function CreateVehicle() {
                 ? (parseFloat(formData.fixed_price) / parseInt(formData.fixed_rental_days))
                 : parseFloat(formData.daily_rate);
 
-            const { error } = await supabase.from('vehicles').insert({
+            const { error: insertError } = await supabase.from('vehicles').insert({
                 owner_id: user.id,
                 make: sanitizeInput(formData.make),
                 model: sanitizeInput(formData.model),
@@ -396,10 +402,14 @@ export default function CreateVehicle() {
                 status: 'pending',
             });
 
-            if (error) throw error;
+            if (insertError) {
+                console.error("Insert error details:", insertError);
+                throw new Error(insertError.message || "Insert failed");
+            }
 
-            toast.success('✅ Vehicle submitted for admin review! You\'ll be notified once it\'s approved.');
-            navigate('/my-vehicles');
+            console.log("Success! Navigating away...");
+            toast.success('✅ Vehicle submitted! You\'ll be notified once it\'s approved by an admin.');
+            navigate('/owner/vehicles');
         } catch (err) {
             console.error('Listing error:', err);
             toast.error(err.message || 'Failed to submit listing');

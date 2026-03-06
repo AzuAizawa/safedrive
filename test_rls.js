@@ -2,39 +2,71 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY);
 
-async function checkPolicies() {
-    // Let's just try to update a test user using the standard anon key to see if RLS blocks it
-    const supabaseClient = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY);
+const supabaseAdmin = createClient(
+    process.env.VITE_SUPABASE_URL,
+    process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
+);
 
-    // First need to sign in a test user to get a session
-    const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
-        email: 'admin@safedrive.com', // Assuming this admin exists based on the seed
-        password: 'password123'
+async function applyFixes() {
+    const sql = `
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "Users can insert their own vehicles" ON vehicles;
+  CREATE POLICY "Users can insert their own vehicles"
+    ON vehicles
+    FOR INSERT
+    WITH CHECK (auth.uid() = owner_id);
+
+  DROP POLICY IF EXISTS "Users can update their own vehicles" ON vehicles;
+  CREATE POLICY "Users can update their own vehicles"
+    ON vehicles
+    FOR UPDATE
+    USING (auth.uid() = owner_id);
+END $$;
+    `;
+    console.log("If service key is not available, RLS SQL scripts must be run manually via Supabase Dashboard");
+}
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+            data: { full_name: 'Test Owner' }
+        }
     });
 
-    if (authError) {
-        console.error("Auth Error:", authError);
+    if (signUpError) {
+        console.error("Sign up error:", signUpError);
         return;
     }
 
-    console.log("Logged in as:", authData.user.id);
+    const userId = signUpData.user.id;
+    console.log("Logged in user ID:", userId);
 
-    // Try to update exactly like SubscriptionSuccess.jsx does
-    const { data, error } = await supabaseClient.from('profiles')
-        .update({
-            subscription_status: 'active',
-            subscription_end_date: new Date().toISOString(),
+    await new Promise(r => setTimeout(r, 1000));
+
+    console.log("Attempting to insert a vehicle...");
+    const { data: insertData, error: insertError } = await supabase.from('vehicles')
+        .insert({
+            owner_id: userId,
+            make: 'Toyota',
+            model: 'Vios',
+            year: 2020,
+            status: 'pending',
+            pricing_type: 'flexible',
+            daily_rate: 1500,
         })
-        .eq('id', authData.user.id)
         .select();
 
-    if (error) {
-        console.error("Update Blocked! Error:", error);
+    if (insertError) {
+        console.error("❌ Insert threw an error:", insertError.message);
+    } else if (!insertData || insertData.length === 0) {
+        console.log("❌ Insert did not throw an error, but 0 rows were updated. THIS MEANS RLS BLOCKED IT!");
     } else {
-        console.log("Update Succeeded:", data);
+        console.log("✅ Insert succeeded! Affected rows:", insertData.length);
+        console.log(insertData[0]);
     }
 }
 
-checkPolicies().catch(console.error);
+testRLS().catch(console.error);

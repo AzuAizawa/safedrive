@@ -25,12 +25,20 @@ export default function SubscriptionSuccess() {
                 const subscriptionEnd = new Date();
                 subscriptionEnd.setDate(subscriptionEnd.getDate() + 30);
 
-                const { error: profileError } = await supabase.from('profiles')
+                const { data: updatedProfile, error: profileError } = await supabase.from('profiles')
                     .update({
                         subscription_status: 'active',
                         subscription_end_date: subscriptionEnd.toISOString(),
                     })
-                    .eq('id', userId);
+                    .eq('id', userId)
+                    .select();
+
+                if (profileError) throw profileError;
+                
+                // CRITICAL CHECK: Supabase silently returns successful if RLS blocks the update (0 rows updated)
+                if (!updatedProfile || updatedProfile.length === 0) {
+                    throw new Error('RLS_BLOCKED');
+                }
 
                 if (profileError) throw profileError;
 
@@ -48,9 +56,15 @@ export default function SubscriptionSuccess() {
                 toast.success('Premium activated successfully!');
             } catch (error) {
                 console.error('Failed to activate subscription:', error);
-                // Expose the raw error to the user so they can report it for debugging
-                alert(`DATABASE ERROR: ${JSON.stringify(error)}`);
-                toast.error('Payment succeeded but profile update failed. Contact support.');
+                
+                if (error.message === 'RLS_BLOCKED') {
+                    toast.error('Payment succeeded, but your database blocked the account upgrade! 🚨', { duration: 8000 });
+                    alert('CRITICAL SETUP ERROR:\n\nYou did not apply the Supabase SQL script for subscriptions! Your database rejected the account upgrade.\n\nPlease open Supabase SQL Editor, run the "SUPABASE_SUBSCRIPTION_RLS_FIX.sql" file, then re-open this page to apply your benefits.');
+                } else {
+                    // Expose the raw error to the user so they can report it for debugging
+                    alert(`DATABASE ERROR: ${JSON.stringify(error)}`);
+                    toast.error('Payment succeeded but profile update failed. Contact support.');
+                }
             } finally {
                 setIsActivating(false);
             }

@@ -101,7 +101,9 @@ export default function Vehicles() {
             const matchBrand = filterBrand === 'all' || v.make === filterBrand;
             const matchCity = filterCity === 'all' || v.pickup_city === filterCity;
             const matchTransmission = filterTransmission === 'all' || v.transmission === filterTransmission;
-            const matchPrice = v.daily_rate >= priceRange.min && v.daily_rate <= priceRange.max;
+            // For fixed pricing, the daily_rate in DB is actually computed as (fixed_price / fixed_rental_days)
+            // so we can just use daily_rate safely for filtering
+            const matchPrice = (v.daily_rate || 0) >= priceRange.min && (v.daily_rate || 0) <= priceRange.max;
             return matchSearch && matchType && matchBrand && matchCity && matchTransmission && matchPrice;
         })
         .sort((a, b) => {
@@ -311,8 +313,17 @@ export default function Vehicles() {
 
                             <div className="vehicle-card-footer">
                                 <div className="vehicle-card-price">
-                                    <span className="amount">₱{vehicle.daily_rate?.toLocaleString()}</span>
-                                    <span className="period">/day</span>
+                                    {vehicle.pricing_type === 'fixed' ? (
+                                        <>
+                                            <span className="amount" style={{ fontSize: 16 }}>₱{vehicle.fixed_price?.toLocaleString()}</span>
+                                            <span className="period" style={{ fontSize: 12 }}> for {vehicle.fixed_rental_days}d</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="amount">₱{vehicle.daily_rate?.toLocaleString()}</span>
+                                            <span className="period">/day</span>
+                                        </>
+                                    )}
                                 </div>
                                 <div className="vehicle-card-rating">
                                     <FiStar className="star" style={{ fill: '#facc15', color: '#facc15' }} />

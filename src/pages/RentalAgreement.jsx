@@ -72,7 +72,7 @@ TERMS AND CONDITIONS OF RENTAL AGREEMENT
 14. GOVERNING LAW: This agreement is governed by the laws of the Republic of the Philippines.
         `.trim();
 
-                const { data: newAgreement } = await supabase.from('rental_agreements').insert({
+                const { data: newAgreement, error: createError } = await supabase.from('rental_agreements').insert({
                     booking_id: bookingId,
                     owner_id: bookingData.owner_id,
                     renter_id: bookingData.renter_id,
@@ -92,11 +92,17 @@ TERMS AND CONDITIONS OF RENTAL AGREEMENT
                     status: 'pending_signatures',
                 }).select().single();
 
+                if (createError) {
+                    console.error('Agreement creation error:', createError);
+                    toast.error(`Error creating agreement: ${createError.message}`);
+                    return; // Prevent crash when no agreement returned
+                }
+
                 setAgreement(newAgreement);
             }
         } catch (err) {
-            console.error('Error:', err);
-            toast.error('Failed to load agreement');
+            console.error('Error in fetchAgreement:', err);
+            toast.error(`Failed to load agreement: ${err.message || 'Unknown error'}`);
         } finally {
             setLoading(false);
         }
