@@ -421,7 +421,7 @@ export default function CreateVehicle() {
 
             console.log("Success! Navigating away...");
             toast.success('✅ Vehicle submitted! You\'ll be notified once it\'s approved by an admin.');
-            navigate('/owner/vehicles');
+            navigate('/my-vehicles');
         } catch (err) {
             console.error('Listing error:', err);
             toast.error(err.message || 'Failed to submit listing');
