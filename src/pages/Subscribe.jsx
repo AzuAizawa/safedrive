@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { FiCheck, FiStar, FiZap, FiList, FiToggleRight, FiCreditCard, FiShield } from 'react-icons/fi';
-import { createSubscriptionPaymentLink, isSubscriptionActive, getSubscriptionDaysLeft, formatPHP, SUBSCRIPTION_PRICE, FREE_LISTING_LIMIT } from '../lib/paymongo';
+import { createSubscriptionPaymentLink, isSubscriptionActive, getSubscriptionDaysLeft, formatPHP, SUBSCRIPTION_PRICE, FREE_LISTING_LIMIT, verifyPaymentStatus } from '../lib/paymongo';
 import toast from 'react-hot-toast';
 import BackButton from '../components/BackButton';
 
@@ -34,6 +34,8 @@ export default function Subscribe() {
     const [vehicleCount, setVehicleCount] = useState(0);
 
     const [paymentStarted, setPaymentStarted] = useState(false);
+    const [pendingLinkId, setPendingLinkId] = useState(null);
+    const [verifying, setVerifying] = useState(false);
 
     // Check EITHER role='verified' OR verification_status='verified'
     // Admin may have set role before verification_status depending on SQL state
@@ -98,11 +100,12 @@ export default function Subscribe() {
         if (!user) { navigate('/login'); return; }
         setLoading(true);
         try {
-            const { url } = await createSubscriptionPaymentLink(user.id, user.email);
-            if (url) {
+            const { url, linkId } = await createSubscriptionPaymentLink(user.id, user.email);
+            if (url && linkId) {
                 // Open PayMongo in a new tab so they don't lose the SafeDrive tab
                 window.open(url, '_blank');
                 // Switch the UI to the "Verify Payment" state
+                setPendingLinkId(linkId);
                 setPaymentStarted(true);
             } else {
                 throw new Error('Payment link could not be created');
@@ -114,10 +117,26 @@ export default function Subscribe() {
         }
     };
 
-    const handleVerifyPayment = () => {
-        // Because PayMongo Links API doesn't auto-redirect, we manually trigger the success
-        // flow when the user confirms they paid in the other tab.
-        navigate(`/subscription/success?user_id=${user.id}`);
+    const handleVerifyPayment = async () => {
+        if (!pendingLinkId) return;
+
+        setVerifying(true);
+        const toastId = toast.loading('Verifying your payment with PayMongo...');
+
+        try {
+            const status = await verifyPaymentStatus(pendingLinkId);
+
+            if (status === 'paid') {
+                toast.success('Payment confirmed! Activating Premium...', { id: toastId });
+                navigate(`/subscription/success?user_id=${user.id}`);
+            } else {
+                toast.error('We have not received your payment yet. Please finish the GCash steps in the other tab.', { id: toastId, duration: 5000 });
+            }
+        } catch (err) {
+            toast.error('Could not verify payment status. If you already paid, please contact support.', { id: toastId });
+        } finally {
+            setVerifying(false);
+        }
     };
 
     return (
@@ -226,12 +245,16 @@ export default function Subscribe() {
                                 className="btn"
                                 style={{
                                     width: '100%', fontSize: 15, fontWeight: 700, padding: '12px 0',
-                                    background: '#4ade80', color: '#064e3b', border: 'none',
-                                    boxShadow: '0 4px 14px rgba(74,222,128,0.4)',
+                                    background: verifying ? '#94a3b8' : '#4ade80',
+                                    color: verifying ? '#f1f5f9' : '#064e3b',
+                                    border: 'none',
+                                    boxShadow: verifying ? 'none' : '0 4px 14px rgba(74,222,128,0.4)',
+                                    cursor: verifying ? 'not-allowed' : 'pointer'
                                 }}
                                 onClick={handleVerifyPayment}
+                                disabled={verifying}
                             >
-                                ✅ I have finished paying
+                                {verifying ? 'Verifying with PayMongo...' : '✅ I have finished paying'}
                             </button>
                         </div>
                     ) : (

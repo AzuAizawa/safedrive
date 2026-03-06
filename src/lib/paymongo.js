@@ -99,6 +99,33 @@ export async function createSubscriptionPaymentLink(userId, userEmail) {
     };
 }
 
+/**
+ * Verify if a specific payment link was actually paid.
+ * Prevents users from clicking "I have finished paying" without paying.
+ *
+ * @param {string} linkId - The PayMongo Link ID (e.g. link_xxxxx)
+ * @returns {string} - "paid" or "unpaid"
+ */
+export async function verifyPaymentStatus(linkId) {
+    const authHeader = getAuthHeader();
+    if (!authHeader) throw new Error('Payment gateway not configured.');
+
+    const response = await fetch(`${PAYMONGO_API}/links/${linkId}`, {
+        method: 'GET',
+        headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/json',
+        },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error('Could not verify payment status.');
+    }
+
+    return data?.data?.attributes?.status; // 'paid' or 'unpaid'
+}
 
 /**
  * Check if a user's subscription is currently active
