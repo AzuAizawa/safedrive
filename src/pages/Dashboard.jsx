@@ -6,10 +6,15 @@ import { FiTruck, FiCalendar, FiStar, FiAlertTriangle, FiArrowRight, FiCheckCirc
 import { isSubscriptionActive, getSubscriptionDaysLeft } from '../lib/paymongo';
 
 export default function Dashboard() {
-    const { profile, isAdmin, isRenter, isRentee } = useAuth();
+    const { profile, isAdmin, isRenter, isRentee, refreshProfile } = useAuth();
     const [stats, setStats] = useState({ vehicles: 0, bookings: 0, reviews: 0, pendingUsers: 0 });
     const [recentBookings, setRecentBookings] = useState([]);
     const [dataLoading, setDataLoading] = useState(true);
+
+    // Completely bust the Profile Context cache
+    useEffect(() => {
+        if (refreshProfile) refreshProfile().catch(console.error);
+    }, []);
 
     useEffect(() => {
         if (profile) {

@@ -17,7 +17,7 @@ const FEATURES_PRO = [
 ];
 
 export default function Subscribe() {
-    const { user, profile, isVerified: ctxVerified } = useAuth();
+    const { user, profile, isVerified: ctxVerified, refreshProfile } = useAuth();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [vehicleCount, setVehicleCount] = useState(0);
@@ -75,8 +75,12 @@ export default function Subscribe() {
     }
 
     useEffect(() => {
-        if (user) fetchVehicleCount();
-    }, [user]);
+        if (user) {
+            fetchVehicleCount();
+            // Guarantee we don't accidentally let a user buy a sub twice due to a stale cache
+            if (refreshProfile) refreshProfile().catch(console.error);
+        }
+    }, [user?.id]);
 
     const fetchVehicleCount = async () => {
         const { count } = await supabase.from('vehicles')
