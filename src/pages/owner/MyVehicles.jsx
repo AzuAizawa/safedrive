@@ -7,20 +7,29 @@ import toast from 'react-hot-toast';
 import { isSubscriptionActive, FREE_LISTING_LIMIT } from '../../lib/paymongo';
 
 export default function MyVehicles() {
-    const { user, profile } = useAuth();
+    const { user, profile, refreshProfile } = useAuth();
     const navigate = useNavigate();
     const [vehicles, setVehicles] = useState([]);
     const [loading, setLoading] = useState(true);
     const [togglingId, setTogglingId] = useState(null);
 
+    // Always derive subscription status dynamically on render
     const isSubscribed = isSubscriptionActive(profile);
 
+    // 1. Fetch vehicles on load or when profile changes
     useEffect(() => {
         let mounted = true;
         fetchMyVehicles();
         const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
         return () => { mounted = false; clearTimeout(safety); };
-    }, []);
+    }, [profile?.id]); // Only refetch vehicles if the actual user changes
+
+    // 2. Guarantee profile is perfectly synced with DB if they just paid
+    useEffect(() => {
+        if (refreshProfile) {
+            refreshProfile().catch(console.error);
+        }
+    }, []); // Run once when visiting the page
 
     const fetchMyVehicles = async () => {
         try {
