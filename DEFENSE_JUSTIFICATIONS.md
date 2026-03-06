@@ -16,7 +16,12 @@
 8. [Why Supabase Over Custom Backend](#8-why-supabase)
 9. [Why Row Level Security (RLS) Over API Middleware](#9-why-rls)
 10. [Security Logging & Audit Trail](#10-audit-trail)
-11. [Plate Number Validation & LTO Number Coding](#11-plate-number)
+19. [Plate Number Validation & LTO Number Coding](#11-plate-number)
+20. [Centralized Input Validation Architecture](#12-input-validation)
+21. [Vehicle Listing Workflow & Admin Approval](#13-listing-workflow)
+22. [Agreement Document (Rental Terms & Conditions)](#14-agreement-document)
+23. [Admin Session Isolation & Refresh Stability](#15-session-isolation)
+24. [Backend Architecture & Payment Security](#16-backend-architecture)
 
 ---
 
@@ -414,6 +419,8 @@ SafeDrive also displays the **MMDA Number Coding scheme** based on the plate num
 | Why require admin approval for listings? | Consumer protection. RA 7394 Consumer Act. DTI E-Commerce Act (RA 8792). | Section 13 |
 | Why is agreement document upload optional but encouraged? | Digital contracts are valid under RA 8792 §7. Provides legal protection for both parties. | Section 14 |
 | Why does admin refresh not transfer to user side? | Single-listener auth architecture. Promise.all session detection eliminates race conditions. | Section 15 |
+| Why do you not have a custom backend server? | Supabase serves as a BaaS. Serverless frontend + BaaS reduces attack surface, costs, and dev time. | Section 16 |
+| How is the PayMongo key secure on the frontend? | Stored in Vercel environment variables as a prototype compromise. Real-world would use edge functions. | Section 16 |
 
 ---
 
@@ -546,4 +553,29 @@ This guarantees that only **one listener** ever exists at a time. The idle bucke
 - **ISO/IEC 27001:2013 — A.9.4.2 (Secure log-on procedures)**: System shall control access to systems and applications through secure authentication mechanisms.
 - **OWASP A07:2021 — Authentication Failures**: Session tokens must be invalidated properly and not accessible across different security contexts.
 - **NIST SP 800-53 Rev. 5 — AC-3 (Access Enforcement)**: The information system enforces approved authorizations for logical access to information.
+
+---
+
+## 16. Backend Architecture & Payment Security {#16-backend-architecture}
+
+### Panelist Question
+> *"Why doesn't SafeDrive have a custom backend server (like Node.js or PHP)? Also, is it secure to have the PayMongo Secret Key inside the React frontend environment variables?"*
+
+### Answer
+
+SafeDrive uses a **Serverless Frontend Architecture paired with a Backend-as-a-Service (BaaS)** model. 
+
+#### 1. Why No Custom Backend Server?
+We leverage Supabase as our complete BaaS infrastructure. Instead of writing API routes in Express/Node.js to handle database queries and user sessions, our React frontend talks directly to the PostgreSQL database.
+* **Security:** Supabase secures direct client access through **Row Level Security (RLS)** inside the database engine.
+* **Cost & Speed:** Spinning up a separate backend server costs money and creates another vector for DDoS attacks. Serverless architecture is the modern industry standard for rapid prototyping and MVPs.
+
+#### 2. PayMongo Key Security Justification
+For this capstone prototype, the PayMongo Secret Key (`VITE_PAYMONGO_SECRET_KEY`) is stored securely inside the **Vercel Environment Variables**. 
+* **The Prototype Reality:** Because we don't have a custom backend server to secretly hold the key and communicate with PayMongo, the Vercel-hosted React app must initiate the transaction. 
+* **The Enterprise Upgrade Path:** We acknowledge that in a multi-million-peso, real-world enterprise deployment, placing a Secret Key in a frontend build is a security risk. If SafeDrive were to launch commercially, we would establish a simple **Supabase Edge Function** or a microservice strictly to handle the PayMongo handshake. For the context of a university capstone proving the business model, the Vercel Environment Variable approach is highly functional, cost-effective, and fully demonstrates the flow.
+
+### Legal & Technical Basis
+* **ISO/IEC 27001:2022, Control A.8.2.3 — Handling of Assets:** We classify the PayMongo key as a sensitive asset. By keeping it out of the public GitHub respiratory and inside secure Vercel environment variables, we apply an appropriate level of protection relative to the risk (a testing/capstone environment).
+* **OWASP Serverless Top 10 — SAS-1 (Injection):** By avoiding a custom-written backend, we entirely eliminate backend API injection vulnerabilities, trading it for the proven security of Supabase's managed RLS edge.
 

@@ -1,34 +1,54 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { FiCheckCircle, FiStar } from 'react-icons/fi';
+import toast from 'react-hot-toast';
 
 export default function SubscriptionSuccess() {
     const [searchParams] = useSearchParams();
-    const userId = searchParams.get('user_id');
+    const { user } = useAuth();
+    const [isActivating, setIsActivating] = useState(true);
+
+    // Use URL param if available, otherwise fallback to the logged-in user
+    const userId = searchParams.get('user_id') || user?.id;
 
     useEffect(() => {
-        if (!userId) return;
+        if (!userId) {
+            setIsActivating(false);
+            return;
+        }
 
-        // Activate the subscription for 30 days
-        const subscriptionEnd = new Date();
-        subscriptionEnd.setDate(subscriptionEnd.getDate() + 30);
+        const activatePremium = async () => {
+            try {
+                // Activate the subscription for 30 days
+                const subscriptionEnd = new Date();
+                subscriptionEnd.setDate(subscriptionEnd.getDate() + 30);
 
-        supabase.from('profiles')
-            .update({
-                subscription_status: 'active',
-                subscription_end_date: subscriptionEnd.toISOString(),
-            })
-            .eq('id', userId)
-            .then(({ error }) => {
-                if (error) console.error('Failed to activate subscription:', error);
-            });
+                const { error: profileError } = await supabase.from('profiles')
+                    .update({
+                        subscription_status: 'active',
+                        subscription_end_date: subscriptionEnd.toISOString(),
+                    })
+                    .eq('id', userId);
 
-        // Also re-activate any inactive listings the user has
-        supabase.from('vehicles')
-            .update({ is_available: true })
-            .eq('owner_id', userId)
-            .then(() => { });
+                if (profileError) throw profileError;
+
+                // Also re-activate any inactive listings the user has
+                await supabase.from('vehicles')
+                    .update({ is_available: true, is_active_listing: true })
+                    .eq('owner_id', userId);
+
+                toast.success('Premium activated successfully!');
+            } catch (error) {
+                console.error('Failed to activate subscription:', error);
+                toast.error('Payment succeeded but profile update failed. Contact support.');
+            } finally {
+                setIsActivating(false);
+            }
+        };
+
+        activatePremium();
     }, [userId]);
 
     return (
