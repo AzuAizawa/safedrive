@@ -421,6 +421,7 @@ SafeDrive also displays the **MMDA Number Coding scheme** based on the plate num
 | Why does admin refresh not transfer to user side? | Single-listener auth architecture. Promise.all session detection eliminates race conditions. | Section 15 |
 | Why do you not have a custom backend server? | Supabase serves as a BaaS. Serverless frontend + BaaS reduces attack surface, costs, and dev time. | Section 16 |
 | How is the PayMongo key secure on the frontend? | Stored in Vercel environment variables as a prototype compromise. Real-world would use edge functions. | Section 16 |
+| Why did you get a CORS error with PayMongo earlier? | Browsers block direct frontend calls to secure financial APIs. Proves why real backends are needed. | Section 16 |
 
 ---
 
@@ -574,6 +575,14 @@ We leverage Supabase as our complete BaaS infrastructure. Instead of writing API
 For this capstone prototype, the PayMongo Secret Key (`VITE_PAYMONGO_SECRET_KEY`) is stored securely inside the **Vercel Environment Variables**. 
 * **The Prototype Reality:** Because we don't have a custom backend server to secretly hold the key and communicate with PayMongo, the Vercel-hosted React app must initiate the transaction. 
 * **The Enterprise Upgrade Path:** We acknowledge that in a multi-million-peso, real-world enterprise deployment, placing a Secret Key in a frontend build is a security risk. If SafeDrive were to launch commercially, we would establish a simple **Supabase Edge Function** or a microservice strictly to handle the PayMongo handshake. For the context of a university capstone proving the business model, the Vercel Environment Variable approach is highly functional, cost-effective, and fully demonstrates the flow.
+
+#### 3. Do We Actually Need a Backend Server?
+For this Capstone Project? **No.**
+For a Real-World Enterprise? **Yes.**
+
+If asked: *"Since you encountered a CORS error with PayMongo, doesn't that prove you need a backend?"*
+**Answer:**
+> *"Yes, the CORS error we encountered is exactly why real-world enterprises use custom backend servers. Because we are a serverless React application, modern web browsers block direct 'Cross-Origin' calls from the frontend to certain financial APIs for strict security reasons. To bypass this for our prototype, we utilized the PayMongo Links API, which legally allows a frontend to generate standard payment links. If SafeDrive were to launch commercially, we would deploy a dedicated Node.js microservice simply for the PayMongo handshake to completely eliminate CORS issues."*
 
 ### Legal & Technical Basis
 * **ISO/IEC 27001:2022, Control A.8.2.3 — Handling of Assets:** We classify the PayMongo key as a sensitive asset. By keeping it out of the public GitHub respiratory and inside secure Vercel environment variables, we apply an appropriate level of protection relative to the risk (a testing/capstone environment).
