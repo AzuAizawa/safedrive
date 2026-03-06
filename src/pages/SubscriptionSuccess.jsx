@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 
 export default function SubscriptionSuccess() {
     const [searchParams] = useSearchParams();
-    const { user } = useAuth();
+    const { user, refreshProfile } = useAuth();
     const [isActivating, setIsActivating] = useState(true);
 
     // Use URL param if available, otherwise fallback to the logged-in user
@@ -38,6 +38,12 @@ export default function SubscriptionSuccess() {
                 await supabase.from('vehicles')
                     .update({ is_available: true, is_active_listing: true })
                     .eq('owner_id', userId);
+
+                // Forces the AuthContext to reload the profile from the database,
+                // instantly updating the UI navbar and "Subscribe" buttons to Premium mode.
+                if (refreshProfile) {
+                    await refreshProfile();
+                }
 
                 toast.success('Premium activated successfully!');
             } catch (error) {

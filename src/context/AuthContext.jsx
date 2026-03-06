@@ -64,6 +64,13 @@ export function AuthProvider({ children }) {
         }
     };
 
+    // ── Force manual profile refresh ───────────────────────────────────────
+    const refreshProfile = async () => {
+        if (user) {
+            await fetchProfile(user.id, activeClient);
+        }
+    };
+
     // ── Attach ONE listener to whichever client won the session check ──────
     // processInitialSession=true when called after a fresh login so that the
     // INITIAL_SESSION event (which fires when listener attaches to an already-
@@ -321,6 +328,7 @@ export function AuthProvider({ children }) {
         signOut,
         updateProfile,
         fetchProfile: () => user && fetchProfile(user.id, activeClientRef.current),
+        refreshProfile,
         // Role helpers
         isAdmin: profile?.role === 'admin',
         isSuperAdmin: profile?.role === 'super_admin',
