@@ -307,18 +307,24 @@ export default function CreateVehicle() {
             console.log("Starting photo upload...", photos?.length);
             let imageUrls = [];
             if (photos && photos.length > 0) {
-                for (let i = 0; i < photos.length; i++) {
-                    try {
-                        const file = photos[i];
-                        const ext = file.name.split('.').pop();
-                        const path = `${user.id}/${Date.now()}_${i}.${ext}`;
-                        const { error: upErr } = await supabase.storage.from('vehicle-images').upload(path, file);
-                        if (upErr) { console.warn('Photo upload failed:', upErr.message); continue; }
-                        const { data: urlData } = supabase.storage.from('vehicle-images').getPublicUrl(path);
-                        imageUrls.push(urlData.publicUrl);
-                    } catch (photoErr) {
-                        console.warn('Photo upload threw:', photoErr.message);
+                // If the entire bucket is missing, supabase.storage.from() will throw immediately 
+                // OR upload() will throw. In both cases, catching the entire loop block prevents deadlock.
+                try {
+                    for (let i = 0; i < photos.length; i++) {
+                        try {
+                            const file = photos[i];
+                            const ext = file.name.split('.').pop();
+                            const path = `${user.id}/${Date.now()}_${i}.${ext}`;
+                            const { error: upErr } = await supabase.storage.from('vehicle-images').upload(path, file);
+                            if (upErr) { console.warn('Photo upload failed:', upErr.message); continue; }
+                            const { data: urlData } = supabase.storage.from('vehicle-images').getPublicUrl(path);
+                            imageUrls.push(urlData.publicUrl);
+                        } catch (photoErr) {
+                            console.warn(`Photo ${i} upload threw:`, photoErr.message || photoErr);
+                        }
                     }
+                } catch (globalPhotoErr) {
+                    console.warn("Fatal storage Error on vehicle-images (bucket might be missing):", globalPhotoErr.message || globalPhotoErr);
                 }
             }
             console.log("Finished photo upload:",  imageUrls.length, "images");
