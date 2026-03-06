@@ -48,6 +48,8 @@ export default function SubscriptionSuccess() {
                 toast.success('Premium activated successfully!');
             } catch (error) {
                 console.error('Failed to activate subscription:', error);
+                // Expose the raw error to the user so they can report it for debugging
+                alert(`DATABASE ERROR: ${JSON.stringify(error)}`);
                 toast.error('Payment succeeded but profile update failed. Contact support.');
             } finally {
                 setIsActivating(false);
