@@ -79,7 +79,7 @@ export default function SubscriptionSuccess() {
                     marginBottom: 24, textAlign: 'left', border: '1px solid var(--success-200)',
                 }}>
                     <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--success-800)' }}>What you unlocked:</div>
-                    {['Unlimited active vehicle listings', 'All your vehicles are now active', 'Priority listing visibility', 'Premium support'].map((f, i) => (
+                    {['Unlimited active vehicle listings', 'All your vehicles are now active'].map((f, i) => (
                         <div key={i} style={{ display: 'flex', gap: 8, fontSize: 14, marginBottom: 6, color: 'var(--success-700)' }}>
                             <FiCheckCircle style={{ flexShrink: 0 }} />{f}
                         </div>

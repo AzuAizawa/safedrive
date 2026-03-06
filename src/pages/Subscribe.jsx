@@ -9,22 +9,11 @@ import BackButton from '../components/BackButton';
 
 const FEATURES_FREE = [
     { text: '1 active vehicle listing', ok: true },
-    { text: 'Rent vehicles from others', ok: true },
-    { text: 'Verified identity badge', ok: true },
-    { text: 'Digital rental agreements', ok: true },
     { text: 'Multiple active listings', ok: false },
-    { text: 'Priority listing visibility', ok: false },
-    { text: 'Premium support', ok: false },
 ];
 
 const FEATURES_PRO = [
     { text: 'Unlimited active listings', ok: true },
-    { text: 'Rent vehicles from others', ok: true },
-    { text: 'Verified identity badge', ok: true },
-    { text: 'Digital rental agreements', ok: true },
-    { text: 'Priority listing visibility', ok: true },
-    { text: 'Premium support', ok: true },
-    { text: 'Manage vehicle availability', ok: true },
 ];
 
 export default function Subscribe() {
