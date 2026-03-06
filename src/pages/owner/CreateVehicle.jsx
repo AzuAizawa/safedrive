@@ -73,7 +73,7 @@ function getCodingDay(plate) {
 export default function CreateVehicle() {
     const { user, profile, isVerified } = useAuth();
     const navigate = useNavigate();
-    const [loading, setLoading] = useState(false);
+    const [loadingState, setLoadingState] = useState(''); // '' means idle, descriptive string means loading
     const [showVerifyGate, setShowVerifyGate] = useState(false);
 
     // Catalog data
@@ -299,7 +299,7 @@ export default function CreateVehicle() {
             }
         }
 
-        setLoading(true);
+        setLoadingState('Uploading Photos...');
 
         try {
             // 1. Upload vehicle photos
@@ -332,6 +332,7 @@ export default function CreateVehicle() {
             // 2. Upload agreement document (best-effort)
             let agreementUrl = null;
             if (agreementFile) {
+                setLoadingState('Uploading Documents...');
                 try {
                     console.log("Starting agreement upload...");
                     const ext = agreementFile.name.split('.').pop();
@@ -354,6 +355,7 @@ export default function CreateVehicle() {
             // 3. Upload ORCR document (admin-only, best-effort)
             let orcrUrl = null;
             if (orcrFile) {
+                setLoadingState('Uploading ORCR...');
                 try {
                     console.log("Starting ORCR upload...");
                     const ext = orcrFile.name.split('.').pop();
@@ -373,6 +375,7 @@ export default function CreateVehicle() {
                 }
             }
             console.log("Setup complete, inserting vehicle...");
+            setLoadingState('Saving to DB...');
 
             // 4. Insert vehicle (status: pending)
             // Compute daily_rate for fixed mode so DB stays consistent
@@ -423,7 +426,7 @@ export default function CreateVehicle() {
             console.error('Listing error:', err);
             toast.error(err.message || 'Failed to submit listing');
         } finally {
-            setLoading(false);
+            setLoadingState('');
         }
     };
 
@@ -961,11 +964,11 @@ export default function CreateVehicle() {
 
                 {/* ── Submit ─────────────────────────────────────────── */}
                 <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                    <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)} disabled={loading}>
+                    <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)} disabled={!!loadingState}>
                         Cancel
                     </button>
-                    <button type="submit" className="btn btn-primary btn-lg" disabled={loading}>
-                        {loading ? '⏳ Submitting...' : '📋 Submit for Admin Review'}
+                    <button type="submit" className="btn btn-primary btn-lg" disabled={!!loadingState}>
+                        {loadingState ? `⏳ ${loadingState}` : '📋 Submit for Admin Review'}
                     </button>
                 </div>
 
