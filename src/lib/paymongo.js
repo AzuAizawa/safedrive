@@ -28,18 +28,18 @@
  * - So per ₱399 subscription: PayMongo takes ₱9.98, you receive ₱389.02
  *
  * ENV SETUP (add to .env and Vercel environment variables):
- *   VITE_PAYMONGO_PUBLIC_KEY=pk_test_xxxxxxxxxxxx  (or pk_live_xxx for production)
+ *   VITE_PAYMONGO_SECRET_KEY=sk_test_xxxxxxxxxxxx  (or sk_live_xxx for production)
  */
 
 const PAYMONGO_API = 'https://api.paymongo.com/v1';
-const PUBLIC_KEY = import.meta.env.VITE_PAYMONGO_PUBLIC_KEY;
+const SECRET_KEY = import.meta.env.VITE_PAYMONGO_SECRET_KEY;
 
 const getAuthHeader = () => {
-    if (!PUBLIC_KEY) {
-        console.warn('⚠️ PayMongo public key not set. Add VITE_PAYMONGO_PUBLIC_KEY to .env');
+    if (!SECRET_KEY) {
+        console.warn('⚠️ PayMongo secret key not set. Add VITE_PAYMONGO_SECRET_KEY to .env');
         return null;
     }
-    return `Basic ${btoa(PUBLIC_KEY + ':')}`;
+    return `Basic ${btoa(SECRET_KEY + ':')}`;
 };
 
 export const SUBSCRIPTION_PRICE = 399; // ₱399/month
