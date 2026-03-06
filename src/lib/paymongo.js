@@ -61,7 +61,7 @@ export async function createSubscriptionPaymentLink(userId, userEmail) {
 
     const amountCentavos = SUBSCRIPTION_PRICE * 100; // ₱399 → 39900 centavos
 
-    const response = await fetch(`${PAYMONGO_API}/links`, {
+    const response = await fetch(`${PAYMONGO_API}/checkout_sessions`, {
         method: 'POST',
         headers: {
             'Authorization': authHeader,
@@ -70,21 +70,26 @@ export async function createSubscriptionPaymentLink(userId, userEmail) {
         body: JSON.stringify({
             data: {
                 attributes: {
-                    amount: amountCentavos,
+                    send_email_receipt: true,
+                    show_description: true,
+                    show_line_items: true,
                     description: 'SafeDrive Premium Subscription — 1 Month Unlimited Listings',
-                    currency: 'PHP',
-                    // The Paymongo Links API uses these exact key names for successful return trips
+                    line_items: [
+                        {
+                            amount: amountCentavos,
+                            currency: 'PHP',
+                            name: 'Premium Subscription (1 Month)',
+                            quantity: 1,
+                        }
+                    ],
+                    payment_method_types: ['gcash', 'paymaya', 'card'],
                     success_url: `${window.location.origin}/subscription/success?user_id=${userId}`,
                     cancel_url: `${window.location.origin}/subscription/failed`,
-
-                    // GCash, Maya, InstaPay — your preferred Philippine payment methods
-                    payment_method_types: ['gcash', 'paymaya', 'dob'],
-                    remarks: 'SafeDrive Premium — Unlimited Car Listings',
+                    reference_number: `SUBSCRIBE-${userId}-${Date.now()}`,
                     metadata: {
                         user_id: userId,
                         user_email: userEmail,
                         plan: 'monthly',
-                        amount_php: SUBSCRIPTION_PRICE,
                     },
                 },
             },
