@@ -327,6 +327,7 @@ export default function CreateVehicle() {
             let agreementUrl = null;
             if (agreementFile) {
                 try {
+                    console.log("Starting agreement upload...");
                     const ext = agreementFile.name.split('.').pop();
                     const path = `${user.id}/${Date.now()}_agreement.${ext}`;
                     const { error: agErr } = await supabase.storage
@@ -336,10 +337,11 @@ export default function CreateVehicle() {
                         const { data: agUrl } = supabase.storage.from('vehicle-agreements').getPublicUrl(path);
                         agreementUrl = agUrl.publicUrl;
                     } else {
-                        console.warn('Agreement upload failed:', agErr.message);
+                        console.warn('Agreement upload failed (bucket might be missing):', agErr.message);
                     }
                 } catch (agErr) {
-                    console.warn('Agreement upload threw:', agErr.message);
+                    // Prevent this from hanging the whole submission if bucket is entirely missing
+                    console.warn('Agreement upload threw exception (gracefully skipping):', agErr.message || agErr);
                 }
             }
 
@@ -360,7 +362,8 @@ export default function CreateVehicle() {
                         console.warn('ORCR upload failed:', orcrErr.message);
                     }
                 } catch (orcrErr) {
-                    console.warn('ORCR upload threw:', orcrErr.message);
+                    // Prevent crash if upload throws entirely
+                    console.warn('ORCR upload threw exception (gracefully skipping):', orcrErr.message || orcrErr);
                 }
             }
             console.log("Setup complete, inserting vehicle...");
