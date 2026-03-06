@@ -73,10 +73,10 @@ export async function createSubscriptionPaymentLink(userId, userEmail) {
                     amount: amountCentavos,
                     description: 'SafeDrive Premium Subscription — 1 Month Unlimited Listings',
                     currency: 'PHP',
-                    redirect: {
-                        success: `${window.location.origin}/subscription/success?user_id=${userId}`,
-                        failed: `${window.location.origin}/subscription/failed`,
-                    },
+                    // The Paymongo Links API uses these exact key names for successful return trips
+                    success_url: `${window.location.origin}/subscription/success?user_id=${userId}`,
+                    cancel_url: `${window.location.origin}/subscription/failed`,
+
                     // GCash, Maya, InstaPay — your preferred Philippine payment methods
                     payment_method_types: ['gcash', 'paymaya', 'dob'],
                     remarks: 'SafeDrive Premium — Unlimited Car Listings',
