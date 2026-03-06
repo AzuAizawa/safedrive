@@ -33,6 +33,8 @@ export default function Subscribe() {
     const [loading, setLoading] = useState(false);
     const [vehicleCount, setVehicleCount] = useState(0);
 
+    const [paymentStarted, setPaymentStarted] = useState(false);
+
     // Check EITHER role='verified' OR verification_status='verified'
     // Admin may have set role before verification_status depending on SQL state
     const isVerified = ctxVerified || profile?.role === 'verified' || profile?.verification_status === 'verified';
@@ -98,7 +100,10 @@ export default function Subscribe() {
         try {
             const { url } = await createSubscriptionPaymentLink(user.id, user.email);
             if (url) {
-                window.location.href = url;
+                // Open PayMongo in a new tab so they don't lose the SafeDrive tab
+                window.open(url, '_blank');
+                // Switch the UI to the "Verify Payment" state
+                setPaymentStarted(true);
             } else {
                 throw new Error('Payment link could not be created');
             }
@@ -107,6 +112,12 @@ export default function Subscribe() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleVerifyPayment = () => {
+        // Because PayMongo Links API doesn't auto-redirect, we manually trigger the success
+        // flow when the user confirms they paid in the other tab.
+        navigate(`/subscription/success?user_id=${user.id}`);
     };
 
     return (
@@ -202,6 +213,27 @@ export default function Subscribe() {
                         <div style={{ fontSize: 12, background: 'rgba(74,222,128,0.15)', borderRadius: 'var(--radius-md)', padding: '8px 12px', color: '#4ade80', fontWeight: 700 }}>
                             ✓ Active — {daysLeft} days remaining
                         </div>
+                    ) : paymentStarted ? (
+                        <div style={{
+                            background: 'rgba(255, 255, 255, 0.1)',
+                            borderRadius: 'var(--radius-lg)', padding: '16px',
+                            textAlign: 'center', border: '1px solid rgba(255,255,255,0.2)'
+                        }}>
+                            <div style={{ fontSize: 13, marginBottom: 12, lineHeight: 1.5, color: '#94a3b8' }}>
+                                A new tab opened for PayMongo checkout. Once you complete the GCash payment there, come back here and click the button below.
+                            </div>
+                            <button
+                                className="btn"
+                                style={{
+                                    width: '100%', fontSize: 15, fontWeight: 700, padding: '12px 0',
+                                    background: '#4ade80', color: '#064e3b', border: 'none',
+                                    boxShadow: '0 4px 14px rgba(74,222,128,0.4)',
+                                }}
+                                onClick={handleVerifyPayment}
+                            >
+                                ✅ I have finished paying
+                            </button>
+                        </div>
                     ) : (
                         <button
                             className="btn"
@@ -214,7 +246,7 @@ export default function Subscribe() {
                             onClick={handleSubscribe}
                             disabled={loading}
                         >
-                            {loading ? 'Redirecting to GCash...' : '💳 Subscribe via GCash'}
+                            {loading ? 'Creating secure link...' : '💳 Subscribe via GCash'}
                         </button>
                     )}
                 </div>

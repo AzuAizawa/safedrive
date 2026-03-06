@@ -61,7 +61,7 @@ export async function createSubscriptionPaymentLink(userId, userEmail) {
 
     const amountCentavos = SUBSCRIPTION_PRICE * 100; // ₱399 → 39900 centavos
 
-    const response = await fetch(`${PAYMONGO_API}/checkout_sessions`, {
+    const response = await fetch(`${PAYMONGO_API}/links`, {
         method: 'POST',
         headers: {
             'Authorization': authHeader,
@@ -70,26 +70,15 @@ export async function createSubscriptionPaymentLink(userId, userEmail) {
         body: JSON.stringify({
             data: {
                 attributes: {
-                    send_email_receipt: true,
-                    show_description: true,
-                    show_line_items: true,
-                    description: 'SafeDrive Premium Subscription — 1 Month Unlimited Listings',
-                    line_items: [
-                        {
-                            amount: amountCentavos,
-                            currency: 'PHP',
-                            name: 'Premium Subscription (1 Month)',
-                            quantity: 1,
-                        }
-                    ],
-                    payment_method_types: ['gcash', 'paymaya', 'card'],
-                    success_url: `${window.location.origin}/subscription/success?user_id=${userId}`,
-                    cancel_url: `${window.location.origin}/subscription/failed`,
-                    reference_number: `SUBSCRIBE-${userId}-${Date.now()}`,
+                    amount: amountCentavos,
+                    description: 'SafeDrive Premium — 1 Month Unlimited Listings. After payment, return to the SafeDrive tab to activate your subscription.',
+                    currency: 'PHP',
+                    remarks: 'SafeDrive Premium Subscription 1 Month',
                     metadata: {
                         user_id: userId,
                         user_email: userEmail,
                         plan: 'monthly',
+                        amount_php: SUBSCRIPTION_PRICE,
                     },
                 },
             },
@@ -109,6 +98,7 @@ export async function createSubscriptionPaymentLink(userId, userEmail) {
         referenceNumber: data?.data?.attributes?.reference_number,
     };
 }
+
 
 /**
  * Check if a user's subscription is currently active
