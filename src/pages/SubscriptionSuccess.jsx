@@ -58,6 +58,7 @@ export default function SubscriptionSuccess() {
                 }
 
                 toast.success('Premium activated successfully!');
+                setIsActivating(false);
             } catch (error) {
                 console.error('Failed to activate subscription:', error);
                 
