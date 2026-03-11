@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { FiSearch, FiMapPin, FiUsers, FiSettings, FiStar, FiHeart, FiFilter, FiX, FiGrid, FiList } from 'react-icons/fi';
@@ -17,6 +17,7 @@ const BODY_TYPES = ['Sedan', 'SUV', 'MPV', 'Van', 'Hatchback', 'Pickup', 'Crosso
 
 export default function Vehicles() {
     const { user } = useAuth();
+    const location = useLocation();
     const [vehicles, setVehicles] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -38,7 +39,7 @@ export default function Vehicles() {
 
         const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
         return () => { mounted = false; clearTimeout(safety); };
-    }, []);
+    }, [location.key]);
 
     const fetchVehicles = async () => {
         try {
@@ -47,6 +48,7 @@ export default function Vehicles() {
                 .select('*, profiles!vehicles_owner_id_fkey(full_name, average_rating, avatar_url)')
                 .in('status', ['approved', 'listed'])
                 .eq('is_available', true)
+                .is('is_active_listing', true)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;

@@ -285,12 +285,14 @@ export default function CreateVehicle() {
             }
         }
 
-        if (!formData.contact_info?.trim()) {
-            toast.error('Please provide your contact information for renters'); return;
+        // Validate PH mobile number format (11 digits starting with 09)
+        const phoneRegex = /^09\d{9}$/;
+        if (!phoneRegex.test(formData.contact_info?.trim())) {
+            toast.error('Please provide a valid 11-digit Philippine mobile number starting with 09 (e.g., 09123456789)'); return;
         }
 
         // Basic sanitization check — reject inputs containing HTML tags
-        const textFields = ['pickup_location', 'pickup_city', 'pickup_province', 'description', 'contact_info'];
+        const textFields = ['pickup_location', 'pickup_city', 'pickup_province', 'description'];
         for (const key of textFields) {
             const val = formData[key] || '';
             if (val && /<[^>]+>/.test(val)) {
@@ -770,13 +772,20 @@ export default function CreateVehicle() {
                     </div>
                     <div className="card-body">
                         <div className="form-group">
-                            <label className="form-label">Contact Details *</label>
-                            <textarea className="form-textarea" style={{ width: '100%' }} rows={3}
-                                placeholder="e.g. 09XX-XXX-XXXX | Facebook: Juan Dela Cruz | Viber: 09XX-XXX-XXXX"
+                            <label className="form-label">Philippine Mobile Number *</label>
+                            <input type="tel" className="form-input" style={{ width: '100%' }}
+                                placeholder="09XXXXXXXXX"
+                                maxLength={11}
                                 value={formData.contact_info}
-                                onChange={e => setFormData({ ...formData, contact_info: e.target.value })} />
+                                onChange={e => {
+                                    // only allow digits
+                                    const val = e.target.value.replace(/\D/g, '');
+                                    if (val.length <= 11) {
+                                        setFormData({ ...formData, contact_info: val });
+                                    }
+                                }} required />
                             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-                                Provide your preferred contact method so renters can reach you to coordinate and negotiate.
+                                Renters will use this number to contact you. Must be an 11-digit number starting with 09.
                             </div>
                         </div>
                     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { FiPlus, FiEye, FiTrash2, FiStar, FiToggleLeft, FiToggleRight } from 'react-icons/fi';
@@ -9,6 +9,7 @@ import { isSubscriptionActive, FREE_LISTING_LIMIT } from '../../lib/paymongo';
 export default function MyVehicles() {
     const { user, profile, refreshProfile } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
     const [vehicles, setVehicles] = useState([]);
     const [loading, setLoading] = useState(true);
     const [togglingId, setTogglingId] = useState(null);
@@ -22,7 +23,7 @@ export default function MyVehicles() {
         fetchMyVehicles();
         const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
         return () => { mounted = false; clearTimeout(safety); };
-    }, [profile?.id]); // Only refetch vehicles if the actual user changes
+    }, [profile?.id, location.key]); // Refetch on route change to capture newly added vehicles
 
     // 2. Guarantee profile is perfectly synced with DB if they just paid
     useEffect(() => {
@@ -47,7 +48,7 @@ export default function MyVehicles() {
         }
     };
 
-    const activeCount = vehicles.filter(v => v.is_active_listing !== false && v.is_available).length;
+    const activeCount = vehicles.filter(v => v.is_active_listing === true).length;
 
     /**
      * Toggle a vehicle's active/inactive listing state.
@@ -55,7 +56,7 @@ export default function MyVehicles() {
      * Subscribed users: unlimited.
      */
     const toggleActiveListing = async (vehicle) => {
-        const currentlyActive = vehicle.is_active_listing !== false && vehicle.is_available;
+        const currentlyActive = vehicle.is_active_listing === true;
 
         if (!currentlyActive && !isSubscribed && activeCount >= FREE_LISTING_LIMIT) {
             toast.error(
@@ -161,7 +162,7 @@ export default function MyVehicles() {
                         </thead>
                         <tbody>
                             {vehicles.map((v, idx) => {
-                                const isActive = v.is_active_listing !== false && v.is_available;
+                                const isActive = v.is_active_listing === true;
                                 const isOldest = idx === 0;
                                 return (
                                     <tr key={v.id} style={{ opacity: isActive ? 1 : 0.6 }}>
