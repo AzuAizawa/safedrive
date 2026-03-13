@@ -59,11 +59,16 @@ function getCodingDay(plate) {
     if (!digits.length) return null;
     const last = parseInt(digits[digits.length - 1]);
     const map = {
-        1: { day: 'Monday', color: '#ef4444' }, 2: { day: 'Monday', color: '#ef4444' },
-        3: { day: 'Tuesday', color: '#f97316' }, 4: { day: 'Tuesday', color: '#f97316' },
-        5: { day: 'Wednesday', color: '#eab308' }, 6: { day: 'Wednesday', color: '#eab308' },
-        7: { day: 'Thursday', color: '#22c55e' }, 8: { day: 'Thursday', color: '#22c55e' },
-        9: { day: 'Friday', color: '#3b82f6' }, 0: { day: 'Friday', color: '#3b82f6' },
+        1: { day: 'Monday', color: 'text-red-500', bg: 'bg-red-50', border: 'border-red-200' },
+        2: { day: 'Monday', color: 'text-red-500', bg: 'bg-red-50', border: 'border-red-200' },
+        3: { day: 'Tuesday', color: 'text-orange-500', bg: 'bg-orange-50', border: 'border-orange-200' },
+        4: { day: 'Tuesday', color: 'text-orange-500', bg: 'bg-orange-50', border: 'border-orange-200' },
+        5: { day: 'Wednesday', color: 'text-yellow-500', bg: 'bg-yellow-50', border: 'border-yellow-200' },
+        6: { day: 'Wednesday', color: 'text-yellow-500', bg: 'bg-yellow-50', border: 'border-yellow-200' },
+        7: { day: 'Thursday', color: 'text-green-500', bg: 'bg-green-50', border: 'border-green-200' },
+        8: { day: 'Thursday', color: 'text-green-500', bg: 'bg-green-50', border: 'border-green-200' },
+        9: { day: 'Friday', color: 'text-blue-500', bg: 'bg-blue-50', border: 'border-blue-200' },
+        0: { day: 'Friday', color: 'text-blue-500', bg: 'bg-blue-50', border: 'border-blue-200' },
     };
     return map[last] || null;
 }
@@ -436,7 +441,7 @@ export default function CreateVehicle() {
     const seatOptions = SEATING_BY_BODY_TYPE[formData.body_type]?.options || [{ value: 5, label: '5 seater' }];
 
     return (
-        <div style={{ maxWidth: 820, margin: '0 auto', paddingBottom: 48 }}>
+        <div className="max-w-[820px] mx-auto pb-12">
             <BackButton />
 
             <div className="page-header">
@@ -446,22 +451,17 @@ export default function CreateVehicle() {
 
             {/* Verification warning banner */}
             {!isVerified && (
-                <div style={{
-                    background: 'var(--warning-50)', border: '1px solid var(--warning-200)',
-                    borderRadius: 'var(--radius-lg)', padding: '16px 20px',
-                    display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 24,
-                }}>
-                    <span style={{ fontSize: 22 }}>⚠️</span>
+                <div className="bg-[var(--warning-50)] border border-[var(--warning-200)] rounded-[var(--radius-lg)] p-[16px_20px] flex items-start gap-3.5 mb-6">
+                    <span className="text-[22px]">⚠️</span>
                     <div>
-                        <div style={{ fontWeight: 700, color: 'var(--warning-700)', marginBottom: 4 }}>
+                        <div className="font-bold text-[var(--warning-700)] mb-1">
                             Identity Verification Required
                         </div>
-                        <div style={{ fontSize: 14, color: 'var(--warning-600)' }}>
+                        <div className="text-[14px] text-[var(--warning-600)]">
                             You must be verified to list a vehicle. Go to your Profile to upload your ID and selfie.
                         </div>
                         <button
-                            className="btn btn-sm"
-                            style={{ marginTop: 10, background: 'var(--warning-500)', color: '#fff', border: 'none' }}
+                            className="btn btn-sm mt-2.5 bg-[var(--warning-500)] text-white border-none"
                             onClick={() => navigate('/profile')}
                         >
                             Go to Profile & Verify
@@ -471,23 +471,16 @@ export default function CreateVehicle() {
             )}
 
             {/* Process Steps */}
-            <div style={{
-                display: 'flex', gap: 0, marginBottom: 28, background: 'var(--surface-secondary)',
-                borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--border-light)',
-            }}>
+            <div className="flex gap-0 mb-7 bg-[var(--surface-secondary)] rounded-[var(--radius-lg)] overflow-hidden border border-[var(--border-light)]">
                 {[
                     { icon: '✅', label: 'Get Verified', done: isVerified },
                     { icon: '📋', label: 'Fill Listing Form', done: false },
                     { icon: '🔍', label: 'Admin Review', done: false },
                     { icon: '🚀', label: 'Go Live', done: false },
                 ].map((step, i) => (
-                    <div key={i} style={{
-                        flex: 1, padding: '12px 8px', textAlign: 'center',
-                        borderRight: i < 3 ? '1px solid var(--border-light)' : 'none',
-                        background: step.done ? 'var(--success-50)' : 'transparent',
-                    }}>
-                        <div style={{ fontSize: 18 }}>{step.icon}</div>
-                        <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: step.done ? 'var(--success-700)' : 'var(--text-secondary)' }}>
+                    <div key={i} className={`flex-1 p-[12px_8px] text-center ${i < 3 ? 'border-r border-[var(--border-light)]' : ''} ${step.done ? 'bg-[var(--success-50)]' : ''}`}>
+                        <div className="text-[18px]">{step.icon}</div>
+                        <div className={`text-[11px] font-semibold mt-1 ${step.done ? 'text-[var(--success-700)]' : 'text-[var(--text-secondary)]'}`}>
                             {step.label}
                         </div>
                     </div>
@@ -496,14 +489,14 @@ export default function CreateVehicle() {
 
             <form onSubmit={handleSubmit}>
                 {/* ── Section 1: Vehicle Info ─────────────────────────── */}
-                <div className="card" style={{ marginBottom: 20 }}>
-                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>🚘 Vehicle Information</h2></div>
+                <div className="card mb-5">
+                    <div className="card-header"><h2 className="text-[16px] font-bold">🚘 Vehicle Information</h2></div>
                     <div className="card-body">
                         {/* Brand + Model */}
-                        <div className="form-row" style={{ marginBottom: 16 }}>
+                        <div className="form-row mb-4">
                             <div className="form-group">
                                 <label className="form-label">Brand *</label>
-                                <select className="form-select" style={{ width: '100%' }}
+                                <select className="form-select w-full"
                                     value={formData.make} disabled={catalogLoading}
                                     onChange={e => setFormData({ ...formData, make: e.target.value })}>
                                     <option value="">{catalogLoading ? 'Loading...' : '— Select Brand —'}</option>
@@ -514,7 +507,7 @@ export default function CreateVehicle() {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Model *</label>
-                                <select className="form-select" style={{ width: '100%' }}
+                                <select className="form-select w-full"
                                     value={formData.model} disabled={!formData.make || catalogLoading}
                                     onChange={e => setFormData({ ...formData, model: e.target.value })}>
                                     <option value="">{!formData.make ? '— Select brand first —' : filteredModels.length === 0 ? 'No models available' : '— Select Model —'}</option>
@@ -524,10 +517,10 @@ export default function CreateVehicle() {
                         </div>
 
                         {/* Year + Color */}
-                        <div className="form-row" style={{ marginBottom: 16 }}>
+                        <div className="form-row mb-4">
                             <div className="form-group">
                                 <label className="form-label">Year Model *</label>
-                                <select className="form-select" style={{ width: '100%' }} value={formData.year}
+                                <select className="form-select w-full" value={formData.year}
                                     onChange={e => setFormData({ ...formData, year: e.target.value })}>
                                     {Array.from({ length: currentYear + 1 - 1990 + 1 }, (_, i) => currentYear + 1 - i).map(y => (
                                         <option key={y} value={y}>{y}</option>
@@ -536,7 +529,7 @@ export default function CreateVehicle() {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Color *</label>
-                                <select className="form-select" style={{ width: '100%' }} value={formData.color} required
+                                <select className="form-select w-full" value={formData.color} required
                                     onChange={e => setFormData({ ...formData, color: e.target.value })}>
                                     <option value="">— Select Color —</option>
                                     {COLOR_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
@@ -545,30 +538,27 @@ export default function CreateVehicle() {
                         </div>
 
                         {/* Body Type (read-only) + Plate Number */}
-                        <div className="form-row" style={{ marginBottom: 16 }}>
+                        <div className="form-row mb-4">
                             <div className="form-group">
-                                <label className="form-label">Body Type <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>(auto-detected)</span></label>
-                                <input className="form-input" style={{ width: '100%', opacity: 0.7, cursor: 'not-allowed' }}
+                                <label className="form-label">Body Type <span className="text-[11px] text-[var(--text-tertiary)]">(auto-detected)</span></label>
+                                <input className="form-input w-full opacity-70 cursor-not-allowed"
                                     value={formData.body_type || '—'} readOnly disabled />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Plate Number *</label>
-                                <input className="form-input" style={{ width: '100%' }} placeholder="ABC 1234"
+                                <input className="form-input w-full" placeholder="ABC 1234"
                                     value={formData.plate_number}
                                     onChange={e => {
                                         const val = e.target.value.toUpperCase().replace(/[^A-Z0-9 ]/g, '');
                                         if (val.replace(/\s/g, '').length <= 7) setFormData({ ...formData, plate_number: val });
                                     }} required />
-                                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                <div className="text-[11px] text-[var(--text-tertiary)] mt-1">
                                     Max 7 alphanumeric chars. Format: ABC 1234
                                 </div>
                                 {codingDay && (
-                                    <div style={{
-                                        display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6,
-                                        padding: '4px 10px', borderRadius: 'var(--radius-md)',
-                                        background: codingDay.color + '18', border: `1px solid ${codingDay.color}40`,
-                                        fontSize: 12, fontWeight: 600, color: codingDay.color,
-                                    }}>
+                                    <div 
+                                        className={`inline-flex items-center gap-1.5 mt-1.5 p-[4px_10px] rounded-[var(--radius-md)] border text-[12px] font-semibold ${codingDay.bg} ${codingDay.border} ${codingDay.color}`}
+                                    >
                                         🚦 Coding Day: {codingDay.day}
                                     </div>
                                 )}
@@ -576,10 +566,10 @@ export default function CreateVehicle() {
                         </div>
 
                         {/* Transmission + Fuel */}
-                        <div className="form-row" style={{ marginBottom: 16 }}>
+                        <div className="form-row mb-4">
                             <div className="form-group">
                                 <label className="form-label">Transmission *</label>
-                                <select className="form-select" style={{ width: '100%' }} value={formData.transmission}
+                                <select className="form-select w-full" value={formData.transmission}
                                     onChange={e => setFormData({ ...formData, transmission: e.target.value })}>
                                     <option value="Automatic">Automatic</option>
                                     <option value="Manual">Manual</option>
@@ -587,7 +577,7 @@ export default function CreateVehicle() {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Fuel Type *</label>
-                                <select className="form-select" style={{ width: '100%' }} value={formData.fuel_type}
+                                <select className="form-select w-full" value={formData.fuel_type}
                                     onChange={e => setFormData({ ...formData, fuel_type: e.target.value })}>
                                     <option value="Gasoline">Gasoline</option>
                                     <option value="Diesel">Diesel</option>
@@ -603,16 +593,12 @@ export default function CreateVehicle() {
                                 <label className="form-label">Seating Capacity *</label>
                                 {seatOptions.length === 1 ? (
                                     // Only one valid option — show as non-editable badge
-                                    <div style={{
-                                        padding: '10px 14px', background: 'var(--neutral-50)',
-                                        border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)',
-                                        fontWeight: 600, color: 'var(--text-primary)',
-                                    }}>
+                                    <div className="p-[10px_14px] bg-[var(--neutral-50)] border border-[var(--border-light)] rounded-[var(--radius-md)] font-semibold text-[var(--text-primary)]">
                                         {seatOptions[0].label}
                                         <input type="hidden" value={seatOptions[0].value} />
                                     </div>
                                 ) : (
-                                    <select className="form-select" style={{ width: '100%' }}
+                                    <select className="form-select w-full"
                                         value={formData.seating_capacity}
                                         onChange={e => setFormData({ ...formData, seating_capacity: parseInt(e.target.value) })}>
                                         {seatOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -620,8 +606,8 @@ export default function CreateVehicle() {
                                 )}
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Mileage (km) <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>optional</span></label>
-                                <input type="number" className="form-input" style={{ width: '100%' }}
+                                <label className="form-label">Mileage (km) <span className="text-[11px] text-[var(--text-tertiary)]">optional</span></label>
+                                <input type="number" className="form-input w-full"
                                     placeholder="e.g. 45000" value={formData.mileage}
                                     onChange={e => setFormData({ ...formData, mileage: e.target.value })} min={0} />
                             </div>
@@ -630,30 +616,25 @@ export default function CreateVehicle() {
                 </div>
 
                 {/* ── Section 2: Pricing & Availability ──────────────── */}
-                <div className="card" style={{ marginBottom: 20 }}>
-                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>💰 Pricing &amp; Availability</h2></div>
+                <div className="card mb-5">
+                    <div className="card-header"><h2 className="text-[16px] font-bold">💰 Pricing &amp; Availability</h2></div>
                     <div className="card-body">
 
                         {/* Pricing Mode Toggle */}
-                        <div style={{ marginBottom: 20 }}>
-                            <label className="form-label" style={{ marginBottom: 8, display: 'block' }}>
+                        <div className="mb-5">
+                            <label className="form-label mb-2 block">
                                 Rental Type *
                             </label>
-                            <div style={{ display: 'flex', gap: 10 }}>
+                            <div className="flex gap-2.5">
                                 {[{ key: 'flexible', icon: '🔄', label: 'Flexible', sub: 'Renter picks the days at your daily rate' },
                                 { key: 'fixed', icon: '📌', label: 'Fixed', sub: 'One price for a set number of days' }].map(opt => {
                                     const active = formData.pricing_type === opt.key;
                                     return (
-                                        <button key={opt.key} type="button" onClick={() => setFormData({ ...formData, pricing_type: opt.key })} style={{
-                                            flex: 1, padding: '12px 16px', borderRadius: 'var(--radius-md)', cursor: 'pointer',
-                                            border: `2px solid ${active ? 'var(--primary-500)' : 'var(--border-light)'}`,
-                                            background: active ? 'var(--primary-50)' : 'var(--surface-secondary)',
-                                            textAlign: 'left', transition: 'all 0.15s',
-                                        }}>
-                                            <div style={{ fontWeight: 700, fontSize: 14, color: active ? 'var(--primary-700)' : 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <button key={opt.key} type="button" onClick={() => setFormData({ ...formData, pricing_type: opt.key })} className={`flex-1 p-[12px_16px] rounded-[var(--radius-md)] cursor-pointer border-2 text-left transition-all duration-150 ${active ? 'border-[var(--primary-500)] bg-[var(--primary-50)]' : 'border-[var(--border-light)] bg-[var(--surface-secondary)]'}`}>
+                                            <div className={`font-bold text-[14px] flex items-center gap-1.5 ${active ? 'text-[var(--primary-700)]' : 'text-[var(--text-primary)]'}`}>
                                                 {active && <FiCheckCircle size={14} />} {opt.icon} {opt.label}
                                             </div>
-                                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{opt.sub}</div>
+                                            <div className="text-[12px] text-[var(--text-tertiary)] mt-0.5">{opt.sub}</div>
                                         </button>
                                     );
                                 })}
@@ -663,40 +644,33 @@ export default function CreateVehicle() {
                         {/* Flexible mode fields */}
                         {formData.pricing_type === 'flexible' && (
                             <>
-                                <div className="form-row" style={{ marginBottom: 20 }}>
+                                <div className="form-row mb-5">
                                     <div className="form-group">
                                         <label className="form-label">Daily Rate (₱) *</label>
-                                        <input type="number" className="form-input" style={{ width: '100%' }}
+                                        <input type="number" className="form-input w-full"
                                             placeholder="e.g. 2500" value={formData.daily_rate}
                                             onChange={e => setFormData({ ...formData, daily_rate: e.target.value })}
                                             required min={1} />
-                                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                        <div className="text-[11px] text-[var(--text-tertiary)] mt-1">
                                             Base daily rate. Renter picks how many days to rent.
                                         </div>
                                     </div>
                                     <div className="form-group">
-                                        <label className="form-label">Security Deposit (₱) <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>optional</span></label>
-                                        <input type="number" className="form-input" style={{ width: '100%' }}
+                                        <label className="form-label">Security Deposit (₱) <span className="text-[11px] text-[var(--text-tertiary)]">optional</span></label>
+                                        <input type="number" className="form-input w-full"
                                             placeholder="e.g. 5000" value={formData.security_deposit}
                                             onChange={e => setFormData({ ...formData, security_deposit: e.target.value })} min={0} />
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="form-label" style={{ marginBottom: 10, display: 'block' }}>
-                                        Available Rental Durations * <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Select all that apply</span>
+                                    <label className="form-label mb-2.5 block">
+                                        Available Rental Durations * <span className="text-[11px] text-[var(--text-tertiary)]">Select all that apply</span>
                                     </label>
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                                    <div className="flex flex-wrap gap-2.5">
                                         {DURATION_OPTIONS.map(d => {
                                             const selected = formData.available_durations.includes(d.key);
                                             return (
-                                                <button key={d.key} type="button" onClick={() => toggleDuration(d.key)} style={{
-                                                    padding: '8px 16px', borderRadius: 'var(--radius-md)',
-                                                    border: `2px solid ${selected ? 'var(--primary-500)' : 'var(--border-light)'}`,
-                                                    background: selected ? 'var(--primary-50)' : 'var(--surface-secondary)',
-                                                    color: selected ? 'var(--primary-700)' : 'var(--text-secondary)',
-                                                    fontWeight: selected ? 700 : 400, cursor: 'pointer', fontSize: 14, transition: 'all 0.15s',
-                                                    display: 'flex', alignItems: 'center', gap: 6,
-                                                }}>
+                                                <button key={d.key} type="button" onClick={() => toggleDuration(d.key)} className={`p-[8px_16px] rounded-[var(--radius-md)] border-2 font-medium cursor-pointer text-[14px] transition-all duration-150 flex items-center gap-1.5 ${selected ? 'border-[var(--primary-500)] bg-[var(--primary-50)] text-[var(--primary-700)] font-bold' : 'border-[var(--border-light)] bg-[var(--surface-secondary)] text-[var(--text-secondary)]'}`}>
                                                     {selected && <FiCheckCircle size={14} />}{d.label}
                                                 </button>
                                             );
@@ -711,19 +685,19 @@ export default function CreateVehicle() {
                             <div className="form-row">
                                 <div className="form-group">
                                     <label className="form-label">Fixed Price (₱) *</label>
-                                    <input type="number" className="form-input" style={{ width: '100%' }}
+                                    <input type="number" className="form-input w-full"
                                         placeholder="e.g. 1500" value={formData.fixed_price}
                                         onChange={e => setFormData({ ...formData, fixed_price: e.target.value })} min={1} />
-                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                    <div className="text-[11px] text-[var(--text-tertiary)] mt-1">
                                         Total price for the whole deal.
                                     </div>
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Number of Rental Days *</label>
-                                    <input type="number" className="form-input" style={{ width: '100%' }}
+                                    <input type="number" className="form-input w-full"
                                         placeholder="e.g. 3" value={formData.fixed_rental_days}
                                         onChange={e => setFormData({ ...formData, fixed_rental_days: e.target.value })} min={1} />
-                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                    <div className="text-[11px] text-[var(--text-tertiary)] mt-1">
                                         {formData.fixed_price && formData.fixed_rental_days ? (
                                             <>Effective rate: ₱{(parseFloat(formData.fixed_price) / parseInt(formData.fixed_rental_days) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}/day</>
                                         ) : 'How many days is this fixed deal for?'}
@@ -735,12 +709,12 @@ export default function CreateVehicle() {
                 </div>
 
                 {/* ── Section 3: Pickup Location ─────────────────────── */}
-                <div className="card" style={{ marginBottom: 20 }}>
-                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>📍 Pickup Location</h2></div>
+                <div className="card mb-5">
+                    <div className="card-header"><h2 className="text-[16px] font-bold">📍 Pickup Location</h2></div>
                     <div className="card-body">
-                        <div className="form-group" style={{ marginBottom: 16 }}>
+                        <div className="form-group mb-4">
                             <label className="form-label">Address / Landmark *</label>
-                            <input className="form-input" style={{ width: '100%' }}
+                            <input className="form-input w-full"
                                 placeholder="Exact address or nearby landmark"
                                 value={formData.pickup_location}
                                 onChange={e => setFormData({ ...formData, pickup_location: e.target.value })} required />
@@ -748,14 +722,14 @@ export default function CreateVehicle() {
                         <div className="form-row">
                             <div className="form-group">
                                 <label className="form-label">City *</label>
-                                <input className="form-input" style={{ width: '100%' }}
+                                <input className="form-input w-full"
                                     placeholder="e.g., Quezon City"
                                     value={formData.pickup_city}
                                     onChange={e => setFormData({ ...formData, pickup_city: e.target.value })} required />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Province *</label>
-                                <input className="form-input" style={{ width: '100%' }}
+                                <input className="form-input w-full"
                                     placeholder="e.g., Metro Manila"
                                     value={formData.pickup_province}
                                     onChange={e => setFormData({ ...formData, pickup_province: e.target.value })} required />
@@ -765,15 +739,15 @@ export default function CreateVehicle() {
                 </div>
 
                 {/* ── Section 3b: Owner Contact Info ─────────────────── */}
-                <div className="card" style={{ marginBottom: 20 }}>
+                <div className="card mb-5">
                     <div className="card-header">
-                        <h2 style={{ fontSize: 16, fontWeight: 700 }}>📞 Owner Contact Information</h2>
-                        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>Shown to renters so they can negotiate directly with you</div>
+                        <h2 className="text-[16px] font-bold">📞 Owner Contact Information</h2>
+                        <div className="text-[13px] text-[var(--text-tertiary)] mt-0.5">Shown to renters so they can negotiate directly with you</div>
                     </div>
                     <div className="card-body">
                         <div className="form-group">
                             <label className="form-label">Philippine Mobile Number *</label>
-                            <input type="tel" className="form-input" style={{ width: '100%' }}
+                            <input type="tel" className="form-input w-full"
                                 placeholder="09XXXXXXXXX"
                                 maxLength={11}
                                 value={formData.contact_info}
@@ -784,7 +758,7 @@ export default function CreateVehicle() {
                                         setFormData({ ...formData, contact_info: val });
                                     }
                                 }} required />
-                            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                            <div className="text-[11px] text-[var(--text-tertiary)] mt-1">
                                 Renters will use this number to contact you. Must be an 11-digit number starting with 09.
                             </div>
                         </div>
@@ -792,71 +766,65 @@ export default function CreateVehicle() {
                 </div>
 
                 {/* ── Section 4: Features & Description ─────────────── */}
-                <div className="card" style={{ marginBottom: 20 }}>
-                    <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>🛠️ Features & Description</h2></div>
+                <div className="card mb-5">
+                    <div className="card-header"><h2 className="text-[16px] font-bold">🛠️ Features & Description</h2></div>
                     <div className="card-body">
-                        <div className="form-group" style={{ marginBottom: 16 }}>
-                            <label className="form-label">Vehicle Features</label>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                {FEATURE_OPTIONS.map(f => (
-                                    <button key={f} type="button"
-                                        className={`badge ${formData.features.includes(f) ? 'badge-info' : 'badge-neutral'}`}
-                                        style={{ cursor: 'pointer', padding: '6px 14px', fontSize: 13 }}
-                                        onClick={() => toggleFeature(f)}>
-                                        {formData.features.includes(f) ? '✓ ' : ''}{f}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">Description</label>
-                            <textarea className="form-textarea" style={{ width: '100%' }} rows={4}
-                                placeholder="Describe the vehicle's condition, history, and any special notes for renters..."
-                                value={formData.description}
-                                onChange={e => setFormData({ ...formData, description: e.target.value })} />
-                        </div>
+                         <div className="form-group mb-4">
+                             <label className="form-label">Vehicle Features</label>
+                             <div className="flex flex-wrap gap-2">
+                                 {FEATURE_OPTIONS.map(f => (
+                                     <button key={f} type="button"
+                                         className={`badge ${formData.features.includes(f) ? 'badge-info' : 'badge-neutral'} cursor-pointer p-[6px_14px] text-[13px]`}
+                                         onClick={() => toggleFeature(f)}>
+                                         {formData.features.includes(f) ? '✓ ' : ''}{f}
+                                     </button>
+                                 ))}
+                             </div>
+                         </div>
+                         <div className="form-group">
+                             <label className="form-label">Description</label>
+                             <textarea className="form-textarea w-full" rows={4}
+                                 placeholder="Describe the vehicle's condition, history, and any special notes for renters..."
+                                 value={formData.description}
+                                 onChange={e => setFormData({ ...formData, description: e.target.value })} />
+                         </div>
                     </div>
                 </div>
 
                 {/* ── Section 5: Agreement Document ─────────────────── */}
-                <div className="card" style={{ marginBottom: 20 }}>
+                <div className="card mb-5">
                     <div className="card-header">
                         <div>
-                            <h2 style={{ fontSize: 16, fontWeight: 700 }}>📄 Rental Agreement / Terms & Conditions</h2>
-                            <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>optional but recommended</div>
+                            <h2 className="text-[16px] font-bold">📄 Rental Agreement / Terms & Conditions</h2>
+                            <div className="text-[13px] text-[var(--text-tertiary)] mt-0.5">optional but recommended</div>
                         </div>
                     </div>
                     <div className="card-body">
-                        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                        <p className="text-[14px] text-[var(--text-secondary)] mb-4">
                             Upload a PDF or Word document containing your rental terms and conditions.
                             Renters will be able to view and download this document before booking.
                         </p>
                         <div
                             onClick={() => agreementInputRef.current?.click()}
-                            style={{
-                                border: `2px dashed ${agreementFile ? 'var(--success-400)' : 'var(--neutral-300)'}`,
-                                borderRadius: 'var(--radius-lg)', padding: '28px 20px',
-                                textAlign: 'center', cursor: 'pointer',
-                                background: agreementFile ? 'var(--success-50)' : 'var(--neutral-50)',
-                                transition: 'all 0.2s ease',
-                            }}>
+                            className={`border-2 border-dashed rounded-[var(--radius-lg)] p-7 text-center cursor-pointer transition-all duration-200 ease-in-out ${agreementFile ? 'border-[var(--success-400)] bg-[var(--success-50)]' : 'border-[var(--neutral-300)] bg-[var(--neutral-50)]'}`}
+                        >
                             {agreementFile ? (
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-                                    <FiFileText size={28} color="var(--success-600)" />
-                                    <div style={{ textAlign: 'left' }}>
-                                        <div style={{ fontWeight: 700, color: 'var(--success-700)' }}>{agreementFile.name}</div>
-                                        <div style={{ fontSize: 12, color: 'var(--success-600)' }}>
+                                <div className="flex items-center justify-center gap-3">
+                                    <FiFileText size={28} className="text-[var(--success-600)]" />
+                                    <div className="text-left">
+                                        <div className="font-bold text-[var(--success-700)]">{agreementFile.name}</div>
+                                        <div className="text-[12px] text-[var(--success-600)]">
                                             {(agreementFile.size / 1024).toFixed(0)} KB · Click to replace
                                         </div>
                                     </div>
                                 </div>
                             ) : (
                                 <>
-                                    <FiUpload size={32} color="var(--text-tertiary)" />
-                                    <div style={{ marginTop: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                                    <FiUpload size={32} className="text-[var(--text-tertiary)] mx-auto" />
+                                    <div className="mt-2.5 font-semibold text-[var(--text-secondary)]">
                                         Click to upload agreement document
                                     </div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                                    <div className="text-[12px] text-[var(--text-tertiary)] mt-1">
                                         PDF, DOC, or DOCX · Max 10MB
                                     </div>
                                 </>
@@ -864,10 +832,10 @@ export default function CreateVehicle() {
                         </div>
                         <input ref={agreementInputRef} type="file"
                             accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            onChange={handleAgreementSelect} style={{ display: 'none' }} />
+                            onChange={handleAgreementSelect} className="hidden" />
                         {agreementFile && (
                             <button type="button"
-                                style={{ marginTop: 10, fontSize: 13, color: 'var(--error-600)', background: 'none', border: 'none', cursor: 'pointer' }}
+                                className="mt-2.5 text-[13px] text-[var(--error-600)] bg-none border-none cursor-pointer"
                                 onClick={() => setAgreementFile(null)}>
                                 ✕ Remove document
                             </button>
@@ -876,103 +844,79 @@ export default function CreateVehicle() {
                 </div>
 
                 {/* ── Section 5b: ORCR (Admin Review Only) ──────────── */}
-                <div className="card" style={{ marginBottom: 20, borderLeft: '3px solid var(--accent-400)' }}>
-                    <div className="card-header" style={{ background: 'var(--accent-50)' }}>
+                <div className="card mb-5 border-l-[3px] border-l-[var(--accent-400)]">
+                    <div className="card-header bg-[var(--accent-50)]">
                         <div>
-                            <h2 style={{ fontSize: 16, fontWeight: 700 }}>🪪 ORCR — Official Receipt &amp; Certificate of Registration</h2>
-                            <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>Required for admin verification only · Not shown in public listing</div>
+                            <h2 className="text-[16px] font-bold">🪪 ORCR — Official Receipt &amp; Certificate of Registration</h2>
+                            <div className="text-[13px] text-[var(--text-tertiary)] mt-0.5">Required for admin verification only · Not shown in public listing</div>
                         </div>
                     </div>
                     <div className="card-body">
-                        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                        <p className="text-[14px] text-[var(--text-secondary)] mb-4">
                             Upload a clear photo of your vehicle's Official Receipt (OR) and Certificate of Registration (CR).
                             This is <strong>only visible to admins</strong> for verification — renters will not see this.
                         </p>
-                        <div onClick={() => orcrInputRef.current?.click()} style={{
-                            border: `2px dashed ${orcrFile ? 'var(--accent-400)' : 'var(--neutral-300)'}`,
-                            borderRadius: 'var(--radius-lg)', padding: '28px 20px', textAlign: 'center', cursor: 'pointer',
-                            background: orcrFile ? 'var(--accent-50)' : 'var(--neutral-50)', transition: 'all 0.2s ease',
-                        }}>
+                        <div onClick={() => orcrInputRef.current?.click()} className={`border-2 border-dashed rounded-[var(--radius-lg)] p-7 text-center cursor-pointer transition-all duration-200 ease-in-out ${orcrFile ? 'border-[var(--accent-400)] bg-[var(--accent-50)]' : 'border-[var(--neutral-300)] bg-[var(--neutral-50)]'}`}>
                             {orcrFile ? (
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-                                    <FiFileText size={28} color="var(--accent-600)" />
-                                    <div style={{ textAlign: 'left' }}>
-                                        <div style={{ fontWeight: 700, color: 'var(--accent-700)' }}>{orcrFile.name}</div>
-                                        <div style={{ fontSize: 12, color: 'var(--accent-600)' }}>{(orcrFile.size / 1024).toFixed(0)} KB · Click to replace</div>
+                                <div className="flex items-center justify-center gap-3">
+                                    <FiFileText size={28} className="text-[var(--accent-600)]" />
+                                    <div className="text-left">
+                                        <div className="font-bold text-[var(--accent-700)]">{orcrFile.name}</div>
+                                        <div className="text-[13px] text-[var(--accent-600)]">{(orcrFile.size / 1024).toFixed(0)} KB · Click to replace</div>
                                     </div>
                                 </div>
                             ) : (
                                 <>
-                                    <FiUpload size={32} color="var(--text-tertiary)" />
-                                    <div style={{ marginTop: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>Click to upload ORCR photo</div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>JPG, PNG · Max 10MB · Take a clear, full-page photo</div>
+                                    <FiUpload size={32} className="text-[var(--text-tertiary)] mx-auto" />
+                                    <div className="mt-2.5 font-semibold text-[var(--text-secondary)]">Click to upload ORCR photo</div>
+                                    <div className="text-[12px] text-[var(--text-tertiary)] mt-1">JPG, PNG · Max 10MB · Take a clear, full-page photo</div>
                                 </>
                             )}
                         </div>
-                        <input ref={orcrInputRef} type="file" accept="image/*" onChange={handleOrcrSelect} style={{ display: 'none' }} />
+                        <input ref={orcrInputRef} type="file" accept="image/*" onChange={handleOrcrSelect} className="hidden" />
                         {orcrFile && (
-                            <button type="button" style={{ marginTop: 10, fontSize: 13, color: 'var(--error-600)', background: 'none', border: 'none', cursor: 'pointer' }}
+                            <button type="button" className="mt-2.5 text-[13px] text-[var(--error-600)] bg-none border-none cursor-pointer"
                                 onClick={() => setOrcrFile(null)}>✕ Remove ORCR photo</button>
                         )}
                     </div>
                 </div>
 
                 {/* ── Section 6: Vehicle Photos ──────────────────────── */}
-                <div className="card" style={{ marginBottom: 24 }}>
+                <div className="card mb-6">
                     <div className="card-header">
-                        <h2 style={{ fontSize: 16, fontWeight: 700 }}>📸 Vehicle Photos</h2>
-                        <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{photos.length}/4 photos</span>
+                        <h2 className="text-[16px] font-bold">📸 Vehicle Photos</h2>
+                        <span className="text-[13px] text-[var(--text-tertiary)]">{photos.length}/4 photos</span>
                     </div>
                     <div className="card-body">
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div className="grid grid-cols-2 gap-3">
                             {photoPreviews.map((url, i) => (
-                                <div key={i} style={{
-                                    position: 'relative', borderRadius: 'var(--radius-lg)',
-                                    overflow: 'hidden', aspectRatio: '4/3',
-                                    border: '2px solid var(--neutral-200)',
-                                }}>
-                                    <img src={url} alt={`Photo ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                <div key={i} className="relative rounded-[var(--radius-lg)] overflow-hidden aspect-[4/3] border-2 border-[var(--neutral-200)]">
+                                    <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
                                     {i === 0 && (
-                                        <span style={{
-                                            position: 'absolute', top: 8, left: 8,
-                                            background: 'var(--primary-500)', color: '#fff',
-                                            fontSize: 10, fontWeight: 700, padding: '2px 8px',
-                                            borderRadius: 'var(--radius-sm)',
-                                        }}>COVER</span>
+                                        <span className="absolute top-2 left-2 bg-[var(--primary-500)] text-white text-[10px] font-bold p-[2px_8px] rounded-[var(--radius-sm)]">COVER</span>
                                     )}
-                                    <button type="button" onClick={() => removePhoto(i)} style={{
-                                        position: 'absolute', top: 8, right: 8, width: 28, height: 28,
-                                        borderRadius: '50%', background: 'rgba(0,0,0,0.6)', color: '#fff',
-                                        border: 'none', cursor: 'pointer', display: 'flex',
-                                        alignItems: 'center', justifyContent: 'center',
-                                    }}>
+                                    <button type="button" onClick={() => removePhoto(i)} className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white border-none cursor-pointer flex items-center justify-center">
                                         <FiX size={14} />
                                     </button>
                                 </div>
                             ))}
                             {photos.length < 4 && (
-                                <label style={{
-                                    aspectRatio: '4/3', border: '2px dashed var(--neutral-300)',
-                                    borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column',
-                                    alignItems: 'center', justifyContent: 'center', gap: 8,
-                                    cursor: 'pointer', background: 'var(--neutral-50)',
-                                    color: 'var(--text-tertiary)', transition: 'all 0.2s ease',
-                                }}>
+                                <label className="aspect-[4/3] border-2 border-dashed border-[var(--neutral-300)] rounded-[var(--radius-lg)] flex flex-col items-center justify-center gap-2 cursor-pointer bg-[var(--neutral-50)] text-[var(--text-tertiary)] transition-all duration-200">
                                     <FiCamera size={28} />
-                                    <span style={{ fontSize: 13, fontWeight: 600 }}>Add Photo</span>
-                                    <span style={{ fontSize: 11 }}>JPG, PNG · Max 5MB</span>
-                                    <input type="file" accept="image/*" multiple onChange={handlePhotoSelect} style={{ display: 'none' }} />
+                                    <span className="text-[13px] font-semibold">Add Photo</span>
+                                    <span className="text-[11px]">JPG, PNG · Max 5MB</span>
+                                    <input type="file" accept="image/*" multiple onChange={handlePhotoSelect} className="hidden" />
                                 </label>
                             )}
                         </div>
-                        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 12 }}>
+                        <p className="text-[12px] text-[var(--text-tertiary)] mt-3">
                             📌 First photo will be used as the cover image. Upload front, rear, interior, and dashboard photos for best results.
                         </p>
                     </div>
                 </div>
 
                 {/* ── Submit ─────────────────────────────────────────── */}
-                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                <div className="flex gap-3 justify-end">
                     <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)} disabled={!!loadingState}>
                         Cancel
                     </button>
@@ -982,7 +926,7 @@ export default function CreateVehicle() {
                 </div>
 
                 {!isVerified && (
-                    <p style={{ textAlign: 'right', fontSize: 13, color: 'var(--text-tertiary)', marginTop: 8 }}>
+                    <p className="text-right text-[13px] text-[var(--text-tertiary)] mt-2">
                         You must be verified to submit a listing.
                     </p>
                 )}

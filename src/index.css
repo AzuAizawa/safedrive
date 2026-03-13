@@ -513,13 +513,20 @@ select {
 .form-input,
 .form-textarea,
 .form-select {
-  padding: var(--space-3) var(--space-4);
+  padding: 12px 16px;
   background: var(--surface-primary);
   border: 1.5px solid var(--border-light);
   border-radius: var(--radius-md);
   font-size: 14px;
   color: var(--text-primary);
   transition: all var(--transition-fast);
+}
+
+/* Global fix for inputs with icons */
+.relative svg + .form-input,
+.relative svg + .form-select,
+.relative svg + .form-textarea {
+  padding-left: 44px !important;
 }
 
 .form-input:focus,
@@ -1858,7 +1865,7 @@ select {
 }
 
 .search-input-wrapper .form-input {
-  padding-left: 42px;
+  padding-left: 44px;
   width: 100%;
 }
 
@@ -2103,7 +2110,7 @@ select {
 }
 
 .search-input-wrapper .form-input {
-  padding-left: 40px;
+  padding-left: 44px;
   width: 100%;
 }
 

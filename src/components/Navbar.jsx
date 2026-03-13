@@ -38,7 +38,7 @@ export default function Navbar() {
     // While auth is resolving, show a minimal neutral nav to prevent flash
     if (loading) {
         return (
-            <nav className="landing-navbar" style={{ minHeight: 64 }}>
+            <nav className="landing-navbar min-h-[64px]">
                 <Link to="/" className="navbar-brand">
                     <div className="navbar-logo">SD</div>
                     <span className="navbar-title">Safe<span>Drive</span></span>
@@ -56,7 +56,7 @@ export default function Navbar() {
                     <span className="navbar-title">Safe<span>Drive</span></span>
                 </Link>
                 <div className="navbar-actions">
-                    <Link to="/login" className="btn btn-ghost" style={{ color: 'rgba(255,255,255,0.7)' }}>Sign In</Link>
+                    <Link to="/login" className="btn btn-ghost text-white/70">Sign In</Link>
                     <Link to="/register" className="btn btn-accent">Get Started</Link>
                 </div>
             </nav>
@@ -65,7 +65,7 @@ export default function Navbar() {
 
     return (
         <nav className="navbar">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
+            <div className="flex items-center gap-8">
                 <Link to="/dashboard" className="navbar-brand">
                     <div className="navbar-logo">SD</div>
                     <span className="navbar-title">Safe<span>Drive</span></span>
@@ -105,7 +105,7 @@ export default function Navbar() {
                 <button className="navbar-notification" onClick={() => navigate('/notifications')}>
                     <FiBell />
                 </button>
-                <div style={{ position: 'relative' }} ref={dropdownRef}>
+                <div className="relative" ref={dropdownRef}>
                     <button className="navbar-avatar" onClick={() => setShowDropdown(!showDropdown)}>
                         {profile?.avatar_url ? (
                             <img src={profile.avatar_url} alt={profile.full_name} />
@@ -115,13 +115,13 @@ export default function Navbar() {
                     </button>
                     {showDropdown && (
                         <div className="user-dropdown">
-                            <div style={{ padding: '12px 16px' }}>
-                                <div style={{ fontWeight: 700, fontSize: 14 }}>{profile?.full_name || 'User'}</div>
-                                <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{user?.email}</div>
+                            <div className="px-4 py-3">
+                                <div className="font-bold text-sm">{profile?.full_name || 'User'}</div>
+                                <div className="text-xs text-[var(--text-tertiary)]">{user?.email}</div>
                                 {isAdmin ? (
-                                    <span className="badge badge-error" style={{ display: 'inline-flex' }}>Admin Account</span>
+                                    <span className="badge badge-error inline-flex">Admin Account</span>
                                 ) : (
-                                    <span className={`badge ${profile?.role === 'verified' ? 'badge-verified' : 'badge-pending'}`} style={{ display: 'inline-flex' }}>
+                                    <span className={`badge ${profile?.role === 'verified' ? 'badge-verified' : 'badge-pending'} inline-flex`}>
                                         {profile?.role === 'verified' ? 'Verified' : 'Not Verified'}
                                     </span>
                                 )}

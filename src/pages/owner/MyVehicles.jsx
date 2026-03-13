@@ -92,27 +92,27 @@ export default function MyVehicles() {
         fetchMyVehicles();
     };
 
-    if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
+    if (loading) return <div className="flex items-center justify-center min-h-[400px]"><div className="w-10 h-10 border-[3px] border-[var(--border-light)] border-t-[var(--primary-600)] rounded-full animate-spin" /></div>;
 
     return (
         <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-                <div className="page-header" style={{ marginBottom: 0 }}>
+            <div className="flex justify-between items-center mb-6">
+                <div className="page-header mb-0">
                     <h1>🚘 My Vehicles</h1>
                     <p>Manage your vehicle listings on SafeDrive</p>
                 </div>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div className="flex gap-2.5 items-center">
                     {!isSubscribed && (
-                        <div style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'right' }}>
-                            <div style={{ fontWeight: 700 }}>{activeCount}/{FREE_LISTING_LIMIT} active (free)</div>
-                            <button className="btn btn-sm btn-ghost" style={{ fontSize: 12, color: 'var(--primary-500)', padding: '2px 0' }}
+                        <div className="text-[13px] text-[var(--text-secondary)] text-right">
+                            <div className="font-bold">{activeCount}/{FREE_LISTING_LIMIT} active (free)</div>
+                            <button className="btn btn-sm btn-ghost text-[12px] text-[var(--primary-500)] p-[2px_0]"
                                 onClick={() => navigate('/subscribe')}>
                                 ⭐ Get unlimited →
                             </button>
                         </div>
                     )}
                     {isSubscribed && (
-                        <div style={{ fontSize: 12, color: 'var(--success-600)', fontWeight: 700, background: 'var(--success-50)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--success-200)' }}>
+                        <div className="text-[12px] text-[var(--success-600)] font-bold bg-[var(--success-50)] p-[4px_10px] rounded-[var(--radius-sm)] border border-[var(--success-200)]">
                             ⭐ Premium — {activeCount} active
                         </div>
                     )}
@@ -122,19 +122,15 @@ export default function MyVehicles() {
 
             {/* Subscribe CTA for free users with multiple vehicles */}
             {!isSubscribed && vehicles.length >= 1 && (
-                <div style={{
-                    background: 'linear-gradient(135deg, #1e3a5f, #1a2e4a)',
-                    borderRadius: 'var(--radius-lg)', padding: '16px 20px',
-                    marginBottom: 20, display: 'flex', alignItems: 'center', gap: 16, color: '#fff',
-                }}>
-                    <FiStar style={{ fontSize: 24, color: '#fbbf24', flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14 }}>Unlock Unlimited Listings for ₱399/month</div>
-                        <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
+                <div className="bg-gradient-to-br from-[#1e3a5f] to-[#1a2e4a] rounded-[var(--radius-lg)] p-[16px_20px] mb-5 flex items-center gap-4 text-white">
+                    <FiStar className="text-[24px] text-[#fbbf24] shrink-0" />
+                    <div className="flex-1">
+                        <div className="font-bold text-[14px]">Unlock Unlimited Listings for ₱399/month</div>
+                        <div className="text-[13px] text-[#94a3b8] mt-0.5">
                             Free tier: {FREE_LISTING_LIMIT} active listing at a time. Subscribe to activate all your vehicles.
                         </div>
                     </div>
-                    <button className="btn" style={{ background: '#3b82f6', color: '#fff', border: 'none', whiteSpace: 'nowrap', fontSize: 13 }}
+                    <button className="btn bg-[#3b82f6] text-white border-none whitespace-nowrap text-[13px]"
                         onClick={() => navigate('/subscribe')}>
                         Subscribe Now
                     </button>
@@ -156,7 +152,7 @@ export default function MyVehicles() {
                                 <th>Vehicle</th>
                                 <th>Price</th>
                                 <th>Admin Status</th>
-                                <th style={{ textAlign: 'center' }}>Active Listing</th>
+                                <th className="text-center">Active Listing</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -165,29 +161,29 @@ export default function MyVehicles() {
                                 const isActive = v.is_active_listing === true;
                                 const isOldest = idx === 0;
                                 return (
-                                    <tr key={v.id} style={{ opacity: isActive ? 1 : 0.6 }}>
+                                    <tr key={v.id} className={isActive ? 'opacity-100' : 'opacity-60'}>
                                         <td>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                                <div style={{ width: 48, height: 48, borderRadius: 10, background: 'var(--neutral-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🚗</div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-12 h-12 rounded-[10px] bg-[var(--neutral-100)] flex items-center justify-center text-[20px]">🚗</div>
                                                 <div>
-                                                    <div style={{ fontWeight: 700 }}>{v.year} {v.make} {v.model}</div>
-                                                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                                                    <div className="font-bold">{v.year} {v.make} {v.model}</div>
+                                                    <div className="text-[12px] text-[var(--text-tertiary)]">
                                                         {v.plate_number} • {v.color}
-                                                        {isOldest && !isSubscribed && <span style={{ marginLeft: 6, color: 'var(--primary-500)', fontWeight: 700 }}>• Default</span>}
+                                                        {isOldest && !isSubscribed && <span className="ml-1.5 text-[var(--primary-500)] font-bold">• Default</span>}
                                                     </div>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>
+                                        <td className="font-bold font-[var(--font-display)]">
                                             {v.pricing_type === 'fixed' ? (
-                                                <div style={{ lineHeight: 1.2 }}>
+                                                <div className="leading-[1.2]">
                                                     <div>₱{v.fixed_price?.toLocaleString()}</div>
-                                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>Fixed • {v.fixed_rental_days}d</div>
+                                                    <div className="text-[11px] text-[var(--text-tertiary)] font-semibold">Fixed • {v.fixed_rental_days}d</div>
                                                 </div>
                                             ) : (
-                                                <div style={{ lineHeight: 1.2 }}>
+                                                <div className="leading-[1.2]">
                                                     <div>₱{v.daily_rate?.toLocaleString()}</div>
-                                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>/day</div>
+                                                    <div className="text-[11px] text-[var(--text-tertiary)] font-semibold">/day</div>
                                                 </div>
                                             )}
                                         </td>
@@ -196,25 +192,20 @@ export default function MyVehicles() {
                                                 {v.status}
                                             </span>
                                         </td>
-                                        <td style={{ textAlign: 'center' }}>
+                                        <td className="text-center">
                                             <button
                                                 onClick={() => toggleActiveListing(v)}
                                                 disabled={togglingId === v.id || (v.status !== 'approved' && v.status !== 'listed')}
                                                 title={isActive ? 'Click to deactivate' : 'Click to activate'}
-                                                style={{
-                                                    background: 'none', border: 'none', cursor: 'pointer',
-                                                    color: isActive ? 'var(--success-500)' : 'var(--neutral-400)',
-                                                    fontSize: 28, display: 'flex', alignItems: 'center', margin: '0 auto',
-                                                    transition: 'color 0.15s',
-                                                }}
+                                                className={`bg-none border-none cursor-pointer text-[28px] flex items-center mx-auto transition-colors duration-150 ${isActive ? 'text-[var(--success-500)]' : 'text-[var(--neutral-400)]'}`}
                                             >
                                                 {isActive ? <FiToggleRight /> : <FiToggleLeft />}
                                             </button>
                                         </td>
                                         <td>
-                                            <div style={{ display: 'flex', gap: 8 }}>
+                                            <div className="flex gap-2">
                                                 <Link to={`/vehicles/${v.id}`} className="btn btn-ghost btn-sm btn-icon"><FiEye /></Link>
-                                                <button className="btn btn-ghost btn-sm btn-icon" onClick={() => deleteVehicle(v.id)} style={{ color: 'var(--error-500)' }}><FiTrash2 /></button>
+                                                <button className="btn btn-ghost btn-sm btn-icon text-[var(--error-500)]" onClick={() => deleteVehicle(v.id)}><FiTrash2 /></button>
                                             </div>
                                         </td>
                                     </tr>

@@ -75,27 +75,14 @@ export default function AuthCallback() {
     }, [navigate]);
 
     return (
-        <div style={{
-            minHeight: '100vh',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'var(--bg-primary)',
-            gap: 24,
-        }}>
+        <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--bg-primary)] gap-6">
             <div className="loading-spinner">
                 <div className="spinner" />
             </div>
-            <div style={{
-                fontSize: 18,
-                fontWeight: 600,
-                color: 'var(--text-primary)',
-                fontFamily: 'var(--font-display)',
-            }}>
+            <div className="text-[18px] font-semibold text-[var(--text-primary)] font-[var(--font-display)]">
                 {status}
             </div>
-            <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
+            <p className="text-[14px] text-[var(--text-secondary)]">
                 Please wait while we verify your account...
             </p>
         </div>

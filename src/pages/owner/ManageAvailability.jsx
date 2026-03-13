@@ -51,7 +51,7 @@ export default function ManageAvailability() {
     if (!vehicle) return null;
 
     return (
-        <div style={{ maxWidth: 700, margin: '0 auto' }}>
+        <div className="max-w-[700px] mx-auto">
             <BackButton to="/my-vehicles" label="Back to My Vehicles" />
 
             <div className="page-header">
@@ -59,13 +59,13 @@ export default function ManageAvailability() {
                 <p>Block dates when your vehicle is unavailable. Booked dates appear automatically.</p>
             </div>
 
-            <div style={{ marginBottom: 24 }}>
-                <div className="card" style={{ marginBottom: 16 }}>
-                    <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <div style={{ fontSize: 32 }}>🚗</div>
+            <div className="mb-6">
+                <div className="card mb-4">
+                    <div className="card-body flex items-center gap-4">
+                        <div className="text-[32px]">🚗</div>
                         <div>
-                            <h3 style={{ fontSize: 16, fontWeight: 700 }}>{vehicle.year} {vehicle.make} {vehicle.model}</h3>
-                            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{vehicle.plate_number}</p>
+                            <h3 className="text-[16px] font-bold">{vehicle.year} {vehicle.make} {vehicle.model}</h3>
+                            <p className="text-[13px] text-[var(--text-secondary)]">{vehicle.plate_number}</p>
                         </div>
                     </div>
                 </div>
@@ -73,13 +73,13 @@ export default function ManageAvailability() {
 
             <AvailabilityCalendar vehicleId={id} editable={true} />
 
-            <div className="card" style={{ marginTop: 24 }}>
+            <div className="card mt-6">
                 <div className="card-body">
-                    <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>💡 How It Works</h3>
-                    <ul style={{ fontSize: 13, color: 'var(--text-secondary)', paddingLeft: 20, lineHeight: 1.8, margin: 0 }}>
-                        <li><strong style={{ color: 'var(--success-600)' }}>Green</strong> dates are available for booking</li>
-                        <li><strong style={{ color: 'var(--error-600)' }}>Red</strong> dates are blocked by you (click to toggle)</li>
-                        <li><strong style={{ color: 'var(--primary-600)' }}>Blue</strong> dates have active bookings (cannot be changed)</li>
+                    <h3 className="text-[14px] font-bold mb-2">💡 How It Works</h3>
+                    <ul className="text-[13px] text-[var(--text-secondary)] pl-5 leading-[1.8] m-0 list-disc">
+                        <li><strong className="text-[var(--success-600)]">Green</strong> dates are available for booking</li>
+                        <li><strong className="text-[var(--error-600)]">Red</strong> dates are blocked by you (click to toggle)</li>
+                        <li><strong className="text-[var(--primary-600)]">Blue</strong> dates have active bookings (cannot be changed)</li>
                         <li>Click dates to block/unblock, then hit <strong>Save</strong></li>
                         <li>Rentees will see the blocked dates and cannot book on those days</li>
                     </ul>

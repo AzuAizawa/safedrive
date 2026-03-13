@@ -14,9 +14,7 @@ export default function BackButton({ label = 'Back', to }) {
 
     return (
         <button
-            className="btn btn-ghost"
-            onClick={handleClick}
-            style={{ marginBottom: 16, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            className="btn btn-ghost mb-4 inline-flex items-center gap-1"
         >
             <FiChevronLeft /> {label}
         </button>

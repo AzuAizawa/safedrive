@@ -124,25 +124,18 @@ export default function Messages() {
     if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
 
     return (
-        <div style={{ maxWidth: 900, margin: '0 auto', paddingBottom: 24 }}>
+        <div className="max-w-[900px] mx-auto pb-6">
             <BackButton />
-            <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 16 }}>💬 Messages</h1>
+            <h1 className="text-[22px] font-extrabold mb-4">💬 Messages</h1>
 
-            <div style={{
-                display: 'grid', gridTemplateColumns: '280px 1fr',
-                gap: 0, height: 600,
-                background: 'var(--surface-primary)',
-                borderRadius: 'var(--radius-xl)',
-                border: '1px solid var(--border-light)',
-                overflow: 'hidden',
-            }}>
+            <div className="grid grid-cols-[280px_1fr] h-[600px] bg-[var(--surface-primary)] rounded-[var(--radius-xl)] border border-[var(--border-light)] overflow-hidden">
                 {/* Conversation List */}
-                <div style={{ borderRight: '1px solid var(--border-light)', overflowY: 'auto' }}>
-                    <div style={{ padding: '16px', fontWeight: 700, fontSize: 13, color: 'var(--text-tertiary)', borderBottom: '1px solid var(--border-light)' }}>
-                        CONVERSATIONS
+                <div className="border-r border-[var(--border-light)] overflow-y-auto">
+                    <div className="p-4 font-bold text-[13px] text-[var(--text-tertiary)] border-b border-[var(--border-light)] uppercase tracking-wider">
+                        Conversations
                     </div>
                     {conversations.length === 0 ? (
-                        <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
+                        <div className="p-6 text-center text-[var(--text-tertiary)] text-[13px]">
                             No conversations yet. Conversations start when a booking is made.
                         </div>
                     ) : conversations.map(conv => {
@@ -151,26 +144,17 @@ export default function Messages() {
                         return (
                             <div key={conv.id}
                                 onClick={() => setActiveConv(conv)}
-                                style={{
-                                    padding: '14px 16px', cursor: 'pointer',
-                                    background: isActive ? 'var(--primary-50)' : 'transparent',
-                                    borderLeft: isActive ? '3px solid var(--primary-500)' : '3px solid transparent',
-                                    borderBottom: '1px solid var(--border-light)',
-                                }}>
-                                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                                    <div style={{
-                                        width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-                                        background: 'var(--primary-100)',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontSize: 14, fontWeight: 700, color: 'var(--primary-600)',
-                                    }}>
+                                className={`p-[14px_16px] cursor-pointer border-b border-[var(--border-light)] transition-all duration-150 ${isActive ? 'bg-[var(--primary-50)] border-l-[3px] border-l-[var(--primary-500)]' : 'bg-transparent border-l-[3px] border-l-transparent'}`}
+                            >
+                                <div className="flex gap-2.5 items-center">
+                                    <div className="w-9 h-9 rounded-full shrink-0 bg-[var(--primary-100)] flex items-center justify-center text-[14px] font-bold text-[var(--primary-600)]">
                                         {other?.full_name?.[0]?.toUpperCase() || '?'}
                                     </div>
-                                    <div style={{ minWidth: 0 }}>
-                                        <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    <div className="min-w-0">
+                                        <div className="font-semibold text-[13px] truncate">
                                             {other?.full_name || 'Unknown'}
                                         </div>
-                                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        <div className="text-[11px] text-[var(--text-tertiary)] truncate">
                                             {conv.last_message || conv.bookings?.vehicles?.make + ' ' + conv.bookings?.vehicles?.model || 'Booking chat'}
                                         </div>
                                     </div>
@@ -182,49 +166,34 @@ export default function Messages() {
 
                 {/* Chat Area */}
                 {activeConv ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                    <div className="flex flex-col h-full bg-[var(--surface-primary)]">
                         {/* Chat Header */}
-                        <div style={{
-                            padding: '14px 20px', borderBottom: '1px solid var(--border-light)',
-                            display: 'flex', alignItems: 'center', gap: 12,
-                            background: 'var(--surface-secondary)',
-                        }}>
-                            <div style={{
-                                width: 36, height: 36, borderRadius: '50%',
-                                background: 'var(--primary-100)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: 14, fontWeight: 700, color: 'var(--primary-600)',
-                            }}>
+                        <div className="p-[14px_20px] border-b border-[var(--border-light)] flex items-center gap-3 bg-[var(--surface-secondary)]">
+                            <div className="w-9 h-9 rounded-full bg-[var(--primary-100)] flex items-center justify-center text-[14px] font-bold text-[var(--primary-600)]">
                                 {getOtherParticipant(activeConv)?.full_name?.[0]?.toUpperCase() || '?'}
                             </div>
                             <div>
-                                <div style={{ fontWeight: 700 }}>{getOtherParticipant(activeConv)?.full_name}</div>
-                                <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                                <div className="font-bold">{getOtherParticipant(activeConv)?.full_name}</div>
+                                <div className="text-[12px] text-[var(--text-tertiary)]">
                                     Re: {activeConv.bookings?.vehicles?.make} {activeConv.bookings?.vehicles?.model}
                                 </div>
                             </div>
                         </div>
 
                         {/* Messages */}
-                        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div className="flex-1 overflow-y-auto p-[16px_20px] flex flex-col gap-3">
                             {messages.length === 0 && (
-                                <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13, marginTop: 40 }}>
+                                <div className="text-center text-[var(--text-tertiary)] text-[13px] mt-10">
                                     No messages yet. Start the conversation!
                                 </div>
                             )}
                             {messages.map(msg => {
                                 const isMe = msg.sender_id === user.id;
                                 return (
-                                    <div key={msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
-                                        <div style={{
-                                            maxWidth: '70%', padding: '10px 14px',
-                                            borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                                            background: isMe ? 'var(--primary-500)' : 'var(--surface-secondary)',
-                                            color: isMe ? '#fff' : 'var(--text-primary)',
-                                            fontSize: 14, lineHeight: 1.5,
-                                        }}>
+                                    <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                        <div className={`max-w-[70%] p-[10px_14px] text-[14px] leading-relaxed ${isMe ? 'bg-[var(--primary-500)] text-white rounded-[16px_16px_4px_16px]' : 'bg-[var(--surface-secondary)] text-[var(--text-primary)] rounded-[16px_16px_16px_4px]'}`}>
                                             {msg.content}
-                                            <div style={{ fontSize: 10, opacity: 0.7, marginTop: 4, textAlign: 'right' }}>
+                                            <div className={`text-[10px] opacity-70 mt-1 text-right ${isMe ? 'text-white' : 'text-[var(--text-tertiary)]'}`}>
                                                 {new Date(msg.created_at).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
                                             </div>
                                         </div>
@@ -235,14 +204,10 @@ export default function Messages() {
                         </div>
 
                         {/* Message Input */}
-                        <form onSubmit={sendMessage} style={{
-                            padding: '12px 20px', borderTop: '1px solid var(--border-light)',
-                            display: 'flex', gap: 10, background: 'var(--surface-secondary)',
-                        }}>
+                        <form onSubmit={sendMessage} className="p-[12px_20px] border-t border-[var(--border-light)] flex gap-2.5 bg-[var(--surface-secondary)]">
                             <input
                                 type="text"
-                                className="form-input"
-                                style={{ flex: 1 }}
+                                className="form-input flex-1"
                                 placeholder="Type a message..."
                                 value={newMessage}
                                 onChange={e => setNewMessage(e.target.value)}
@@ -254,7 +219,7 @@ export default function Messages() {
                         </form>
                     </div>
                 ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-tertiary)', fontSize: 14 }}>
+                    <div className="flex items-center justify-center h-full text-[var(--text-tertiary)] text-[14px]">
                         Select a conversation to start messaging
                     </div>
                 )}

@@ -110,12 +110,12 @@ export default function Register() {
     // Password strength score
     const passwordStrength = useMemo(() => {
         const passed = passwordChecks.filter(r => r.passed).length;
-        if (formData.password.length === 0) return { level: 'none', label: '', color: '', percent: 0 };
-        if (passed <= 1) return { level: 'weak', label: 'Weak', color: '#ef4444', percent: 20 };
-        if (passed <= 2) return { level: 'fair', label: 'Fair', color: '#f97316', percent: 40 };
-        if (passed <= 3) return { level: 'good', label: 'Good', color: '#eab308', percent: 60 };
-        if (passed <= 4) return { level: 'strong', label: 'Strong', color: '#22c55e', percent: 80 };
-        return { level: 'excellent', label: 'Excellent', color: '#10b981', percent: 100 };
+        if (formData.password.length === 0) return { level: 'none', label: '', color: 'text-neutral-400', bg: 'bg-neutral-200', percent: 0 };
+        if (passed <= 1) return { level: 'weak', label: 'Weak', color: 'text-red-500', bg: 'bg-red-500', percent: 20 };
+        if (passed <= 2) return { level: 'fair', label: 'Fair', color: 'text-orange-500', bg: 'bg-orange-500', percent: 40 };
+        if (passed <= 3) return { level: 'good', label: 'Good', color: 'text-yellow-500', bg: 'bg-yellow-500', percent: 60 };
+        if (passed <= 4) return { level: 'strong', label: 'Strong', color: 'text-green-500', bg: 'bg-green-500', percent: 80 };
+        return { level: 'excellent', label: 'Excellent', color: 'text-emerald-500', bg: 'bg-emerald-500', percent: 100 };
     }, [passwordChecks, formData.password]);
 
     // Confirm password match
@@ -186,17 +186,17 @@ export default function Register() {
         <div className="auth-page">
             <div className="auth-visual">
                 <div className="auth-visual-content">
-                    <div style={{ fontSize: 56, marginBottom: 24 }}>🚗</div>
+                    <div className="text-[56px] mb-6">🚗</div>
                     <h2>Join SafeDrive</h2>
                     <p>Create your verified account to start renting or listing vehicles on the most secure P2P car rental platform in the Philippines.</p>
-                    <div style={{ marginTop: 48, display: 'flex', flexDirection: 'column', gap: 16, textAlign: 'left', maxWidth: 320, margin: '48px auto 0' }}>
+                    <div className="mt-12 flex flex-col gap-4 text-left max-w-[320px] mx-auto">
                         {[
                             '✅ Government ID Verification',
                             '✅ Selfie Identity Matching',
                             '✅ Digital Rental Agreements',
                             '✅ Community Trust & Reviews',
                         ].map((item, i) => (
-                            <div key={i} style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)' }}>{item}</div>
+                            <div key={i} className="text-[14px] text-[#ffffffcc]">{item}</div>
                         ))}
                     </div>
                 </div>
@@ -208,7 +208,7 @@ export default function Register() {
                     <p className="subtitle">Get started with a free SafeDrive account</p>
 
                     {error && (
-                        <div style={{ background: 'var(--error-50)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: 'var(--error-600)' }}>
+                        <div className="bg-[var(--error-50)] border border-[#ef444433] rounded-[var(--radius-md)] p-[12px_16px] mb-4 flex items-center gap-2 text-[14px] text-[var(--error-600)]">
                             <FiAlertCircle /> {error}
                         </div>
                     )}
@@ -218,13 +218,12 @@ export default function Register() {
                     {/* Full Name */}
                     <div className="form-group">
                         <label className="form-label">Full Name</label>
-                        <div style={{ position: 'relative' }}>
-                            <FiUser style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+                        <div className="relative">
+                            <FiUser className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
                             <input
                                 type="text"
-                                className="form-input"
+                                className="form-input pl-10 w-full"
                                 placeholder="Juan Dela Cruz"
-                                style={{ paddingLeft: 40, width: '100%' }}
                                 value={formData.fullName}
                                 onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
                                 required
@@ -235,59 +234,29 @@ export default function Register() {
                     {/* Email with validation */}
                     <div className="form-group">
                         <label className="form-label">Email Address</label>
-                        <div style={{ position: 'relative' }}>
-                            <FiMail style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+                        <div className="relative">
+                            <FiMail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
                             <input
                                 type="email"
-                                className="form-input"
+                                className={`form-input pl-10 w-full ${formData.email ? (emailValidation.valid && !emailValidation.showWarning ? 'border-[var(--success-500,#22c55e)]' : emailValidation.showWarning && !emailValidation.isInfo ? 'border-[var(--error-500,#ef4444)]' : emailValidation.isInfo ? 'border-[var(--warning-500,#f59e0b)]' : '') : ''}`}
                                 placeholder="you@gmail.com"
-                                style={{
-                                    paddingLeft: 40,
-                                    width: '100%',
-                                    borderColor: formData.email
-                                        ? emailValidation.valid && !emailValidation.showWarning ? 'var(--success-500, #22c55e)'
-                                            : emailValidation.showWarning && !emailValidation.isInfo ? 'var(--error-500, #ef4444)'
-                                                : emailValidation.isInfo ? 'var(--warning-500, #f59e0b)'
-                                                    : undefined
-                                        : undefined,
-                                }}
                                 value={formData.email}
                                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                                 required
                             />
                             {formData.email && emailValidation.valid && !emailValidation.showWarning && (
-                                <FiCheck style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: '#22c55e', fontSize: 18 }} />
+                                <FiCheck className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#22c55e] text-[18px]" />
                             )}
                         </div>
                         {formData.email && emailValidation.showWarning && (
-                            <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                marginTop: 6,
-                                fontSize: 12,
-                                color: emailValidation.isInfo ? 'var(--warning-600, #d97706)' : 'var(--error-600, #dc2626)',
-                                padding: '6px 10px',
-                                background: emailValidation.isInfo ? 'var(--warning-50, #fffbeb)' : 'var(--error-50, #fef2f2)',
-                                borderRadius: 'var(--radius-sm, 6px)',
-                            }}>
+                            <div className={`flex items-center gap-1.5 mt-1.5 text-[12px] p-[6px_10px] rounded-[var(--radius-sm,6px)] ${emailValidation.isInfo ? 'text-[var(--warning-600,#d97706)] bg-[var(--warning-50,#fffbeb)]' : 'text-[var(--error-600,#dc2626)] bg-[var(--error-50,#fef2f2)]'}`}>
                                 {emailValidation.isInfo ? <FiAlertCircle size={13} /> : <FiX size={13} />}
                                 <span>{emailValidation.message}</span>
                                 {emailValidation.suggestion && (
                                     <button
                                         type="button"
                                         onClick={() => applySuggestion(emailValidation.suggestion)}
-                                        style={{
-                                            background: 'none',
-                                            border: 'none',
-                                            color: 'var(--primary-600)',
-                                            cursor: 'pointer',
-                                            fontWeight: 600,
-                                            fontSize: 12,
-                                            textDecoration: 'underline',
-                                            padding: 0,
-                                            marginLeft: 4,
-                                        }}
+                                        className="bg-none border-none text-[var(--primary-600)] cursor-pointer font-semibold text-[12px] underline p-0 ml-1"
                                     >
                                         Fix it
                                     </button>
@@ -299,13 +268,12 @@ export default function Register() {
                     {/* Phone */}
                     <div className="form-group">
                         <label className="form-label">Phone Number</label>
-                        <div style={{ position: 'relative' }}>
-                            <FiPhone style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+                        <div className="relative">
+                            <FiPhone className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
                             <input
                                 type="tel"
-                                className="form-input"
+                                className="form-input pl-10 w-full"
                                 placeholder="09XX XXX XXXX"
-                                style={{ paddingLeft: 40, width: '100%' }}
                                 value={formData.phone}
                                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                                 required
@@ -316,13 +284,12 @@ export default function Register() {
                     {/* Password with strength indicator */}
                     <div className="form-group">
                         <label className="form-label">Password</label>
-                        <div style={{ position: 'relative' }}>
-                            <FiLock style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+                        <div className="relative">
+                            <FiLock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
                             <input
                                 type={showPassword ? 'text' : 'password'}
-                                className="form-input"
+                                className="form-input pl-10 pr-11 w-full"
                                 placeholder="Create a strong password"
-                                style={{ paddingLeft: 40, paddingRight: 44, width: '100%' }}
                                 value={formData.password}
                                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                                 required
@@ -330,11 +297,7 @@ export default function Register() {
                             <button
                                 type="button"
                                 onClick={() => setShowPassword(!showPassword)}
-                                style={{
-                                    position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                                    background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)',
-                                    padding: 4, display: 'flex', alignItems: 'center',
-                                }}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 bg-none border-none cursor-pointer text-[var(--text-tertiary)] p-1 flex items-center"
                             >
                                 {showPassword ? <FiEyeOff size={16} /> : <FiEye size={16} />}
                             </button>
@@ -342,49 +305,28 @@ export default function Register() {
 
                         {/* Password strength bar */}
                         {formData.password && (
-                            <div style={{ marginTop: 8 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                    <span style={{ fontSize: 11, fontWeight: 600, color: passwordStrength.color }}>
+                            <div className="mt-2">
+                                <div className="flex justify-between items-center mb-1.5">
+                                    <span className={`text-[11px] font-semibold transition-colors duration-200 ${passwordStrength.color}`}>
                                         {passwordStrength.label}
                                     </span>
                                 </div>
-                                <div style={{
-                                    width: '100%', height: 4, borderRadius: 4,
-                                    background: 'var(--neutral-200, #e5e7eb)',
-                                    overflow: 'hidden',
-                                }}>
-                                    <div style={{
-                                        width: `${passwordStrength.percent}%`,
-                                        height: '100%',
-                                        borderRadius: 4,
-                                        background: passwordStrength.color,
-                                        transition: 'all 0.3s ease',
-                                    }} />
+                                <div className="w-full h-1 rounded-full bg-[var(--neutral-200)] overflow-hidden">
+                                    <div 
+                                        className={`h-full rounded-full transition-all duration-300 ease-in-out ${passwordStrength.bg}`}
+                                        style={{ width: `${passwordStrength.percent}%` }} 
+                                    />
                                 </div>
                             </div>
                         )}
 
                         {/* Password rules checklist */}
                         {formData.password && (
-                            <div style={{
-                                display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10,
-                            }}>
+                            <div className="flex flex-wrap gap-1.5 mt-2.5">
                                 {passwordChecks.map(rule => (
                                     <div
                                         key={rule.key}
-                                        style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 4,
-                                            padding: '3px 10px',
-                                            borderRadius: 20,
-                                            fontSize: 11,
-                                            fontWeight: 500,
-                                            background: rule.passed ? 'var(--success-50, #f0fdf4)' : 'var(--error-50, #fef2f2)',
-                                            color: rule.passed ? 'var(--success-700, #15803d)' : 'var(--error-600, #dc2626)',
-                                            border: `1px solid ${rule.passed ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.2)'}`,
-                                            transition: 'all 0.2s ease',
-                                        }}
+                                        className={`inline-flex items-center gap-1 p-[3px_10px] rounded-[20px] text-[11px] font-medium border transition-all duration-200 ease-in-out ${rule.passed ? 'bg-[var(--success-50,#f0fdf4)] text-[var(--success-700,#15803d)] border-[#22c55e40]' : 'bg-[var(--error-50,#fef2f2)] text-[var(--error-600,#dc2626)] border-[#ef444433]'}`}
                                     >
                                         {rule.passed ? <FiCheck size={11} /> : <FiX size={11} />}
                                         {rule.label}
@@ -397,19 +339,12 @@ export default function Register() {
                     {/* Confirm Password */}
                     <div className="form-group">
                         <label className="form-label">Confirm Password</label>
-                        <div style={{ position: 'relative' }}>
-                            <FiLock style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+                        <div className="relative">
+                            <FiLock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
                             <input
                                 type={showConfirmPassword ? 'text' : 'password'}
-                                className="form-input"
+                                className={`form-input pl-10 pr-11 w-full ${passwordsMatch === null ? '' : passwordsMatch ? 'border-[var(--success-500,#22c55e)]' : 'border-[var(--error-500,#ef4444)]'}`}
                                 placeholder="Re-enter your password"
-                                style={{
-                                    paddingLeft: 40,
-                                    paddingRight: 44,
-                                    width: '100%',
-                                    borderColor: passwordsMatch === null ? undefined
-                                        : passwordsMatch ? 'var(--success-500, #22c55e)' : 'var(--error-500, #ef4444)',
-                                }}
                                 value={formData.confirmPassword}
                                 onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                                 required
@@ -417,20 +352,13 @@ export default function Register() {
                             <button
                                 type="button"
                                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                style={{
-                                    position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                                    background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)',
-                                    padding: 4, display: 'flex', alignItems: 'center',
-                                }}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 bg-none border-none cursor-pointer text-[var(--text-tertiary)] p-1 flex items-center"
                             >
                                 {showConfirmPassword ? <FiEyeOff size={16} /> : <FiEye size={16} />}
                             </button>
                         </div>
                         {passwordsMatch !== null && (
-                            <div style={{
-                                display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12,
-                                color: passwordsMatch ? 'var(--success-600, #16a34a)' : 'var(--error-600, #dc2626)',
-                            }}>
+                            <div className={`flex items-center gap-1.5 mt-1.5 text-[12px] ${passwordsMatch ? 'text-[var(--success-600,#16a34a)]' : 'text-[var(--error-600,#dc2626)]'}`}>
                                 {passwordsMatch ? <FiCheck size={13} /> : <FiX size={13} />}
                                 {passwordsMatch ? 'Passwords match' : 'Passwords do not match'}
                             </div>
@@ -438,13 +366,13 @@ export default function Register() {
                     </div>
 
                     {/* Terms */}
-                    <div style={{ marginTop: 8 }}>
-                        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                    <div className="mt-2">
+                        <label className="flex items-start gap-2 text-[13px] text-[var(--text-secondary)] cursor-pointer">
                             <input
                                 type="checkbox"
                                 checked={formData.agreeTerms}
                                 onChange={(e) => setFormData({ ...formData, agreeTerms: e.target.checked })}
-                                style={{ marginTop: 2, accentColor: 'var(--primary-600)' }}
+                                className="mt-0.5 accent-[var(--primary-600)]"
                             />
                             I agree to SafeDrive's Terms of Service, Privacy Policy, and Rental Agreement Terms. I understand that my identity will be verified.
                         </label>
@@ -452,8 +380,7 @@ export default function Register() {
 
                     <button
                         type="submit"
-                        className="btn btn-primary btn-lg"
-                        style={{ width: '100%', marginTop: 16 }}
+                        className="btn btn-primary btn-lg w-full mt-4"
                         disabled={loading}
                     >
                         {loading ? 'Creating Account...' : 'Create Account'}

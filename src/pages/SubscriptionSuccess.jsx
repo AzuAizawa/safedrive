@@ -78,54 +78,46 @@ export default function SubscriptionSuccess() {
     }, [userId]);
 
     return (
-        <div style={{ maxWidth: 480, margin: '60px auto', textAlign: 'center', padding: '0 24px' }}>
-            <div style={{
-                background: 'var(--surface-primary)',
-                border: '2px solid var(--success-300)',
-                borderRadius: 'var(--radius-xl)',
-                padding: 48,
-            }}>
+        <div className="max-w-[480px] mx-auto my-[60px] text-center px-6">
+            <div className="bg-[var(--surface-primary)] border-2 border-[var(--success-300)] rounded-[var(--radius-xl)] p-12">
                 {isActivating ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                        <div className="empty-state-icon" style={{ animation: 'bounce 2s infinite' }}>⭐</div>
+                    <div className="flex flex-col items-center gap-4">
+                        <div className="empty-state-icon animate-[bounce_2s_infinite]">⭐</div>
                         <h3>Activating Premium...</h3>
                         <p>Please wait while we update your account benefits.</p>
                     </div>
                 ) : (
                     <>
-                        <div style={{ fontSize: 72, marginBottom: 16 }}>⭐</div>
-                        <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--success-700)', marginBottom: 8 }}>
+                        <div className="text-[72px] mb-4">⭐</div>
+                        <h1 className="text-[26px] font-extrabold text-[var(--success-700)] mb-2">
                             Welcome to Premium!
                         </h1>
-                        <p style={{ color: 'var(--text-secondary)', marginBottom: 24, lineHeight: 1.7 }}>
+                        <p className="text-[var(--text-secondary)] mb-6 leading-[1.7]">
                             Your ₱399 payment was successful. Your SafeDrive Premium subscription is now active for
                             <strong> 30 days</strong>. You can now list unlimited vehicles simultaneously!
                         </p>
 
-                        <div style={{
-                            background: 'var(--success-50)', borderRadius: 'var(--radius-lg)', padding: '16px 20px',
-                            marginBottom: 24, textAlign: 'left', border: '1px solid var(--success-200)',
-                        }}>
-                            <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--success-800)' }}>What you unlocked:</div>
+                        <div className="bg-[var(--success-50)] rounded-[var(--radius-lg)] px-5 py-4 mb-6 text-left border border-[var(--success-200)]">
+                            <div className="font-bold mb-2 text-[var(--success-800)]">What you unlocked:</div>
                             {['Unlimited active vehicle listings', 'All your vehicles are now active'].map((f, i) => (
-                                <div key={i} style={{ display: 'flex', gap: 8, fontSize: 14, marginBottom: 6, color: 'var(--success-700)' }}>
-                                    <FiCheckCircle style={{ flexShrink: 0 }} />{f}
+                                <div key={i} className="flex gap-2 text-sm mb-1.5 text-[var(--success-700)]">
+                                    <FiCheckCircle className="shrink-0" />{f}
                                 </div>
                             ))}
                         </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div className="flex flex-col gap-2.5">
                             {!isSubscribedGlobally ? (
-                                <div style={{ padding: 20, background: 'var(--warning-50)', borderRadius: 12, border: '1px solid var(--warning-200)' }}>
-                                    <div className="spinner" style={{ margin: '0 auto 10px', borderColor: 'var(--warning-500)', borderTopColor: 'transparent' }} />
-                                    <div style={{ color: 'var(--warning-700)', fontWeight: 600 }}>Syncing benefits to your device...</div>
+                                <div className="p-5 bg-[var(--warning-50)] rounded-xl border border-[var(--warning-200)]">
+                                    <div className="spinner mx-auto mb-2.5 border-[var(--warning-500)] border-t-transparent" />
+                                    <div className="text-[var(--warning-700)] font-semibold">Syncing benefits to your device...</div>
                                 </div>
                             ) : (
-                                <Link to="/my-vehicles" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
-                                    Go to My Vehicles <FiTruck style={{ marginLeft: 8 }} />
+                                <Link to="/my-vehicles" className="btn btn-primary w-full justify-center">
+                                    Go to My Vehicles <FiTruck className="ml-2" />
                                 </Link>
                             )}
-                            <Link to="/owner/create-vehicle" className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
+                            <Link to="/owner/create-vehicle" className="btn btn-secondary w-full justify-center">
                                 Add New Vehicle
                             </Link>
                         </div>

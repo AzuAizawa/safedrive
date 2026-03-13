@@ -107,29 +107,15 @@ export default function Dashboard() {
     const getVerificationBanner = () => {
         if (isAdmin) {
             return (
-                <div style={{
-                    background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
-                    border: '1px solid rgba(59,130,246,0.3)',
-                    borderRadius: 'var(--radius-lg, 12px)',
-                    padding: '20px 24px',
-                    marginBottom: 24,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 16,
-                }}>
-                    <div style={{
-                        width: 48, height: 48, borderRadius: 12,
-                        background: '#dbeafe', color: '#2563eb',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 22, flexShrink: 0,
-                    }}>
+                <div className="bg-gradient-to-br from-[#eff6ff] to-[#dbeafe] border border-blue-500/30 rounded-[var(--radius-lg,12px)] px-6 py-5 mb-6 flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-[#dbeafe] text-[#2563eb] flex items-center justify-center text-[22px] shrink-0">
                         <FiShield />
                     </div>
-                    <div style={{ flex: 1 }}>
-                        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>You're the Admin</h3>
-                        <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>Manage users, verify identities, and approve vehicle listings from the Admin Panel.</p>
+                    <div className="flex-1">
+                        <h3 className="text-base font-bold mb-1">You're the Admin</h3>
+                        <p className="text-sm text-[var(--text-secondary)] m-0">Manage users, verify identities, and approve vehicle listings from the Admin Panel.</p>
                     </div>
-                    <Link to="/admin" className="btn btn-primary btn-sm" style={{ flexShrink: 0 }}>
+                    <Link to="/admin" className="btn btn-primary btn-sm shrink-0">
                         Go to Admin Panel <FiArrowRight />
                     </Link>
                 </div>
@@ -153,30 +139,15 @@ export default function Dashboard() {
         };
 
         return (
-            <div style={{
-                background: msg.bgGradient,
-                border: `1px solid ${msg.borderColor}`,
-                borderRadius: 'var(--radius-lg, 12px)',
-                padding: '20px 24px',
-                marginBottom: 24,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 16,
-                flexWrap: 'wrap',
-            }}>
-                <div style={{
-                    width: 48, height: 48, borderRadius: 12,
-                    background: msg.iconBg, color: msg.iconColor,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 22, flexShrink: 0,
-                }}>
+            <div className={`rounded-[var(--radius-lg,12px)] px-6 py-5 mb-6 flex items-center gap-4 flex-wrap border border-orange-500/30 bg-gradient-to-br from-orange-50 to-amber-50`}>
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center text-[22px] shrink-0 bg-amber-100 text-[#d97706]">
                     {msg.icon}
                 </div>
-                <div style={{ flex: 1, minWidth: 200 }}>
-                    <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{msg.title}</h3>
-                    <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>{msg.desc}</p>
+                <div className="flex-1 min-w-[200px]">
+                    <h3 className="text-base font-bold mb-1">{msg.title}</h3>
+                    <p className="text-sm text-[var(--text-secondary)] m-0">{msg.desc}</p>
                 </div>
-                <Link to={msg.link} className="btn btn-accent btn-sm" style={{ flexShrink: 0 }}>
+                <Link to={msg.link} className="btn btn-accent btn-sm shrink-0">
                     {msg.action} <FiArrowRight />
                 </Link>
             </div>
@@ -185,11 +156,11 @@ export default function Dashboard() {
 
     // Skeleton placeholder for stats while loading
     const StatSkeleton = () => (
-        <div className="stat-card" style={{ opacity: 0.5 }}>
-            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--neutral-200, #e5e7eb)', animation: 'pulse 1.5s infinite' }} />
+        <div className="stat-card opacity-50">
+            <div className="w-12 h-12 rounded-xl bg-[var(--neutral-200,#e5e7eb)] animate-pulse" />
             <div className="stat-info">
-                <div style={{ width: 40, height: 24, borderRadius: 6, background: 'var(--neutral-200, #e5e7eb)', marginBottom: 4, animation: 'pulse 1.5s infinite' }} />
-                <div style={{ width: 80, height: 14, borderRadius: 4, background: 'var(--neutral-200, #e5e7eb)', animation: 'pulse 1.5s infinite' }} />
+                <div className="w-10 h-6 rounded-md bg-[var(--neutral-200,#e5e7eb)] mb-1 animate-pulse" />
+                <div className="w-20 h-3.5 rounded bg-[var(--neutral-200,#e5e7eb)] animate-pulse" />
             </div>
         </div>
     );
@@ -223,42 +194,28 @@ export default function Dashboard() {
             {/* ── Subscription Banner (verified non-admin users only) ── */}
             {!isAdmin && (profile?.role === 'verified' || profile?.verification_status === 'verified') && (
                 isSubscriptionActive(profile) ? (
-                    <div style={{
-                        background: 'linear-gradient(135deg, #0f2d1f, #14532d)',
-                        border: '1px solid rgba(74,222,128,0.3)',
-                        borderRadius: 'var(--radius-lg, 12px)',
-                        padding: '14px 20px',
-                        marginBottom: 24,
-                        display: 'flex', alignItems: 'center', gap: 14,
-                    }}>
-                        <span style={{ fontSize: 22 }}>⭐</span>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: '#4ade80' }}>SafeDrive Premium Active</div>
-                            <div style={{ fontSize: 13, color: '#86efac' }}>
+                    <div className="bg-gradient-to-br from-[#0f2d1f] to-[#14532d] border border-green-400/30 rounded-[var(--radius-lg,12px)] px-5 py-3.5 mb-6 flex items-center gap-3.5">
+                        <span className="text-[22px]">⭐</span>
+                        <div className="flex-1">
+                            <div className="font-bold text-[14px] text-[#4ade80]">SafeDrive Premium Active</div>
+                            <div className="text-[13px] text-[#86efac]">
                                 {getSubscriptionDaysLeft(profile)} days remaining — Unlimited listings
                             </div>
                         </div>
-                        <Link to="/subscribe" className="btn btn-sm" style={{ background: 'rgba(74,222,128,0.2)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.4)', fontSize: 12 }}>
+                        <Link to="/subscribe" className="btn btn-sm bg-green-400/20 text-[#4ade80] border border-green-400/40 text-[12px]">
                             Manage
                         </Link>
                     </div>
                 ) : (
-                    <div style={{
-                        background: 'linear-gradient(135deg, #1e3a5f, #1a2e4a)',
-                        border: '1px solid rgba(59,130,246,0.4)',
-                        borderRadius: 'var(--radius-lg, 12px)',
-                        padding: '16px 20px',
-                        marginBottom: 24,
-                        display: 'flex', alignItems: 'center', gap: 14,
-                    }}>
-                        <span style={{ fontSize: 24 }}>⭐</span>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: '#93c5fd' }}>Unlock Unlimited Listings</div>
-                            <div style={{ fontSize: 13, color: '#64748b' }}>
+                    <div className="bg-gradient-to-br from-[#1e3a5f] to-[#1a2e4a] border border-blue-500/40 rounded-[var(--radius-lg,12px)] px-5 py-4 mb-6 flex items-center gap-3.5">
+                        <span className="text-2xl">⭐</span>
+                        <div className="flex-1">
+                            <div className="font-bold text-[14px] text-[#93c5fd]">Unlock Unlimited Listings</div>
+                            <div className="text-[13px] text-[#64748b]">
                                 Subscribe for ₱399/month via GCash — list as many cars as you want.
                             </div>
                         </div>
-                        <Link to="/subscribe" className="btn btn-primary btn-sm" style={{ flexShrink: 0, background: '#3b82f6', border: 'none', whiteSpace: 'nowrap' }}>
+                        <Link to="/subscribe" className="btn btn-primary btn-sm shrink-0 bg-[#3b82f6] border-none whitespace-nowrap">
                             Subscribe ₱399 →
                         </Link>
                     </div>
@@ -356,67 +313,67 @@ export default function Dashboard() {
             </div>
 
             {/* Quick Actions */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20, marginBottom: 32 }}>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-5 mb-8">
                 {isAdmin && (
                     <>
-                        <Link to="/admin?tab=users" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
-                            <div className="stat-icon blue" style={{ width: 44, height: 44 }}><FiUsers /></div>
+                        <Link to="/admin?tab=users" className="card card-body flex items-center gap-4 cursor-pointer">
+                            <div className="stat-icon blue w-11 h-11"><FiUsers /></div>
                             <div>
-                                <h3 style={{ fontSize: 15, fontWeight: 700 }}>Manage Users</h3>
-                                <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Verify identities & manage accounts</p>
+                                <h3 className="text-[15px] font-bold">Manage Users</h3>
+                                <p className="text-[13px] text-[var(--text-tertiary)]">Verify identities & manage accounts</p>
                             </div>
-                            <FiArrowRight style={{ marginLeft: 'auto', color: 'var(--text-tertiary)' }} />
+                            <FiArrowRight className="ml-auto text-[var(--text-tertiary)]" />
                         </Link>
-                        <Link to="/admin?tab=vehicles" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
-                            <div className="stat-icon green" style={{ width: 44, height: 44 }}><FiTruck /></div>
+                        <Link to="/admin?tab=vehicles" className="card card-body flex items-center gap-4 cursor-pointer">
+                            <div className="stat-icon green w-11 h-11"><FiTruck /></div>
                             <div>
-                                <h3 style={{ fontSize: 15, fontWeight: 700 }}>Manage Vehicles</h3>
-                                <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Approve & review car listings</p>
+                                <h3 className="text-[15px] font-bold">Manage Vehicles</h3>
+                                <p className="text-[13px] text-[var(--text-tertiary)]">Approve & review car listings</p>
                             </div>
-                            <FiArrowRight style={{ marginLeft: 'auto', color: 'var(--text-tertiary)' }} />
+                            <FiArrowRight className="ml-auto text-[var(--text-tertiary)]" />
                         </Link>
                     </>
                 )}
                 {isRenter && !isAdmin && (
-                    <Link to="/vehicles/new" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer', background: 'linear-gradient(135deg, var(--accent-50), var(--warning-50))', borderColor: 'rgba(249,115,22,0.2)' }}>
-                        <div className="stat-icon orange" style={{ width: 44, height: 44 }}>🚗</div>
+                    <Link to="/vehicles/new" className="card card-body flex items-center gap-4 cursor-pointer bg-gradient-to-br from-[var(--accent-50)] to-[var(--warning-50)] border-orange-500/20">
+                        <div className="stat-icon orange w-11 h-11">🚗</div>
                         <div>
-                            <h3 style={{ fontSize: 15, fontWeight: 700 }}>List a New Vehicle</h3>
-                            <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Add your car to the platform</p>
+                            <h3 className="text-[15px] font-bold">List a New Vehicle</h3>
+                            <p className="text-[13px] text-[var(--text-tertiary)]">Add your car to the platform</p>
                         </div>
-                        <FiArrowRight style={{ marginLeft: 'auto', color: 'var(--text-tertiary)' }} />
+                        <FiArrowRight className="ml-auto text-[var(--text-tertiary)]" />
                     </Link>
                 )}
-                <Link to="/vehicles" className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
-                    <div className="stat-icon blue" style={{ width: 44, height: 44 }}>🔍</div>
+                <Link to="/vehicles" className="card card-body flex items-center gap-4 cursor-pointer">
+                    <div className="stat-icon blue w-11 h-11">🔍</div>
                     <div>
-                        <h3 style={{ fontSize: 15, fontWeight: 700 }}>{isAdmin ? 'View All Vehicles' : 'Browse Vehicles'}</h3>
-                        <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{isAdmin ? 'See all listed vehicles on the platform' : 'Find your perfect rental car'}</p>
+                        <h3 className="text-[15px] font-bold">{isAdmin ? 'View All Vehicles' : 'Browse Vehicles'}</h3>
+                        <p className="text-[13px] text-[var(--text-tertiary)]">{isAdmin ? 'See all listed vehicles on the platform' : 'Find your perfect rental car'}</p>
                     </div>
-                    <FiArrowRight style={{ marginLeft: 'auto', color: 'var(--text-tertiary)' }} />
+                    <FiArrowRight className="ml-auto text-[var(--text-tertiary)]" />
                 </Link>
             </div>
 
             {/* Recent Bookings */}
             <div className="card">
                 <div className="card-header">
-                    <h2 style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-display)' }}>Recent Bookings</h2>
+                    <h2 className="text-base font-bold font-[var(--font-display)]">Recent Bookings</h2>
                     <Link to="/bookings" className="btn btn-ghost btn-sm">View All <FiArrowRight /></Link>
                 </div>
                 {dataLoading ? (
-                    <div style={{ padding: 32, textAlign: 'center' }}>
-                        <div className="spinner" style={{ margin: '0 auto 12px' }} />
-                        <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Loading bookings...</p>
+                    <div className="p-8 text-center">
+                        <div className="spinner mx-auto mb-3" />
+                        <p className="text-[13px] text-[var(--text-tertiary)]">Loading bookings...</p>
                     </div>
                 ) : recentBookings.length === 0 ? (
-                    <div className="empty-state" style={{ padding: 48 }}>
+                    <div className="empty-state p-12">
                         <div className="empty-state-icon">📋</div>
                         <h3>No bookings yet</h3>
                         <p>Your rental bookings will appear here once you start using SafeDrive.</p>
                         <Link to="/vehicles" className="btn btn-primary">Browse Vehicles</Link>
                     </div>
                 ) : (
-                    <div style={{ overflow: 'auto' }}>
+                    <div className="overflow-auto">
                         <table className="table">
                             <thead>
                                 <tr>
@@ -430,17 +387,17 @@ export default function Dashboard() {
                                 {recentBookings.map((booking) => (
                                     <tr key={booking.id}>
                                         <td>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                                <div style={{ width: 40, height: 40, borderRadius: 8, background: 'var(--neutral-100)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🚗</div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-lg bg-[var(--neutral-100)] flex items-center justify-center">🚗</div>
                                                 <div>
-                                                    <div style={{ fontWeight: 600, fontSize: 14 }}>{booking.vehicles?.year} {booking.vehicles?.make} {booking.vehicles?.model}</div>
+                                                    <div className="font-semibold text-[14px]">{booking.vehicles?.year} {booking.vehicles?.make} {booking.vehicles?.model}</div>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                                        <td className="text-[13px] text-[var(--text-secondary)]">
                                             {new Date(booking.start_date).toLocaleDateString()} - {new Date(booking.end_date).toLocaleDateString()}
                                         </td>
-                                        <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>₱{booking.total_amount?.toLocaleString()}</td>
+                                        <td className="font-bold font-[var(--font-display)]">₱{booking.total_amount?.toLocaleString()}</td>
                                         <td>
                                             <span className={`badge badge-${booking.status === 'confirmed' || booking.status === 'completed' ? 'success' : booking.status === 'pending' ? 'pending' : booking.status === 'cancelled' ? 'error' : 'info'}`}>
                                                 {booking.status}

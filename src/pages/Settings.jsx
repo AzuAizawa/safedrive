@@ -10,51 +10,20 @@ import toast from 'react-hot-toast';
 import BackButton from '../components/BackButton';
 import { Admin2FASetup } from '../components/Admin2FA';
 
-const SECTION_STYLE = {
-    background: 'var(--surface-primary)',
-    borderRadius: 'var(--radius-lg)',
-    border: '1px solid var(--border-light)',
-    marginBottom: 20,
-    overflow: 'hidden',
-};
 
-const HEADER_STYLE = {
-    padding: '16px 24px',
-    borderBottom: '1px solid var(--border-light)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    fontWeight: 700,
-    fontSize: 15,
-    background: 'var(--surface-secondary)',
-};
 
-const ITEM_STYLE = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '16px 24px',
-    borderBottom: '1px solid var(--border-light)',
-};
+
+
+
 
 function Toggle({ checked, onChange }) {
     return (
         <button
             type="button"
             onClick={onChange}
-            style={{
-                width: 44, height: 24, borderRadius: 12, border: 'none',
-                background: checked ? 'var(--primary-500)' : 'var(--neutral-300)',
-                cursor: 'pointer', position: 'relative', transition: 'background 0.2s',
-                flexShrink: 0,
-            }}
+            className={`w-11 h-6 rounded-xl border-none cursor-pointer relative transition-colors duration-200 shrink-0 ${checked ? 'bg-[var(--primary-500)]' : 'bg-[var(--neutral-300)]'}`}
         >
-            <span style={{
-                position: 'absolute', top: 2,
-                left: checked ? 22 : 2,
-                width: 20, height: 20, borderRadius: '50%',
-                background: '#fff', transition: 'left 0.2s',
-            }} />
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all duration-200 ${checked ? 'left-[22px]' : 'left-0.5'}`} />
         </button>
     );
 }
@@ -114,7 +83,7 @@ export default function Settings() {
     };
 
     return (
-        <div style={{ maxWidth: 680, margin: '0 auto', paddingBottom: 48 }}>
+        <div className="max-w-[680px] mx-auto pb-12">
             <BackButton />
             <div className="page-header">
                 <h1>⚙️ Settings</h1>
@@ -122,37 +91,33 @@ export default function Settings() {
             </div>
 
             {/* ── Account Section ────────────────────────────── */}
-            <div style={SECTION_STYLE}>
-                <div style={HEADER_STYLE}><FiUser /> Account</div>
+            <div className="bg-[var(--surface-primary)] rounded-[var(--radius-lg)] border border-[var(--border-light)] mb-5 overflow-hidden">
+                <div className="p-[16px_24px] border-b border-[var(--border-light)] flex items-center gap-2.5 font-bold text-[15px] bg-[var(--surface-secondary)]"><FiUser /> Account</div>
 
-                <div style={{ ...ITEM_STYLE, cursor: 'pointer' }} onClick={() => navigate('/profile')}>
+                <div className="flex items-center justify-between p-[16px_24px] border-b border-[var(--border-light)] cursor-pointer" onClick={() => navigate('/profile')}>
                     <div>
-                        <div style={{ fontWeight: 600 }}>Edit Profile</div>
-                        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                        <div className="font-semibold">Edit Profile</div>
+                        <div className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
                             Name, phone, avatar, and identity verification
                         </div>
                     </div>
-                    <span style={{ color: 'var(--text-tertiary)', fontSize: 18 }}>›</span>
+                    <span className="text-[var(--text-tertiary)] text-[18px]">›</span>
                 </div>
 
-                <div style={{ ...ITEM_STYLE }}>
+                <div className="flex items-center justify-between p-[16px_24px] border-b border-[var(--border-light)]">
                     <div>
-                        <div style={{ fontWeight: 600 }}>Email Address</div>
-                        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                        <div className="font-semibold">Email Address</div>
+                        <div className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
                             {user?.email}
                         </div>
                     </div>
-                    <span style={{
-                        background: 'var(--success-50)', color: 'var(--success-700)',
-                        fontSize: 11, fontWeight: 700, padding: '3px 10px',
-                        borderRadius: 'var(--radius-sm)', border: '1px solid var(--success-200)',
-                    }}>Verified</span>
+                    <span className="bg-[var(--success-50)] text-[var(--success-700)] text-[11px] font-bold p-[3px_10px] rounded-[var(--radius-sm)] border border-[var(--success-200)]">Verified</span>
                 </div>
 
-                <div style={{ ...ITEM_STYLE, borderBottom: 'none' }}>
+                <div className="flex items-center justify-between p-[16px_24px]">
                     <div>
-                        <div style={{ fontWeight: 600 }}>Account Role</div>
-                        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                        <div className="font-semibold">Account Role</div>
+                        <div className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
                             {profile?.role === 'verified' ? '✅ Verified User — can list and rent vehicles'
                                 : profile?.role === 'admin' ? '🛡️ Administrator'
                                     : '👤 Regular User — complete verification to unlock all features'}
@@ -162,31 +127,31 @@ export default function Settings() {
             </div>
 
             {/* ── Security Section ────────────────────────────── */}
-            <div style={SECTION_STYLE}>
-                <div style={HEADER_STYLE}><FiLock /> Security & Password</div>
+            <div className="bg-[var(--surface-primary)] rounded-[var(--radius-lg)] border border-[var(--border-light)] mb-5 overflow-hidden">
+                <div className="p-[16px_24px] border-b border-[var(--border-light)] flex items-center gap-2.5 font-bold text-[15px] bg-[var(--surface-secondary)]"><FiLock /> Security & Password</div>
 
-                <div style={{ padding: '20px 24px' }}>
+                <div className="p-[20px_24px]">
                     <form onSubmit={handlePasswordChange}>
-                        <div className="form-group" style={{ marginBottom: 14 }}>
+                        <div className="form-group mb-3.5">
                             <label className="form-label">New Password</label>
-                            <input type="password" className="form-input" style={{ width: '100%' }}
+                            <input type="password" className="form-input w-full"
                                 placeholder="Enter new password (min 8 characters)"
                                 value={newPassword}
                                 onChange={e => setNewPassword(e.target.value)} />
                         </div>
-                        <div className="form-group" style={{ marginBottom: 16 }}>
+                        <div className="form-group mb-4">
                             <label className="form-label">Confirm New Password</label>
-                            <input type="password" className="form-input" style={{ width: '100%' }}
+                            <input type="password" className="form-input w-full"
                                 placeholder="Re-enter new password"
                                 value={confirmNewPassword}
                                 onChange={e => setConfirmNewPassword(e.target.value)} />
                         </div>
-                        <div style={{ display: 'flex', gap: 12 }}>
+                        <div className="flex gap-3">
                             <button type="submit" className="btn btn-primary" disabled={passwordLoading}>
                                 {passwordLoading ? 'Updating...' : '🔒 Update Password'}
                             </button>
-                            <button type="button" className="btn btn-ghost"
-                                onClick={handleSendResetEmail} style={{ fontSize: 13 }}>
+                            <button type="button" className="btn btn-ghost text-[13px]"
+                                onClick={handleSendResetEmail}>
                                 Send Reset Email Instead
                             </button>
                         </div>
@@ -196,17 +161,17 @@ export default function Settings() {
 
             {/* ── Admin 2FA Section (admin only) ──────────────── */}
             {profile?.role === 'admin' && (
-                <div style={SECTION_STYLE}>
-                    <div style={HEADER_STYLE}><FiShield style={{ color: 'var(--primary-500)' }} /> Two-Factor Authentication (Admin)</div>
-                    <div style={{ padding: '20px 24px' }}>
+                <div className="bg-[var(--surface-primary)] rounded-[var(--radius-lg)] border border-[var(--border-light)] mb-5 overflow-hidden">
+                    <div className="p-[16px_24px] border-b border-[var(--border-light)] flex items-center gap-2.5 font-bold text-[15px] bg-[var(--surface-secondary)]"><FiShield className="text-[var(--primary-500)]" /> Two-Factor Authentication (Admin)</div>
+                    <div className="p-[20px_24px]">
                         <Admin2FASetup />
                     </div>
                 </div>
             )}
 
             {/* ── Notification Preferences ────────────────────── */}
-            <div style={SECTION_STYLE}>
-                <div style={HEADER_STYLE}><FiBell /> Notification Preferences</div>
+            <div className="bg-[var(--surface-primary)] rounded-[var(--radius-lg)] border border-[var(--border-light)] mb-5 overflow-hidden">
+                <div className="p-[16px_24px] border-b border-[var(--border-light)] flex items-center gap-2.5 font-bold text-[15px] bg-[var(--surface-secondary)]"><FiBell /> Notification Preferences</div>
 
                 {[
                     { key: 'emailNotifications', label: 'Email Notifications', desc: 'Receive booking updates and alerts via email' },
@@ -214,10 +179,10 @@ export default function Settings() {
                     { key: 'smsAlerts', label: 'SMS Alerts', desc: 'Receive text messages for critical booking events' },
                     { key: 'promotions', label: 'Promotions & Updates', desc: 'SafeDrive news, tips, and promotional offers' },
                 ].map(({ key, label, desc }, i, arr) => (
-                    <div key={key} style={{ ...ITEM_STYLE, borderBottom: i < arr.length - 1 ? undefined : 'none' }}>
+                    <div key={key} className={`flex items-center justify-between p-[16px_24px] ${i < arr.length - 1 ? 'border-b border-[var(--border-light)]' : ''}`}>
                         <div>
-                            <div style={{ fontWeight: 600 }}>{label}</div>
-                            <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>{desc}</div>
+                            <div className="font-semibold">{label}</div>
+                            <div className="text-[13px] text-[var(--text-tertiary)] mt-0.5">{desc}</div>
                         </div>
                         <Toggle checked={prefs[key]} onChange={() => toggle(key)} />
                     </div>
@@ -225,13 +190,13 @@ export default function Settings() {
             </div>
 
             {/* ── Privacy Section ─────────────────────────────── */}
-            <div style={SECTION_STYLE}>
-                <div style={HEADER_STYLE}><FiShield /> Privacy</div>
+            <div className="bg-[var(--surface-primary)] rounded-[var(--radius-lg)] border border-[var(--border-light)] mb-5 overflow-hidden">
+                <div className="p-[16px_24px] border-b border-[var(--border-light)] flex items-center gap-2.5 font-bold text-[15px] bg-[var(--surface-secondary)]"><FiShield /> Privacy</div>
 
-                <div style={ITEM_STYLE}>
+                <div className="flex items-center justify-between p-[16px_24px] border-b border-[var(--border-light)]">
                     <div>
-                        <div style={{ fontWeight: 600 }}>Data Export</div>
-                        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                        <div className="font-semibold">Data Export</div>
+                        <div className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
                             Request a copy of all your personal data (RA 10173 right to data portability)
                         </div>
                     </div>
@@ -241,15 +206,14 @@ export default function Settings() {
                     </button>
                 </div>
 
-                <div style={{ ...ITEM_STYLE, borderBottom: 'none' }}>
+                <div className="flex items-center justify-between p-[16px_24px]">
                     <div>
-                        <div style={{ fontWeight: 600, color: 'var(--error-600)' }}>Delete Account</div>
-                        <div style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                        <div className="font-semibold text-[var(--error-600)]">Delete Account</div>
+                        <div className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
                             Permanently delete your account and all associated data
                         </div>
                     </div>
-                    <button className="btn btn-sm"
-                        style={{ background: 'var(--error-500)', color: '#fff', border: 'none' }}
+                    <button className="btn btn-sm bg-[var(--error-500)] text-white border-none"
                         onClick={() => setShowDeleteConfirm(true)}>
                         <FiTrash2 /> Delete
                     </button>
@@ -257,8 +221,8 @@ export default function Settings() {
             </div>
 
             {/* ── Sign Out ─────────────────────────────────────── */}
-            <div style={{ display: 'flex', gap: 12 }}>
-                <button className="btn btn-secondary" style={{ width: '100%' }}
+            <div className="flex gap-3">
+                <button className="btn btn-secondary w-full"
                     onClick={async () => {
                         const wasAdmin = profile?.role === 'admin';
                         await signOut();
@@ -270,27 +234,20 @@ export default function Settings() {
 
             {/* Delete Confirmation Modal */}
             {showDeleteConfirm && (
-                <div style={{
-                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999,
-                }}>
-                    <div style={{
-                        background: 'var(--surface-primary)', borderRadius: 'var(--radius-xl)',
-                        padding: 32, maxWidth: 420, width: '90%',
-                        border: '1px solid var(--error-200)',
-                    }}>
-                        <div style={{ fontSize: 32, textAlign: 'center', marginBottom: 16 }}>⚠️</div>
-                        <h3 style={{ fontWeight: 700, marginBottom: 8, textAlign: 'center' }}>Delete Account?</h3>
-                        <p style={{ fontSize: 14, color: 'var(--text-secondary)', textAlign: 'center', marginBottom: 24 }}>
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999]">
+                    <div className="bg-[var(--surface-primary)] rounded-[var(--radius-xl)] p-8 max-w-[420px] w-[90%] border border-[var(--error-200)]">
+                        <div className="text-[32px] text-center mb-4">⚠️</div>
+                        <h3 className="font-bold mb-2 text-center">Delete Account?</h3>
+                        <p className="text-[14px] text-[var(--text-secondary)] text-center mb-6">
                             This action is permanent and cannot be undone. All your bookings, vehicles, and
                             reviews will be permanently deleted.
                         </p>
-                        <div style={{ display: 'flex', gap: 12 }}>
-                            <button className="btn btn-secondary" style={{ flex: 1 }}
+                        <div className="flex gap-3">
+                            <button className="btn btn-secondary flex-1"
                                 onClick={() => setShowDeleteConfirm(false)}>
                                 Cancel
                             </button>
-                            <button className="btn" style={{ flex: 1, background: 'var(--error-500)', color: '#fff', border: 'none' }}
+                            <button className="btn flex-1 bg-[var(--error-500)] text-white border-none"
                                 disabled={deleteLoading}
                                 onClick={async () => {
                                     setDeleteLoading(true);

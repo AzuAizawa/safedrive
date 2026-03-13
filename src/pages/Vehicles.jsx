@@ -134,46 +134,27 @@ export default function Vehicles() {
     return (
         <div>
             {/* Hero Header */}
-            <div style={{
-                background: 'linear-gradient(135deg, var(--primary-600), var(--primary-800))',
-                borderRadius: 'var(--radius-xl)', padding: '32px 36px', marginBottom: 28,
-                color: '#fff', position: 'relative', overflow: 'hidden',
-            }}>
-                <div style={{ position: 'absolute', top: -40, right: -40, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
-                <div style={{ position: 'absolute', bottom: -60, right: 60, width: 120, height: 120, borderRadius: '50%', background: 'rgba(255,255,255,0.04)' }} />
-                <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 6, fontFamily: 'var(--font-display)' }}>🔍 Browse Vehicles</h1>
-                <p style={{ fontSize: 15, opacity: 0.85, marginBottom: 20 }}>Find verified vehicles from trusted owners across the Philippines</p>
+            <div className="bg-gradient-to-br from-[var(--primary-600)] to-[var(--primary-800)] rounded-[var(--radius-xl)] px-9 py-8 mb-7 text-white relative overflow-hidden">
+                <div className="absolute -top-10 -right-10 w-[180px] h-[180px] rounded-full bg-white/5" />
+                <div className="absolute -bottom-[60px] right-[60px] w-30 h-30 rounded-full bg-white/5" />
+                <h1 className="text-[28px] font-extrabold mb-1.5 font-[var(--font-display)]">🔍 Browse Vehicles</h1>
+                <p className="text-[15px] opacity-85 mb-5">Find verified vehicles from trusted owners across the Philippines</p>
 
                 {/* Search Bar */}
-                <div style={{ display: 'flex', gap: 10, maxWidth: 700, position: 'relative' }}>
-                    <div className="search-input-wrapper" style={{ flex: 1 }}>
-                        <FiSearch className="search-icon" style={{ color: 'var(--text-tertiary)' }} />
+                <div className="flex gap-2.5 max-w-[700px] relative">
+                    <div className="search-input-wrapper flex-1">
+                        <FiSearch className="search-icon text-[var(--text-tertiary)]" />
                         <input
                             type="text"
-                            className="form-input"
-                            placeholder="Search by brand, model, year, or color..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            style={{ paddingLeft: 40, background: 'rgba(255,255,255,0.95)', border: 'none', fontSize: 15 }}
+                            className="form-input pl-10 bg-white/95 border-none text-[15px]"
                         />
                     </div>
                     <button
-                        className="btn"
-                        onClick={() => setShowFilters(!showFilters)}
-                        style={{
-                            background: showFilters ? '#fff' : 'rgba(255,255,255,0.15)',
-                            color: showFilters ? 'var(--primary-600)' : '#fff',
-                            border: '1px solid rgba(255,255,255,0.3)',
-                            display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600,
-                        }}
+                        className={`btn flex items-center gap-1.5 font-semibold border border-white/30 ${showFilters ? 'bg-white text-[var(--primary-600)]' : 'bg-white/15 text-white'}`}
                     >
                         <FiFilter /> Filters
                         {activeFilterCount > 0 && (
-                            <span style={{
-                                background: 'var(--accent-500)', color: '#fff', width: 20, height: 20,
-                                borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: 11, fontWeight: 700,
-                            }}>{activeFilterCount}</span>
+                            <span className="bg-[var(--accent-500)] text-white w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold">{activeFilterCount}</span>
                         )}
                     </button>
                 </div>
@@ -181,55 +162,55 @@ export default function Vehicles() {
 
             {/* Filter Panel */}
             {showFilters && (
-                <div className="card" style={{ marginBottom: 24, animation: 'fadeIn 0.2s ease' }}>
-                    <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h3 style={{ fontSize: 15, fontWeight: 700 }}>🎯 Filters</h3>
+                <div className="card mb-6 animate-[fadeIn_0.2s_ease]">
+                    <div className="card-header flex justify-between items-center">
+                        <h3 className="text-[15px] font-bold">🎯 Filters</h3>
                         {activeFilterCount > 0 && (
-                            <button className="btn btn-ghost btn-sm" onClick={clearFilters} style={{ color: 'var(--error-500)' }}>
+                            <button className="btn btn-ghost btn-sm text-[var(--error-500)]" onClick={clearFilters}>
                                 <FiX /> Clear All
                             </button>
                         )}
                     </div>
                     <div className="card-body">
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+                        <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
                             <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12 }}>Brand</label>
-                                <select className="form-select" style={{ width: '100%' }} value={filterBrand} onChange={(e) => setFilterBrand(e.target.value)}>
+                                <label className="form-label text-[12px]">Brand</label>
+                                <select className="form-select w-full" value={filterBrand} onChange={(e) => setFilterBrand(e.target.value)}>
                                     <option value="all">All Brands</option>
                                     {brands.map(b => <option key={b} value={b}>{b}</option>)}
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12 }}>Body Type</label>
-                                <select className="form-select" style={{ width: '100%' }} value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+                                <label className="form-label text-[12px]">Body Type</label>
+                                <select className="form-select w-full" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
                                     <option value="all">All Types</option>
                                     {BODY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12 }}>Location</label>
-                                <select className="form-select" style={{ width: '100%' }} value={filterCity} onChange={(e) => setFilterCity(e.target.value)}>
+                                <label className="form-label text-[12px]">Location</label>
+                                <select className="form-select w-full" value={filterCity} onChange={(e) => setFilterCity(e.target.value)}>
                                     <option value="all">All Cities</option>
                                     {cities.map(c => <option key={c} value={c}>{c}</option>)}
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12 }}>Transmission</label>
-                                <select className="form-select" style={{ width: '100%' }} value={filterTransmission} onChange={(e) => setFilterTransmission(e.target.value)}>
+                                <label className="form-label text-[12px]">Transmission</label>
+                                <select className="form-select w-full" value={filterTransmission} onChange={(e) => setFilterTransmission(e.target.value)}>
                                     <option value="all">All</option>
                                     <option value="Automatic">Automatic</option>
                                     <option value="Manual">Manual</option>
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12 }}>Price Range (daily)</label>
-                                <select className="form-select" style={{ width: '100%' }} value={filterPrice} onChange={(e) => setFilterPrice(parseInt(e.target.value))}>
+                                <label className="form-label text-[12px]">Price Range (daily)</label>
+                                <select className="form-select w-full" value={filterPrice} onChange={(e) => setFilterPrice(parseInt(e.target.value))}>
                                     {PRICE_RANGES.map((p, i) => <option key={i} value={i}>{p.label}</option>)}
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12 }}>Sort By</label>
-                                <select className="form-select" style={{ width: '100%' }} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                                <label className="form-label text-[12px]">Sort By</label>
+                                <select className="form-select w-full" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                                     <option value="newest">Newest First</option>
                                     <option value="price-low">Price: Low → High</option>
                                     <option value="price-high">Price: High → Low</option>
@@ -242,19 +223,18 @@ export default function Vehicles() {
             )}
 
             {/* Results Summary + Quick Filter Chips */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-                <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
-                    Showing <strong style={{ color: 'var(--text-primary)' }}>{filteredVehicles.length}</strong> of {vehicles.length} vehicles
+            <div className="flex justify-between items-center mb-5 flex-wrap gap-3">
+                <div className="text-sm text-[var(--text-secondary)]">
+                    Showing <strong className="text-[var(--text-primary)]">{filteredVehicles.length}</strong> of {vehicles.length} vehicles
                     {activeFilterCount > 0 && <span> · {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''} active</span>}
                 </div>
                 {/* Quick type chips */}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <div className="flex gap-1.5 flex-wrap">
                     {['all', 'Sedan', 'SUV', 'MPV', 'Pickup'].map(type => (
                         <button
                             key={type}
                             onClick={() => setFilterType(type)}
-                            className={`badge ${filterType === type ? 'badge-info' : 'badge-neutral'}`}
-                            style={{ cursor: 'pointer', padding: '5px 12px', fontSize: 12, fontWeight: 600, transition: 'all 0.15s ease' }}
+                            className={`badge ${filterType === type ? 'badge-info' : 'badge-neutral'} cursor-pointer px-3 py-1.5 text-[12px] font-semibold transition-all duration-150 ease-in-out`}
                         >
                             {type === 'all' ? 'All' : type}
                         </button>
@@ -264,12 +244,12 @@ export default function Vehicles() {
 
             {/* Vehicle Grid */}
             {filteredVehicles.length === 0 ? (
-                <div className="empty-state" style={{ padding: 64 }}>
+                <div className="empty-state p-16">
                     <div className="empty-state-icon">🚗</div>
                     <h3>No vehicles found</h3>
                     <p>Try adjusting your search or filters to find more vehicles.</p>
                     {activeFilterCount > 0 && (
-                        <button className="btn btn-primary" onClick={clearFilters} style={{ marginTop: 12 }}>
+                        <button className="btn btn-primary mt-3" onClick={clearFilters}>
                             Clear All Filters
                         </button>
                     )}
@@ -282,7 +262,7 @@ export default function Vehicles() {
                                 {vehicle.thumbnail_url || vehicle.images?.[0] ? (
                                     <img src={vehicle.thumbnail_url || vehicle.images[0]} alt={`${vehicle.make} ${vehicle.model}`} />
                                 ) : (
-                                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48, background: 'linear-gradient(135deg, var(--neutral-100), var(--neutral-200))' }}>
+                                    <div className="w-full h-full flex items-center justify-center text-[48px] bg-gradient-to-br from-[var(--neutral-100)] to-[var(--neutral-200)]">
                                         🚗
                                     </div>
                                 )}
@@ -293,15 +273,15 @@ export default function Vehicles() {
                                     className={`vehicle-card-favorite ${favorites.has(vehicle.id) ? 'active' : ''}`}
                                     onClick={(e) => toggleFavorite(e, vehicle.id)}
                                 >
-                                    <FiHeart style={favorites.has(vehicle.id) ? { fill: 'var(--error-500)' } : {}} />
+                                    <FiHeart className={`${favorites.has(vehicle.id) ? 'fill-[var(--error-500)]' : ''}`} />
                                 </button>
                             </div>
 
                             <div className="vehicle-card-content">
-                                <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                                    <span className="badge badge-info" style={{ fontSize: 10 }}>{vehicle.body_type}</span>
-                                    <span className="badge badge-neutral" style={{ fontSize: 10 }}>{vehicle.transmission}</span>
-                                    {vehicle.color && <span className="badge badge-neutral" style={{ fontSize: 10 }}>{vehicle.color}</span>}
+                                <div className="flex gap-1.5 mb-1.5">
+                                    <span className="badge badge-info text-[10px]">{vehicle.body_type}</span>
+                                    <span className="badge badge-neutral text-[10px]">{vehicle.transmission}</span>
+                                    {vehicle.color && <span className="badge badge-neutral text-[10px]">{vehicle.color}</span>}
                                 </div>
                                 <div className="vehicle-card-title">{vehicle.year} {vehicle.make} {vehicle.model}</div>
                                 <div className="vehicle-card-specs">
@@ -317,8 +297,8 @@ export default function Vehicles() {
                                 <div className="vehicle-card-price">
                                     {vehicle.pricing_type === 'fixed' ? (
                                         <>
-                                            <span className="amount" style={{ fontSize: 16 }}>₱{vehicle.fixed_price?.toLocaleString()}</span>
-                                            <span className="period" style={{ fontSize: 12 }}> for {vehicle.fixed_rental_days}d</span>
+                                            <span className="amount text-base">₱{vehicle.fixed_price?.toLocaleString()}</span>
+                                            <span className="period text-[12px]"> for {vehicle.fixed_rental_days}d</span>
                                         </>
                                     ) : (
                                         <>
@@ -328,7 +308,7 @@ export default function Vehicles() {
                                     )}
                                 </div>
                                 <div className="vehicle-card-rating">
-                                    <FiStar className="star" style={{ fill: '#facc15', color: '#facc15' }} />
+                                    <FiStar className="star fill-[#facc15] text-[#facc15]" />
                                     {vehicle.profiles?.average_rating?.toFixed(1) || 'New'}
                                 </div>
                             </div>

@@ -37,51 +37,40 @@ export default function PaymentSuccess() {
     if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
 
     return (
-        <div style={{ maxWidth: 520, margin: '60px auto', textAlign: 'center', padding: '0 24px' }}>
-            <div style={{
-                background: 'var(--surface-primary)',
-                border: '1px solid var(--success-200)',
-                borderRadius: 'var(--radius-xl)',
-                padding: 48,
-            }}>
-                <div style={{ fontSize: 72, marginBottom: 16 }}>✅</div>
-                <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--success-100)', color: 'var(--success-600)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, margin: '0 auto 20px' }}>
+        <div className="max-w-[520px] mx-auto my-[60px] text-center px-6">
+            <div className="bg-[var(--surface-primary)] border border-[var(--success-200)] rounded-[var(--radius-xl)] p-12">
+                <div className="text-[72px] mb-4">✅</div>
+                <div className="w-16 h-16 rounded-full bg-[var(--success-100)] text-[var(--success-600)] flex items-center justify-center text-[32px] mx-auto mb-5">
                     <FiCheckCircle />
                 </div>
-                <h1 style={{ fontSize: 28, fontWeight: 800, color: 'var(--success-700)', marginBottom: 8 }}>Payment Successful!</h1>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: 24, lineHeight: 1.6 }}>
+                <h1 className="text-[28px] font-extrabold text-[var(--success-700)] mb-2">Payment Successful!</h1>
+                <p className="text-[var(--text-secondary)] mb-6 leading-[1.6]">
                     Your payment has been received. Your booking is now confirmed!
                 </p>
 
                 {booking && (
-                    <div style={{
-                        background: 'var(--surface-secondary)',
-                        borderRadius: 'var(--radius-lg)',
-                        padding: '20px 24px',
-                        marginBottom: 24,
-                        textAlign: 'left',
-                    }}>
-                        <div style={{ fontWeight: 700, marginBottom: 12 }}>Booking Summary</div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-                            <span style={{ color: 'var(--text-secondary)' }}>Vehicle</span>
-                            <span style={{ fontWeight: 600 }}>{booking.vehicles?.make} {booking.vehicles?.model} {booking.vehicles?.year}</span>
+                    <div className="bg-[var(--surface-secondary)] rounded-[var(--radius-lg)] px-6 py-5 mb-6 text-left">
+                        <div className="font-bold mb-3">Booking Summary</div>
+                        <div className="flex justify-between text-sm mb-1.5">
+                            <span className="text-[var(--text-secondary)]">Vehicle</span>
+                            <span className="font-semibold">{booking.vehicles?.make} {booking.vehicles?.model} {booking.vehicles?.year}</span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-                            <span style={{ color: 'var(--text-secondary)' }}>Duration</span>
-                            <span style={{ fontWeight: 600 }}>{booking.total_days} day{booking.total_days !== 1 ? 's' : ''}</span>
+                        <div className="flex justify-between text-sm mb-1.5">
+                            <span className="text-[var(--text-secondary)]">Duration</span>
+                            <span className="font-semibold">{booking.total_days} day{booking.total_days !== 1 ? 's' : ''}</span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid var(--border-light)', paddingTop: 10, marginTop: 8 }}>
-                            <span style={{ fontWeight: 700 }}>Total Paid</span>
-                            <span style={{ fontWeight: 800, color: 'var(--success-600)', fontSize: 16 }}>{formatPHP(booking.total_amount)}</span>
+                        <div className="flex justify-between text-sm border-t border-[var(--border-light)] pt-2.5 mt-2">
+                            <span className="font-bold">Total Paid</span>
+                            <span className="font-extrabold text-[var(--success-600)] text-base">{formatPHP(booking.total_amount)}</span>
                         </div>
                     </div>
                 )}
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <Link to="/bookings" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
+                <div className="flex flex-col gap-2.5">
+                    <Link to="/bookings" className="btn btn-primary w-full justify-center">
                         <FiArrowRight /> View My Bookings
                     </Link>
-                    <Link to="/vehicles" className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center' }}>
+                    <Link to="/vehicles" className="btn btn-secondary w-full justify-center">
                         Browse More Vehicles
                     </Link>
                 </div>

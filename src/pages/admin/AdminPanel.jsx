@@ -340,23 +340,23 @@ export default function AdminPanel() {
 
     // ===== USER ROW COMPONENT =====
     const UserRow = ({ u, showActions = false }) => (
-        <tr key={u.id} style={{ background: showActions ? 'var(--warning-50)' : undefined }}>
+        <tr key={u.id} className={showActions ? 'bg-[var(--warning-50)]' : ''}>
             <td>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg, var(--primary-400), var(--accent-400))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
+                <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--primary-400)] to-[var(--accent-400)] flex items-center justify-center text-white text-[13px] font-bold shrink-0">
                         {u.full_name?.[0] || 'U'}
                     </div>
                     <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{u.full_name || 'N/A'}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{u.email}</div>
+                        <div className="font-semibold text-sm">{u.full_name || 'N/A'}</div>
+                        <div className="text-[12px] text-[var(--text-tertiary)]">{u.email}</div>
                     </div>
                 </div>
             </td>
             <td><span className={`badge ${getRoleBadgeClass(u.role)}`}>{u.role === 'user' ? 'Not Verified' : u.role}</span></td>
             <td><span className={`badge ${getStatusBadge(u.verification_status)}`}>{u.verification_status || 'none'}</span></td>
-            <td style={{ fontSize: 13 }}>{new Date(u.created_at).toLocaleDateString()}</td>
+            <td className="text-[13px]">{new Date(u.created_at).toLocaleDateString()}</td>
             <td>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div className="flex gap-1.5">
                     {showActions && (
                         <>
                             <button className="btn btn-success btn-sm" onClick={() => verifyUser(u.id, 'approve')} title="Approve">✅ Approve</button>
@@ -371,31 +371,31 @@ export default function AdminPanel() {
 
     // ===== VEHICLE ROW COMPONENT =====
     const VehicleRow = ({ v, showActions = false }) => (
-        <tr key={v.id} style={{ background: showActions ? 'rgba(251,146,60,0.06)' : undefined }}>
+        <tr key={v.id} className={showActions ? 'bg-orange-500/5' : ''}>
             <td>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 48, height: 36, borderRadius: 'var(--radius-sm)', background: 'var(--neutral-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, overflow: 'hidden', flexShrink: 0 }}>
+                <div className="flex items-center gap-2.5">
+                    <div className="w-12 h-9 rounded-[var(--radius-sm)] bg-[var(--neutral-100)] flex items-center justify-center text-[20px] overflow-hidden shrink-0">
                         {v.thumbnail_url || v.images?.[0] ? (
-                            <img src={v.thumbnail_url || v.images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={v.thumbnail_url || v.images[0]} alt="" className="w-full h-full object-cover" />
                         ) : '🚗'}
                     </div>
                     <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{v.year} {v.make} {v.model}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{v.plate_number} • {v.color} • {v.body_type}</div>
+                        <div className="font-semibold text-sm">{v.year} {v.make} {v.model}</div>
+                        <div className="text-[12px] text-[var(--text-tertiary)]">{v.plate_number} • {v.color} • {v.body_type}</div>
                     </div>
                 </div>
             </td>
-            <td style={{ fontSize: 14 }}>{v.profiles?.full_name || '—'}</td>
-            <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>
+            <td className="text-[14px]">{v.profiles?.full_name || '—'}</td>
+            <td className="font-bold font-[var(--font-display)]">
                 {v.pricing_type === 'fixed' ? (
-                    <div style={{ lineHeight: 1.2 }}>
+                    <div className="leading-[1.2]">
                         <div>₱{v.fixed_price?.toLocaleString()}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>Fixed • {v.fixed_rental_days}d</div>
+                        <div className="text-[11px] text-[var(--text-tertiary)] font-semibold">Fixed • {v.fixed_rental_days}d</div>
                     </div>
                 ) : (
-                    <div style={{ lineHeight: 1.2 }}>
+                    <div className="leading-[1.2]">
                         <div>₱{v.daily_rate?.toLocaleString()}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>/day</div>
+                        <div className="text-[11px] text-[var(--text-tertiary)] font-semibold">/day</div>
                     </div>
                 )}
             </td>
@@ -408,7 +408,7 @@ export default function AdminPanel() {
             )}
             {showActions && <td />}
             <td>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div className="flex gap-1.5">
                     {showActions && (
                         <>
                             <button className="btn btn-success btn-sm" onClick={() => approveVehicle(v.id, 'approve')}>✅ Approve</button>
@@ -431,25 +431,25 @@ export default function AdminPanel() {
             </div>
 
             {/* Summary Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 28 }}>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-7">
                 {[
-                    { icon: <FiAlertCircle />, label: 'Pending Users', value: pendingUsers.length, color: 'var(--warning-500)', bg: 'var(--warning-50)' },
-                    { icon: <FiClock />, label: 'Pending Vehicles', value: pendingVehicles.length, color: 'var(--accent-500)', bg: 'var(--accent-50)' },
-                    { icon: <FiUsers />, label: 'Total Users', value: users.length, color: 'var(--primary-500)', bg: 'var(--primary-50)' },
-                    { icon: <FiTruck />, label: 'Total Vehicles', value: vehicles.length, color: 'var(--success-500)', bg: 'var(--success-50)' },
+                    { icon: <FiAlertCircle />, label: 'Pending Users', value: pendingUsers.length, color: 'text-[#f59e0b]', bg: 'bg-[#fffbeb]' },
+                    { icon: <FiClock />, label: 'Pending Vehicles', value: pendingVehicles.length, color: 'text-[#f97316]', bg: 'bg-[#fff7ed]' },
+                    { icon: <FiUsers />, label: 'Total Users', value: users.length, color: 'text-[#3b82f6]', bg: 'bg-[#eff6ff]' },
+                    { icon: <FiTruck />, label: 'Total Vehicles', value: vehicles.length, color: 'text-[#22c55e]', bg: 'bg-[#f0fdf4]' },
                 ].map((s, i) => (
-                    <div key={i} className="card card-body" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px' }}>
-                        <div style={{ width: 40, height: 40, borderRadius: 'var(--radius-md)', background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: s.color, fontSize: 18 }}>{s.icon}</div>
+                    <div key={i} className="card card-body flex items-center gap-3 p-[14px_16px]">
+                        <div className={`w-10 h-10 rounded-[var(--radius-md)] flex items-center justify-center text-[18px] ${s.bg} ${s.color}`}>{s.icon}</div>
                         <div>
-                            <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'var(--font-display)', color: s.color }}>{s.value}</div>
-                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{s.label}</div>
+                            <div className={`text-[22px] font-extrabold font-[var(--font-display)] ${s.color}`}>{s.value}</div>
+                            <div className="text-[12px] text-[var(--text-tertiary)]">{s.label}</div>
                         </div>
                     </div>
                 ))}
             </div>
 
             {/* Tabs */}
-            <div className="tabs" style={{ maxWidth: 650, marginBottom: 24 }}>
+            <div className="tabs max-w-[650px] mb-6">
                 {[
                     { id: 'users', icon: <FiUsers />, label: 'Users', count: pendingUsers.length },
                     { id: 'vehicles', icon: <FiTruck />, label: 'Vehicles', count: pendingVehicles.length },
@@ -458,10 +458,10 @@ export default function AdminPanel() {
                     { id: 'audit', icon: <FiActivity />, label: 'Audit Trail' },
                 ].map(tab => (
                     <button key={tab.id} className={`tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
-                        {tab.icon && <span style={{ marginRight: 6 }}>{tab.icon}</span>}
+                        {tab.icon && <span className="mr-1.5">{tab.icon}</span>}
                         {tab.label}
                         {tab.count > 0 && (
-                            <span style={{ marginLeft: 6, background: 'var(--error-500)', color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>
+                            <span className="ml-1.5 bg-[var(--error-500)] text-white rounded-full w-5 h-5 inline-flex items-center justify-center text-[11px] font-bold">
                                 {tab.count}
                             </span>
                         )}
@@ -471,7 +471,7 @@ export default function AdminPanel() {
 
             {/* Search */}
             {activeTab !== 'catalog' && (
-                <div className="search-input-wrapper" style={{ marginBottom: 20, maxWidth: 400 }}>
+                <div className="search-input-wrapper mb-5 max-w-[400px]">
                     <FiSearch className="search-icon" />
                     <input className="form-input" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
@@ -487,10 +487,10 @@ export default function AdminPanel() {
                             {/* UNIFIED ALL USERS TABLE */}
                             <div className="card">
                                 <div className="card-header">
-                                    <h2 style={{ fontSize: 16, fontWeight: 700 }}>
+                                    <h2 className="text-[16px] font-bold">
                                         👥 All Users ({users.length})
                                         {pendingUsers.length > 0 && (
-                                            <span style={{ marginLeft: 10, background: 'var(--warning-500)', color: '#fff', borderRadius: 20, padding: '2px 10px', fontSize: 12, fontWeight: 700 }}>
+                                            <span className="ml-2.5 bg-[var(--warning-500)] text-white rounded-[20px] p-[2px_10px] text-[12px] font-bold">
                                                 {pendingUsers.length} pending review
                                             </span>
                                         )}
@@ -505,7 +505,7 @@ export default function AdminPanel() {
                                         </thead>
                                         <tbody>
                                             {searchFilter(allUsers, ['full_name', 'email']).length === 0 ? (
-                                                <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-tertiary)' }}>No users found</td></tr>
+                                                <tr><td colSpan={5} className="text-center p-8 text-[var(--text-tertiary)]">No users found</td></tr>
                                             ) : searchFilter(allUsers, ['full_name', 'email']).map(u => (
                                                 <UserRow key={u.id} u={u} showActions={u.verification_status === 'submitted'} />
                                             ))}
@@ -521,12 +521,12 @@ export default function AdminPanel() {
                         <div>
                             {/* PENDING APPROVAL SECTION */}
                             {pendingVehicles.length > 0 && (
-                                <div className="card" style={{ marginBottom: 24, borderLeft: '4px solid var(--accent-500)' }}>
-                                    <div className="card-header" style={{ background: 'var(--accent-50)' }}>
-                                        <h2 style={{ fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div className="card mb-6 border-l-4 border-l-[var(--accent-500)]">
+                                    <div className="card-header bg-[var(--accent-50)]">
+                                        <h2 className="text-[16px] font-bold flex items-center gap-2">
                                             🔍 Pending Approval ({pendingVehicles.length})
                                         </h2>
-                                        <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>New vehicle listings — review and approve/reject</span>
+                                        <span className="text-[12px] text-[var(--text-tertiary)]">New vehicle listings — review and approve/reject</span>
                                     </div>
                                     <div className="table-container">
                                         <table className="table">
@@ -548,7 +548,7 @@ export default function AdminPanel() {
                             {/* ALL VEHICLES SECTION */}
                             <div className="card">
                                 <div className="card-header">
-                                    <h2 style={{ fontSize: 16, fontWeight: 700 }}>
+                                    <h2 className="text-[16px] font-bold">
                                         🚗 All Vehicles ({allVehicles.length})
                                     </h2>
                                 </div>
@@ -561,7 +561,7 @@ export default function AdminPanel() {
                                         </thead>
                                         <tbody>
                                             {searchFilter(allVehicles, ['make', 'model', 'plate_number']).length === 0 ? (
-                                                <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-tertiary)' }}>No vehicles found</td></tr>
+                                            <tr><td colSpan={5} className="text-center p-8 text-[var(--text-tertiary)]">No vehicles found</td></tr>
                                             ) : searchFilter(allVehicles, ['make', 'model', 'plate_number']).map(v => (
                                                 <VehicleRow key={v.id} v={v} />
                                             ))}
@@ -576,7 +576,7 @@ export default function AdminPanel() {
                     {activeTab === 'bookings' && (
                         <div className="card">
                             <div className="card-header">
-                                <h2 style={{ fontSize: 16, fontWeight: 700 }}>📅 All Bookings ({bookings.length})</h2>
+                                <h2 className="text-[16px] font-bold">📅 All Bookings ({bookings.length})</h2>
                             </div>
                             <div className="table-container">
                                 <table className="table">
@@ -584,16 +584,16 @@ export default function AdminPanel() {
                                         <tr><th>Vehicle</th><th>Rentee</th><th>Dates</th><th>Amount</th><th>Status</th></tr>
                                     </thead>
                                     <tbody>
-                                        {searchFilter(bookings, ['vehicles.make', 'profiles.full_name']).length === 0 ? (
-                                            <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-tertiary)' }}>No bookings found</td></tr>
+                                            {searchFilter(bookings, ['vehicles.make', 'profiles.full_name']).length === 0 ? (
+                                            <tr><td colSpan={5} className="text-center p-8 text-[var(--text-tertiary)]">No bookings found</td></tr>
                                         ) : searchFilter(bookings, ['vehicles.make', 'profiles.full_name']).map(b => (
                                             <tr key={b.id}>
-                                                <td style={{ fontWeight: 600 }}>{b.vehicles?.year} {b.vehicles?.make} {b.vehicles?.model}</td>
+                                                <td className="font-semibold">{b.vehicles?.year} {b.vehicles?.make} {b.vehicles?.model}</td>
                                                 <td>{b.profiles?.full_name}</td>
-                                                <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                                                <td className="text-[13px] text-[var(--text-secondary)]">
                                                     {new Date(b.start_date).toLocaleDateString()} → {new Date(b.end_date).toLocaleDateString()}
                                                 </td>
-                                                <td style={{ fontWeight: 700, fontFamily: 'var(--font-display)' }}>₱{b.total_amount?.toLocaleString()}</td>
+                                                <td className="font-bold font-[var(--font-display)]">₱{b.total_amount?.toLocaleString()}</td>
                                                 <td>
                                                     <span className={`badge badge-${b.status === 'completed' || b.status === 'confirmed' ? 'success' : b.status === 'pending' ? 'pending' : b.status === 'cancelled' ? 'error' : 'info'}`}>
                                                         {b.status}
@@ -610,8 +610,8 @@ export default function AdminPanel() {
                     {activeTab === 'audit' && (
                         <div className="card">
                             <div className="card-header">
-                                <h2 style={{ fontSize: 16, fontWeight: 700 }}>🕵️ Audit Trail ({auditLogs.length})</h2>
-                                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>All admin actions — who did what and when</span>
+                                <h2 className="text-[16px] font-bold">🕵️ Audit Trail ({auditLogs.length})</h2>
+                                <span className="text-[12px] text-[var(--text-tertiary)]">All admin actions — who did what and when</span>
                             </div>
                             <div className="table-container">
                                 <table className="table">
@@ -626,7 +626,7 @@ export default function AdminPanel() {
                                     </thead>
                                     <tbody>
                                         {auditLogs.length === 0 ? (
-                                            <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-tertiary)' }}>No audit logs yet. Admin actions will appear here.</td></tr>
+                                            <tr><td colSpan={5} className="text-center p-8 text-[var(--text-tertiary)]">No audit logs yet. Admin actions will appear here.</td></tr>
                                         ) : auditLogs.map(log => {
                                             let badgeClass = 'badge-info';
                                             if (log.action?.includes('APPROVE') || log.action?.includes('VERIFY')) badgeClass = 'badge-success';
@@ -634,22 +634,22 @@ export default function AdminPanel() {
 
                                             return (
                                                 <tr key={log.id}>
-                                                    <td style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                                                    <td className="text-[12px] text-[var(--text-secondary)] whitespace-nowrap">
                                                         {new Date(log.created_at).toLocaleString()}
                                                     </td>
                                                     <td>
-                                                        <div style={{ fontWeight: 600, fontSize: 13 }}>{log.performer_name || '—'}</div>
-                                                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{log.performer_email || ''}</div>
+                                                        <div className="font-semibold text-[13px]">{log.performer_name || '—'}</div>
+                                                        <div className="text-[11px] text-[var(--text-tertiary)]">{log.performer_email || ''}</div>
                                                     </td>
                                                     <td>
-                                                        <span className={`badge ${badgeClass}`} style={{ fontSize: 11 }}>{log.action}</span>
+                                                        <span className={`badge ${badgeClass} text-[11px]`}>{log.action}</span>
                                                     </td>
-                                                    <td style={{ fontSize: 13 }}>
-                                                        <span className="badge badge-neutral" style={{ fontSize: 11 }}>{log.entity_type}</span>
+                                                    <td className="text-[13px]">
+                                                        <span className="badge badge-neutral text-[11px]">{log.entity_type}</span>
                                                     </td>
-                                                    <td style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 280 }}>{log.description}</td>
+                                                    <td className="text-[13px] text-[var(--text-secondary)] max-w-[280px]">{log.description}</td>
                                                 </tr>
-                                            )
+                                            );
                                         })}
                                     </tbody>
                                 </table>
@@ -661,37 +661,39 @@ export default function AdminPanel() {
 
             {/* ========== CAR CATALOG TAB ========== */}
             {activeTab === 'catalog' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 24 }}>
+                <div className="grid grid-cols-[1fr_1.5fr] gap-6">
                     {/* Brands Column */}
                     <div className="card">
-                        <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>🏭 Brands ({carBrands.length})</h2></div>
+                        <div className="card-header"><h2 className="text-[16px] font-bold">🏭 Brands ({carBrands.length})</h2></div>
                         <div className="card-body">
-                            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                                <input className="form-input" style={{ flex: 1 }} placeholder="New brand name" value={newBrandName} onChange={(e) => setNewBrandName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addBrand()} />
+                            <div className="flex gap-2 mb-4">
+                                <input className="form-input flex-1" placeholder="New brand name" value={newBrandName} onChange={(e) => setNewBrandName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addBrand()} />
                                 <button className="btn btn-accent btn-sm" onClick={addBrand}><FiPlus /> Add</button>
                             </div>
                             {catalogLoading ? (
-                                <div style={{ textAlign: 'center', padding: 24 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+                                <div className="text-center p-6"><div className="spinner mx-auto" /></div>
                             ) : carBrands.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)' }}>No brands yet</div>
+                                <div className="text-center p-6 text-[var(--text-tertiary)]">No brands yet</div>
                             ) : (
-                                <div style={{ maxHeight: 450, overflowY: 'auto' }}>
+                                <div className="max-h-[450px] overflow-y-auto">
                                     {carBrands.map(brand => (
-                                        <div key={brand.id} onClick={() => setSelectedBrandId(brand.id === selectedBrandId ? '' : brand.id)} style={{
-                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 'var(--radius-md)', marginBottom: 4, cursor: 'pointer',
-                                            background: selectedBrandId === brand.id ? 'var(--primary-50)' : 'transparent', border: selectedBrandId === brand.id ? '1px solid var(--primary-200)' : '1px solid transparent',
-                                        }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                <span style={{ fontWeight: 600, fontSize: 14, opacity: brand.is_active ? 1 : 0.5 }}>{brand.name}</span>
-                                                {!brand.is_active && <span className="badge badge-neutral" style={{ fontSize: 10 }}>Inactive</span>}
-                                                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>({carModels.filter(m => m.brand_id === brand.id).length})</span>
+                                        <div key={brand.id} onClick={() => setSelectedBrandId(brand.id === selectedBrandId ? '' : brand.id)} className={`
+                                            flex justify-between items-center p-[10px_12px] rounded-[var(--radius-md)] mb-1 cursor-pointer transition-colors
+                                            ${selectedBrandId === brand.id ? 'bg-[var(--primary-50)] border border-[var(--primary-200)]' : 'bg-transparent border border-transparent'}
+                                        `}>
+                                            <div className="flex items-center gap-2">
+                                                <span className={`font-semibold text-[14px] ${brand.is_active ? 'opacity-100' : 'opacity-50'}`}>{brand.name}</span>
+                                                {!brand.is_active && <span className="badge badge-neutral text-[10px]">Inactive</span>}
+                                                <span className="text-[11px] text-[var(--text-tertiary)]">({carModels.filter(m => m.brand_id === brand.id).length})</span>
                                             </div>
-                                            <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); toggleBrandActive(brand.id, brand.is_active); }} style={{ color: brand.is_active ? 'var(--success-500)' : 'var(--neutral-400)' }}>
-                                                {brand.is_active ? <FiToggleRight size={18} /> : <FiToggleLeft size={18} />}
-                                            </button>
-                                            <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); deleteBrand(brand.id, brand.name); }} style={{ color: 'var(--error-400)' }} title="Delete brand">
-                                                <FiTrash2 size={15} />
-                                            </button>
+                                            <div className="flex">
+                                                <button className="btn btn-ghost btn-sm p-1" onClick={(e) => { e.stopPropagation(); toggleBrandActive(brand.id, brand.is_active); }}>
+                                                    {brand.is_active ? <FiToggleRight size={18} className="text-[var(--success-500)]" /> : <FiToggleLeft size={18} className="text-[var(--neutral-400)]" />}
+                                                </button>
+                                                <button className="btn btn-ghost btn-sm p-1 text-[var(--error-400)]" onClick={(e) => { e.stopPropagation(); deleteBrand(brand.id, brand.name); }} title="Delete brand">
+                                                    <FiTrash2 size={15} />
+                                                </button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -701,23 +703,23 @@ export default function AdminPanel() {
 
                     {/* Models Column */}
                     <div className="card">
-                        <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>🚗 Models {selectedBrandId && `— ${carBrands.find(b => b.id === selectedBrandId)?.name || ''}`} ({filteredCatalogModels.length})</h2></div>
+                        <div className="card-header"><h2 className="text-[16px] font-bold">🚗 Models {selectedBrandId && `— ${carBrands.find(b => b.id === selectedBrandId)?.name || ''}`} ({filteredCatalogModels.length})</h2></div>
                         <div className="card-body">
-                            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-                                <select className="form-select" style={{ width: 180 }} value={selectedBrandId} onChange={(e) => setSelectedBrandId(e.target.value)}>
+                            <div className="flex gap-2 mb-4 flex-wrap">
+                                <select className="form-select w-[180px]" value={selectedBrandId} onChange={(e) => setSelectedBrandId(e.target.value)}>
                                     <option value="">All Brands</option>
                                     {carBrands.filter(b => b.is_active).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                                 </select>
-                                <input className="form-input" style={{ flex: 1, minWidth: 120 }} placeholder="New model" value={newModelName} onChange={(e) => setNewModelName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addModel()} />
-                                <select className="form-select" style={{ width: 130 }} value={newModelBodyType} onChange={(e) => setNewModelBodyType(e.target.value)}>
+                                <input className="form-input flex-1 min-w-[120px]" placeholder="New model" value={newModelName} onChange={(e) => setNewModelName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addModel()} />
+                                <select className="form-select w-[130px]" value={newModelBodyType} onChange={(e) => setNewModelBodyType(e.target.value)}>
                                     {['Sedan', 'SUV', 'MPV', 'Van', 'Hatchback', 'Pickup', 'Crossover', 'Coupe'].map(t => <option key={t} value={t}>{t}</option>)}
                                 </select>
                                 <button className="btn btn-accent btn-sm" onClick={addModel} disabled={!selectedBrandId}><FiPlus /> Add</button>
                             </div>
                             {catalogLoading ? (
-                                <div style={{ textAlign: 'center', padding: 24 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+                                <div className="text-center p-6"><div className="spinner mx-auto" /></div>
                             ) : filteredCatalogModels.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)' }}>{selectedBrandId ? 'No models for this brand yet.' : 'Select a brand or view all.'}</div>
+                                <div className="text-center p-6 text-[var(--text-tertiary)]">{selectedBrandId ? 'No models for this brand yet.' : 'Select a brand or view all.'}</div>
                             ) : (
                                 <div className="table-container">
                                     <table className="table">
@@ -725,16 +727,16 @@ export default function AdminPanel() {
                                         <tbody>
                                             {filteredCatalogModels.map(m => (
                                                 <tr key={m.id}>
-                                                    <td style={{ fontWeight: 600 }}>{m.name}</td>
-                                                    <td style={{ color: 'var(--text-secondary)' }}>{m.car_brands?.name || '—'}</td>
+                                                    <td className="font-semibold">{m.name}</td>
+                                                    <td className="text-[var(--text-secondary)]">{m.car_brands?.name || '—'}</td>
                                                     <td><span className="badge badge-info">{m.body_type}</span></td>
                                                     <td><span className={`badge ${m.is_active ? 'badge-success' : 'badge-neutral'}`}>{m.is_active ? 'Active' : 'Inactive'}</span></td>
                                                     <td>
-                                                        <div style={{ display: 'flex', gap: 4 }}>
-                                                            <button className="btn btn-ghost btn-sm" onClick={() => toggleModelActive(m.id, m.is_active)} style={{ color: m.is_active ? 'var(--success-500)' : 'var(--neutral-400)' }}>
-                                                                {m.is_active ? <FiToggleRight size={16} /> : <FiToggleLeft size={16} />}
+                                                        <div className="flex gap-1">
+                                                            <button className="btn btn-ghost btn-sm p-1" onClick={() => toggleModelActive(m.id, m.is_active)}>
+                                                                {m.is_active ? <FiToggleRight size={16} className="text-[var(--success-500)]" /> : <FiToggleLeft size={16} className="text-[var(--neutral-400)]" />}
                                                             </button>
-                                                            <button className="btn btn-ghost btn-sm" onClick={() => deleteModel(m.id, m.name)} style={{ color: 'var(--error-400)' }} title="Delete model">
+                                                            <button className="btn btn-ghost btn-sm p-1 text-[var(--error-400)]" onClick={() => deleteModel(m.id, m.name)} title="Delete model">
                                                                 <FiTrash2 size={14} />
                                                             </button>
                                                         </div>
@@ -753,21 +755,21 @@ export default function AdminPanel() {
             {/* ========== USER DETAIL MODAL ========== */}
             {selectedUser && (
                 <div className="modal-overlay" onClick={() => setSelectedUser(null)}>
-                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 700, maxHeight: '90vh', overflow: 'auto' }}>
+                    <div className="modal max-w-[700px] max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-header">
                             <h2>User Details</h2>
                             <button className="btn btn-ghost btn-sm" onClick={() => setSelectedUser(null)}>✕</button>
                         </div>
                         <div className="modal-body">
                             {/* User Info */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
-                                <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, var(--primary-400), var(--accent-400))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 24, fontWeight: 700 }}>
+                            <div className="flex items-center gap-4 mb-6">
+                                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[var(--primary-400)] to-[var(--accent-400)] flex items-center justify-center text-white text-[24px] font-bold">
                                     {selectedUser.full_name?.[0] || 'U'}
                                 </div>
                                 <div>
-                                    <h3 style={{ fontSize: 18, fontWeight: 700 }}>{selectedUser.full_name}</h3>
-                                    <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{selectedUser.email}</p>
-                                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                                    <h3 className="text-[18px] font-bold">{selectedUser.full_name}</h3>
+                                    <p className="text-[var(--text-secondary)] text-[14px]">{selectedUser.email}</p>
+                                    <div className="flex gap-2 mt-1">
                                         <span className={`badge ${getRoleBadgeClass(selectedUser.role)}`}>{selectedUser.role === 'user' ? 'Not Verified' : selectedUser.role}</span>
                                         <span className={`badge ${getStatusBadge(selectedUser.verification_status)}`}>{selectedUser.verification_status || 'none'}</span>
                                     </div>
@@ -775,47 +777,47 @@ export default function AdminPanel() {
                             </div>
 
                             {/* User Details Grid */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
-                                {[
-                                    { label: 'Phone', value: selectedUser.phone || 'N/A' },
-                                    { label: 'City', value: selectedUser.city || 'N/A' },
-                                    { label: 'Province', value: selectedUser.province || 'N/A' },
-                                    { label: 'Date of Birth', value: selectedUser.date_of_birth ? new Date(selectedUser.date_of_birth).toLocaleDateString() : 'N/A' },
-                                    { label: "Driver's License #", value: selectedUser.drivers_license_number || 'Not submitted' },
-                                    { label: 'National / UMID ID #', value: selectedUser.national_id_number || 'Not submitted' },
-                                ].map((item, i) => (
-                                    <div key={i} style={{ padding: 12, background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
-                                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
-                                        <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{item.value}</div>
-                                    </div>
-                                ))}
-                            </div>
+                             <div className="grid grid-cols-2 gap-3 mb-6">
+                                 {[
+                                     { label: 'Phone', value: selectedUser.phone || 'N/A' },
+                                     { label: 'City', value: selectedUser.city || 'N/A' },
+                                     { label: 'Province', value: selectedUser.province || 'N/A' },
+                                     { label: 'Date of Birth', value: selectedUser.date_of_birth ? new Date(selectedUser.date_of_birth).toLocaleDateString() : 'N/A' },
+                                     { label: "Driver's License #", value: selectedUser.drivers_license_number || 'Not submitted' },
+                                     { label: 'National / UMID ID #', value: selectedUser.national_id_number || 'Not submitted' },
+                                 ].map((item, i) => (
+                                     <div key={i} className="p-3 bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
+                                         <div className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase">{item.label}</div>
+                                         <div className="text-[14px] font-semibold mt-1">{item.value}</div>
+                                     </div>
+                                 ))}
+                             </div>
 
                             {/* Submitted Documents */}
-                            <div style={{ marginBottom: 24 }}>
-                                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div className="mb-6">
+                                <h3 className="text-[15px] font-bold mb-3 flex items-center gap-2">
                                     <FiImage /> Submitted ID Documents
                                 </h3>
                                 {docsLoading ? (
-                                    <div style={{ textAlign: 'center', padding: 24 }}><div className="spinner" style={{ margin: '0 auto 8px' }} /><p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Loading...</p></div>
+                                    <div className="text-center p-6"><div className="spinner mx-auto mb-2" /><p className="text-[13px] text-[var(--text-tertiary)]">Loading...</p></div>
                                 ) : userDocs.length === 0 ? (
-                                    <div style={{ padding: 24, textAlign: 'center', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', color: 'var(--text-tertiary)' }}>No documents uploaded yet</div>
+                                    <div className="p-6 text-center bg-[var(--neutral-50)] rounded-[var(--radius-md)] text-[var(--text-tertiary)]">No documents uploaded yet</div>
                                 ) : (
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+                                    <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
                                         {userDocs.map((doc, i) => (
-                                            <div key={i} style={{ border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', overflow: 'hidden', background: 'var(--surface-secondary)' }}>
+                                            <div key={i} className="border border-[var(--border-light)] rounded-[var(--radius-md)] overflow-hidden bg-[var(--surface-secondary)]">
                                                 {doc.url ? (
                                                     <a href={doc.url} target="_blank" rel="noopener noreferrer">
-                                                        <img src={doc.url} alt={doc.name} style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }}
-                                                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
-                                                        <div style={{ display: 'none', height: 150, alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--text-tertiary)', padding: 8, textAlign: 'center' }}>
+                                                        <img src={doc.url} alt={doc.name} className="w-full h-[150px] object-cover block"
+                                                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.classList.remove('hidden'); e.target.nextSibling.classList.add('flex'); }} />
+                                                        <div className="hidden h-[150px] items-center justify-center text-[12px] text-[var(--text-tertiary)] p-2 text-center">
                                                             🖼️ Click to view
                                                         </div>
                                                     </a>
                                                 ) : null}
-                                                <div style={{ padding: '8px 12px', fontSize: 12 }}>
-                                                    <div style={{ fontWeight: 600, wordBreak: 'break-all' }}>{doc.name}</div>
-                                                    <div style={{ color: 'var(--text-tertiary)' }}>{doc.bucket === 'selfies' ? '📸 Selfie' : '🪪 ID Document'}</div>
+                                                <div className="p-[8px_12px] text-[12px]">
+                                                    <div className="font-semibold break-all">{doc.name}</div>
+                                                    <div className="text-[var(--text-tertiary)]">{doc.bucket === 'selfies' ? '📸 Selfie' : '🪪 ID Document'}</div>
                                                 </div>
                                             </div>
                                         ))}
@@ -824,32 +826,32 @@ export default function AdminPanel() {
                             </div>
 
                             {/* Role Management — only user <-> verified, no admin promotion */}
-                            <div style={{ marginBottom: 16 }}>
-                                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}><FiShield /> Role Management</h3>
-                                <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10 }}>Admin accounts are created separately and cannot be assigned through this panel.</p>
-                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <div className="mb-4">
+                                <h3 className="text-[15px] font-bold mb-3 flex items-center gap-2"><FiShield /> Role Management</h3>
+                                <p className="text-[12px] text-[var(--text-tertiary)] mb-2.5">Admin accounts are created separately and cannot be assigned through this panel.</p>
+                                <div className="flex gap-2 flex-wrap">
                                     {['user', 'verified'].map(role => (
-                                        <button key={role} className={`btn btn-sm ${selectedUser.role === role ? 'btn-primary' : 'btn-secondary'}`} onClick={() => selectedUser.role !== role && changeRole(selectedUser.id, role)} disabled={selectedUser.role === role || selectedUser.id === user.id || selectedUser.role === 'admin'} style={{ textTransform: 'capitalize' }}>
+                                        <button key={role} className={`btn btn-sm ${selectedUser.role === role ? 'btn-primary' : 'btn-secondary'} capitalize`} onClick={() => selectedUser.role !== role && changeRole(selectedUser.id, role)} disabled={selectedUser.role === role || selectedUser.id === user.id || selectedUser.role === 'admin'}>
                                             {selectedUser.role === role ? `✓ ${role === 'user' ? 'Not Verified' : 'Verified'}` : (role === 'user' ? 'Set Not Verified' : 'Set Verified')}
                                         </button>
                                     ))}
-                                    {selectedUser.role === 'admin' && <span className="badge badge-error" style={{ padding: '8px 12px' }}>Admin — role cannot be changed here</span>}
+                                    {selectedUser.role === 'admin' && <span className="badge badge-error p-[8px_12px]">Admin — role cannot be changed here</span>}
                                 </div>
-                                {selectedUser.id === user.id && <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>⚠️ You cannot change your own role</p>}
+                                {selectedUser.id === user.id && <p className="text-[12px] text-[var(--text-tertiary)] mt-2">⚠️ You cannot change your own role</p>}
                             </div>
 
                             {/* User's Vehicles */}
-                            <div style={{ marginBottom: 16 }}>
-                                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}><FiTruck /> Listed Vehicles ({userVehicles.length})</h3>
-                                {userDetailLoading ? <div style={{ textAlign: 'center', padding: 16 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
-                                    : userVehicles.length === 0 ? <p style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '8px 0' }}>No vehicles listed</p>
+                            <div className="mb-4">
+                                <h3 className="text-[15px] font-bold mb-3 flex items-center gap-2"><FiTruck /> Listed Vehicles ({userVehicles.length})</h3>
+                                {userDetailLoading ? <div className="text-center p-4"><div className="spinner mx-auto" /></div>
+                                    : userVehicles.length === 0 ? <p className="text-[13px] text-[var(--text-tertiary)] p-[8px_0]">No vehicles listed</p>
                                         : (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                            <div className="flex flex-col gap-2">
                                                 {userVehicles.map(v => (
-                                                    <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--neutral-50)', borderRadius: 8 }}>
+                                                    <div key={v.id} className="flex justify-between items-center p-[10px_12px] bg-[var(--neutral-50)] rounded-[8px]">
                                                         <div>
-                                                            <div style={{ fontWeight: 600, fontSize: 13 }}>{v.year} {v.make} {v.model}</div>
-                                                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{v.plate_number} • ₱{v.daily_rate?.toLocaleString()}/day</div>
+                                                            <div className="font-semibold text-[13px]">{v.year} {v.make} {v.model}</div>
+                                                            <div className="text-[12px] text-[var(--text-tertiary)]">{v.plate_number} • ₱{v.daily_rate?.toLocaleString()}/day</div>
                                                         </div>
                                                         <span className={`badge ${v.status === 'approved' ? 'badge-success' : v.status === 'pending' ? 'badge-pending' : 'badge-error'}`}>{v.status}</span>
                                                     </div>
@@ -859,22 +861,22 @@ export default function AdminPanel() {
                             </div>
 
                             {/* User's Bookings */}
-                            <div style={{ marginBottom: 8 }}>
-                                <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}><FiCalendar /> Booking History ({userBookings.length})</h3>
-                                {userDetailLoading ? <div style={{ textAlign: 'center', padding: 16 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
-                                    : userBookings.length === 0 ? <p style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '8px 0' }}>No bookings yet</p>
+                            <div className="mb-2">
+                                <h3 className="text-[15px] font-bold mb-3 flex items-center gap-2"><FiCalendar /> Booking History ({userBookings.length})</h3>
+                                {userDetailLoading ? <div className="text-center p-4"><div className="spinner mx-auto" /></div>
+                                    : userBookings.length === 0 ? <p className="text-[13px] text-[var(--text-tertiary)] p-[8px_0]">No bookings yet</p>
                                         : (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                            <div className="flex flex-col gap-2">
                                                 {userBookings.slice(0, 5).map(b => (
-                                                    <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--neutral-50)', borderRadius: 8 }}>
+                                                    <div key={b.id} className="flex justify-between items-center p-[10px_12px] bg-[var(--neutral-50)] rounded-[8px]">
                                                         <div>
-                                                            <div style={{ fontWeight: 600, fontSize: 13 }}>{b.vehicles?.year} {b.vehicles?.make} {b.vehicles?.model}</div>
-                                                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{new Date(b.start_date).toLocaleDateString()} → {new Date(b.end_date).toLocaleDateString()} • ₱{b.total_amount?.toLocaleString()}</div>
+                                                            <div className="font-semibold text-[13px]">{b.vehicles?.year} {b.vehicles?.make} {b.vehicles?.model}</div>
+                                                            <div className="text-[12px] text-[var(--text-tertiary)]">{new Date(b.start_date).toLocaleDateString()} → {new Date(b.end_date).toLocaleDateString()} • ₱{b.total_amount?.toLocaleString()}</div>
                                                         </div>
                                                         <span className={`badge ${b.status === 'completed' ? 'badge-success' : b.status === 'confirmed' ? 'badge-info' : b.status === 'cancelled' ? 'badge-error' : 'badge-pending'}`}>{b.status}</span>
                                                     </div>
                                                 ))}
-                                                {userBookings.length > 5 && <p style={{ fontSize: 12, color: 'var(--text-tertiary)', textAlign: 'center' }}>+{userBookings.length - 5} more bookings</p>}
+                                                {userBookings.length > 5 && <p className="text-[12px] text-[var(--text-tertiary)] text-center">+{userBookings.length - 5} more bookings</p>}
                                             </div>
                                         )}
                             </div>
@@ -895,31 +897,31 @@ export default function AdminPanel() {
             {/* ========== VEHICLE DETAIL MODAL ========== */}
             {selectedVehicle && (
                 <div className="modal-overlay" onClick={() => setSelectedVehicle(null)}>
-                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: '92vh', overflow: 'auto' }}>
+                    <div className="modal max-w-[720px] max-h-[92vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-header">
                             <h2>🚗 {selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}</h2>
                             <button className="btn btn-ghost btn-sm" onClick={() => setSelectedVehicle(null)}>✕</button>
                         </div>
                         <div className="modal-body">
                             {/* Owner */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, padding: '10px 14px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
+                            <div className="flex justify-between items-center mb-5 p-[10px_14px] bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
                                 <div>
-                                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>Owner</div>
-                                    <div style={{ fontWeight: 700, fontSize: 15 }}>{selectedVehicle.profiles?.full_name || '—'}</div>
+                                    <div className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase">Owner</div>
+                                    <div className="font-bold text-[15px]">{selectedVehicle.profiles?.full_name || '—'}</div>
                                 </div>
-                                <span className={`badge ${selectedVehicle.status === 'approved' ? 'badge-success' : selectedVehicle.status === 'rejected' ? 'badge-error' : 'badge-info'}`} style={{ fontSize: 13, padding: '6px 14px' }}>
+                                <span className={`badge ${selectedVehicle.status === 'approved' ? 'badge-success' : selectedVehicle.status === 'rejected' ? 'badge-error' : 'badge-info'} text-[13px] p-[6px_14px]`}>
                                     {selectedVehicle.status?.toUpperCase()}
                                 </span>
                             </div>
 
                             {/* Photos */}
                             {selectedVehicle.images?.length > 0 && (
-                                <div style={{ marginBottom: 20 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Photos</div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
+                                <div className="mb-5">
+                                    <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2">Photos</div>
+                                    <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2">
                                         {selectedVehicle.images.map((url, i) => (
                                             <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                                                <img src={url} alt={`Photo ${i + 1}`} style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', borderRadius: 'var(--radius-md)' }} />
+                                                <img src={url} alt={`Photo ${i + 1}`} className="w-full aspect-[4/3] object-cover rounded-[var(--radius-md)]" />
                                             </a>
                                         ))}
                                     </div>
@@ -927,8 +929,8 @@ export default function AdminPanel() {
                             )}
 
                             {/* Vehicle Details Grid */}
-                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 10 }}>Vehicle Details</div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+                            <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2.5">Vehicle Details</div>
+                            <div className="grid grid-cols-3 gap-2.5 mb-5">
                                 {[
                                     { label: 'Brand', value: selectedVehicle.make },
                                     { label: 'Model', value: selectedVehicle.model },
@@ -946,41 +948,41 @@ export default function AdminPanel() {
                                         : { label: 'Daily Rate', value: `₱${selectedVehicle.daily_rate?.toLocaleString()}/day` },
                                     { label: 'Security Deposit', value: selectedVehicle.security_deposit ? `₱${selectedVehicle.security_deposit?.toLocaleString()}` : 'None' },
                                 ].map((item, i) => (
-                                    <div key={i} style={{ padding: '10px 12px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
-                                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
-                                        <div style={{ fontSize: 13, fontWeight: 600, marginTop: 3 }}>{item.value || '—'}</div>
+                                    <div key={i} className="p-[10px_12px] bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
+                                        <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase">{item.label}</div>
+                                        <div className="text-[13px] font-semibold mt-0.5">{item.value || '—'}</div>
                                     </div>
                                 ))}
                             </div>
 
                             {/* Contact Info */}
                             {selectedVehicle.contact_info && (
-                                <div style={{ marginBottom: 20 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Owner Contact Info</div>
-                                    <div style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', padding: '12px 16px', fontSize: 13 }}>{selectedVehicle.contact_info}</div>
+                                <div className="mb-5">
+                                    <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2">Owner Contact Info</div>
+                                    <div className="background-[var(--neutral-50)] rounded-[var(--radius-md)] p-[12px_16px] text-[13px]">{selectedVehicle.contact_info}</div>
                                 </div>
                             )}
 
                             {/* Pickup Location */}
-                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 10 }}>Pickup Location</div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+                            <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2.5">Pickup Location</div>
+                            <div className="grid grid-cols-3 gap-2.5 mb-5">
                                 {[
                                     { label: 'Street / Landmark', value: selectedVehicle.pickup_location },
                                     { label: 'City', value: selectedVehicle.pickup_city },
                                     { label: 'Province', value: selectedVehicle.pickup_province },
                                 ].map((item, i) => (
-                                    <div key={i} style={{ padding: '10px 12px', background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
-                                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
-                                        <div style={{ fontSize: 13, fontWeight: 600, marginTop: 3 }}>{item.value || '—'}</div>
+                                    <div key={i} className="p-[10px_12px] bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
+                                        <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase">{item.label}</div>
+                                        <div className="text-[13px] font-semibold mt-0.5">{item.value || '—'}</div>
                                     </div>
                                 ))}
                             </div>
 
                             {/* Rental Durations */}
                             {selectedVehicle.available_durations?.length > 0 && (
-                                <div style={{ marginBottom: 20 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Available Rental Durations</div>
-                                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <div className="mb-5">
+                                    <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2">Available Rental Durations</div>
+                                    <div className="flex gap-2 flex-wrap">
                                         {selectedVehicle.available_durations.map((d, i) => (
                                             <span key={i} className="badge badge-info">{d.replace(/_/g, ' ')}</span>
                                         ))}
@@ -990,11 +992,11 @@ export default function AdminPanel() {
 
                             {/* Features */}
                             {selectedVehicle.features?.length > 0 && (
-                                <div style={{ marginBottom: 20 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Features</div>
-                                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <div className="mb-5">
+                                    <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2">Features</div>
+                                    <div className="flex gap-2 flex-wrap">
                                         {selectedVehicle.features.map((f, i) => (
-                                            <span key={i} style={{ background: 'var(--success-50)', color: 'var(--success-700)', borderRadius: 20, padding: '4px 10px', fontSize: 12, fontWeight: 600 }}>{f}</span>
+                                            <span key={i} className="bg-[var(--success-50)] text-[var(--success-700)] rounded-[20px] p-[4px_10px] text-[12px] font-semibold">{f}</span>
                                         ))}
                                     </div>
                                 </div>
@@ -1002,9 +1004,9 @@ export default function AdminPanel() {
 
                             {/* Description */}
                             {selectedVehicle.description && (
-                                <div style={{ marginBottom: 20 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Owner's Description</div>
-                                    <div style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', padding: '12px 16px', fontSize: 13, lineHeight: 1.6 }}>
+                                <div className="mb-5">
+                                    <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2">Owner's Description</div>
+                                    <div className="bg-[var(--neutral-50)] rounded-[var(--radius-md)] p-[12px_16px] text-[13px] leading-[1.6]">
                                         {selectedVehicle.description}
                                     </div>
                                 </div>
@@ -1012,8 +1014,8 @@ export default function AdminPanel() {
 
                             {/* Agreement */}
                             {selectedVehicle.agreement_url && (
-                                <div style={{ marginBottom: 20 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>Agreement Document</div>
+                                <div className="mb-5">
+                                    <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2">Agreement Document</div>
                                     <a href={selectedVehicle.agreement_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
                                         📄 View Agreement
                                     </a>
@@ -1021,11 +1023,11 @@ export default function AdminPanel() {
                             )}
 
                             {/* Owner Verification Info — cross-check with ORCR */}
-                            <div style={{ marginBottom: 20, border: '1px solid var(--accent-200)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-                                <div style={{ background: 'var(--accent-50)', padding: '10px 16px', fontSize: 12, fontWeight: 700, color: 'var(--accent-700)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                            <div className="mb-5 border border-[var(--accent-200)] rounded-[var(--radius-md)] overflow-hidden">
+                                <div className="bg-[var(--accent-50)] p-[10px_16px] text-[12px] font-bold text-[var(--accent-700)] uppercase tracking-[0.5px]">
                                     🔍 Owner Verification Info — Cross-check with ORCR
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: 12 }}>
+                                <div className="grid grid-cols-2 gap-2 p-3">
                                     {[
                                         { label: 'Full Name', value: selectedVehicle.profiles?.full_name },
                                         { label: 'Phone', value: selectedVehicle.profiles?.phone },
@@ -1036,9 +1038,9 @@ export default function AdminPanel() {
                                         { label: 'City', value: selectedVehicle.profiles?.city },
                                         { label: 'Province', value: selectedVehicle.profiles?.province },
                                     ].map((item, i) => (
-                                        <div key={i} style={{ padding: '8px 10px', background: 'var(--surface-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
-                                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
-                                            <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2, color: item.value ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{item.value || 'N/A'}</div>
+                                        <div key={i} className="p-[8px_10px] bg-[var(--surface-secondary)] rounded-[var(--radius-sm)] border border-[var(--border-light)]">
+                                            <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase">{item.label}</div>
+                                            <div className={`text-[13px] font-semibold mt-0.5 ${item.value ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'}`}>{item.value || 'N/A'}</div>
                                         </div>
                                     ))}
                                 </div>
@@ -1046,13 +1048,13 @@ export default function AdminPanel() {
 
                             {/* ORCR Document (Admin Only) */}
                             {selectedVehicle.orcr_url && (
-                                <div style={{ marginBottom: 20 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>🪪 ORCR Document (Admin Only)</div>
+                                <div className="mb-5">
+                                    <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2">🪪 ORCR Document (Admin Only)</div>
                                     <a href={selectedVehicle.orcr_url} target="_blank" rel="noopener noreferrer">
-                                        <img src={selectedVehicle.orcr_url} alt="ORCR" style={{ maxWidth: '100%', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)', cursor: 'zoom-in', display: 'block' }}
+                                        <img src={selectedVehicle.orcr_url} alt="ORCR" className="max-w-full rounded-[var(--radius-md)] border border-[var(--border-light)] cursor-zoom-in block"
                                             onError={(e) => { e.target.style.display = 'none'; }} />
                                     </a>
-                                    <a href={selectedVehicle.orcr_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: 'var(--primary-600)', marginTop: 6, display: 'inline-block' }}>
+                                    <a href={selectedVehicle.orcr_url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-[var(--primary-600)] mt-1.5 inline-block">
                                         Open full image ↗
                                     </a>
                                 </div>
@@ -1071,19 +1073,18 @@ export default function AdminPanel() {
             {/* ========== REJECTION REASON MODAL ========== */}
             {showRejectModal && (
                 <div className="modal-overlay" onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>
-                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+                    <div className="modal max-w-[480px]" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-header">
                             <h2>❌ Reason for Rejection</h2>
                             <button className="btn btn-ghost btn-sm" onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>✕</button>
                         </div>
                         <div className="modal-body">
-                            <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                            <p className="text-[14px] text-[var(--text-secondary)] mb-4">
                                 Provide a reason for rejecting this {showRejectModal === 'vehicle' ? 'vehicle listing' : 'verification request'}.
                                 This message will be sent to the {showRejectModal === 'vehicle' ? 'vehicle owner' : 'user'} as a notification.
                             </p>
                             <textarea
-                                className="form-input"
-                                style={{ width: '100%', height: 120, resize: 'vertical', fontFamily: 'inherit' }}
+                                className="form-input w-full h-[120px] resize-vertical font-inherit"
                                 placeholder={showRejectModal === 'vehicle'
                                     ? 'e.g. Photos are unclear, plate number doesn\'t match registration, missing required documents...'
                                     : 'e.g. ID photo is blurry, selfie doesn\'t match ID, expired document...'
@@ -1091,7 +1092,7 @@ export default function AdminPanel() {
                                 value={rejectReason}
                                 onChange={(e) => setRejectReason(e.target.value)}
                             />
-                            <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>You can leave this blank to use a generic rejection message.</p>
+                            <p className="text-[12px] text-[var(--text-tertiary)] mt-2">You can leave this blank to use a generic rejection message.</p>
                         </div>
                         <div className="modal-footer">
                             <button className="btn btn-secondary" onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>Cancel</button>

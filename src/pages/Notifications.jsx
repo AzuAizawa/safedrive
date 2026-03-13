@@ -46,25 +46,25 @@ export default function Notifications() {
 
     const getIcon = (type) => {
         const icons = {
-            booking: <FiCalendar style={{ color: 'var(--primary-500)' }} />,
-            vehicle: <FiTruck style={{ color: 'var(--accent-500)' }} />,
-            user: <FiUser style={{ color: 'var(--success-500)' }} />,
+            booking: <FiCalendar className="text-[var(--primary-500)]" />,
+            vehicle: <FiTruck className="text-[var(--accent-500)]" />,
+            user: <FiUser className="text-[var(--success-500)]" />,
         };
-        return icons[type] || <FiBell style={{ color: 'var(--text-tertiary)' }} />;
+        return icons[type] || <FiBell className="text-[var(--text-tertiary)]" />;
     };
 
     const unreadCount = notifications.filter(n => !n.is_read).length;
 
     return (
-        <div style={{ maxWidth: 680, margin: '0 auto', paddingBottom: 48 }}>
+        <div className="max-w-[680px] mx-auto pb-12">
             <BackButton />
-            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div className="page-header flex justify-between items-start">
                 <div>
                     <h1>🔔 Notifications</h1>
                     <p>{unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : 'All caught up!'}</p>
                 </div>
                 {unreadCount > 0 && (
-                    <button className="btn btn-sm btn-secondary" onClick={markAllRead} style={{ marginTop: 8 }}>
+                    <button className="btn btn-sm btn-secondary mt-2" onClick={markAllRead}>
                         <FiCheck /> Mark all read
                     </button>
                 )}
@@ -73,57 +73,33 @@ export default function Notifications() {
             {loading ? (
                 <div className="loading-spinner"><div className="spinner" /></div>
             ) : notifications.length === 0 ? (
-                <div style={{
-                    textAlign: 'center', padding: '60px 24px',
-                    background: 'var(--surface-secondary)',
-                    borderRadius: 'var(--radius-xl)',
-                    border: '1px solid var(--border-light)',
-                }}>
-                    <div style={{ fontSize: 52, marginBottom: 16 }}>🔔</div>
-                    <div style={{ fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>No notifications yet</div>
-                    <div style={{ fontSize: 14, color: 'var(--text-tertiary)' }}>
+                <div className="text-center p-[60px_24px] bg-[var(--surface-secondary)] rounded-[var(--radius-xl)] border border-[var(--border-light)]">
+                    <div className="text-[52px] mb-4">🔔</div>
+                    <div className="font-bold text-[var(--text-secondary)] mb-2">No notifications yet</div>
+                    <div className="text-[14px] text-[var(--text-tertiary)]">
                         You'll be notified about bookings, approvals, and messages here.
                     </div>
                 </div>
             ) : (
-                <div style={{
-                    background: 'var(--surface-primary)',
-                    borderRadius: 'var(--radius-xl)',
-                    border: '1px solid var(--border-light)',
-                    overflow: 'hidden',
-                }}>
+                <div className="bg-[var(--surface-primary)] rounded-[var(--radius-xl)] border border-[var(--border-light)] overflow-hidden">
                     {notifications.map((n, i) => (
                         <div
                             key={n.id}
                             onClick={() => { markRead(n.id); if (n.reference_id && n.reference_type === 'booking') navigate(`/bookings`); }}
-                            style={{
-                                display: 'flex', alignItems: 'flex-start', gap: 14,
-                                padding: '16px 20px',
-                                borderBottom: i < notifications.length - 1 ? '1px solid var(--border-light)' : 'none',
-                                cursor: n.reference_id ? 'pointer' : 'default',
-                                background: n.is_read ? 'transparent' : 'var(--primary-50)',
-                                transition: 'background 0.15s',
-                            }}
+                            className={`flex items-start gap-4 p-[16px_20px] transition-all duration-150 ${i < notifications.length - 1 ? 'border-b border-[var(--border-light)]' : ''} ${n.reference_id ? 'cursor-pointer' : 'default'} ${n.is_read ? 'bg-transparent' : 'bg-[var(--primary-50)]'}`}
                         >
-                            <div style={{
-                                width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-                                background: 'var(--surface-secondary)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}>
+                            <div className="w-9 h-9 rounded-full shrink-0 bg-[var(--surface-secondary)] flex items-center justify-center">
                                 {getIcon(n.type)}
                             </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontWeight: n.is_read ? 400 : 700, fontSize: 14 }}>{n.title}</div>
-                                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.5 }}>{n.message}</div>
-                                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                            <div className="flex-1 min-w-0">
+                                <div className={`text-[14px] ${n.is_read ? 'font-normal' : 'font-bold'}`}>{n.title}</div>
+                                <div className="text-[13px] text-[var(--text-secondary)] mt-0.5 leading-relaxed">{n.message}</div>
+                                <div className="text-[11px] text-[var(--text-tertiary)] mt-1">
                                     {new Date(n.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
                                 </div>
                             </div>
                             {!n.is_read && (
-                                <div style={{
-                                    width: 8, height: 8, borderRadius: '50%',
-                                    background: 'var(--primary-500)', flexShrink: 0, marginTop: 6,
-                                }} />
+                                <div className="w-2 h-2 rounded-full bg-[var(--primary-500)] shrink-0 mt-1.5" />
                             )}
                         </div>
                     ))}

@@ -155,7 +155,7 @@ export default function Profile() {
     const infoLocked = profile?.verification_status === 'submitted' || profile?.verification_status === 'verified';
 
     return (
-        <div style={{ maxWidth: 800, margin: '0 auto' }}>
+        <div className="max-w-[800px] mx-auto">
             <BackButton />
 
             <div className="page-header">
@@ -167,16 +167,16 @@ export default function Profile() {
             {(() => {
                 const verified = profile?.role === 'verified' || profile?.verification_status === 'verified';
                 return (
-                    <div className="card" style={{ marginBottom: 24, background: verified ? 'linear-gradient(135deg, #f0fdf4, #dcfce7)' : undefined }}>
-                        <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                            <div style={{ width: 48, height: 48, borderRadius: '50%', background: verified ? '#bbf7d020' : '#f3f4f620', display: 'flex', alignItems: 'center', justifyContent: 'center', color: verified ? 'var(--success-500)' : 'var(--text-tertiary)' }}>
+                    <div className={`rounded-[var(--radius-xl)] border border-[var(--border-light)] p-5 mb-6 shadow-sm overflow-hidden ${verified ? 'bg-gradient-to-br from-[#f0fdf4] to-[#dcfce7]' : 'bg-[var(--surface-primary)]'}`}>
+                        <div className="flex items-center gap-4">
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${verified ? 'bg-[#bbf7d020] text-[var(--success-500)]' : 'bg-[#f3f4f620] text-[var(--text-tertiary)]'}`}>
                                 {verified ? <FiCheckCircle size={24} /> : <FiShield size={24} />}
                             </div>
-                            <div style={{ flex: 1 }}>
-                                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>
+                            <div className="flex-1">
+                                <h3 className="text-[16px] font-bold mb-0.5">
                                     {verified ? '✅ Identity Verified' : '🔒 Not Verified'}
                                 </h3>
-                                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                                <p className="text-[13px] text-[var(--text-secondary)]">
                                     {verified
                                         ? 'Your identity has been verified. You have full access — list vehicles, rent, and subscribe.'
                                         : 'Submit your ID and selfie below to get verified and unlock all SafeDrive features.'}
@@ -191,18 +191,13 @@ export default function Profile() {
             })()}
 
             {/* Personal Information */}
-            <div className="card" style={{ marginBottom: 24 }}>
-                <div className="card-header"><h2 style={{ fontSize: 16, fontWeight: 700 }}>Personal Information</h2></div>
-                <div className="card-body">
+            <div className="rounded-[var(--radius-xl)] border border-[var(--border-light)] bg-[var(--surface-primary)] shadow-sm overflow-hidden mb-6">
+                <div className="p-[16px_24px] border-b border-[var(--border-light)]"><h2 className="text-[16px] font-bold">Personal Information</h2></div>
+                <div className="p-[20px_24px]">
                     {/* Lock notice */}
                     {infoLocked && (
-                        <div style={{
-                            background: 'var(--neutral-50)', border: '1px solid var(--border-light)',
-                            borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: 20,
-                            display: 'flex', alignItems: 'center', gap: 10, fontSize: 13,
-                            color: 'var(--text-secondary)',
-                        }}>
-                            <span style={{ fontSize: 18 }}>🔒</span>
+                        <div className="bg-[var(--neutral-50)] border border-[var(--border-light)] rounded-[var(--radius-md)] p-3 mb-5 flex items-center gap-2.5 text-[13px] text-[var(--text-secondary)]">
+                            <span className="text-[18px]">🔒</span>
                             <span>
                                 Your personal information is <strong>locked</strong> because your verification was
                                 {profile?.verification_status === 'verified' ? ' approved.' : ' submitted and is pending review.'}
@@ -211,60 +206,60 @@ export default function Profile() {
                         </div>
                     )}
 
-                    <div className="form-row" style={{ marginBottom: 16 }}>
-                        <div className="form-group">
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="form-group mb-4">
                             <label className="form-label">Full Name</label>
-                            <div style={{ position: 'relative' }}>
-                                <FiUser style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                                <input className="form-input" style={{ paddingLeft: 40, width: '100%', opacity: infoLocked ? 0.7 : 1 }} value={formData.full_name}
+                            <div className="relative">
+                                <FiUser className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                                <input className={`form-input pl-10 w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`} value={formData.full_name}
                                     onChange={(e) => !infoLocked && setFormData({ ...formData, full_name: e.target.value })}
                                     placeholder="Your full name" readOnly={infoLocked} />
                             </div>
                         </div>
-                        <div className="form-group">
+                        <div className="form-group mb-4">
                             <label className="form-label">Email</label>
-                            <div style={{ position: 'relative' }}>
-                                <FiMail style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                                <input className="form-input" style={{ paddingLeft: 40, width: '100%' }} value={profile?.email || ''} disabled />
+                            <div className="relative">
+                                <FiMail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                                <input className="form-input pl-10 w-full" value={profile?.email || ''} disabled />
                             </div>
                         </div>
                     </div>
-                    <div className="form-row" style={{ marginBottom: 16 }}>
-                        <div className="form-group">
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="form-group mb-4">
                             <label className="form-label">Phone Number</label>
-                            <div style={{ position: 'relative' }}>
-                                <FiPhone style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                                <input className="form-input" style={{ paddingLeft: 40, width: '100%', opacity: infoLocked ? 0.7 : 1 }} placeholder="09XX XXX XXXX"
+                            <div className="relative">
+                                <FiPhone className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                                <input className={`form-input pl-10 w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`} placeholder="09XX XXX XXXX"
                                     value={formData.phone}
                                     onChange={(e) => !infoLocked && setFormData({ ...formData, phone: e.target.value })}
                                     readOnly={infoLocked} />
                             </div>
                         </div>
-                        <div className="form-group">
+                        <div className="form-group mb-4">
                             <label className="form-label">Date of Birth</label>
-                            <div style={{ position: 'relative' }}>
-                                <FiCalendar style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                                <input type="date" className="form-input" style={{ paddingLeft: 40, width: '100%', opacity: infoLocked ? 0.7 : 1 }}
+                            <div className="relative">
+                                <FiCalendar className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                                <input type="date" className={`form-input pl-10 w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`}
                                     value={formData.date_of_birth}
                                     onChange={(e) => !infoLocked && setFormData({ ...formData, date_of_birth: e.target.value })}
                                     readOnly={infoLocked} />
                             </div>
                         </div>
                     </div>
-                    <div className="form-row" style={{ marginBottom: 20 }}>
-                        <div className="form-group">
+                    <div className="grid grid-cols-2 gap-4 mb-5">
+                        <div className="form-group mb-4">
                             <label className="form-label">City</label>
-                            <div style={{ position: 'relative' }}>
-                                <FiMapPin style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                                <input className="form-input" style={{ paddingLeft: 40, width: '100%', opacity: infoLocked ? 0.7 : 1 }} placeholder="Your city"
+                            <div className="relative">
+                                <FiMapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                                <input className={`form-input pl-10 w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`} placeholder="Your city"
                                     value={formData.city}
                                     onChange={(e) => !infoLocked && setFormData({ ...formData, city: e.target.value })}
                                     readOnly={infoLocked} />
                             </div>
                         </div>
-                        <div className="form-group">
+                        <div className="form-group mb-4">
                             <label className="form-label">Province</label>
-                            <input className="form-input" style={{ width: '100%', opacity: infoLocked ? 0.7 : 1 }} placeholder="Your province"
+                            <input className={`form-input w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`} placeholder="Your province"
                                 value={formData.province}
                                 onChange={(e) => !infoLocked && setFormData({ ...formData, province: e.target.value })}
                                 readOnly={infoLocked} />
@@ -283,11 +278,11 @@ export default function Profile() {
                 const verified = profile?.role === 'verified' || profile?.verification_status === 'verified';
                 if (verified) {
                     return (
-                        <div className="card" style={{ marginBottom: 24, background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)', border: '1px solid #bbf7d0' }}>
-                            <div className="card-body" style={{ textAlign: 'center', padding: '36px 24px' }}>
-                                <div style={{ fontSize: 56, marginBottom: 12 }}>✅</div>
-                                <h2 style={{ fontSize: 20, fontWeight: 800, color: '#166534', marginBottom: 8 }}>You're Verified!</h2>
-                                <p style={{ fontSize: 14, color: '#15803d', maxWidth: 400, margin: '0 auto' }}>
+                        <div className="rounded-[var(--radius-xl)] border border-[#bbf7d0] bg-gradient-to-br from-[#f0fdf4] to-[#dcfce7] shadow-sm overflow-hidden mb-6">
+                            <div className="p-9 text-center">
+                                <div className="text-[56px] mb-3">✅</div>
+                                <h2 className="text-[20px] font-extrabold text-[#166534] mb-2">You're Verified!</h2>
+                                <p className="text-[14px] text-[#15803d] max-w-[400px] mx-auto">
                                     Your identity has been confirmed by our admin team. You now have full access to list vehicles, rent vehicles, and subscribe to SafeDrive Premium.
                                 </p>
                             </div>
@@ -295,75 +290,74 @@ export default function Profile() {
                     );
                 }
                 return (
-                    <div className="card" style={{ marginBottom: 24 }}>
-                        <div className="card-header">
-                            <h2 style={{ fontSize: 16, fontWeight: 700 }}>🔐 Identity Verification</h2>
+                    <div className="rounded-[var(--radius-xl)] border border-[var(--border-light)] bg-[var(--surface-primary)] shadow-sm overflow-hidden mb-6">
+                        <div className="p-[16px_24px] border-b border-[var(--border-light)]">
+                            <h2 className="text-[16px] font-bold">🔐 Identity Verification</h2>
                         </div>
-                        <div className="card-body">
-                            <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20 }}>
+                        <div className="p-[20px_24px]">
+                            <p className="text-[14px] text-[var(--text-secondary)] mb-5">
                                 Submit your information and ID photos to get verified. Once approved by our team, you can list and rent vehicles.
                             </p>
 
                             {/* Personal info summary shown in verification (so admin sees it) */}
                             {(formData.full_name || formData.phone || formData.city) && (
-                                <div style={{ background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)', padding: '14px 18px', marginBottom: 20, border: '1px solid var(--border-light)' }}>
-                                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--text-secondary)' }}>📋 Your Submitted Personal Info</div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px', fontSize: 13 }}>
-                                        {formData.full_name && <div><span style={{ color: 'var(--text-tertiary)' }}>Name: </span>{formData.full_name}</div>}
-                                        {formData.phone && <div><span style={{ color: 'var(--text-tertiary)' }}>Phone: </span>{formData.phone}</div>}
-                                        {formData.city && <div><span style={{ color: 'var(--text-tertiary)' }}>City: </span>{formData.city}</div>}
-                                        {formData.province && <div><span style={{ color: 'var(--text-tertiary)' }}>Province: </span>{formData.province}</div>}
-                                        {formData.date_of_birth && <div><span style={{ color: 'var(--text-tertiary)' }}>Birthday: </span>{formData.date_of_birth}</div>}
+                                <div className="bg-[var(--neutral-50)] rounded-[var(--radius-md)] p-[14px_18px] mb-5 border border-[var(--border-light)]">
+                                    <div className="font-bold text-[13px] mb-2 text-[var(--text-secondary)]">📋 Your Submitted Personal Info</div>
+                                    <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 text-[13px]">
+                                        {formData.full_name && <div><span className="text-[var(--text-tertiary)]">Name: </span>{formData.full_name}</div>}
+                                        {formData.phone && <div><span className="text-[var(--text-tertiary)]">Phone: </span>{formData.phone}</div>}
+                                        {formData.city && <div><span className="text-[var(--text-tertiary)]">City: </span>{formData.city}</div>}
+                                        {formData.province && <div><span className="text-[var(--text-tertiary)]">Province: </span>{formData.province}</div>}
+                                        {formData.date_of_birth && <div><span className="text-[var(--text-tertiary)]">Birthday: </span>{formData.date_of_birth}</div>}
                                     </div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>
+                                    <div className="text-[12px] text-[var(--text-tertiary)] mt-2">
                                         ℹ️ This information will be included with your verification submission.
                                     </div>
                                 </div>
                             )}
 
                             {/* ID Numbers */}
-                            <div className="form-row" style={{ marginBottom: 16 }}>
-                                <div className="form-group">
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div className="form-group mb-4">
                                     <label className="form-label">Driver's License Number</label>
-                                    <input className="form-input" style={{ width: '100%' }} placeholder="N01-23-456789" value={formData.drivers_license_number} onChange={(e) => setFormData({ ...formData, drivers_license_number: e.target.value })} />
+                                    <input className="form-input w-full" placeholder="N01-23-456789" value={formData.drivers_license_number} onChange={(e) => setFormData({ ...formData, drivers_license_number: e.target.value })} />
                                 </div>
-                                <div className="form-group">
+                                <div className="form-group mb-4">
                                     <label className="form-label">National / UMID ID Number</label>
-                                    <input className="form-input" style={{ width: '100%' }} placeholder="0000-0000000-0" value={formData.national_id_number} onChange={(e) => setFormData({ ...formData, national_id_number: e.target.value })} />
+                                    <input className="form-input w-full" placeholder="0000-0000000-0" value={formData.national_id_number} onChange={(e) => setFormData({ ...formData, national_id_number: e.target.value })} />
                                 </div>
                             </div>
 
                             {/* ID Photos */}
-                            <div className="form-group" style={{ marginBottom: 16 }}>
-                                <label className="form-label">ID Photo (Front) <span style={{ color: 'var(--error-500)' }}>*</span></label>
+                            <div className="form-group mb-4">
+                                <label className="form-label">ID Photo (Front) <span className="text-[var(--error-500)]">*</span></label>
                                 <div className="file-upload-area">
-                                    <FiUpload size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
-                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Upload front of your Government ID</p>
-                                    <input ref={idFrontRef} type="file" accept="image/*" style={{ marginTop: 8 }} />
+                                    <FiUpload size={24} className="text-[var(--text-tertiary)] mb-2" />
+                                    <p className="text-[13px] text-[var(--text-secondary)]">Upload front of your Government ID</p>
+                                    <input ref={idFrontRef} type="file" accept="image/*" className="mt-2" />
                                 </div>
                             </div>
 
-                            <div className="form-group" style={{ marginBottom: 16 }}>
+                            <div className="form-group mb-4">
                                 <label className="form-label">ID Photo (Back)</label>
                                 <div className="file-upload-area">
-                                    <FiUpload size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
-                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Upload back of your Government ID</p>
-                                    <input ref={idBackRef} type="file" accept="image/*" style={{ marginTop: 8 }} />
+                                    <FiUpload size={24} className="text-[var(--text-tertiary)] mb-2" />
+                                    <p className="text-[13px] text-[var(--text-secondary)]">Upload back of your Government ID</p>
+                                    <input ref={idBackRef} type="file" accept="image/*" className="mt-2" />
                                 </div>
                             </div>
 
-                            <div className="form-group" style={{ marginBottom: 24 }}>
-                                <label className="form-label">Selfie Photo (Face Verification) <span style={{ color: 'var(--error-500)' }}>*</span></label>
+                            <div className="form-group mb-6">
+                                <label className="form-label">Selfie Photo (Face Verification) <span className="text-[var(--error-500)]">*</span></label>
                                 <div className="file-upload-area">
-                                    <FiUpload size={24} style={{ color: 'var(--text-tertiary)', marginBottom: 8 }} />
-                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Take a clear photo of your face for identity matching</p>
-                                    <input ref={selfieRef} type="file" accept="image/*" capture="user" style={{ marginTop: 8 }} />
+                                    <FiUpload size={24} className="text-[var(--text-tertiary)] mb-2" />
+                                    <p className="text-[13px] text-[var(--text-secondary)]">Take a clear photo of your face for identity matching</p>
+                                    <input ref={selfieRef} type="file" accept="image/*" capture="user" className="mt-2" />
                                 </div>
                             </div>
 
                             <button
-                                className="btn btn-accent btn-lg"
-                                style={{ width: '100%' }}
+                                className="btn btn-accent btn-lg w-full"
                                 onClick={handleSubmitVerification}
                                 disabled={submitLoading}
                             >

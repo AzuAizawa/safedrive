@@ -136,7 +136,7 @@ TERMS AND CONDITIONS OF RENTAL AGREEMENT
         }
     };
 
-    if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
+    if (loading) return <div className="flex items-center justify-center min-h-[400px]"><div className="w-10 h-10 border-[3px] border-[var(--border-light)] border-t-[var(--primary-600)] rounded-full animate-spin" /></div>;
     if (!booking || !agreement) return null;
 
     const isOwner = user.id === booking.owner_id;
@@ -144,18 +144,18 @@ TERMS AND CONDITIONS OF RENTAL AGREEMENT
 
     return (
         <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
+            <div className="flex justify-between mb-6">
                 <button className="btn btn-ghost" onClick={() => navigate(-1)}><FiChevronLeft /> Back</button>
                 <button className="btn btn-secondary" onClick={() => window.print()}><FiPrinter /> Print</button>
             </div>
 
-            <div className="agreement-document">
-                <div style={{ textAlign: 'center', marginBottom: 32 }}>
-                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
-                        <div className="navbar-logo" style={{ width: 48, height: 48, fontSize: 18 }}>SD</div>
+            <div className="max-w-[800px] mx-auto bg-[var(--surface-primary)] border border-[var(--border-light)] rounded-[var(--radius-xl)] p-12 shadow-[var(--shadow-lg)]">
+                <div className="text-center mb-8">
+                    <div className="flex justify-center mb-2">
+                        <div className="navbar-logo w-12 h-12 text-[18px]">SD</div>
                     </div>
-                    <h1>SAFEDRIVE DIGITAL RENTAL AGREEMENT</h1>
-                    <p style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>
+                    <h1 className="text-[24px] font-extrabold font-[var(--font-display)] tracking-wider">SAFEDRIVE DIGITAL RENTAL AGREEMENT</h1>
+                    <p className="text-[var(--text-tertiary)] text-[13px]">
                         Agreement ID: {agreement.id?.slice(0, 8).toUpperCase()} | Generated: {new Date(agreement.created_at).toLocaleDateString()}
                     </p>
                     <span className={`badge ${agreement.status === 'active' ? 'badge-success' : agreement.status === 'pending_signatures' ? 'badge-pending' : 'badge-info'}`}>
@@ -163,77 +163,77 @@ TERMS AND CONDITIONS OF RENTAL AGREEMENT
                     </span>
                 </div>
 
-                <h2>PARTIES INVOLVED</h2>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-                    <div style={{ padding: 16, background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 8 }}>Vehicle Owner (Lessor)</div>
-                        <div style={{ fontWeight: 600 }}>ID: {booking.owner_id?.slice(0, 8).toUpperCase()}</div>
+                <h2 className="text-[14px] font-bold uppercase tracking-wider text-[var(--text-secondary)] mt-6 mb-3 pb-2 border-b-2 border-[var(--border-light)]">PARTIES INVOLVED</h2>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="p-4 bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
+                        <div className="text-[11px] font-bold uppercase text-[var(--text-tertiary)] mb-2">Vehicle Owner (Lessor)</div>
+                        <div className="font-semibold">ID: {booking.owner_id?.slice(0, 8).toUpperCase()}</div>
                     </div>
-                    <div style={{ padding: 16, background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 8 }}>Renter (Lessee)</div>
-                        <div style={{ fontWeight: 600 }}>{booking.profiles?.full_name}</div>
-                        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{booking.profiles?.email}</div>
+                    <div className="p-4 bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
+                        <div className="text-[11px] font-bold uppercase text-[var(--text-tertiary)] mb-2">Renter (Lessee)</div>
+                        <div className="font-semibold">{booking.profiles?.full_name}</div>
+                        <div className="text-[13px] text-[var(--text-secondary)]">{booking.profiles?.email}</div>
                     </div>
                 </div>
 
-                <h2>VEHICLE INFORMATION</h2>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
+                <h2 className="text-[14px] font-bold uppercase tracking-wider text-[var(--text-secondary)] mt-6 mb-3 pb-2 border-b-2 border-[var(--border-light)]">VEHICLE INFORMATION</h2>
+                <div className="grid grid-cols-3 gap-3 mb-4">
                     {[
                         { label: 'Vehicle', value: `${agreement.vehicle_info.year} ${agreement.vehicle_info.make} ${agreement.vehicle_info.model}` },
                         { label: 'Plate Number', value: agreement.vehicle_info.plate_number },
                         { label: 'Color', value: agreement.vehicle_info.color },
                     ].map((item, i) => (
-                        <div key={i} style={{ padding: 12, background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
-                            <div style={{ fontWeight: 600, marginTop: 4 }}>{item.value}</div>
+                        <div key={i} className="p-3 bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
+                            <div className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase">{item.label}</div>
+                            <div className="font-semibold mt-1">{item.value}</div>
                         </div>
                     ))}
                 </div>
 
-                <h2>RENTAL DETAILS</h2>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 16 }}>
+                <h2 className="text-[14px] font-bold uppercase tracking-wider text-[var(--text-secondary)] mt-6 mb-3 pb-2 border-b-2 border-[var(--border-light)]">RENTAL DETAILS</h2>
+                <div className="grid grid-cols-2 gap-3 mb-4">
                     {[
                         { label: 'Start Date', value: new Date(agreement.rental_period_start).toLocaleDateString() },
                         { label: 'End Date', value: new Date(agreement.rental_period_end).toLocaleDateString() },
                         { label: 'Daily Rate', value: `₱${agreement.daily_rate?.toLocaleString()}` },
                         { label: 'Total Amount', value: `₱${agreement.total_amount?.toLocaleString()}` },
                     ].map((item, i) => (
-                        <div key={i} style={{ padding: 12, background: 'var(--neutral-50)', borderRadius: 'var(--radius-md)' }}>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{item.label}</div>
-                            <div style={{ fontWeight: 700, marginTop: 4, fontFamily: 'var(--font-display)' }}>{item.value}</div>
+                        <div key={i} className="p-3 bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
+                            <div className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase">{item.label}</div>
+                            <div className="font-bold mt-1 font-[var(--font-display)]">{item.value}</div>
                         </div>
                     ))}
                 </div>
 
-                <h2>TERMS AND CONDITIONS</h2>
-                <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.8, color: 'var(--text-secondary)' }}>
+                <h2 className="text-[14px] font-bold uppercase tracking-wider text-[var(--text-secondary)] mt-6 mb-3 pb-2 border-b-2 border-[var(--border-light)]">TERMS AND CONDITIONS</h2>
+                <div className="whitespace-pre-wrap text-[13px] leading-[1.8] text-[var(--text-secondary)]">
                     {agreement.terms_and_conditions}
                 </div>
 
                 {/* Signatures */}
-                <div className="agreement-signature">
-                    <div className="agreement-signature-box">
-                        <div className="signature-line">
+                <div className="grid grid-cols-2 gap-6 mt-8">
+                    <div className="text-center p-6 border border-dashed border-[var(--border-medium)] rounded-[var(--radius-lg)]">
+                        <div className="border-b-2 border-[var(--text-primary)] mb-3 pb-6 min-h-[40px] font-bold text-[var(--success-600)] flex items-end justify-center">
                             {agreement.owner_signed && '✓ Digitally Signed'}
                         </div>
-                        <p style={{ fontWeight: 600 }}>Vehicle Owner</p>
-                        <p style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                        <p className="font-semibold">Vehicle Owner</p>
+                        <p className="text-[12px] text-[var(--text-tertiary)]">
                             {agreement.owner_signed ? `Signed: ${new Date(agreement.owner_signed_at).toLocaleString()}` : 'Awaiting signature'}
                         </p>
                     </div>
-                    <div className="agreement-signature-box">
-                        <div className="signature-line">
+                    <div className="text-center p-6 border border-dashed border-[var(--border-medium)] rounded-[var(--radius-lg)]">
+                        <div className="border-b-2 border-[var(--text-primary)] mb-3 pb-6 min-h-[40px] font-bold text-[var(--success-600)] flex items-end justify-center">
                             {agreement.renter_signed && '✓ Digitally Signed'}
                         </div>
-                        <p style={{ fontWeight: 600 }}>Renter</p>
-                        <p style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                        <p className="font-semibold">Renter</p>
+                        <p className="text-[12px] text-[var(--text-tertiary)]">
                             {agreement.renter_signed ? `Signed: ${new Date(agreement.renter_signed_at).toLocaleString()}` : 'Awaiting signature'}
                         </p>
                     </div>
                 </div>
 
                 {!hasSigned && (
-                    <div style={{ textAlign: 'center', marginTop: 32 }}>
+                    <div className="text-center mt-8">
                         <button
                             className="btn btn-accent btn-lg"
                             onClick={signAgreement}
@@ -241,7 +241,7 @@ TERMS AND CONDITIONS OF RENTAL AGREEMENT
                         >
                             <FiCheck /> {signing ? 'Signing...' : 'Sign This Agreement'}
                         </button>
-                        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>
+                        <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
                             By signing, you agree to all terms and conditions stated above.
                         </p>
                     </div>

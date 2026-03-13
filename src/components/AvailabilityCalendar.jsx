@@ -178,19 +178,19 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
         }
     };
 
-    const statusColors = {
-        available: { bg: 'var(--success-50)', color: 'var(--success-700)', border: 'var(--success-200)' },
-        blocked: { bg: 'var(--error-50)', color: 'var(--error-700)', border: 'var(--error-200)' },
-        booked: { bg: 'var(--primary-50)', color: 'var(--primary-700)', border: 'var(--primary-200)' },
-        past: { bg: 'var(--neutral-50)', color: 'var(--neutral-400)', border: 'transparent' },
-        'pending-block': { bg: 'var(--error-100)', color: 'var(--error-600)', border: 'var(--error-400)' },
-        'pending-unblock': { bg: 'var(--success-100)', color: 'var(--success-600)', border: 'var(--success-400)' },
+    const statusClasses = {
+        available: 'bg-[var(--success-50)] text-[var(--success-700)] border-[var(--success-200)]',
+        blocked: 'bg-[var(--error-50)] text-[var(--error-700)] border-[var(--error-200)]',
+        booked: 'bg-[var(--primary-50)] text-[var(--primary-700)] border-[var(--primary-200)]',
+        past: 'bg-[var(--neutral-50)] text-[var(--neutral-400)] border-transparent',
+        'pending-block': 'bg-[var(--error-100)] text-[var(--error-600)] border-[var(--error-400)]',
+        'pending-unblock': 'bg-[var(--success-100)] text-[var(--success-600)] border-[var(--success-400)]',
     };
 
     return (
-        <div className="card" style={{ overflow: 'visible' }}>
-            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="card overflow-visible">
+            <div className="card-header flex justify-between items-center">
+                <h2 className="text-[16px] font-bold flex items-center gap-2">
                     📅 {editable ? 'Manage Availability' : 'Availability Calendar'}
                 </h2>
                 {editable && pendingChanges.size > 0 && (
@@ -202,32 +202,32 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
 
             <div className="card-body">
                 {/* Month Navigation */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div className="flex justify-between items-center mb-4">
                     <button className="btn btn-ghost btn-sm" onClick={prevMonth}><FiChevronLeft /></button>
-                    <h3 style={{ fontSize: 16, fontWeight: 700 }}>{MONTHS[month]} {year}</h3>
+                    <h3 className="text-[16px] font-bold">{MONTHS[month]} {year}</h3>
                     <button className="btn btn-ghost btn-sm" onClick={nextMonth}><FiChevronRight /></button>
                 </div>
 
                 {loading ? (
-                    <div style={{ textAlign: 'center', padding: 40 }}>
-                        <div className="spinner" style={{ margin: '0 auto' }} />
+                    <div className="text-center p-10">
+                        <div className="spinner mx-auto" />
                     </div>
                 ) : (
                     <>
                         {/* Day Headers */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 8 }}>
+                        <div className="grid grid-cols-7 gap-1 mb-2">
                             {DAYS.map(d => (
-                                <div key={d} style={{ textAlign: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', padding: '4px 0' }}>
+                                <div key={d} className="text-center text-[11px] font-bold text-[var(--text-tertiary)] uppercase py-1">
                                     {d}
                                 </div>
                             ))}
                         </div>
 
                         {/* Calendar Grid */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+                        <div className="grid grid-cols-7 gap-1">
                             {calendarDays.map((day, i) => {
                                 const status = getDayStatus(day);
-                                const colors = statusColors[status] || {};
+                                const classes = statusClasses[status] || 'text-[var(--text-tertiary)]';
                                 const isClickable = editable && day && status !== 'past' && status !== 'booked';
                                 const isToday = day && dateToStr(new Date(year, month, day)) === today;
 
@@ -235,22 +235,11 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
                                     <div
                                         key={i}
                                         onClick={() => isClickable && handleDayClick(day)}
-                                        style={{
-                                            aspectRatio: '1',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: 'var(--radius-md)',
-                                            fontSize: 13,
-                                            fontWeight: isToday ? 800 : 600,
-                                            cursor: isClickable ? 'pointer' : 'default',
-                                            background: day ? (colors.bg || 'transparent') : 'transparent',
-                                            color: day ? (colors.color || 'var(--text-tertiary)') : 'transparent',
-                                            border: isToday ? '2px solid var(--accent-500)' : `1px solid ${colors.border || 'transparent'}`,
-                                            transition: 'all 0.15s ease',
-                                            position: 'relative',
-                                            ...(isClickable && { ':hover': { transform: 'scale(1.1)' } }),
-                                        }}
+                                        className={`aspect-square flex items-center justify-center rounded-[var(--radius-md)] text-[13px] transition-all duration-150 border relative 
+                                            ${day ? classes : 'border-transparent'} 
+                                            ${isClickable ? 'cursor-pointer hover:scale-110' : 'cursor-default'} 
+                                            ${isToday ? 'font-extrabold border-2 border-[var(--accent-500)]' : 'font-semibold'}
+                                        `}
                                         title={
                                             status === 'booked' ? 'Booked by a rentee' :
                                                 status === 'blocked' ? 'Blocked by owner' :
@@ -269,29 +258,29 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
                 )}
 
                 {/* Legend */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 16, fontSize: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{ width: 14, height: 14, borderRadius: 4, background: 'var(--success-50)', border: '1px solid var(--success-200)' }} />
-                        <span style={{ color: 'var(--text-secondary)' }}>Available</span>
+                <div className="flex flex-wrap gap-3 mt-4 text-[12px]">
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-3.5 h-3.5 rounded-[4px] bg-[var(--success-50)] border border-[var(--success-200)]" />
+                        <span className="text-[var(--text-secondary)]">Available</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{ width: 14, height: 14, borderRadius: 4, background: 'var(--primary-50)', border: '1px solid var(--primary-200)' }} />
-                        <span style={{ color: 'var(--text-secondary)' }}>Booked</span>
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-3.5 h-3.5 rounded-[4px] bg-[var(--primary-50)] border border-[var(--primary-200)]" />
+                        <span className="text-[var(--text-secondary)]">Booked</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{ width: 14, height: 14, borderRadius: 4, background: 'var(--error-50)', border: '1px solid var(--error-200)' }} />
-                        <span style={{ color: 'var(--text-secondary)' }}>Blocked</span>
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-3.5 h-3.5 rounded-[4px] bg-[var(--error-50)] border border-[var(--error-200)]" />
+                        <span className="text-[var(--text-secondary)]">Blocked</span>
                     </div>
                     {editable && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ width: 14, height: 14, borderRadius: 4, background: 'var(--error-100)', border: '2px dashed var(--error-400)' }} />
-                            <span style={{ color: 'var(--text-secondary)' }}>Unsaved</span>
+                        <div className="flex items-center gap-1.5">
+                            <div className="w-3.5 h-3.5 rounded-[4px] bg-[var(--error-100)] border-2 border-dashed border-[var(--error-400)]" />
+                            <span className="text-[var(--text-secondary)]">Unsaved</span>
                         </div>
                     )}
                 </div>
 
                 {editable && (
-                    <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 12 }}>
+                    <p className="text-[12px] text-[var(--text-tertiary)] mt-3">
                         💡 Click on available dates to block them. Click blocked dates to unblock. Then hit Save.
                     </p>
                 )}
