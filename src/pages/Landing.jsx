@@ -1,79 +1,106 @@
-import { FiShield, FiCheckCircle, FiStar, FiUsers, FiTruck, FiFileText } from 'react-icons/fi';
 import { Link } from 'react-router-dom';
+import { FiCheckCircle, FiFileText, FiShield, FiStar, FiUsers } from 'react-icons/fi';
+import { ui } from '../lib/ui';
+
+const steps = [
+    { title: 'Create your account', copy: 'Register once, then verify your identity inside SafeDrive before you book or list.' },
+    { title: 'Browse or switch to lister mode', copy: 'Use renter mode to discover cars, or switch to lister mode to manage your own inventory.' },
+    { title: 'Book with clarity', copy: 'See pricing, dates, owner details, and agreement access in one consistent flow.' },
+    { title: 'Manage the full trip', copy: 'Messages, bookings, and agreements stay tied together through the entire rental.' },
+];
 
 export default function Landing() {
     return (
-        <div>
-            {/* Hero Section */}
-            <section className="landing-hero">
-                <div className="landing-hero-grid" />
-                <div className="floating-shape w-[300px] h-[300px] bg-blue-500/15 top-[20%] left-[10%]" />
-                <div className="floating-shape w-[200px] h-[200px] bg-orange-500/10 bottom-[20%] right-[20%] [animation-delay:-5s]" />
-
-                <div className="landing-hero-content">
-                    <div className="landing-hero-text">
-                        <h1>
-                            Rent Cars with<br />
-                            <span className="highlight">Complete Trust</span><br />
-                            & Security
-                        </h1>
-                        <p>
-                            SafeDrive is the Philippines' first identity-verified peer-to-peer car rental platform.
-                            Every user is verified, every transaction is protected, and every rental is backed by a digital agreement.
-                        </p>
-                        <div className="landing-hero-actions">
-                            <Link to="/register" className="btn btn-accent btn-lg">Start Renting Now</Link>
-                            <Link to="/register?role=owner" className="btn btn-secondary btn-lg bg-white/10 border border-white/20 text-white">
-                                List Your Car
+        <div className="overflow-hidden bg-surface-secondary pt-28">
+            <section className="px-4 pb-20 sm:px-6 lg:px-8">
+                <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+                    <div className="space-y-7">
+                        <div className="inline-flex items-center rounded-full border border-primary-100 bg-primary-50 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-primary-700">
+                            Trusted peer-to-peer rentals
+                        </div>
+                        <div className="space-y-5">
+                            <h1 className="max-w-3xl font-display text-5xl font-bold leading-[1.05] tracking-tight text-text-primary sm:text-6xl">
+                                Rent and list cars with a calmer, safer workflow.
+                            </h1>
+                            <p className="max-w-2xl text-base leading-8 text-text-secondary">
+                                SafeDrive pairs verified users, clear booking details, and mode-based renter or lister experiences so the marketplace feels organized from first browse to final handoff.
+                            </p>
+                        </div>
+                        <div className="flex flex-col gap-3 sm:flex-row">
+                            <Link to="/register" className={ui.button.accent}>
+                                Start renting
+                            </Link>
+                            <Link to="/register" className={ui.button.secondary}>
+                                Create a lister account
                             </Link>
                         </div>
-
-                        <div className="flex gap-8 mt-12">
+                        <div className="grid gap-3 sm:grid-cols-3">
                             {[
-                                { num: '500+', label: 'Verified Users' },
-                                { num: '200+', label: 'Listed Vehicles' },
-                                { num: '99%', label: 'Safe Transactions' },
-                            ].map((stat, i) => (
-                                <div key={i} className="text-white">
-                                    <div className="text-[28px] font-extrabold font-[var(--font-display)]">{stat.num}</div>
-                                    <div className="text-[13px] text-white/50">{stat.label}</div>
+                                { value: '500+', label: 'Verified members' },
+                                { value: '200+', label: 'Live vehicles' },
+                                { value: '24/7', label: 'Booking visibility' },
+                            ].map((item) => (
+                                <div key={item.label} className="rounded-3xl border border-border-light bg-surface-primary px-5 py-4 shadow-soft">
+                                    <div className="font-display text-3xl font-bold text-text-primary">{item.value}</div>
+                                    <div className="mt-1 text-sm text-text-tertiary">{item.label}</div>
                                 </div>
                             ))}
                         </div>
                     </div>
 
-                    <div className="landing-hero-visual">
-                        <div className="landing-hero-card">
-                            <div className="flex flex-col gap-5">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center">
-                                        <FiCheckCircle className="text-[#22c55e] text-[20px]" />
-                                    </div>
-                                    <div>
-                                        <div className="text-white font-semibold text-sm">Identity Verified ✓</div>
-                                        <div className="text-white/50 text-[12px]">Government ID + Selfie matched</div>
-                                    </div>
+                    <div className="relative">
+                        <div className="absolute inset-0 -translate-y-6 rounded-[40px] bg-primary-100/80 blur-3xl" />
+                        <div className="relative rounded-[36px] border border-white/70 bg-white/85 p-6 shadow-float backdrop-blur-xl sm:p-8">
+                            <div className="mb-6 flex items-center justify-between rounded-3xl border border-border-light bg-surface-secondary px-5 py-4">
+                                <div>
+                                    <div className="text-sm font-semibold text-text-primary">SafeDrive renter flow</div>
+                                    <div className="text-xs text-text-tertiary">Browse, book, and review with confidence</div>
                                 </div>
+                                <span className="inline-flex items-center gap-2 rounded-full bg-success-50 px-3 py-1 text-xs font-semibold text-success-700">
+                                    <FiCheckCircle />
+                                    Verified
+                                </span>
+                            </div>
 
-                                <div className="bg-white/5 rounded-xl p-4">
-                                    <div className="text-white/50 text-[11px] uppercase tracking-wider mb-2">Vehicle Available</div>
-                                    <div className="text-white text-[18px] font-bold font-[var(--font-display)]">2024 Toyota Vios</div>
-                                    <div className="text-white/40 text-[13px] mt-1">Sedan • Automatic • Quezon City</div>
-                                    <div className="flex justify-between items-center mt-3">
+                            <div className="space-y-4">
+                                <div className="rounded-[30px] border border-border-light bg-surface-primary p-5 shadow-soft">
+                                    <div className="mb-2 flex items-center justify-between">
+                                        <div className="text-sm font-semibold text-text-primary">2024 Toyota Vios</div>
+                                        <div className="flex items-center gap-1 text-sm font-semibold text-warning-600">
+                                            <FiStar className="fill-current" />
+                                            4.9
+                                        </div>
+                                    </div>
+                                    <p className="text-sm text-text-secondary">Automatic · Quezon City · Verified owner</p>
+                                    <div className="mt-4 flex items-end justify-between">
                                         <div>
-                                            <span className="text-[var(--accent-400)] text-[22px] font-extrabold">₱2,500</span>
-                                            <span className="text-white/40 text-[13px]">/day</span>
+                                            <div className="font-display text-3xl font-bold text-text-primary">PHP 2,500</div>
+                                            <div className="text-xs text-text-tertiary">per day</div>
                                         </div>
-                                        <div className="flex items-center gap-1 text-[#facc15]">
-                                            <FiStar className="fill-[#facc15]" />
-                                            <span className="text-white font-semibold text-sm">4.9</span>
+                                        <div className="rounded-full bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700">
+                                            Available this week
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className="bg-blue-500/10 rounded-xl p-4 border border-blue-500/20">
-                                    <div className="flex items-center gap-2 text-[var(--primary-300)] text-[13px] font-semibold">
-                                        <FiFileText /> Digital Agreement Ready
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="rounded-3xl border border-border-light bg-surface-primary p-5 shadow-soft">
+                                        <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+                                            <FiShield />
+                                        </div>
+                                        <div className="font-semibold text-text-primary">Identity verification</div>
+                                        <p className="mt-2 text-sm leading-6 text-text-secondary">
+                                            Verified users unlock renter and lister actions only after profile review.
+                                        </p>
+                                    </div>
+                                    <div className="rounded-3xl border border-border-light bg-surface-primary p-5 shadow-soft">
+                                        <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-50 text-accent-600">
+                                            <FiFileText />
+                                        </div>
+                                        <div className="font-semibold text-text-primary">Digital agreements</div>
+                                        <p className="mt-2 text-sm leading-6 text-text-secondary">
+                                            Booking details, agreements, and messages stay connected inside one flow.
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -82,135 +109,97 @@ export default function Landing() {
                 </div>
             </section>
 
-            {/* Features Section */}
-            <section className="landing-section bg-[var(--surface-secondary)]">
-                <div className="landing-section-header">
-                    <div className="overline">Why SafeDrive?</div>
-                    <h2>Built for Trust & Safety</h2>
-                    <p>We eliminate the risks of peer-to-peer car rental through strict verification, digital contracts, and community accountability.</p>
-                </div>
-
-                <div className="features-grid">
-                    <div className="feature-card">
-                        <div className="feature-card-icon"><FiShield /></div>
-                        <h3>Identity Verification</h3>
-                        <p>Every user is verified through government-issued IDs (Driver's License & National ID via LTMS/PhilSys) and real-time selfie matching to prevent fraud.</p>
-                    </div>
-                    <div className="feature-card">
-                        <div className="feature-card-icon"><FiFileText /></div>
-                        <h3>Digital Rental Agreements</h3>
-                        <p>Automatically generated digital contracts that formally document the terms, conditions, and responsibilities between car owners and renters.</p>
-                    </div>
-                    <div className="feature-card">
-                        <div className="feature-card-icon"><FiUsers /></div>
-                        <h3>Community Trust System</h3>
-                        <p>Comprehensive feedback and review system for both renters and car owners, building accountability and transparency within the community.</p>
-                    </div>
-                </div>
-            </section>
-
-            {/* How It Works */}
-            <section className="landing-section">
-                <div className="landing-section-header">
-                    <div className="overline">How It Works</div>
-                    <h2>Simple & Secure Process</h2>
-                    <p>From registration to returning the keys, every step is designed to protect both parties.</p>
-                </div>
-
-                <div className="grid grid-cols-4 gap-6">
-                    {[
-                        { step: '01', title: 'Register & Verify', desc: 'Create your account and verify your identity with government ID and selfie verification.', icon: '🛡️' },
-                        { step: '02', title: 'Browse & Book', desc: 'Search for verified vehicles by type, location, price and availability. Book with confidence.', icon: '🔍' },
-                        { step: '03', title: 'Sign Agreement', desc: 'A digital rental agreement is automatically generated with all terms and conditions.', icon: '📄' },
-                        { step: '04', title: 'Drive & Review', desc: 'Pick up the vehicle after physical ID check. After return, leave a review for the community.', icon: '⭐' },
-                    ].map((item, i) => (
-                        <div key={i} className="text-center p-6">
-                            <div className="text-[40px] mb-4">{item.icon}</div>
-                            <div className="text-[12px] font-bold text-[var(--accent-500)] mb-2 tracking-[2px]">STEP {item.step}</div>
-                            <h3 className="text-[17px] font-bold mb-2 font-[var(--font-display)]">{item.title}</h3>
-                            <p className="text-[14px] text-[var(--text-secondary)] leading-[1.7]">{item.desc}</p>
+            <section className="px-4 pb-20 sm:px-6 lg:px-8">
+                <div className="mx-auto max-w-7xl rounded-[40px] border border-border-light bg-surface-primary p-6 shadow-soft sm:p-8 lg:p-10">
+                    <div className="mb-8 max-w-2xl space-y-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-tertiary">
+                            Why SafeDrive
                         </div>
-                    ))}
+                        <h2 className="font-display text-4xl font-bold tracking-tight text-text-primary">
+                            A marketplace shaped around trust and role clarity.
+                        </h2>
+                        <p className="text-sm leading-7 text-text-secondary sm:text-base">
+                            The redesign focuses on cleaner task separation: renter mode for discovery and trip management, lister mode for fleet and booking operations.
+                        </p>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-3">
+                        {[
+                            {
+                                title: 'Verified community',
+                                copy: 'Identity review is built into the platform before users can transact.',
+                                icon: FiShield,
+                            },
+                            {
+                                title: 'Clear booking context',
+                                copy: 'Vehicle, dates, owner or customer details, amount, and status are always visible together.',
+                                icon: FiUsers,
+                            },
+                            {
+                                title: 'Mode-aware workflow',
+                                copy: 'Switch between renter and lister views without mixing the wrong actions into the wrong interface.',
+                                icon: FiFileText,
+                            },
+                        ].map((item) => (
+                            <article key={item.title} className="rounded-[32px] border border-border-light bg-surface-secondary p-6 shadow-soft">
+                                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+                                    <item.icon />
+                                </div>
+                                <h3 className="font-display text-2xl font-semibold text-text-primary">{item.title}</h3>
+                                <p className="mt-3 text-sm leading-7 text-text-secondary">{item.copy}</p>
+                            </article>
+                        ))}
+                    </div>
                 </div>
             </section>
 
-            {/* Vehicle Types */}
-            <section className="landing-section bg-[var(--surface-secondary)]">
-                <div className="landing-section-header">
-                    <div className="overline">Vehicle Categories</div>
-                    <h2>Quality Vehicles Only</h2>
-                    <p>We only accept vehicles that are 0-5 years old, ensuring reliability, safety, and roadworthiness.</p>
-                </div>
-
-                <div className="grid grid-cols-4 gap-6">
-                    {[
-                        { type: 'Sedan', desc: 'Compact and fuel-efficient for city driving', emoji: '🚗' },
-                        { type: 'SUV', desc: 'Spacious and rugged for any terrain', emoji: '🚙' },
-                        { type: 'MPV', desc: 'Perfect for family trips and group travel', emoji: '🚐' },
-                        { type: 'Van', desc: 'Maximum capacity for large groups', emoji: '🚌' },
-                    ].map((v, i) => (
-                        <div key={i} className="card text-center p-8 cursor-pointer">
-                            <div className="text-[48px] mb-4">{v.emoji}</div>
-                            <h3 className="text-[18px] font-bold mb-2 font-[var(--font-display)]">{v.type}</h3>
-                            <p className="text-[14px] text-[var(--text-secondary)]">{v.desc}</p>
+            <section className="px-4 pb-20 sm:px-6 lg:px-8">
+                <div className="mx-auto max-w-7xl">
+                    <div className="mb-8 max-w-2xl space-y-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-tertiary">
+                            How it works
                         </div>
-                    ))}
+                        <h2 className="font-display text-4xl font-bold tracking-tight text-text-primary">
+                            Four clear steps from account creation to the road.
+                        </h2>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-4">
+                        {steps.map((step, index) => (
+                            <article key={step.title} className="rounded-[32px] border border-border-light bg-surface-primary p-6 shadow-soft">
+                                <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-700">
+                                    Step {String(index + 1).padStart(2, '0')}
+                                </div>
+                                <h3 className="font-display text-2xl font-semibold text-text-primary">
+                                    {step.title}
+                                </h3>
+                                <p className="mt-3 text-sm leading-7 text-text-secondary">{step.copy}</p>
+                            </article>
+                        ))}
+                    </div>
                 </div>
             </section>
 
-            {/* CTA Section */}
-            <section className="px-8 py-[100px] bg-gradient-to-br from-[var(--primary-900)] to-[var(--primary-800)] text-center">
-                <h2 className="font-[var(--font-display)] text-[40px] font-extrabold text-white mb-4">
-                    Ready to Drive Safely?
-                </h2>
-                <p className="text-[17px] text-white/60 mb-8 max-w-[500px] mx-auto">
-                    Join the SafeDrive community today and experience the most secure peer-to-peer car rental platform in the Philippines.
-                </p>
-                <div className="flex gap-4 justify-center">
-                    <Link to="/register" className="btn btn-accent btn-lg">Create Free Account</Link>
-                    <Link to="/register?role=owner" className="btn btn-secondary btn-lg bg-white/10 border border-white/20 text-white">
-                        List Your Vehicle
-                    </Link>
+            <section className="border-t border-border-light bg-primary-900 px-4 py-16 text-white sm:px-6 lg:px-8">
+                <div className="mx-auto flex max-w-7xl flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="max-w-2xl space-y-3">
+                        <h2 className="font-display text-4xl font-bold tracking-tight">
+                            Ready to move through bookings with less friction?
+                        </h2>
+                        <p className="text-sm leading-7 text-white/70 sm:text-base">
+                            Start as a renter today, then switch to lister mode whenever you are ready to put a vehicle on the platform.
+                        </p>
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                        <Link to="/register" className={ui.button.accent}>
+                            Create your account
+                        </Link>
+                        <Link to="/vehicles" className={ui.button.secondary}>
+                            Browse vehicles
+                        </Link>
+                    </div>
                 </div>
             </section>
-
-            {/* Footer */}
-            <footer className="footer">
-                <div className="footer-content">
-                    <div className="footer-brand">
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="navbar-logo w-9 h-9 text-[14px]">SD</div>
-                            <span className="font-[var(--font-display)] text-[20px] font-bold text-white">SafeDrive</span>
-                        </div>
-                        <p>The Philippines' first identity-verified peer-to-peer car rental community platform. Built for trust, designed for safety.</p>
-                    </div>
-                    <div className="footer-section">
-                        <h4>Platform</h4>
-                        <a href="#">Browse Cars</a>
-                        <a href="#">List Your Car</a>
-                        <a href="#">How It Works</a>
-                        <a href="#">Pricing</a>
-                    </div>
-                    <div className="footer-section">
-                        <h4>Company</h4>
-                        <a href="#">About Us</a>
-                        <a href="#">Safety</a>
-                        <a href="#">Contact</a>
-                        <a href="#">FAQs</a>
-                    </div>
-                    <div className="footer-section">
-                        <h4>Legal</h4>
-                        <a href="#">Terms of Service</a>
-                        <a href="#">Privacy Policy</a>
-                        <a href="#">Rental Agreement</a>
-                        <a href="#">Data Protection</a>
-                    </div>
-                </div>
-                <div className="footer-bottom">
-                    <span>&copy; 2026 SafeDrive. All rights reserved.</span>
-                    <span>STI College Novaliches - Capstone Project</span>
-                </div>
-            </footer>
         </div>
     );
 }

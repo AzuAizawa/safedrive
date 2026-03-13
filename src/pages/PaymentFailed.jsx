@@ -1,40 +1,43 @@
-import { useSearchParams, Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { FiAlertCircle } from 'react-icons/fi';
+import { ui } from '../lib/ui';
 
 export default function PaymentFailed() {
     const [searchParams] = useSearchParams();
     const bookingId = searchParams.get('booking_id');
 
     return (
-        <div className="max-w-[480px] mx-auto my-[60px] text-center px-6">
-            <div className="bg-[var(--surface-primary)] border border-[var(--error-200)] rounded-[var(--radius-xl)] p-12">
-                <div className="text-[72px] mb-4">❌</div>
-                <h1 className="text-[28px] font-extrabold text-[var(--error-600)] mb-2">Payment Failed</h1>
-                <p className="text-[var(--text-secondary)] mb-6 leading-[1.6]">
-                    Your payment could not be processed. Your booking has not been cancelled — you can try again.
+        <div className="mx-auto mt-28 max-w-2xl">
+            <div className="rounded-[36px] border border-error-200 bg-surface-primary p-8 text-center shadow-soft sm:p-10">
+                <div className="text-6xl">✕</div>
+                <h1 className="mt-4 font-display text-4xl font-bold text-error-700">Payment failed</h1>
+                <p className="mt-3 text-sm leading-7 text-text-secondary">
+                    Your payment could not be processed. The booking was not cancelled, so you can try again.
                 </p>
-                <div className="bg-[var(--error-50)] rounded-[var(--radius-lg)] px-5 py-3.5 mb-6 text-left border border-[var(--error-100)]">
-                    <div className="flex gap-2.5 items-start text-sm">
-                        <FiAlertCircle className="text-[var(--error-500)] shrink-0 mt-0.5" />
+
+                <div className="mt-6 rounded-3xl border border-error-200 bg-error-50 p-5 text-left">
+                    <div className="flex gap-3 text-sm text-error-700">
+                        <FiAlertCircle className="mt-0.5 shrink-0" />
                         <div>
-                            <div className="font-bold mb-1">Common reasons for failure:</div>
-                            <ul className="text-[var(--text-secondary)] leading-[1.8] pl-4 list-disc">
-                                <li>Insufficient GCash/bank balance</li>
-                                <li>Card declined by issuing bank</li>
+                            <div className="font-semibold">Common reasons for failure</div>
+                            <ul className="mt-2 space-y-1 leading-6 text-text-secondary">
+                                <li>Insufficient balance</li>
+                                <li>Card or provider declined the payment</li>
                                 <li>Payment timed out</li>
-                                <li>Network connectivity issue</li>
+                                <li>Network issues interrupted the flow</li>
                             </ul>
                         </div>
                     </div>
                 </div>
-                <div className="flex flex-col gap-2.5">
+
+                <div className="mt-6 flex flex-col gap-3">
                     {bookingId && (
-                        <Link to={`/bookings`} className="btn btn-primary w-full justify-center">
-                            Try Again — View Booking
+                        <Link to="/bookings" className={`${ui.button.primary} w-full justify-center`}>
+                            Retry from my bookings
                         </Link>
                     )}
-                    <Link to="/vehicles" className="btn btn-secondary w-full justify-center">
-                        Browse Vehicles
+                    <Link to="/vehicles" className={`${ui.button.secondary} w-full justify-center`}>
+                        Browse vehicles
                     </Link>
                 </div>
             </div>

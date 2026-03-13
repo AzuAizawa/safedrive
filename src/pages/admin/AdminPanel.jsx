@@ -6,6 +6,7 @@ import { FiUsers, FiTruck, FiCalendar, FiShield, FiCheck, FiX, FiEye, FiSearch, 
 import toast from 'react-hot-toast';
 import BackButton from '../../components/BackButton';
 import { logAudit } from '../../lib/auditLogger';
+import { badgeClass, bookingStatusClass, cx, ui } from '../../lib/ui';
 
 export default function AdminPanel() {
     const { user, profile } = useAuth();
@@ -18,7 +19,6 @@ export default function AdminPanel() {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedUser, setSelectedUser] = useState(null);
-    const [userDetailTab, setUserDetailTab] = useState('overview');
     const [userDocs, setUserDocs] = useState([]);
     const [userVehicles, setUserVehicles] = useState([]);
     const [userBookings, setUserBookings] = useState([]);
@@ -130,9 +130,9 @@ export default function AdminPanel() {
                 admin_user_id: user.id,
             });
             if (error) throw error;
-            try { await supabaseAdmin.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: reason || `User ${isApprove ? 'verified' : 'rejected'} by admin` }); } catch (e) { }
+            try { await supabaseAdmin.from('verification_logs').insert({ user_id: userId, admin_id: user.id, action, verification_type: 'identity', notes: reason || `User ${isApprove ? 'verified' : 'rejected'} by admin` }); } catch { /* Non-blocking audit insert */ }
             const rejectionNote = reason ? `\n\nAdmin note: ${reason}` : '';
-            try { await supabaseAdmin.from('notifications').insert({ user_id: userId, title: isApprove ? 'Identity Verified! ✅' : 'Verification Rejected', message: isApprove ? 'Your identity has been verified. You can now list vehicles and access all SafeDrive features!' : `Your identity verification was not approved. Please resubmit your documents with clearer photos.${rejectionNote}`, type: 'verification' }); } catch (e) { }
+            try { await supabaseAdmin.from('notifications').insert({ user_id: userId, title: isApprove ? 'Identity Verified! ✅' : 'Verification Rejected', message: isApprove ? 'Your identity has been verified. You can now list vehicles and access all SafeDrive features!' : `Your identity verification was not approved. Please resubmit your documents with clearer photos.${rejectionNote}`, type: 'verification' }); } catch { /* Non-blocking notification insert */ }
             await logAudit({ action: isApprove ? 'VERIFY_USER' : 'REJECT_USER', entityType: 'user', entityId: userId, description: `Admin ${isApprove ? 'approved' : 'rejected'} identity verification for user ${selectedUser?.full_name || userId}${reason ? ': ' + reason : ''}`, newValue: { verification_status: isApprove ? 'verified' : 'rejected', role: isApprove ? 'verified' : 'user' }, performedBy: user.id, performerName: profile?.full_name, performerEmail: user.email });
             toast.success(`User ${isApprove ? 'verified ✅' : 'rejected'} successfully`);
             fetchData();
@@ -271,7 +271,7 @@ export default function AdminPanel() {
             if (error) throw error;
             toast.success(current ? 'Brand deactivated' : 'Brand activated');
             fetchCatalog();
-        } catch (err) { toast.error('Failed to update brand'); }
+        } catch { toast.error('Failed to update brand'); }
     };
 
     const toggleModelActive = async (modelId, current) => {
@@ -280,7 +280,7 @@ export default function AdminPanel() {
             if (error) throw error;
             toast.success(current ? 'Model deactivated' : 'Model activated');
             fetchCatalog();
-        } catch (err) { toast.error('Failed to update model'); }
+        } catch { toast.error('Failed to update model'); }
     };
 
     const deleteBrand = async (brandId, brandName) => {
@@ -299,7 +299,7 @@ export default function AdminPanel() {
             toast.success(`"${brandName}" deleted`);
             if (selectedBrandId === brandId) setSelectedBrandId('');
             fetchCatalog();
-        } catch (err) { toast.error('Failed to delete brand. It may be referenced by vehicles.'); }
+        } catch { toast.error('Failed to delete brand. It may be referenced by vehicles.'); }
     };
 
     const deleteModel = async (modelId, modelName) => {
@@ -309,18 +309,17 @@ export default function AdminPanel() {
             if (error) throw error;
             toast.success(`"${modelName}" deleted`);
             fetchCatalog();
-        } catch (err) { toast.error('Failed to delete model. It may be referenced by vehicles.'); }
+        } catch { toast.error('Failed to delete model. It may be referenced by vehicles.'); }
     };
 
     // ===== COMPUTED =====
     const handleViewUser = (u) => {
         setSelectedUser(u);
-        setUserDetailTab('overview');
         fetchUserDocs(u.id);
         fetchUserDetails(u);
     };
-    const getRoleBadgeClass = (role) => ({ admin: 'badge-error', verified: 'badge-success', user: 'badge-info' }[role] || 'badge-neutral');
-    const getStatusBadge = (status) => ({ verified: 'badge-success', submitted: 'badge-pending', rejected: 'badge-error' }[status] || 'badge-neutral');
+    const getRoleBadgeClass = (role) => ({ admin: 'error', verified: 'success', user: 'info' }[role] || 'neutral');
+    const getStatusBadge = (status) => ({ verified: 'success', submitted: 'pending', rejected: 'error' }[status] || 'neutral');
     const filteredCatalogModels = selectedBrandId ? carModels.filter(m => m.brand_id === selectedBrandId) : carModels;
 
     // Show all users in one unified table (pending users card removed per requirement)
@@ -340,10 +339,10 @@ export default function AdminPanel() {
 
     // ===== USER ROW COMPONENT =====
     const UserRow = ({ u, showActions = false }) => (
-        <tr key={u.id} className={showActions ? 'bg-[var(--warning-50)]' : ''}>
-            <td>
+        <tr key={u.id} className={showActions ? 'bg-warning-50/70' : ''}>
+            <td className={ui.tableCell}>
                 <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--primary-400)] to-[var(--accent-400)] flex items-center justify-center text-white text-[13px] font-bold shrink-0">
+                    <div className="w-9 h-9 rounded-full bg-[var(--primary-600)] flex items-center justify-center text-white text-[13px] font-bold shrink-0">
                         {u.full_name?.[0] || 'U'}
                     </div>
                     <div>
@@ -352,18 +351,18 @@ export default function AdminPanel() {
                     </div>
                 </div>
             </td>
-            <td><span className={`badge ${getRoleBadgeClass(u.role)}`}>{u.role === 'user' ? 'Not Verified' : u.role}</span></td>
-            <td><span className={`badge ${getStatusBadge(u.verification_status)}`}>{u.verification_status || 'none'}</span></td>
-            <td className="text-[13px]">{new Date(u.created_at).toLocaleDateString()}</td>
-            <td>
+            <td className={ui.tableCell}><span className={badgeClass(getRoleBadgeClass(u.role))}>{u.role === 'user' ? 'Not Verified' : u.role}</span></td>
+            <td className={ui.tableCell}><span className={badgeClass(getStatusBadge(u.verification_status))}>{u.verification_status || 'none'}</span></td>
+            <td className={ui.tableCell}>{new Date(u.created_at).toLocaleDateString()}</td>
+            <td className={ui.tableCell}>
                 <div className="flex gap-1.5">
                     {showActions && (
                         <>
-                            <button className="btn btn-success btn-sm" onClick={() => verifyUser(u.id, 'approve')} title="Approve">✅ Approve</button>
-                            <button className="btn btn-danger btn-sm" onClick={() => { setRejectTarget(u.id); setShowRejectModal('user'); }} title="Reject">❌ Reject</button>
+                            <button className={cx(ui.button.success, ui.button.sm)} onClick={() => verifyUser(u.id, 'approve')} title="Approve">✅ Approve</button>
+                            <button className={cx(ui.button.danger, ui.button.sm)} onClick={() => { setRejectTarget(u.id); setShowRejectModal('user'); }} title="Reject">❌ Reject</button>
                         </>
                     )}
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleViewUser(u)} title="View details"><FiEye /></button>
+                    <button className={cx(ui.button.ghost, ui.button.sm)} onClick={() => handleViewUser(u)} title="View details"><FiEye /></button>
                 </div>
             </td>
         </tr>
@@ -401,7 +400,7 @@ export default function AdminPanel() {
             </td>
             {!showActions && (
                 <td>
-                    <span className={`badge ${v.status === 'approved' || v.status === 'listed' ? 'badge-success' : v.status === 'rejected' ? 'badge-error' : 'badge-info'}`}>
+                    <span className={badgeClass(v.status === 'approved' || v.status === 'listed' ? 'success' : v.status === 'rejected' ? 'error' : 'info')}>
                         {v.status}
                     </span>
                 </td>
@@ -411,11 +410,11 @@ export default function AdminPanel() {
                 <div className="flex gap-1.5">
                     {showActions && (
                         <>
-                            <button className="btn btn-success btn-sm" onClick={() => approveVehicle(v.id, 'approve')}>✅ Approve</button>
-                            <button className="btn btn-danger btn-sm" onClick={() => { setRejectTarget(v.id); setShowRejectModal('vehicle'); }}>❌ Reject</button>
+                            <button className={cx(ui.button.success, ui.button.sm)} onClick={() => approveVehicle(v.id, 'approve')}>✅ Approve</button>
+                            <button className={cx(ui.button.danger, ui.button.sm)} onClick={() => { setRejectTarget(v.id); setShowRejectModal('vehicle'); }}>❌ Reject</button>
                         </>
                     )}
-                    <button className="btn btn-ghost btn-sm" onClick={() => setSelectedVehicle(v)} title="View all details"><FiEye /></button>
+                    <button className={cx(ui.button.ghost, ui.button.sm)} onClick={() => setSelectedVehicle(v)} title="View all details"><FiEye /></button>
                 </div>
             </td>
         </tr>
@@ -423,9 +422,9 @@ export default function AdminPanel() {
 
     return (
         <div>
-            <BackButton to="/dashboard" label="Back to Dashboard" />
+            <BackButton to="/admin" label="Back to Admin" />
 
-            <div className="page-header">
+            <div className="mb-6 space-y-2">
                 <h1>🛡️ Admin Panel</h1>
                 <p>SAFEDRIVE Platform Administration</p>
             </div>
@@ -438,7 +437,7 @@ export default function AdminPanel() {
                     { icon: <FiUsers />, label: 'Total Users', value: users.length, color: 'text-[#3b82f6]', bg: 'bg-[#eff6ff]' },
                     { icon: <FiTruck />, label: 'Total Vehicles', value: vehicles.length, color: 'text-[#22c55e]', bg: 'bg-[#f0fdf4]' },
                 ].map((s, i) => (
-                    <div key={i} className="card card-body flex items-center gap-3 p-[14px_16px]">
+                    <div key={i} className="flex items-center gap-3 rounded-3xl border border-border-light bg-surface-primary px-4 py-4 shadow-soft">
                         <div className={`w-10 h-10 rounded-[var(--radius-md)] flex items-center justify-center text-[18px] ${s.bg} ${s.color}`}>{s.icon}</div>
                         <div>
                             <div className={`text-[22px] font-extrabold font-[var(--font-display)] ${s.color}`}>{s.value}</div>
@@ -449,7 +448,7 @@ export default function AdminPanel() {
             </div>
 
             {/* Tabs */}
-            <div className="tabs max-w-[650px] mb-6">
+            <div className="mb-6 flex max-w-[760px] flex-wrap gap-2 rounded-[28px] border border-border-light bg-surface-primary p-2 shadow-soft">
                 {[
                     { id: 'users', icon: <FiUsers />, label: 'Users', count: pendingUsers.length },
                     { id: 'vehicles', icon: <FiTruck />, label: 'Vehicles', count: pendingVehicles.length },
@@ -457,7 +456,7 @@ export default function AdminPanel() {
                     { id: 'catalog', icon: null, label: '🚘 Car Catalog' },
                     { id: 'audit', icon: <FiActivity />, label: 'Audit Trail' },
                 ].map(tab => (
-                    <button key={tab.id} className={`tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+                    <button key={tab.id} className={cx('inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition', activeTab === tab.id ? 'bg-primary-700 text-white shadow-soft' : 'text-text-secondary hover:bg-primary-50 hover:text-text-primary')} onClick={() => setActiveTab(tab.id)}>
                         {tab.icon && <span className="mr-1.5">{tab.icon}</span>}
                         {tab.label}
                         {tab.count > 0 && (
@@ -471,22 +470,22 @@ export default function AdminPanel() {
 
             {/* Search */}
             {activeTab !== 'catalog' && (
-                <div className="search-input-wrapper mb-5 max-w-[400px]">
-                    <FiSearch className="search-icon" />
-                    <input className="form-input" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                <div className="relative mb-5 max-w-[400px]">
+                    <FiSearch className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-tertiary" />
+                    <input className={ui.input} placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
             )}
 
             {loading ? (
-                <div className="loading-spinner"><div className="spinner" /></div>
+                <div className={ui.loadingScreen}><div className={ui.spinner} /></div>
             ) : (
                 <>
                     {/* ========== USERS TAB ========== */}
                     {activeTab === 'users' && (
                         <div>
                             {/* UNIFIED ALL USERS TABLE */}
-                            <div className="card">
-                                <div className="card-header">
+                            <div className={ui.section}>
+                                <div className={ui.sectionHeader}>
                                     <h2 className="text-[16px] font-bold">
                                         👥 All Users ({users.length})
                                         {pendingUsers.length > 0 && (
@@ -496,8 +495,8 @@ export default function AdminPanel() {
                                         )}
                                     </h2>
                                 </div>
-                                <div className="table-container">
-                                    <table className="table">
+                                <div className={ui.tableWrap}>
+                                    <table className={ui.table}>
                                         <thead>
                                             <tr>
                                                 <th>User</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th>
@@ -521,15 +520,15 @@ export default function AdminPanel() {
                         <div>
                             {/* PENDING APPROVAL SECTION */}
                             {pendingVehicles.length > 0 && (
-                                <div className="card mb-6 border-l-4 border-l-[var(--accent-500)]">
-                                    <div className="card-header bg-[var(--accent-50)]">
+                                <div className="overflow-hidden rounded-3xl border border-accent-200 bg-surface-primary shadow-soft">
+                                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-accent-200 bg-accent-50 px-5 py-4 sm:px-6">
                                         <h2 className="text-[16px] font-bold flex items-center gap-2">
                                             🔍 Pending Approval ({pendingVehicles.length})
                                         </h2>
                                         <span className="text-[12px] text-[var(--text-tertiary)]">New vehicle listings — review and approve/reject</span>
                                     </div>
-                                    <div className="table-container">
-                                        <table className="table">
+                                    <div className={ui.tableWrap}>
+                                        <table className={ui.table}>
                                             <thead>
                                                 <tr>
                                                     <th>Vehicle</th><th>Owner</th><th>Price</th><th>Status</th><th>Actions</th>
@@ -546,14 +545,14 @@ export default function AdminPanel() {
                             )}
 
                             {/* ALL VEHICLES SECTION */}
-                            <div className="card">
-                                <div className="card-header">
+                            <div className={ui.section}>
+                                <div className={ui.sectionHeader}>
                                     <h2 className="text-[16px] font-bold">
                                         🚗 All Vehicles ({allVehicles.length})
                                     </h2>
                                 </div>
-                                <div className="table-container">
-                                    <table className="table">
+                                <div className={ui.tableWrap}>
+                                    <table className={ui.table}>
                                         <thead>
                                             <tr>
                                                 <th>Vehicle</th><th>Owner</th><th>Price</th><th>Status</th><th>Actions</th>
@@ -574,12 +573,12 @@ export default function AdminPanel() {
 
                     {/* ========== BOOKINGS TAB ========== */}
                     {activeTab === 'bookings' && (
-                        <div className="card">
-                            <div className="card-header">
+                        <div className={ui.section}>
+                            <div className={ui.sectionHeader}>
                                 <h2 className="text-[16px] font-bold">📅 All Bookings ({bookings.length})</h2>
                             </div>
-                            <div className="table-container">
-                                <table className="table">
+                            <div className={ui.tableWrap}>
+                                <table className={ui.table}>
                                     <thead>
                                         <tr><th>Vehicle</th><th>Rentee</th><th>Dates</th><th>Amount</th><th>Status</th></tr>
                                     </thead>
@@ -595,7 +594,7 @@ export default function AdminPanel() {
                                                 </td>
                                                 <td className="font-bold font-[var(--font-display)]">₱{b.total_amount?.toLocaleString()}</td>
                                                 <td>
-                                                    <span className={`badge badge-${b.status === 'completed' || b.status === 'confirmed' ? 'success' : b.status === 'pending' ? 'pending' : b.status === 'cancelled' ? 'error' : 'info'}`}>
+                                                    <span className={bookingStatusClass(b.status)}>
                                                         {b.status}
                                                     </span>
                                                 </td>
@@ -608,13 +607,13 @@ export default function AdminPanel() {
                     )}
                     {/* ========== AUDIT TRAIL TAB ========== */}
                     {activeTab === 'audit' && (
-                        <div className="card">
-                            <div className="card-header">
+                        <div className={ui.section}>
+                            <div className={ui.sectionHeader}>
                                 <h2 className="text-[16px] font-bold">🕵️ Audit Trail ({auditLogs.length})</h2>
                                 <span className="text-[12px] text-[var(--text-tertiary)]">All admin actions — who did what and when</span>
                             </div>
-                            <div className="table-container">
-                                <table className="table">
+                            <div className={ui.tableWrap}>
+                                <table className={ui.table}>
                                     <thead>
                                         <tr>
                                             <th>Timestamp</th>
@@ -628,9 +627,9 @@ export default function AdminPanel() {
                                         {auditLogs.length === 0 ? (
                                             <tr><td colSpan={5} className="text-center p-8 text-[var(--text-tertiary)]">No audit logs yet. Admin actions will appear here.</td></tr>
                                         ) : auditLogs.map(log => {
-                                            let badgeClass = 'badge-info';
-                                            if (log.action?.includes('APPROVE') || log.action?.includes('VERIFY')) badgeClass = 'badge-success';
-                                            if (log.action?.includes('REJECT') || log.action?.includes('DELETE')) badgeClass = 'badge-error';
+                                            let auditBadgeVariant = 'info';
+                                            if (log.action?.includes('APPROVE') || log.action?.includes('VERIFY')) auditBadgeVariant = 'success';
+                                            if (log.action?.includes('REJECT') || log.action?.includes('DELETE')) auditBadgeVariant = 'error';
 
                                             return (
                                                 <tr key={log.id}>
@@ -642,10 +641,10 @@ export default function AdminPanel() {
                                                         <div className="text-[11px] text-[var(--text-tertiary)]">{log.performer_email || ''}</div>
                                                     </td>
                                                     <td>
-                                                        <span className={`badge ${badgeClass} text-[11px]`}>{log.action}</span>
+                                                        <span className={cx(badgeClass(auditBadgeVariant), 'text-[11px]')}>{log.action}</span>
                                                     </td>
                                                     <td className="text-[13px]">
-                                                        <span className="badge badge-neutral text-[11px]">{log.entity_type}</span>
+                                                        <span className={cx(badgeClass('neutral'), 'text-[11px]')}>{log.entity_type}</span>
                                                     </td>
                                                     <td className="text-[13px] text-[var(--text-secondary)] max-w-[280px]">{log.description}</td>
                                                 </tr>
@@ -663,15 +662,15 @@ export default function AdminPanel() {
             {activeTab === 'catalog' && (
                 <div className="grid grid-cols-[1fr_1.5fr] gap-6">
                     {/* Brands Column */}
-                    <div className="card">
-                        <div className="card-header"><h2 className="text-[16px] font-bold">🏭 Brands ({carBrands.length})</h2></div>
-                        <div className="card-body">
+                    <div className={ui.section}>
+                        <div className={ui.sectionHeader}><h2 className="text-[16px] font-bold">🏭 Brands ({carBrands.length})</h2></div>
+                        <div className={ui.sectionBody}>
                             <div className="flex gap-2 mb-4">
-                                <input className="form-input flex-1" placeholder="New brand name" value={newBrandName} onChange={(e) => setNewBrandName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addBrand()} />
-                                <button className="btn btn-accent btn-sm" onClick={addBrand}><FiPlus /> Add</button>
+                                <input className={cx(ui.input, 'flex-1')} placeholder="New brand name" value={newBrandName} onChange={(e) => setNewBrandName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addBrand()} />
+                                <button className={cx(ui.button.accent, ui.button.sm)} onClick={addBrand}><FiPlus /> Add</button>
                             </div>
                             {catalogLoading ? (
-                                <div className="text-center p-6"><div className="spinner mx-auto" /></div>
+                                <div className="text-center p-6"><div className={cx(ui.spinner, 'mx-auto')} /></div>
                             ) : carBrands.length === 0 ? (
                                 <div className="text-center p-6 text-[var(--text-tertiary)]">No brands yet</div>
                             ) : (
@@ -683,14 +682,14 @@ export default function AdminPanel() {
                                         `}>
                                             <div className="flex items-center gap-2">
                                                 <span className={`font-semibold text-[14px] ${brand.is_active ? 'opacity-100' : 'opacity-50'}`}>{brand.name}</span>
-                                                {!brand.is_active && <span className="badge badge-neutral text-[10px]">Inactive</span>}
+                                                {!brand.is_active && <span className={cx(badgeClass('neutral'), 'text-[10px]')}>Inactive</span>}
                                                 <span className="text-[11px] text-[var(--text-tertiary)]">({carModels.filter(m => m.brand_id === brand.id).length})</span>
                                             </div>
                                             <div className="flex">
-                                                <button className="btn btn-ghost btn-sm p-1" onClick={(e) => { e.stopPropagation(); toggleBrandActive(brand.id, brand.is_active); }}>
+                                                <button className={cx(ui.button.ghost, ui.button.sm, 'p-1')} onClick={(e) => { e.stopPropagation(); toggleBrandActive(brand.id, brand.is_active); }}>
                                                     {brand.is_active ? <FiToggleRight size={18} className="text-[var(--success-500)]" /> : <FiToggleLeft size={18} className="text-[var(--neutral-400)]" />}
                                                 </button>
-                                                <button className="btn btn-ghost btn-sm p-1 text-[var(--error-400)]" onClick={(e) => { e.stopPropagation(); deleteBrand(brand.id, brand.name); }} title="Delete brand">
+                                                <button className={cx(ui.button.ghost, ui.button.sm, 'p-1 text-error-600')} onClick={(e) => { e.stopPropagation(); deleteBrand(brand.id, brand.name); }} title="Delete brand">
                                                     <FiTrash2 size={15} />
                                                 </button>
                                             </div>
@@ -702,41 +701,41 @@ export default function AdminPanel() {
                     </div>
 
                     {/* Models Column */}
-                    <div className="card">
-                        <div className="card-header"><h2 className="text-[16px] font-bold">🚗 Models {selectedBrandId && `— ${carBrands.find(b => b.id === selectedBrandId)?.name || ''}`} ({filteredCatalogModels.length})</h2></div>
-                        <div className="card-body">
+                    <div className={ui.section}>
+                        <div className={ui.sectionHeader}><h2 className="text-[16px] font-bold">🚗 Models {selectedBrandId && `— ${carBrands.find(b => b.id === selectedBrandId)?.name || ''}`} ({filteredCatalogModels.length})</h2></div>
+                        <div className={ui.sectionBody}>
                             <div className="flex gap-2 mb-4 flex-wrap">
-                                <select className="form-select w-[180px]" value={selectedBrandId} onChange={(e) => setSelectedBrandId(e.target.value)}>
+                                <select className={cx(ui.select, 'w-[180px]')} value={selectedBrandId} onChange={(e) => setSelectedBrandId(e.target.value)}>
                                     <option value="">All Brands</option>
                                     {carBrands.filter(b => b.is_active).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                                 </select>
-                                <input className="form-input flex-1 min-w-[120px]" placeholder="New model" value={newModelName} onChange={(e) => setNewModelName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addModel()} />
-                                <select className="form-select w-[130px]" value={newModelBodyType} onChange={(e) => setNewModelBodyType(e.target.value)}>
+                                <input className={cx(ui.input, 'min-w-[120px] flex-1')} placeholder="New model" value={newModelName} onChange={(e) => setNewModelName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addModel()} />
+                                <select className={cx(ui.select, 'w-[130px]')} value={newModelBodyType} onChange={(e) => setNewModelBodyType(e.target.value)}>
                                     {['Sedan', 'SUV', 'MPV', 'Van', 'Hatchback', 'Pickup', 'Crossover', 'Coupe'].map(t => <option key={t} value={t}>{t}</option>)}
                                 </select>
-                                <button className="btn btn-accent btn-sm" onClick={addModel} disabled={!selectedBrandId}><FiPlus /> Add</button>
+                                <button className={cx(ui.button.accent, ui.button.sm)} onClick={addModel} disabled={!selectedBrandId}><FiPlus /> Add</button>
                             </div>
                             {catalogLoading ? (
-                                <div className="text-center p-6"><div className="spinner mx-auto" /></div>
+                                <div className="text-center p-6"><div className={cx(ui.spinner, 'mx-auto')} /></div>
                             ) : filteredCatalogModels.length === 0 ? (
                                 <div className="text-center p-6 text-[var(--text-tertiary)]">{selectedBrandId ? 'No models for this brand yet.' : 'Select a brand or view all.'}</div>
                             ) : (
-                                <div className="table-container">
-                                    <table className="table">
+                                <div className={ui.tableWrap}>
+                                    <table className={ui.table}>
                                         <thead><tr><th>Model</th><th>Brand</th><th>Body Type</th><th>Status</th><th></th></tr></thead>
                                         <tbody>
                                             {filteredCatalogModels.map(m => (
                                                 <tr key={m.id}>
                                                     <td className="font-semibold">{m.name}</td>
                                                     <td className="text-[var(--text-secondary)]">{m.car_brands?.name || '—'}</td>
-                                                    <td><span className="badge badge-info">{m.body_type}</span></td>
-                                                    <td><span className={`badge ${m.is_active ? 'badge-success' : 'badge-neutral'}`}>{m.is_active ? 'Active' : 'Inactive'}</span></td>
+                                                    <td><span className={badgeClass('info')}>{m.body_type}</span></td>
+                                                    <td><span className={badgeClass(m.is_active ? 'success' : 'neutral')}>{m.is_active ? 'Active' : 'Inactive'}</span></td>
                                                     <td>
                                                         <div className="flex gap-1">
-                                                            <button className="btn btn-ghost btn-sm p-1" onClick={() => toggleModelActive(m.id, m.is_active)}>
+                                                            <button className={cx(ui.button.ghost, ui.button.sm, 'p-1')} onClick={() => toggleModelActive(m.id, m.is_active)}>
                                                                 {m.is_active ? <FiToggleRight size={16} className="text-[var(--success-500)]" /> : <FiToggleLeft size={16} className="text-[var(--neutral-400)]" />}
                                                             </button>
-                                                            <button className="btn btn-ghost btn-sm p-1 text-[var(--error-400)]" onClick={() => deleteModel(m.id, m.name)} title="Delete model">
+                                                            <button className={cx(ui.button.ghost, ui.button.sm, 'p-1 text-error-600')} onClick={() => deleteModel(m.id, m.name)} title="Delete model">
                                                                 <FiTrash2 size={14} />
                                                             </button>
                                                         </div>
@@ -754,24 +753,24 @@ export default function AdminPanel() {
 
             {/* ========== USER DETAIL MODAL ========== */}
             {selectedUser && (
-                <div className="modal-overlay" onClick={() => setSelectedUser(null)}>
-                    <div className="modal max-w-[700px] max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-                        <div className="modal-header">
+                <div className={ui.modalOverlay} onClick={() => setSelectedUser(null)}>
+                    <div className={cx(ui.modalPanel, 'max-h-[90vh] max-w-[700px] overflow-auto')} onClick={(e) => e.stopPropagation()}>
+                        <div className={ui.sectionHeader}>
                             <h2>User Details</h2>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedUser(null)}>✕</button>
+                            <button className={cx(ui.button.ghost, ui.button.sm)} onClick={() => setSelectedUser(null)}>✕</button>
                         </div>
-                        <div className="modal-body">
+                        <div className={ui.sectionBody}>
                             {/* User Info */}
                             <div className="flex items-center gap-4 mb-6">
-                                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[var(--primary-400)] to-[var(--accent-400)] flex items-center justify-center text-white text-[24px] font-bold">
+                                <div className="w-16 h-16 rounded-full bg-[var(--primary-600)] flex items-center justify-center text-white text-[24px] font-bold">
                                     {selectedUser.full_name?.[0] || 'U'}
                                 </div>
                                 <div>
                                     <h3 className="text-[18px] font-bold">{selectedUser.full_name}</h3>
                                     <p className="text-[var(--text-secondary)] text-[14px]">{selectedUser.email}</p>
                                     <div className="flex gap-2 mt-1">
-                                        <span className={`badge ${getRoleBadgeClass(selectedUser.role)}`}>{selectedUser.role === 'user' ? 'Not Verified' : selectedUser.role}</span>
-                                        <span className={`badge ${getStatusBadge(selectedUser.verification_status)}`}>{selectedUser.verification_status || 'none'}</span>
+                                        <span className={badgeClass(getRoleBadgeClass(selectedUser.role))}>{selectedUser.role === 'user' ? 'Not Verified' : selectedUser.role}</span>
+                                        <span className={badgeClass(getStatusBadge(selectedUser.verification_status))}>{selectedUser.verification_status || 'none'}</span>
                                     </div>
                                 </div>
                             </div>
@@ -799,7 +798,7 @@ export default function AdminPanel() {
                                     <FiImage /> Submitted ID Documents
                                 </h3>
                                 {docsLoading ? (
-                                    <div className="text-center p-6"><div className="spinner mx-auto mb-2" /><p className="text-[13px] text-[var(--text-tertiary)]">Loading...</p></div>
+                                    <div className="text-center p-6"><div className={cx(ui.spinner, 'mx-auto mb-2')} /><p className="text-[13px] text-[var(--text-tertiary)]">Loading...</p></div>
                                 ) : userDocs.length === 0 ? (
                                     <div className="p-6 text-center bg-[var(--neutral-50)] rounded-[var(--radius-md)] text-[var(--text-tertiary)]">No documents uploaded yet</div>
                                 ) : (
@@ -831,11 +830,11 @@ export default function AdminPanel() {
                                 <p className="text-[12px] text-[var(--text-tertiary)] mb-2.5">Admin accounts are created separately and cannot be assigned through this panel.</p>
                                 <div className="flex gap-2 flex-wrap">
                                     {['user', 'verified'].map(role => (
-                                        <button key={role} className={`btn btn-sm ${selectedUser.role === role ? 'btn-primary' : 'btn-secondary'} capitalize`} onClick={() => selectedUser.role !== role && changeRole(selectedUser.id, role)} disabled={selectedUser.role === role || selectedUser.id === user.id || selectedUser.role === 'admin'}>
+                                        <button key={role} className={cx(selectedUser.role === role ? ui.button.primary : ui.button.secondary, ui.button.sm, 'capitalize')} onClick={() => selectedUser.role !== role && changeRole(selectedUser.id, role)} disabled={selectedUser.role === role || selectedUser.id === user.id || selectedUser.role === 'admin'}>
                                             {selectedUser.role === role ? `✓ ${role === 'user' ? 'Not Verified' : 'Verified'}` : (role === 'user' ? 'Set Not Verified' : 'Set Verified')}
                                         </button>
                                     ))}
-                                    {selectedUser.role === 'admin' && <span className="badge badge-error p-[8px_12px]">Admin — role cannot be changed here</span>}
+                                    {selectedUser.role === 'admin' && <span className={cx(badgeClass('error'), 'px-3 py-2')}>Admin — role cannot be changed here</span>}
                                 </div>
                                 {selectedUser.id === user.id && <p className="text-[12px] text-[var(--text-tertiary)] mt-2">⚠️ You cannot change your own role</p>}
                             </div>
@@ -843,7 +842,7 @@ export default function AdminPanel() {
                             {/* User's Vehicles */}
                             <div className="mb-4">
                                 <h3 className="text-[15px] font-bold mb-3 flex items-center gap-2"><FiTruck /> Listed Vehicles ({userVehicles.length})</h3>
-                                {userDetailLoading ? <div className="text-center p-4"><div className="spinner mx-auto" /></div>
+                                {userDetailLoading ? <div className="text-center p-4"><div className={cx(ui.spinner, 'mx-auto')} /></div>
                                     : userVehicles.length === 0 ? <p className="text-[13px] text-[var(--text-tertiary)] p-[8px_0]">No vehicles listed</p>
                                         : (
                                             <div className="flex flex-col gap-2">
@@ -853,7 +852,7 @@ export default function AdminPanel() {
                                                             <div className="font-semibold text-[13px]">{v.year} {v.make} {v.model}</div>
                                                             <div className="text-[12px] text-[var(--text-tertiary)]">{v.plate_number} • ₱{v.daily_rate?.toLocaleString()}/day</div>
                                                         </div>
-                                                        <span className={`badge ${v.status === 'approved' ? 'badge-success' : v.status === 'pending' ? 'badge-pending' : 'badge-error'}`}>{v.status}</span>
+                                                        <span className={badgeClass(v.status === 'approved' ? 'success' : v.status === 'pending' ? 'pending' : 'error')}>{v.status}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -863,7 +862,7 @@ export default function AdminPanel() {
                             {/* User's Bookings */}
                             <div className="mb-2">
                                 <h3 className="text-[15px] font-bold mb-3 flex items-center gap-2"><FiCalendar /> Booking History ({userBookings.length})</h3>
-                                {userDetailLoading ? <div className="text-center p-4"><div className="spinner mx-auto" /></div>
+                                {userDetailLoading ? <div className="text-center p-4"><div className={cx(ui.spinner, 'mx-auto')} /></div>
                                     : userBookings.length === 0 ? <p className="text-[13px] text-[var(--text-tertiary)] p-[8px_0]">No bookings yet</p>
                                         : (
                                             <div className="flex flex-col gap-2">
@@ -873,7 +872,7 @@ export default function AdminPanel() {
                                                             <div className="font-semibold text-[13px]">{b.vehicles?.year} {b.vehicles?.make} {b.vehicles?.model}</div>
                                                             <div className="text-[12px] text-[var(--text-tertiary)]">{new Date(b.start_date).toLocaleDateString()} → {new Date(b.end_date).toLocaleDateString()} • ₱{b.total_amount?.toLocaleString()}</div>
                                                         </div>
-                                                        <span className={`badge ${b.status === 'completed' ? 'badge-success' : b.status === 'confirmed' ? 'badge-info' : b.status === 'cancelled' ? 'badge-error' : 'badge-pending'}`}>{b.status}</span>
+                                                        <span className={bookingStatusClass(b.status)}>{b.status}</span>
                                                     </div>
                                                 ))}
                                                 {userBookings.length > 5 && <p className="text-[12px] text-[var(--text-tertiary)] text-center">+{userBookings.length - 5} more bookings</p>}
@@ -885,9 +884,9 @@ export default function AdminPanel() {
 
                         {/* Verification Actions in Footer */}
                         {selectedUser.verification_status === 'submitted' && (
-                            <div className="modal-footer">
-                                <button className="btn btn-danger" onClick={() => verifyUser(selectedUser.id, 'reject')}><FiX /> Reject</button>
-                                <button className="btn btn-success" onClick={() => verifyUser(selectedUser.id, 'approve')}><FiCheck /> Verify User</button>
+                            <div className="flex flex-wrap justify-end gap-3 border-t border-border-light px-5 py-4 sm:px-6">
+                                <button className={ui.button.danger} onClick={() => verifyUser(selectedUser.id, 'reject')}><FiX /> Reject</button>
+                                <button className={ui.button.success} onClick={() => verifyUser(selectedUser.id, 'approve')}><FiCheck /> Verify User</button>
                             </div>
                         )}
                     </div>
@@ -896,20 +895,20 @@ export default function AdminPanel() {
 
             {/* ========== VEHICLE DETAIL MODAL ========== */}
             {selectedVehicle && (
-                <div className="modal-overlay" onClick={() => setSelectedVehicle(null)}>
-                    <div className="modal max-w-[720px] max-h-[92vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-                        <div className="modal-header">
+                <div className={ui.modalOverlay} onClick={() => setSelectedVehicle(null)}>
+                    <div className={cx(ui.modalPanel, 'max-h-[92vh] max-w-[720px] overflow-auto')} onClick={(e) => e.stopPropagation()}>
+                        <div className={ui.sectionHeader}>
                             <h2>🚗 {selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}</h2>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedVehicle(null)}>✕</button>
+                            <button className={cx(ui.button.ghost, ui.button.sm)} onClick={() => setSelectedVehicle(null)}>✕</button>
                         </div>
-                        <div className="modal-body">
+                        <div className={ui.sectionBody}>
                             {/* Owner */}
                             <div className="flex justify-between items-center mb-5 p-[10px_14px] bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
                                 <div>
                                     <div className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase">Owner</div>
                                     <div className="font-bold text-[15px]">{selectedVehicle.profiles?.full_name || '—'}</div>
                                 </div>
-                                <span className={`badge ${selectedVehicle.status === 'approved' ? 'badge-success' : selectedVehicle.status === 'rejected' ? 'badge-error' : 'badge-info'} text-[13px] p-[6px_14px]`}>
+                                <span className={cx(badgeClass(selectedVehicle.status === 'approved' ? 'success' : selectedVehicle.status === 'rejected' ? 'error' : 'info'), 'px-3.5 py-1.5 text-[13px]')}>
                                     {selectedVehicle.status?.toUpperCase()}
                                 </span>
                             </div>
@@ -984,7 +983,7 @@ export default function AdminPanel() {
                                     <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2">Available Rental Durations</div>
                                     <div className="flex gap-2 flex-wrap">
                                         {selectedVehicle.available_durations.map((d, i) => (
-                                            <span key={i} className="badge badge-info">{d.replace(/_/g, ' ')}</span>
+                                            <span key={i} className={badgeClass('info')}>{d.replace(/_/g, ' ')}</span>
                                         ))}
                                     </div>
                                 </div>
@@ -1016,7 +1015,7 @@ export default function AdminPanel() {
                             {selectedVehicle.agreement_url && (
                                 <div className="mb-5">
                                     <div className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase mb-2">Agreement Document</div>
-                                    <a href={selectedVehicle.agreement_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
+                                    <a href={selectedVehicle.agreement_url} target="_blank" rel="noopener noreferrer" className={cx(ui.button.secondary, ui.button.sm)}>
                                         📄 View Agreement
                                     </a>
                                 </div>
@@ -1061,9 +1060,9 @@ export default function AdminPanel() {
                             )}
                         </div>
                         {selectedVehicle.status === 'pending' && (
-                            <div className="modal-footer">
-                                <button className="btn btn-danger" onClick={() => { setRejectTarget(selectedVehicle.id); setShowRejectModal('vehicle'); setSelectedVehicle(null); }}><FiX /> Reject</button>
-                                <button className="btn btn-success" onClick={() => approveVehicle(selectedVehicle.id, 'approve')}><FiCheck /> Approve Listing</button>
+                            <div className="flex flex-wrap justify-end gap-3 border-t border-border-light px-5 py-4 sm:px-6">
+                                <button className={ui.button.danger} onClick={() => { setRejectTarget(selectedVehicle.id); setShowRejectModal('vehicle'); setSelectedVehicle(null); }}><FiX /> Reject</button>
+                                <button className={ui.button.success} onClick={() => approveVehicle(selectedVehicle.id, 'approve')}><FiCheck /> Approve Listing</button>
                             </div>
                         )}
                     </div>
@@ -1072,19 +1071,19 @@ export default function AdminPanel() {
 
             {/* ========== REJECTION REASON MODAL ========== */}
             {showRejectModal && (
-                <div className="modal-overlay" onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>
-                    <div className="modal max-w-[480px]" onClick={(e) => e.stopPropagation()}>
-                        <div className="modal-header">
+                <div className={ui.modalOverlay} onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>
+                    <div className={cx(ui.modalPanel, 'max-w-[480px]')} onClick={(e) => e.stopPropagation()}>
+                        <div className={ui.sectionHeader}>
                             <h2>❌ Reason for Rejection</h2>
-                            <button className="btn btn-ghost btn-sm" onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>✕</button>
+                            <button className={cx(ui.button.ghost, ui.button.sm)} onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>✕</button>
                         </div>
-                        <div className="modal-body">
+                        <div className={ui.sectionBody}>
                             <p className="text-[14px] text-[var(--text-secondary)] mb-4">
                                 Provide a reason for rejecting this {showRejectModal === 'vehicle' ? 'vehicle listing' : 'verification request'}.
                                 This message will be sent to the {showRejectModal === 'vehicle' ? 'vehicle owner' : 'user'} as a notification.
                             </p>
                             <textarea
-                                className="form-input w-full h-[120px] resize-vertical font-inherit"
+                                className={cx(ui.textarea, 'min-h-[120px]')}
                                 placeholder={showRejectModal === 'vehicle'
                                     ? 'e.g. Photos are unclear, plate number doesn\'t match registration, missing required documents...'
                                     : 'e.g. ID photo is blurry, selfie doesn\'t match ID, expired document...'
@@ -1094,9 +1093,9 @@ export default function AdminPanel() {
                             />
                             <p className="text-[12px] text-[var(--text-tertiary)] mt-2">You can leave this blank to use a generic rejection message.</p>
                         </div>
-                        <div className="modal-footer">
-                            <button className="btn btn-secondary" onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>Cancel</button>
-                            <button className="btn btn-danger" onClick={confirmReject}><FiX /> Confirm Reject</button>
+                        <div className="flex flex-wrap justify-end gap-3 border-t border-border-light px-5 py-4 sm:px-6">
+                            <button className={ui.button.secondary} onClick={() => { setShowRejectModal(null); setRejectReason(''); setRejectTarget(null); }}>Cancel</button>
+                            <button className={ui.button.danger} onClick={confirmReject}><FiX /> Confirm Reject</button>
                         </div>
                     </div>
                 </div>
@@ -1104,3 +1103,6 @@ export default function AdminPanel() {
         </div>
     );
 }
+
+
+

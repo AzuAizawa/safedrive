@@ -100,7 +100,7 @@ export function detectThreats(input) {
     }
 
     // Path traversal
-    if (/\.\.[\/\\]/.test(input)) {
+    if (/\.\.[/\\]/.test(input)) {
         threats.push('path_traversal');
     }
 

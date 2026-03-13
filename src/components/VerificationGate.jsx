@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { FiShield, FiArrowLeft, FiArrowRight } from 'react-icons/fi';
+import { ui } from '../lib/ui';
 
 export default function VerificationGate({ isOpen, onClose, action = 'rent a car' }) {
     const navigate = useNavigate();
@@ -12,54 +13,54 @@ export default function VerificationGate({ isOpen, onClose, action = 'rent a car
     };
 
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal max-w-[480px] text-center" onClick={(e) => e.stopPropagation()}>
-                <div className="px-8 py-10">
-                    {/* Icon */}
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#fff7ed] to-[#fef3c7] flex items-center justify-center mx-auto mb-6 text-[36px]">
-                        <FiShield className="text-[#d97706]" />
+        <div className={ui.modalOverlay} onClick={onClose}>
+            <div className={`${ui.modalPanel} max-w-[480px] text-center`} onClick={(e) => e.stopPropagation()}>
+                <div className="px-6 py-8 sm:px-8 sm:py-10">
+                    <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-accent-200 bg-accent-50 text-4xl text-accent-700">
+                        <FiShield />
                     </div>
 
-                    {/* Title */}
-                    <h2 className="text-[22px] font-extrabold font-[var(--font-display)] mb-3 text-[var(--text-primary)]">
+                    <h2 className="mb-3 font-display text-2xl font-extrabold text-text-primary">
                         Verification Required
                     </h2>
 
-                    {/* Description */}
-                    <p className="text-[15px] text-[var(--text-secondary)] leading-[1.6] max-w-[360px] mx-auto mb-6">
+                    <p className="mx-auto mb-6 max-w-[360px] text-sm leading-7 text-text-secondary sm:text-[15px]">
                         You need to verify your identity before you can <strong>{action}</strong>.
-                        This ensures everyone on SafeDrive is trusted and safe.
+                        This keeps the marketplace trusted and safe for everyone.
                     </p>
 
-                    {/* What's needed */}
-                    <div className="bg-[var(--neutral-50,#f9fafb)] rounded-[var(--radius-md,8px)] px-5 py-4 mb-7 text-left">
-                        <div className="text-[13px] font-bold text-[var(--text-primary)] mb-2.5">
-                            What you'll need:
+                    <div className="mb-7 rounded-3xl border border-border-light bg-surface-secondary px-5 py-4 text-left">
+                        <div className="mb-2.5 text-sm font-bold text-text-primary">
+                            What you&apos;ll need:
                         </div>
                         <div className="flex flex-col gap-2">
                             {[
-                                '🪪 2 Valid Government IDs (front & back)',
-                                '📸 A clear selfie photo for face verification',
+                                '2 valid government IDs (front and back)',
+                                'A clear selfie photo for face verification',
                             ].map((item, i) => (
-                                <div key={i} className="text-[13px] text-[var(--text-secondary)] flex items-center gap-2">
+                                <div key={i} className="flex items-center gap-2 text-sm text-text-secondary">
+                                    <span className="text-primary-600">•</span>
                                     {item}
                                 </div>
                             ))}
                         </div>
-                        <div className="text-[12px] text-[var(--text-tertiary)] mt-2.5">
-                            ⏱️ Review takes 24-48 hours after submission
+                        <div className="mt-2.5 text-xs text-text-tertiary">
+                            Review takes 24-48 hours after submission.
                         </div>
                     </div>
 
-                    {/* Buttons */}
-                    <div className="flex gap-3 justify-center">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
                         <button
-                            className="btn btn-secondary flex-1 max-w-[160px]"
+                            type="button"
+                            onClick={onClose}
+                            className={`${ui.button.secondary} flex-1 sm:max-w-[160px]`}
                         >
                             <FiArrowLeft /> Go Back
                         </button>
                         <button
-                            className="btn btn-accent flex-1 max-w-[200px]"
+                            type="button"
+                            onClick={handleVerify}
+                            className={`${ui.button.accent} flex-1 sm:max-w-[200px]`}
                         >
                             Get Verified <FiArrowRight />
                         </button>

@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import BackButton from '../../components/BackButton';
 import AvailabilityCalendar from '../../components/AvailabilityCalendar';
-import toast from 'react-hot-toast';
+import { ui } from '../../lib/ui';
 
 export default function ManageAvailability() {
     const { id } = useParams();
@@ -14,13 +15,11 @@ export default function ManageAvailability() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        let mounted = true;
         fetchVehicle();
-        const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
-        return () => { mounted = false; clearTimeout(safety); };
     }, [id]);
 
     const fetchVehicle = async () => {
+        setLoading(true);
         try {
             const { data, error } = await supabase
                 .from('vehicles')
@@ -30,16 +29,15 @@ export default function ManageAvailability() {
 
             if (error) throw error;
 
-            // Verify user owns this vehicle
             if (data.owner_id !== user.id) {
-                toast.error('You can only manage your own vehicles');
+                toast.error('You can only manage your own vehicles.');
                 navigate('/my-vehicles');
                 return;
             }
 
             setVehicle(data);
         } catch (err) {
-            console.error('Error:', err);
+            console.error('Error loading vehicle:', err);
             toast.error('Vehicle not found');
             navigate('/my-vehicles');
         } finally {
@@ -47,44 +45,57 @@ export default function ManageAvailability() {
         }
     };
 
-    if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
+    if (loading) {
+        return (
+            <div className={ui.loadingScreen}>
+                <div className={ui.spinner} />
+                <p className="text-sm font-medium text-text-secondary">Loading vehicle schedule...</p>
+            </div>
+        );
+    }
+
     if (!vehicle) return null;
 
     return (
-        <div className="max-w-[700px] mx-auto">
-            <BackButton to="/my-vehicles" label="Back to My Vehicles" />
+        <div className={ui.pageNarrow}>
+            <BackButton to="/my-vehicles" label="Back to my vehicles" />
 
-            <div className="page-header">
-                <h1>📅 Schedule — {vehicle.year} {vehicle.make} {vehicle.model}</h1>
-                <p>Block dates when your vehicle is unavailable. Booked dates appear automatically.</p>
+            <div className={ui.pageHeader}>
+                <h1 className={ui.pageTitle}>
+                    Schedule for {vehicle.year} {vehicle.make} {vehicle.model}
+                </h1>
+                <p className={ui.pageDescription}>
+                    Block the dates when this vehicle should not accept bookings. Existing bookings appear automatically on the calendar.
+                </p>
             </div>
 
-            <div className="mb-6">
-                <div className="card mb-4">
-                    <div className="card-body flex items-center gap-4">
-                        <div className="text-[32px]">🚗</div>
-                        <div>
-                            <h3 className="text-[16px] font-bold">{vehicle.year} {vehicle.make} {vehicle.model}</h3>
-                            <p className="text-[13px] text-[var(--text-secondary)]">{vehicle.plate_number}</p>
+            <section className={ui.section}>
+                <div className="flex items-center gap-4 px-5 py-5 sm:px-6">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-neutral-100 text-3xl">
+                        🚗
+                    </div>
+                    <div>
+                        <div className="font-semibold text-text-primary">
+                            {vehicle.year} {vehicle.make} {vehicle.model}
                         </div>
+                        <div className="text-sm text-text-tertiary">{vehicle.plate_number}</div>
                     </div>
                 </div>
-            </div>
+            </section>
 
             <AvailabilityCalendar vehicleId={id} editable={true} />
 
-            <div className="card mt-6">
-                <div className="card-body">
-                    <h3 className="text-[14px] font-bold mb-2">💡 How It Works</h3>
-                    <ul className="text-[13px] text-[var(--text-secondary)] pl-5 leading-[1.8] m-0 list-disc">
-                        <li><strong className="text-[var(--success-600)]">Green</strong> dates are available for booking</li>
-                        <li><strong className="text-[var(--error-600)]">Red</strong> dates are blocked by you (click to toggle)</li>
-                        <li><strong className="text-[var(--primary-600)]">Blue</strong> dates have active bookings (cannot be changed)</li>
-                        <li>Click dates to block/unblock, then hit <strong>Save</strong></li>
-                        <li>Rentees will see the blocked dates and cannot book on those days</li>
+            <section className={ui.section}>
+                <div className={ui.sectionBody}>
+                    <h2 className="font-display text-2xl font-semibold text-text-primary">How it works</h2>
+                    <ul className="mt-4 space-y-2 text-sm leading-7 text-text-secondary">
+                        <li>Available dates stay open for renters to request.</li>
+                        <li>Blocked dates are controlled by you and stay unavailable.</li>
+                        <li>Booked dates come from active reservations and cannot be edited here.</li>
+                        <li>Save your changes after selecting the dates you want to block or reopen.</li>
                     </ul>
                 </div>
-            </div>
+            </section>
         </div>
     );
 }

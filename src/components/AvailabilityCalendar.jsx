@@ -1,20 +1,21 @@
-import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '../lib/supabase';
-import { FiChevronLeft, FiChevronRight, FiSave, FiLoader } from 'react-icons/fi';
+import { useEffect, useMemo, useState } from 'react';
+import { FiChevronLeft, FiChevronRight, FiLoader, FiSave } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { supabase } from '../lib/supabase';
+import { ui } from '../lib/ui';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-function dateToStr(d) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function dateToStr(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 export default function AvailabilityCalendar({ vehicleId, editable = false, onDateSelect }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [blockedDates, setBlockedDates] = useState(new Set());
     const [bookedDates, setBookedDates] = useState(new Set());
-    const [pendingChanges, setPendingChanges] = useState(new Map()); // dateStr -> 'add' | 'remove'
+    const [pendingChanges, setPendingChanges] = useState(new Map());
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -23,7 +24,9 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
     const today = dateToStr(new Date());
 
     useEffect(() => {
-        if (vehicleId) fetchAvailability();
+        if (vehicleId) {
+            fetchAvailability();
+        }
     }, [vehicleId, year, month]);
 
     const fetchAvailability = async () => {
@@ -33,7 +36,6 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
             const lastDay = new Date(year, month + 1, 0).getDate();
             const endOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-${lastDay}`;
 
-            // Fetch blocked dates
             const { data: blockData } = await supabase
                 .from('vehicle_availability')
                 .select('unavailable_date, reason')
@@ -41,15 +43,14 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
                 .gte('unavailable_date', startOfMonth)
                 .lte('unavailable_date', endOfMonth);
 
-            const blocked = new Set();
-            (blockData || []).forEach(d => {
-                if (d.reason === 'blocked' || d.reason === 'maintenance') {
-                    blocked.add(d.unavailable_date);
+            const nextBlocked = new Set();
+            (blockData || []).forEach((entry) => {
+                if (entry.reason === 'blocked' || entry.reason === 'maintenance') {
+                    nextBlocked.add(entry.unavailable_date);
                 }
             });
-            setBlockedDates(blocked);
+            setBlockedDates(nextBlocked);
 
-            // Fetch booked dates
             const { data: bookings } = await supabase
                 .from('bookings')
                 .select('start_date, end_date, status')
@@ -57,19 +58,24 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
                 .in('status', ['pending', 'confirmed', 'active'])
                 .or(`start_date.lte.${endOfMonth},end_date.gte.${startOfMonth}`);
 
-            const booked = new Set();
-            (bookings || []).forEach(b => {
-                const start = new Date(b.start_date);
-                const end = new Date(b.end_date);
-                for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-                    const ds = dateToStr(d);
-                    if (ds >= startOfMonth && ds <= endOfMonth) booked.add(ds);
+            const nextBooked = new Set();
+            (bookings || []).forEach((booking) => {
+                const start = new Date(booking.start_date);
+                const end = new Date(booking.end_date);
+
+                for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+                    const dateString = dateToStr(date);
+                    if (dateString >= startOfMonth && dateString <= endOfMonth) {
+                        nextBooked.add(dateString);
+                    }
                 }
             });
-            setBookedDates(booked);
+
+            setBookedDates(nextBooked);
             setPendingChanges(new Map());
         } catch (err) {
             console.error('Error fetching availability:', err);
+            toast.error('Failed to load availability');
         } finally {
             setLoading(false);
         }
@@ -80,74 +86,80 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
         const totalDays = new Date(year, month + 1, 0).getDate();
         const days = [];
 
-        // Empty cells for days before month starts
-        for (let i = 0; i < firstDay; i++) days.push(null);
-        for (let d = 1; d <= totalDays; d++) days.push(d);
+        for (let i = 0; i < firstDay; i += 1) {
+            days.push(null);
+        }
+
+        for (let day = 1; day <= totalDays; day += 1) {
+            days.push(day);
+        }
 
         return days;
-    }, [year, month]);
-
-    const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
-    const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
+    }, [month, year]);
 
     const handleDayClick = (day) => {
         if (!day) return;
-        const ds = dateToStr(new Date(year, month, day));
 
-        // Can't modify past dates
-        if (ds < today) return;
+        const dateString = dateToStr(new Date(year, month, day));
+        if (dateString < today) return;
 
-        // Can't modify booked dates
-        if (bookedDates.has(ds)) {
-            toast.error('This date has an active booking');
+        if (bookedDates.has(dateString)) {
+            toast.error('This date has an active booking.');
             return;
         }
 
         if (editable) {
-            const newChanges = new Map(pendingChanges);
-            const isCurrentlyBlocked = blockedDates.has(ds);
-            const pendingAction = newChanges.get(ds);
+            const nextChanges = new Map(pendingChanges);
+            const currentlyBlocked = blockedDates.has(dateString);
+            const pendingAction = nextChanges.get(dateString);
 
-            if (isCurrentlyBlocked && !pendingAction) {
-                newChanges.set(ds, 'remove'); // Mark for unblocking
-            } else if (!isCurrentlyBlocked && !pendingAction) {
-                newChanges.set(ds, 'add'); // Mark for blocking
+            if (currentlyBlocked && !pendingAction) {
+                nextChanges.set(dateString, 'remove');
+            } else if (!currentlyBlocked && !pendingAction) {
+                nextChanges.set(dateString, 'add');
             } else {
-                newChanges.delete(ds); // Cancel pending change
+                nextChanges.delete(dateString);
             }
-            setPendingChanges(newChanges);
+
+            setPendingChanges(nextChanges);
         }
 
-        if (onDateSelect) onDateSelect(ds);
+        if (onDateSelect) {
+            onDateSelect(dateString);
+        }
     };
 
     const getDayStatus = (day) => {
         if (!day) return 'empty';
-        const ds = dateToStr(new Date(year, month, day));
 
-        if (ds < today) return 'past';
-        if (bookedDates.has(ds)) return 'booked';
+        const dateString = dateToStr(new Date(year, month, day));
+        if (dateString < today) return 'past';
+        if (bookedDates.has(dateString)) return 'booked';
 
-        const pendingAction = pendingChanges.get(ds);
+        const pendingAction = pendingChanges.get(dateString);
         if (pendingAction === 'add') return 'pending-block';
         if (pendingAction === 'remove') return 'pending-unblock';
-        if (blockedDates.has(ds)) return 'blocked';
+        if (blockedDates.has(dateString)) return 'blocked';
 
         return 'available';
     };
 
     const saveChanges = async () => {
         if (pendingChanges.size === 0) return;
+
         setSaving(true);
         try {
             const toAdd = [];
             const toRemove = [];
-            pendingChanges.forEach((action, dateStr) => {
-                if (action === 'add') toAdd.push(dateStr);
-                else toRemove.push(dateStr);
+
+            pendingChanges.forEach((action, dateString) => {
+                if (action === 'add') {
+                    toAdd.push(dateString);
+                } else {
+                    toRemove.push(dateString);
+                }
             });
 
-            // Remove unblocked dates
             if (toRemove.length > 0) {
                 await supabase
                     .from('vehicle_availability')
@@ -156,13 +168,13 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
                     .in('unavailable_date', toRemove);
             }
 
-            // Add blocked dates
             if (toAdd.length > 0) {
-                const rows = toAdd.map(date => ({
+                const rows = toAdd.map((dateString) => ({
                     vehicle_id: vehicleId,
-                    unavailable_date: date,
+                    unavailable_date: dateString,
                     reason: 'blocked',
                 }));
+
                 await supabase.from('vehicle_availability').upsert(rows, {
                     onConflict: 'vehicle_id,unavailable_date',
                 });
@@ -171,120 +183,127 @@ export default function AvailabilityCalendar({ vehicleId, editable = false, onDa
             toast.success(`Saved ${pendingChanges.size} change${pendingChanges.size > 1 ? 's' : ''}`);
             fetchAvailability();
         } catch (err) {
-            console.error('Error saving:', err);
-            toast.error('Failed to save changes');
+            console.error('Error saving availability:', err);
+            toast.error('Failed to save availability');
         } finally {
             setSaving(false);
         }
     };
 
     const statusClasses = {
-        available: 'bg-[var(--success-50)] text-[var(--success-700)] border-[var(--success-200)]',
-        blocked: 'bg-[var(--error-50)] text-[var(--error-700)] border-[var(--error-200)]',
-        booked: 'bg-[var(--primary-50)] text-[var(--primary-700)] border-[var(--primary-200)]',
-        past: 'bg-[var(--neutral-50)] text-[var(--neutral-400)] border-transparent',
-        'pending-block': 'bg-[var(--error-100)] text-[var(--error-600)] border-[var(--error-400)]',
-        'pending-unblock': 'bg-[var(--success-100)] text-[var(--success-600)] border-[var(--success-400)]',
+        available: 'border-success-200 bg-success-50 text-success-700',
+        blocked: 'border-error-200 bg-error-50 text-error-700',
+        booked: 'border-primary-200 bg-primary-50 text-primary-700',
+        past: 'border-transparent bg-neutral-50 text-neutral-400',
+        'pending-block': 'border-error-400 bg-error-50 text-error-700 ring-2 ring-error-200/70',
+        'pending-unblock': 'border-success-400 bg-success-50 text-success-700 ring-2 ring-success-200/70',
     };
 
     return (
-        <div className="card overflow-visible">
-            <div className="card-header flex justify-between items-center">
-                <h2 className="text-[16px] font-bold flex items-center gap-2">
-                    📅 {editable ? 'Manage Availability' : 'Availability Calendar'}
-                </h2>
+        <section className={ui.section}>
+            <div className={ui.sectionHeader}>
+                <div>
+                    <h2 className="font-display text-2xl font-bold text-text-primary">
+                        {editable ? 'Manage availability' : 'Availability calendar'}
+                    </h2>
+                    <p className="text-sm text-text-tertiary">
+                        {editable
+                            ? 'Block days when the vehicle cannot be booked.'
+                            : 'View upcoming blocked and booked dates.'}
+                    </p>
+                </div>
                 {editable && pendingChanges.size > 0 && (
-                    <button className="btn btn-accent btn-sm" onClick={saveChanges} disabled={saving}>
-                        {saving ? <><FiLoader className="spin" /> Saving...</> : <><FiSave /> Save {pendingChanges.size} Change{pendingChanges.size > 1 ? 's' : ''}</>}
+                    <button type="button" className={`${ui.button.accent} ${ui.button.sm}`} onClick={saveChanges} disabled={saving}>
+                        {saving ? <FiLoader className="animate-spin" /> : <FiSave />}
+                        Save {pendingChanges.size} change{pendingChanges.size > 1 ? 's' : ''}
                     </button>
                 )}
             </div>
 
-            <div className="card-body">
-                {/* Month Navigation */}
-                <div className="flex justify-between items-center mb-4">
-                    <button className="btn btn-ghost btn-sm" onClick={prevMonth}><FiChevronLeft /></button>
-                    <h3 className="text-[16px] font-bold">{MONTHS[month]} {year}</h3>
-                    <button className="btn btn-ghost btn-sm" onClick={nextMonth}><FiChevronRight /></button>
+            <div className={ui.sectionBody}>
+                <div className="mb-5 flex items-center justify-between">
+                    <button type="button" className={`${ui.button.ghost} ${ui.button.sm}`} onClick={() => setCurrentDate(new Date(year, month - 1, 1))}>
+                        <FiChevronLeft />
+                        Previous
+                    </button>
+                    <h3 className="font-display text-2xl font-semibold text-text-primary">
+                        {MONTHS[month]} {year}
+                    </h3>
+                    <button type="button" className={`${ui.button.ghost} ${ui.button.sm}`} onClick={() => setCurrentDate(new Date(year, month + 1, 1))}>
+                        Next
+                        <FiChevronRight />
+                    </button>
                 </div>
 
                 {loading ? (
-                    <div className="text-center p-10">
-                        <div className="spinner mx-auto" />
+                    <div className="flex items-center justify-center py-16">
+                        <div className={ui.spinner} />
                     </div>
                 ) : (
                     <>
-                        {/* Day Headers */}
-                        <div className="grid grid-cols-7 gap-1 mb-2">
-                            {DAYS.map(d => (
-                                <div key={d} className="text-center text-[11px] font-bold text-[var(--text-tertiary)] uppercase py-1">
-                                    {d}
+                        <div className="grid grid-cols-7 gap-2 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-text-tertiary">
+                            {DAYS.map((day) => (
+                                <div key={day} className="py-2">
+                                    {day}
                                 </div>
                             ))}
                         </div>
-
-                        {/* Calendar Grid */}
-                        <div className="grid grid-cols-7 gap-1">
-                            {calendarDays.map((day, i) => {
+                        <div className="mt-3 grid grid-cols-7 gap-2">
+                            {calendarDays.map((day, index) => {
                                 const status = getDayStatus(day);
-                                const classes = statusClasses[status] || 'text-[var(--text-tertiary)]';
-                                const isClickable = editable && day && status !== 'past' && status !== 'booked';
                                 const isToday = day && dateToStr(new Date(year, month, day)) === today;
+                                const canEdit = editable && day && status !== 'past' && status !== 'booked';
 
                                 return (
-                                    <div
-                                        key={i}
-                                        onClick={() => isClickable && handleDayClick(day)}
-                                        className={`aspect-square flex items-center justify-center rounded-[var(--radius-md)] text-[13px] transition-all duration-150 border relative 
-                                            ${day ? classes : 'border-transparent'} 
-                                            ${isClickable ? 'cursor-pointer hover:scale-110' : 'cursor-default'} 
-                                            ${isToday ? 'font-extrabold border-2 border-[var(--accent-500)]' : 'font-semibold'}
-                                        `}
+                                    <button
+                                        key={`${day || 'blank'}-${index}`}
+                                        type="button"
+                                        onClick={() => canEdit && handleDayClick(day)}
+                                        disabled={!canEdit}
+                                        className={`${day ? statusClasses[status] : 'border-transparent bg-transparent'} ${isToday ? 'border-2 border-accent-500' : 'border'} aspect-square rounded-2xl text-sm font-semibold transition ${canEdit ? 'cursor-pointer hover:-translate-y-0.5' : 'cursor-default'} disabled:opacity-100`}
                                         title={
-                                            status === 'booked' ? 'Booked by a rentee' :
-                                                status === 'blocked' ? 'Blocked by owner' :
-                                                    status === 'pending-block' ? 'Will be blocked (unsaved)' :
-                                                        status === 'pending-unblock' ? 'Will be unblocked (unsaved)' :
-                                                            status === 'available' ? 'Available' :
-                                                                status === 'past' ? 'Past date' : ''
+                                            status === 'booked'
+                                                ? 'Booked'
+                                                : status === 'blocked'
+                                                    ? 'Blocked'
+                                                    : status === 'pending-block'
+                                                        ? 'Will be blocked'
+                                                        : status === 'pending-unblock'
+                                                            ? 'Will be unblocked'
+                                                            : status === 'past'
+                                                                ? 'Past date'
+                                                                : 'Available'
                                         }
                                     >
                                         {day || ''}
-                                    </div>
+                                    </button>
                                 );
                             })}
                         </div>
                     </>
                 )}
 
-                {/* Legend */}
-                <div className="flex flex-wrap gap-3 mt-4 text-[12px]">
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-3.5 h-3.5 rounded-[4px] bg-[var(--success-50)] border border-[var(--success-200)]" />
-                        <span className="text-[var(--text-secondary)]">Available</span>
+                <div className="mt-6 flex flex-wrap gap-4 text-sm text-text-secondary">
+                    <div className="flex items-center gap-2">
+                        <span className="h-3.5 w-3.5 rounded-full bg-success-50 ring-2 ring-success-200" />
+                        Available
                     </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-3.5 h-3.5 rounded-[4px] bg-[var(--primary-50)] border border-[var(--primary-200)]" />
-                        <span className="text-[var(--text-secondary)]">Booked</span>
+                    <div className="flex items-center gap-2">
+                        <span className="h-3.5 w-3.5 rounded-full bg-primary-50 ring-2 ring-primary-200" />
+                        Booked
                     </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-3.5 h-3.5 rounded-[4px] bg-[var(--error-50)] border border-[var(--error-200)]" />
-                        <span className="text-[var(--text-secondary)]">Blocked</span>
+                    <div className="flex items-center gap-2">
+                        <span className="h-3.5 w-3.5 rounded-full bg-error-50 ring-2 ring-error-200" />
+                        Blocked
                     </div>
                     {editable && (
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-3.5 h-3.5 rounded-[4px] bg-[var(--error-100)] border-2 border-dashed border-[var(--error-400)]" />
-                            <span className="text-[var(--text-secondary)]">Unsaved</span>
+                        <div className="flex items-center gap-2">
+                            <span className="h-3.5 w-3.5 rounded-full bg-warning-50 ring-2 ring-warning-200" />
+                            Pending change
                         </div>
                     )}
                 </div>
-
-                {editable && (
-                    <p className="text-[12px] text-[var(--text-tertiary)] mt-3">
-                        💡 Click on available dates to block them. Click blocked dates to unblock. Then hit Save.
-                    </p>
-                )}
             </div>
-        </div>
+        </section>
     );
 }

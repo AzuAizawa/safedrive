@@ -1,0 +1,15 @@
+this will be a design update:
+
+First of all the design technology will use tailwind as a standard
+
+we will change the UI of the system, we will copy or similar to airbnb, the default layout will will be divided by the renter to lister/owner, we will use the airbnb toggle button to switch the user role from renter to lister. so a different UI will be shown when users is in renter mode and listing mode. the toggle button will be inside the dropdown menu of when the user clicked the profie picture on the right side of the header. replace the "my bookings" in the dropdown menu. replace it with the new toggle that we talk abt
+
+
+#### RENTER UI
+renter UI will see, browse cars for searching for vehicle and "my bookings" for renter booked cars, in the "my bookings" have table for information of the booked cars, like, what car, owner basic information, start book date, end book date. the list car button in the header will be removed in the renter ui
+
+#### LISTER/OWNER UI
+the lister ui will see the "my vehicles" and bookings. for bookings, this one is similar to my bookings but the list will show the customers WHO BOOKED the owner's car so it should have necessary information aswell.
+
+BOTH MODES SHOULD HAVE DASHBOARD BE REMOVED.
+

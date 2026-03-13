@@ -12,6 +12,7 @@ import {
 
 const AuthContext = createContext({});
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }) {
@@ -255,8 +256,10 @@ export function AuthProvider({ children }) {
         setProfile(null);
 
         try {
-            logSecurityEvent('auth.logout', 'User initiated sign out', { severity: 'info' }).catch(() => { });
-        } catch (e) { }
+            logSecurityEvent('auth.logout', 'User initiated sign out', { severity: 'info' }).catch(() => {});
+        } catch {
+            // Ignore client-side logging failures during sign-out.
+        }
 
         try {
             await activeClientRef.current.auth.signOut();
@@ -272,7 +275,9 @@ export function AuthProvider({ children }) {
             sessionStorage.removeItem('safedrive-auth');
             sessionStorage.removeItem('safedrive-admin-auth');
             localStorage.removeItem('safedrive_remember_me');
-        } catch (e) { }
+        } catch {
+            // Storage cleanup is best-effort only.
+        }
 
         // Reset to the user client and re-attach a fresh listener
         activeClientRef.current = supabaseUser;

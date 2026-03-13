@@ -1,372 +1,417 @@
-import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { supabase } from '../lib/supabase';
-import { FiUser, FiMail, FiPhone, FiMapPin, FiUpload, FiCheckCircle, FiClock, FiShield, FiCalendar } from 'react-icons/fi';
+import { useEffect, useRef, useState } from 'react';
+import { FiCalendar, FiCheckCircle, FiMail, FiMapPin, FiPhone, FiShield, FiUpload, FiUser } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import BackButton from '../components/BackButton';
+import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
+import { badgeClass, cx, ui } from '../lib/ui';
+
+function Field({ label, icon, children, required = false }) {
+  return (
+    <label className="space-y-2">
+      <span className={ui.label}>
+        {label}
+        {required ? ' *' : ''}
+      </span>
+      <div className="relative">
+        {icon && <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-tertiary">{icon}</span>}
+        {children}
+      </div>
+    </label>
+  );
+}
+
+function UploadCard({ label, hint, inputRef, required = false, capture }) {
+  return (
+    <div className="space-y-2">
+      <label className={ui.label}>
+        {label}
+        {required ? ' *' : ''}
+      </label>
+      <div className="rounded-[28px] border border-dashed border-border-medium bg-surface-secondary px-5 py-6 text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary-50 text-primary-700">
+          <FiUpload />
+        </div>
+        <p className="mt-3 text-sm font-medium text-text-primary">{hint}</p>
+        <input ref={inputRef} type="file" accept="image/*" capture={capture} className="mt-4 block w-full text-sm text-text-secondary file:mr-4 file:rounded-full file:border-0 file:bg-primary-700 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-primary-800" />
+      </div>
+    </div>
+  );
+}
 
 export default function Profile() {
-    const { profile, updateProfile, user } = useAuth();
-    const [saveLoading, setSaveLoading] = useState(false);
-    const [submitLoading, setSubmitLoading] = useState(false);
+  const { profile, updateProfile, user } = useAuth();
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    full_name: '',
+    phone: '',
+    city: '',
+    province: '',
+    date_of_birth: '',
+    drivers_license_number: '',
+    national_id_number: '',
+  });
 
-    // Sync profile into formData whenever profile changes (handles async load)
-    const [formData, setFormData] = useState({
-        full_name: '',
-        phone: '',
-        city: '',
-        province: '',
-        date_of_birth: '',
-        drivers_license_number: '',
-        national_id_number: '',
-    });
+  const idFrontRef = useRef(null);
+  const idBackRef = useRef(null);
+  const selfieRef = useRef(null);
 
-    useEffect(() => {
-        if (profile) {
-            setFormData({
-                full_name: profile.full_name || '',
-                phone: profile.phone || '',
-                city: profile.city || '',
-                province: profile.province || '',
-                date_of_birth: profile.date_of_birth || '',
-                drivers_license_number: profile.drivers_license_number || '',
-                national_id_number: profile.national_id_number || '',
-            });
-        }
-    }, [profile]);
+  useEffect(() => {
+    if (profile) {
+      setFormData({
+        full_name: profile.full_name || '',
+        phone: profile.phone || '',
+        city: profile.city || '',
+        province: profile.province || '',
+        date_of_birth: profile.date_of_birth || '',
+        drivers_license_number: profile.drivers_license_number || '',
+        national_id_number: profile.national_id_number || '',
+      });
+    }
+  }, [profile]);
 
-    const idFrontRef = useRef(null);
-    const idBackRef = useRef(null);
-    const selfieRef = useRef(null);
+  const handleSaveProfile = async () => {
+    setSaveLoading(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: formData.full_name,
+          phone: formData.phone,
+          city: formData.city,
+          province: formData.province,
+          date_of_birth: formData.date_of_birth || null,
+          drivers_license_number: formData.drivers_license_number,
+          national_id_number: formData.national_id_number,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
 
-    // ── Save personal info ────────────────────────────────────────────────
-    const handleSaveProfile = async () => {
-        setSaveLoading(true);
+      if (error) {
+        throw new Error(error.message || 'Could not save profile');
+      }
+
+      await updateProfile({});
+      toast.success('Profile saved successfully');
+    } catch (err) {
+      console.error(err);
+      toast.error(err.message || 'Could not save profile. Please try again.');
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  const handleSubmitVerification = async () => {
+    if (!formData.full_name || !formData.phone) {
+      toast.error('Please fill in your full name and phone number first.');
+      return;
+    }
+
+    if (!formData.drivers_license_number && !formData.national_id_number) {
+      toast.error("Please provide at least one ID number before submitting verification.");
+      return;
+    }
+
+    if (!idFrontRef.current?.files?.[0]) {
+      toast.error('Please upload the front photo of your ID.');
+      return;
+    }
+
+    if (!selfieRef.current?.files?.[0]) {
+      toast.error('Please upload a selfie photo.');
+      return;
+    }
+
+    setSubmitLoading(true);
+    try {
+      const tryUpload = async (bucket, path, file) => {
         try {
-            // Use supabase directly (.eq on own ID always passes RLS for authenticated users)
-            const { error } = await supabase
-                .from('profiles')
-                .update({
-                    full_name: formData.full_name,
-                    phone: formData.phone,
-                    city: formData.city,
-                    province: formData.province,
-                    date_of_birth: formData.date_of_birth || null,
-                    drivers_license_number: formData.drivers_license_number,
-                    national_id_number: formData.national_id_number,
-                    updated_at: new Date().toISOString(),
-                })
-                .eq('id', user.id);
-
-            if (error) {
-                console.error('Profile save error:', error);
-                throw new Error(error.message || 'Could not save profile');
-            }
-
-            // Refresh profile in context
-            await updateProfile({});
-            toast.success('Profile saved successfully!');
-        } catch (err) {
-            console.error(err);
-            toast.error(err.message || 'Could not save profile. Please try again.');
-        } finally {
-            setSaveLoading(false);
+          const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
+          if (error) {
+            console.warn(`Photo upload to ${bucket} failed:`, error.message);
+          }
+        } catch (uploadError) {
+          console.warn(`Photo upload to ${bucket} threw:`, uploadError.message);
         }
-    };
+      };
 
-    // ── Submit for verification ───────────────────────────────────────────
-    const handleSubmitVerification = async () => {
-        if (!formData.full_name || !formData.phone) {
-            toast.error('Please fill in your full name and phone number first.');
-            return;
-        }
-        if (!formData.drivers_license_number && !formData.national_id_number) {
-            toast.error('Please provide at least one ID number (Driver\'s License or National ID).');
-            return;
-        }
-        if (!idFrontRef.current?.files?.[0]) {
-            toast.error('Please upload the front photo of your ID.');
-            return;
-        }
-        if (!selfieRef.current?.files?.[0]) {
-            toast.error('Please upload a selfie photo.');
-            return;
-        }
+      await tryUpload('documents', `${user.id}/id-front-${Date.now()}`, idFrontRef.current.files[0]);
 
-        setSubmitLoading(true);
-        try {
-            // Upload photos as BEST-EFFORT — don't block submission if storage fails
-            const tryUpload = async (bucket, path, file) => {
-                try {
-                    const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
-                    if (error) console.warn(`Photo upload to ${bucket} failed (will retry later):`, error.message);
-                } catch (e) {
-                    console.warn(`Photo upload to ${bucket} threw:`, e.message);
-                }
-            };
+      if (idBackRef.current?.files?.[0]) {
+        await tryUpload('documents', `${user.id}/id-back-${Date.now()}`, idBackRef.current.files[0]);
+      }
 
-            await tryUpload('documents', `${user.id}/id-front-${Date.now()}`, idFrontRef.current.files[0]);
-            if (idBackRef.current?.files?.[0]) {
-                await tryUpload('documents', `${user.id}/id-back-${Date.now()}`, idBackRef.current.files[0]);
-            }
-            await tryUpload('selfies', `${user.id}/selfie-${Date.now()}`, selfieRef.current.files[0]);
+      await tryUpload('selfies', `${user.id}/selfie-${Date.now()}`, selfieRef.current.files[0]);
 
-            // ALWAYS save profile data + set verification_status to 'submitted'
-            // This is the critical step — even if photo uploads fail, the request is registered
-            const { error: updateErr } = await supabase
-                .from('profiles')
-                .update({
-                    full_name: formData.full_name,
-                    phone: formData.phone,
-                    city: formData.city,
-                    province: formData.province,
-                    date_of_birth: formData.date_of_birth || null,
-                    drivers_license_number: formData.drivers_license_number,
-                    national_id_number: formData.national_id_number,
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          full_name: formData.full_name,
+          phone: formData.phone,
+          city: formData.city,
+          province: formData.province,
+          date_of_birth: formData.date_of_birth || null,
+          drivers_license_number: formData.drivers_license_number,
+          national_id_number: formData.national_id_number,
+          verification_status: 'submitted',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
 
-                    verification_status: 'submitted',
-                    updated_at: new Date().toISOString(),
-                })
-                .eq('id', user.id);
+      if (updateError) {
+        throw new Error(updateError.message || 'Could not submit verification');
+      }
 
-            if (updateErr) throw new Error(updateErr.message || 'Could not submit verification');
+      await updateProfile({});
+      toast.success('Verification submitted. Our team will review it within 24 to 48 hours.');
+    } catch (err) {
+      console.error('Verification submit error:', err);
+      toast.error(err.message || 'Failed to submit verification. Please try again.');
+    } finally {
+      setSubmitLoading(false);
+    }
+  };
 
-            // Refresh context profile
-            await updateProfile({});
-            toast.success('Verification submitted! Our team will review within 24–48 hours. ✅');
-        } catch (err) {
-            console.error('Verification submit error:', err);
-            toast.error(err.message || 'Failed to submit verification. Please try again.');
-        } finally {
-            setSubmitLoading(false);
-        }
-    };
+  const verified = profile?.role === 'verified' || profile?.verification_status === 'verified';
+  const infoLocked =
+    profile?.verification_status === 'submitted' || profile?.verification_status === 'verified';
 
-    const getStatusColor = (status) => {
-        switch (status) {
-            case 'verified': return 'var(--success-500)';
-            case 'submitted': return 'var(--warning-500)';
-            case 'rejected': return 'var(--error-500)';
-            default: return 'var(--text-tertiary)';
-        }
-    };
+  return (
+    <div className={ui.pageNarrow}>
+      <BackButton />
 
-    // Personal info is locked once submitted or verified; editable again only if rejected
-    const infoLocked = profile?.verification_status === 'submitted' || profile?.verification_status === 'verified';
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-text-tertiary">Account</p>
+        <h1 className={ui.pageTitle}>My Profile</h1>
+        <p className={ui.pageDescription}>
+          Keep your personal details current and manage identity verification for renting and listing.
+        </p>
+      </div>
 
-    return (
-        <div className="max-w-[800px] mx-auto">
-            <BackButton />
-
-            <div className="page-header">
-                <h1>👤 My Profile</h1>
-                <p>Manage your personal information and identity verification</p>
+      <section
+        className={cx(
+          'rounded-[32px] border px-6 py-6 shadow-soft',
+          verified
+            ? 'border-success-200 bg-success-50'
+            : 'border-border-light bg-surface-primary'
+        )}
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-4">
+            <div
+              className={cx(
+                'flex h-14 w-14 items-center justify-center rounded-full',
+                verified ? 'bg-white text-success-700' : 'bg-primary-50 text-primary-700'
+              )}
+            >
+              {verified ? <FiCheckCircle className="text-2xl" /> : <FiShield className="text-2xl" />}
             </div>
-
-            {/* Verification Status Banner — only two states: verified or not verified */}
-            {(() => {
-                const verified = profile?.role === 'verified' || profile?.verification_status === 'verified';
-                return (
-                    <div className={`rounded-[var(--radius-xl)] border border-[var(--border-light)] p-5 mb-6 shadow-sm overflow-hidden ${verified ? 'bg-gradient-to-br from-[#f0fdf4] to-[#dcfce7]' : 'bg-[var(--surface-primary)]'}`}>
-                        <div className="flex items-center gap-4">
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${verified ? 'bg-[#bbf7d020] text-[var(--success-500)]' : 'bg-[#f3f4f620] text-[var(--text-tertiary)]'}`}>
-                                {verified ? <FiCheckCircle size={24} /> : <FiShield size={24} />}
-                            </div>
-                            <div className="flex-1">
-                                <h3 className="text-[16px] font-bold mb-0.5">
-                                    {verified ? '✅ Identity Verified' : '🔒 Not Verified'}
-                                </h3>
-                                <p className="text-[13px] text-[var(--text-secondary)]">
-                                    {verified
-                                        ? 'Your identity has been verified. You have full access — list vehicles, rent, and subscribe.'
-                                        : 'Submit your ID and selfie below to get verified and unlock all SafeDrive features.'}
-                                </p>
-                            </div>
-                            <span className={`badge ${verified ? 'badge-verified' : 'badge-neutral'}`}>
-                                {verified ? 'Verified' : 'Not Verified'}
-                            </span>
-                        </div>
-                    </div>
-                );
-            })()}
-
-            {/* Personal Information */}
-            <div className="rounded-[var(--radius-xl)] border border-[var(--border-light)] bg-[var(--surface-primary)] shadow-sm overflow-hidden mb-6">
-                <div className="p-[16px_24px] border-b border-[var(--border-light)]"><h2 className="text-[16px] font-bold">Personal Information</h2></div>
-                <div className="p-[20px_24px]">
-                    {/* Lock notice */}
-                    {infoLocked && (
-                        <div className="bg-[var(--neutral-50)] border border-[var(--border-light)] rounded-[var(--radius-md)] p-3 mb-5 flex items-center gap-2.5 text-[13px] text-[var(--text-secondary)]">
-                            <span className="text-[18px]">🔒</span>
-                            <span>
-                                Your personal information is <strong>locked</strong> because your verification was
-                                {profile?.verification_status === 'verified' ? ' approved.' : ' submitted and is pending review.'}
-                                {profile?.verification_status !== 'verified' && ' If it is rejected, you can edit and resubmit.'}
-                            </span>
-                        </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div className="form-group mb-4">
-                            <label className="form-label">Full Name</label>
-                            <div className="relative">
-                                <FiUser className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                                <input className={`form-input pl-10 w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`} value={formData.full_name}
-                                    onChange={(e) => !infoLocked && setFormData({ ...formData, full_name: e.target.value })}
-                                    placeholder="Your full name" readOnly={infoLocked} />
-                            </div>
-                        </div>
-                        <div className="form-group mb-4">
-                            <label className="form-label">Email</label>
-                            <div className="relative">
-                                <FiMail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                                <input className="form-input pl-10 w-full" value={profile?.email || ''} disabled />
-                            </div>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div className="form-group mb-4">
-                            <label className="form-label">Phone Number</label>
-                            <div className="relative">
-                                <FiPhone className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                                <input className={`form-input pl-10 w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`} placeholder="09XX XXX XXXX"
-                                    value={formData.phone}
-                                    onChange={(e) => !infoLocked && setFormData({ ...formData, phone: e.target.value })}
-                                    readOnly={infoLocked} />
-                            </div>
-                        </div>
-                        <div className="form-group mb-4">
-                            <label className="form-label">Date of Birth</label>
-                            <div className="relative">
-                                <FiCalendar className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                                <input type="date" className={`form-input pl-10 w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`}
-                                    value={formData.date_of_birth}
-                                    onChange={(e) => !infoLocked && setFormData({ ...formData, date_of_birth: e.target.value })}
-                                    readOnly={infoLocked} />
-                            </div>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 mb-5">
-                        <div className="form-group mb-4">
-                            <label className="form-label">City</label>
-                            <div className="relative">
-                                <FiMapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                                <input className={`form-input pl-10 w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`} placeholder="Your city"
-                                    value={formData.city}
-                                    onChange={(e) => !infoLocked && setFormData({ ...formData, city: e.target.value })}
-                                    readOnly={infoLocked} />
-                            </div>
-                        </div>
-                        <div className="form-group mb-4">
-                            <label className="form-label">Province</label>
-                            <input className={`form-input w-full ${infoLocked ? 'opacity-70' : 'opacity-100'}`} placeholder="Your province"
-                                value={formData.province}
-                                onChange={(e) => !infoLocked && setFormData({ ...formData, province: e.target.value })}
-                                readOnly={infoLocked} />
-                        </div>
-                    </div>
-                    {!infoLocked && (
-                        <button className="btn btn-primary" onClick={handleSaveProfile} disabled={saveLoading}>
-                            {saveLoading ? 'Saving...' : '💾 Save Profile'}
-                        </button>
-                    )}
-                </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-semibold text-text-primary">
+                {verified ? 'Identity verified' : 'Verification required'}
+              </h2>
+              <p className="max-w-2xl text-sm leading-6 text-text-secondary">
+                {verified
+                  ? 'Your identity has been approved. You can rent vehicles, list vehicles, and access subscription features.'
+                  : 'Submit your identification details and selfie to unlock listing and premium features.'}
+              </p>
             </div>
+          </div>
 
-            {/* Identity Verification Section */}
-            {(() => {
-                const verified = profile?.role === 'verified' || profile?.verification_status === 'verified';
-                if (verified) {
-                    return (
-                        <div className="rounded-[var(--radius-xl)] border border-[#bbf7d0] bg-gradient-to-br from-[#f0fdf4] to-[#dcfce7] shadow-sm overflow-hidden mb-6">
-                            <div className="p-9 text-center">
-                                <div className="text-[56px] mb-3">✅</div>
-                                <h2 className="text-[20px] font-extrabold text-[#166534] mb-2">You're Verified!</h2>
-                                <p className="text-[14px] text-[#15803d] max-w-[400px] mx-auto">
-                                    Your identity has been confirmed by our admin team. You now have full access to list vehicles, rent vehicles, and subscribe to SafeDrive Premium.
-                                </p>
-                            </div>
-                        </div>
-                    );
-                }
-                return (
-                    <div className="rounded-[var(--radius-xl)] border border-[var(--border-light)] bg-[var(--surface-primary)] shadow-sm overflow-hidden mb-6">
-                        <div className="p-[16px_24px] border-b border-[var(--border-light)]">
-                            <h2 className="text-[16px] font-bold">🔐 Identity Verification</h2>
-                        </div>
-                        <div className="p-[20px_24px]">
-                            <p className="text-[14px] text-[var(--text-secondary)] mb-5">
-                                Submit your information and ID photos to get verified. Once approved by our team, you can list and rent vehicles.
-                            </p>
-
-                            {/* Personal info summary shown in verification (so admin sees it) */}
-                            {(formData.full_name || formData.phone || formData.city) && (
-                                <div className="bg-[var(--neutral-50)] rounded-[var(--radius-md)] p-[14px_18px] mb-5 border border-[var(--border-light)]">
-                                    <div className="font-bold text-[13px] mb-2 text-[var(--text-secondary)]">📋 Your Submitted Personal Info</div>
-                                    <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 text-[13px]">
-                                        {formData.full_name && <div><span className="text-[var(--text-tertiary)]">Name: </span>{formData.full_name}</div>}
-                                        {formData.phone && <div><span className="text-[var(--text-tertiary)]">Phone: </span>{formData.phone}</div>}
-                                        {formData.city && <div><span className="text-[var(--text-tertiary)]">City: </span>{formData.city}</div>}
-                                        {formData.province && <div><span className="text-[var(--text-tertiary)]">Province: </span>{formData.province}</div>}
-                                        {formData.date_of_birth && <div><span className="text-[var(--text-tertiary)]">Birthday: </span>{formData.date_of_birth}</div>}
-                                    </div>
-                                    <div className="text-[12px] text-[var(--text-tertiary)] mt-2">
-                                        ℹ️ This information will be included with your verification submission.
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* ID Numbers */}
-                            <div className="grid grid-cols-2 gap-4 mb-4">
-                                <div className="form-group mb-4">
-                                    <label className="form-label">Driver's License Number</label>
-                                    <input className="form-input w-full" placeholder="N01-23-456789" value={formData.drivers_license_number} onChange={(e) => setFormData({ ...formData, drivers_license_number: e.target.value })} />
-                                </div>
-                                <div className="form-group mb-4">
-                                    <label className="form-label">National / UMID ID Number</label>
-                                    <input className="form-input w-full" placeholder="0000-0000000-0" value={formData.national_id_number} onChange={(e) => setFormData({ ...formData, national_id_number: e.target.value })} />
-                                </div>
-                            </div>
-
-                            {/* ID Photos */}
-                            <div className="form-group mb-4">
-                                <label className="form-label">ID Photo (Front) <span className="text-[var(--error-500)]">*</span></label>
-                                <div className="file-upload-area">
-                                    <FiUpload size={24} className="text-[var(--text-tertiary)] mb-2" />
-                                    <p className="text-[13px] text-[var(--text-secondary)]">Upload front of your Government ID</p>
-                                    <input ref={idFrontRef} type="file" accept="image/*" className="mt-2" />
-                                </div>
-                            </div>
-
-                            <div className="form-group mb-4">
-                                <label className="form-label">ID Photo (Back)</label>
-                                <div className="file-upload-area">
-                                    <FiUpload size={24} className="text-[var(--text-tertiary)] mb-2" />
-                                    <p className="text-[13px] text-[var(--text-secondary)]">Upload back of your Government ID</p>
-                                    <input ref={idBackRef} type="file" accept="image/*" className="mt-2" />
-                                </div>
-                            </div>
-
-                            <div className="form-group mb-6">
-                                <label className="form-label">Selfie Photo (Face Verification) <span className="text-[var(--error-500)]">*</span></label>
-                                <div className="file-upload-area">
-                                    <FiUpload size={24} className="text-[var(--text-tertiary)] mb-2" />
-                                    <p className="text-[13px] text-[var(--text-secondary)]">Take a clear photo of your face for identity matching</p>
-                                    <input ref={selfieRef} type="file" accept="image/*" capture="user" className="mt-2" />
-                                </div>
-                            </div>
-
-                            <button
-                                className="btn btn-accent btn-lg w-full"
-                                onClick={handleSubmitVerification}
-                                disabled={submitLoading}
-                            >
-                                {submitLoading ? '⏳ Submitting... Please wait' : '🔐 Submit for Verification'}
-                            </button>
-                        </div>
-                    </div>
-                );
-            })()}
+          <span className={badgeClass(verified ? 'success' : 'neutral')}>
+            {verified ? 'Verified' : 'Not verified'}
+          </span>
         </div>
-    );
+      </section>
+
+      <section className={ui.section}>
+        <div className={ui.sectionHeader}>
+          <div>
+            <h2 className="text-lg font-semibold text-text-primary">Personal information</h2>
+            <p className="text-sm text-text-secondary">Used for bookings, support, and verification review</p>
+          </div>
+        </div>
+
+        <div className={ui.sectionBody}>
+          {infoLocked && (
+            <div className="mb-6 rounded-[28px] border border-border-light bg-surface-secondary px-4 py-4 text-sm leading-6 text-text-secondary">
+              Your personal information is locked while verification is pending or approved. If your submission is rejected, you can edit and resubmit it.
+            </div>
+          )}
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Full name" icon={<FiUser />} required>
+              <input
+                className={cx(ui.inputWithIcon, infoLocked && 'opacity-70')}
+                value={formData.full_name}
+                onChange={(event) =>
+                  !infoLocked && setFormData({ ...formData, full_name: event.target.value })
+                }
+                placeholder="Your full legal name"
+                readOnly={infoLocked}
+              />
+            </Field>
+
+            <Field label="Email" icon={<FiMail />}>
+              <input className={ui.inputWithIcon} value={profile?.email || ''} disabled />
+            </Field>
+
+            <Field label="Phone number" icon={<FiPhone />} required>
+              <input
+                className={cx(ui.inputWithIcon, infoLocked && 'opacity-70')}
+                value={formData.phone}
+                onChange={(event) =>
+                  !infoLocked && setFormData({ ...formData, phone: event.target.value })
+                }
+                placeholder="09XX XXX XXXX"
+                readOnly={infoLocked}
+              />
+            </Field>
+
+            <Field label="Date of birth" icon={<FiCalendar />}>
+              <input
+                type="date"
+                className={cx(ui.inputWithIcon, infoLocked && 'opacity-70')}
+                value={formData.date_of_birth}
+                onChange={(event) =>
+                  !infoLocked && setFormData({ ...formData, date_of_birth: event.target.value })
+                }
+                readOnly={infoLocked}
+              />
+            </Field>
+
+            <Field label="City" icon={<FiMapPin />}>
+              <input
+                className={cx(ui.inputWithIcon, infoLocked && 'opacity-70')}
+                value={formData.city}
+                onChange={(event) =>
+                  !infoLocked && setFormData({ ...formData, city: event.target.value })
+                }
+                placeholder="Your city"
+                readOnly={infoLocked}
+              />
+            </Field>
+
+            <Field label="Province">
+              <input
+                className={cx(ui.input, infoLocked && 'opacity-70')}
+                value={formData.province}
+                onChange={(event) =>
+                  !infoLocked && setFormData({ ...formData, province: event.target.value })
+                }
+                placeholder="Your province"
+                readOnly={infoLocked}
+              />
+            </Field>
+          </div>
+
+          {!infoLocked && (
+            <button type="button" className={cx(ui.button.primary, 'mt-6')} onClick={handleSaveProfile} disabled={saveLoading}>
+              {saveLoading ? 'Saving...' : 'Save profile'}
+            </button>
+          )}
+        </div>
+      </section>
+
+      {verified ? (
+        <section className="rounded-[32px] border border-success-200 bg-success-50 px-6 py-8 text-center shadow-soft">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-white text-2xl text-success-700 shadow-xs">
+            <FiCheckCircle />
+          </div>
+          <h2 className="mt-4 text-2xl font-semibold text-text-primary">You are verified</h2>
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-success-700">
+            Your identity has been approved by the admin team. You have full access to listing, renting, and subscription features.
+          </p>
+        </section>
+      ) : (
+        <section className={ui.section}>
+          <div className={ui.sectionHeader}>
+            <div>
+              <h2 className="text-lg font-semibold text-text-primary">Identity verification</h2>
+              <p className="text-sm text-text-secondary">Submit documents so the admin team can review your account</p>
+            </div>
+          </div>
+
+          <div className={ui.sectionBody}>
+            <p className="text-sm leading-6 text-text-secondary">
+              Provide at least one government ID number, an ID photo, and a selfie. These details are shared only with admins for verification review.
+            </p>
+
+            {(formData.full_name || formData.phone || formData.city) && (
+              <div className="mt-5 rounded-[28px] border border-border-light bg-surface-secondary px-5 py-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-text-tertiary">Submission summary</p>
+                <div className="mt-4 grid gap-3 text-sm text-text-primary sm:grid-cols-2">
+                  {formData.full_name && <p><span className="text-text-tertiary">Name:</span> {formData.full_name}</p>}
+                  {formData.phone && <p><span className="text-text-tertiary">Phone:</span> {formData.phone}</p>}
+                  {formData.city && <p><span className="text-text-tertiary">City:</span> {formData.city}</p>}
+                  {formData.province && <p><span className="text-text-tertiary">Province:</span> {formData.province}</p>}
+                  {formData.date_of_birth && <p><span className="text-text-tertiary">Birthday:</span> {formData.date_of_birth}</p>}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <div>
+                <label className={ui.label}>Driver's license number</label>
+                <input
+                  className={ui.input}
+                  placeholder="N01-23-456789"
+                  value={formData.drivers_license_number}
+                  onChange={(event) =>
+                    setFormData({ ...formData, drivers_license_number: event.target.value })
+                  }
+                />
+              </div>
+
+              <div>
+                <label className={ui.label}>National or UMID ID number</label>
+                <input
+                  className={ui.input}
+                  placeholder="0000-0000000-0"
+                  value={formData.national_id_number}
+                  onChange={(event) =>
+                    setFormData({ ...formData, national_id_number: event.target.value })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <UploadCard
+                label="ID photo front"
+                hint="Upload the front side of your government ID"
+                inputRef={idFrontRef}
+                required
+              />
+              <UploadCard
+                label="ID photo back"
+                hint="Upload the back side if your ID includes details there"
+                inputRef={idBackRef}
+              />
+            </div>
+
+            <div className="mt-4">
+              <UploadCard
+                label="Selfie photo"
+                hint="Take a clear selfie so admins can match it to your ID"
+                inputRef={selfieRef}
+                required
+                capture="user"
+              />
+            </div>
+
+            <button
+              type="button"
+              className={cx(ui.button.accent, ui.button.lg, 'mt-6 w-full justify-center')}
+              onClick={handleSubmitVerification}
+              disabled={submitLoading}
+            >
+              {submitLoading ? 'Submitting...' : 'Submit for verification'}
+            </button>
+          </div>
+        </section>
+      )}
+    </div>
+  );
 }

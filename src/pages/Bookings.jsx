@@ -1,70 +1,83 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { FiCalendar, FiCheck, FiEye, FiFileText, FiMessageSquare, FiX } from 'react-icons/fi';
+import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { FiCalendar, FiCheck, FiX, FiFileText, FiMessageSquare, FiEye } from 'react-icons/fi';
-import toast from 'react-hot-toast';
+import { useUserMode } from '../context/UserModeContext';
 import BackButton from '../components/BackButton';
+import { bookingStatusClass, cx, ui } from '../lib/ui';
+
+const STATUS_FILTERS = ['all', 'pending', 'confirmed', 'active', 'completed', 'cancelled'];
+
+function formatCurrency(value) {
+    return `PHP ${Number(value || 0).toLocaleString()}`;
+}
+
+function formatDate(value) {
+    return new Date(value).toLocaleDateString('en-PH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+    });
+}
 
 export default function Bookings() {
-    const { user, profile, isAdmin } = useAuth();
+    const { user, isAdmin } = useAuth();
+    const { mode } = useUserMode();
     const navigate = useNavigate();
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState('all');
-    // Detect if this user has listed vehicles → is a car owner/renter
-    const [isOwner, setIsOwner] = useState(false);
-    const [viewMode, setViewMode] = useState('renter'); // 'renter' | 'owner'
-    const [selectedBooking, setSelectedBooking] = useState(null); // detail modal
+    const [activeFilter, setActiveFilter] = useState('all');
+    const [selectedBooking, setSelectedBooking] = useState(null);
 
     useEffect(() => {
-        let mounted = true;
-        checkOwnerStatus();
-        const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
-        return () => { mounted = false; clearTimeout(safety); };
-    }, []);
-
-    // Re-fetch bookings whenever viewMode changes
-    useEffect(() => {
-        fetchBookings();
-    }, [viewMode]);
-
-    const checkOwnerStatus = async () => {
-        try {
-            const { data } = await supabase
-                .from('vehicles')
-                .select('id')
-                .eq('owner_id', user.id)
-                .limit(1);
-            setIsOwner(data?.length > 0);
-        } catch (err) {
-            // ignore — default to renter view
+        if (user) {
+            fetchBookings();
         }
-    };
+    }, [mode, user]);
 
     const fetchBookings = async () => {
         setLoading(true);
         try {
             let query = supabase
                 .from('bookings')
-                .select('*, vehicles(id, make, model, year, thumbnail_url, images, plate_number, daily_rate, fixed_price, fixed_rental_days, pricing_type, pickup_location, pickup_city, pickup_province), profiles!bookings_renter_id_fkey(full_name, email, phone)')
+                .select(`
+                    *,
+                    vehicles(
+                        id,
+                        make,
+                        model,
+                        year,
+                        thumbnail_url,
+                        images,
+                        plate_number,
+                        daily_rate,
+                        fixed_price,
+                        fixed_rental_days,
+                        pricing_type,
+                        pickup_location,
+                        pickup_city,
+                        pickup_province
+                    ),
+                    renter:profiles!bookings_renter_id_fkey(full_name, email, phone),
+                    owner:profiles!bookings_owner_id_fkey(full_name, email, phone)
+                `)
                 .order('created_at', { ascending: false });
 
-            if (isAdmin) {
-                // Admin sees everything — no filter
-            } else if (viewMode === 'owner') {
-                // Owner view: bookings for my vehicles
-                query = query.eq('owner_id', user.id);
-            } else {
-                // Renter view: bookings where I am the one renting
-                query = query.eq('renter_id', user.id);
+            if (!isAdmin) {
+                query = mode === 'lister'
+                    ? query.eq('owner_id', user.id)
+                    : query.eq('renter_id', user.id);
             }
 
             const { data, error } = await query;
             if (error) throw error;
+
             setBookings(data || []);
         } catch (err) {
-            console.error('Error:', err);
+            console.error('Error loading bookings:', err);
+            toast.error('Failed to load bookings');
         } finally {
             setLoading(false);
         }
@@ -72,27 +85,32 @@ export default function Bookings() {
 
     const updateBookingStatus = async (bookingId, newStatus) => {
         try {
-            const { error } = await supabase.from('bookings').update({ status: newStatus }).eq('id', bookingId);
+            const { error } = await supabase
+                .from('bookings')
+                .update({ status: newStatus })
+                .eq('id', bookingId);
+
             if (error) throw error;
 
-            // Bug 9 fix: When owner confirms a booking, insert booked dates into vehicle_availability
             if (newStatus === 'confirmed') {
-                const booking = bookings.find(b => b.id === bookingId);
+                const booking = bookings.find((entry) => entry.id === bookingId);
                 if (booking) {
                     const start = new Date(booking.start_date);
                     const end = new Date(booking.end_date);
                     const datesToInsert = [];
-                    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+
+                    for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
                         datesToInsert.push({
                             vehicle_id: booking.vehicle_id,
-                            unavailable_date: d.toISOString().split('T')[0],
+                            unavailable_date: date.toISOString().split('T')[0],
                             reason: 'booked',
                         });
                     }
+
                     if (datesToInsert.length > 0) {
                         await supabase.from('vehicle_availability').upsert(datesToInsert, {
                             onConflict: 'vehicle_id,unavailable_date',
-                        }).catch(err => console.warn('Could not update availability:', err));
+                        });
                     }
                 }
             }
@@ -100,235 +118,365 @@ export default function Bookings() {
             toast.success(`Booking ${newStatus}`);
             fetchBookings();
         } catch (err) {
+            console.error('Failed updating booking:', err);
             toast.error('Failed to update booking');
         }
     };
 
-    const filteredBookings = activeTab === 'all'
-        ? bookings
-        : bookings.filter(b => b.status === activeTab);
+    const filteredBookings = useMemo(() => {
+        if (activeFilter === 'all') return bookings;
+        return bookings.filter((booking) => booking.status === activeFilter);
+    }, [activeFilter, bookings]);
 
-    if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
+    const ownerView = isAdmin || mode === 'lister';
+
+    if (loading) {
+        return (
+            <div className={ui.loadingScreen}>
+                <div className={ui.spinner} />
+                <p className="text-sm font-medium text-text-secondary">Loading bookings...</p>
+            </div>
+        );
+    }
 
     return (
-        <div>
+        <div className={ui.page}>
             <BackButton />
 
-            <div className="page-header">
-                <h1>📋 Bookings</h1>
-                <p>Manage your vehicle rental bookings</p>
+            <div className={ui.pageHeader}>
+                <h1 className={ui.pageTitle}>
+                    {ownerView ? 'Bookings for your vehicles' : 'My bookings'}
+                </h1>
+                <p className={ui.pageDescription}>
+                    {ownerView
+                        ? 'Review incoming reservations, contact renters, and approve or decline requests.'
+                        : 'Track your reservations, see owner details, and manage the next steps of your trip.'}
+                </p>
             </div>
 
-            {/* View mode toggle — only show if user is both an owner and a renter */}
-            {(isOwner || isAdmin) && !isAdmin && (
-                <div className="flex gap-2 mb-5 bg-[var(--neutral-100)] rounded-[var(--radius-lg)] p-1 max-w-[300px]">
-                    {[
-                        { id: 'renter', label: '🚗 My Rentals' },
-                        { id: 'owner', label: '🔑 My Listings' },
-                    ].map(m => (
-                        <button
-                            key={m.id}
-                            onClick={() => setViewMode(m.id)}
-                            className={`flex-1 py-2 px-3 rounded-[var(--radius-md)] border-none cursor-pointer text-[13px] font-bold transition-all duration-150 ${viewMode === m.id ? 'bg-[var(--surface-primary)] text-[var(--primary-700)] shadow-[var(--shadow-sm)]' : 'bg-transparent text-[var(--text-tertiary)]'}`}
-                        >
-                            {m.label}
-                        </button>
-                    ))}
+            <section className={ui.section}>
+                <div className={ui.sectionHeader}>
+                    <div>
+                        <div className="text-sm font-semibold text-text-primary">
+                            {filteredBookings.length} booking{filteredBookings.length === 1 ? '' : 's'}
+                        </div>
+                        <div className="text-xs text-text-tertiary">
+                            Filter by booking status
+                        </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {STATUS_FILTERS.map((status) => (
+                            <button
+                                key={status}
+                                type="button"
+                                onClick={() => setActiveFilter(status)}
+                                className={cx(
+                                    'rounded-full px-4 py-2 text-sm font-semibold transition',
+                                    activeFilter === status
+                                        ? 'bg-primary-700 text-white shadow-soft'
+                                        : 'bg-neutral-100 text-text-secondary hover:bg-neutral-200 hover:text-text-primary'
+                                )}
+                            >
+                                {status}
+                            </button>
+                        ))}
+                    </div>
                 </div>
-            )}
 
-            <div className="tabs mb-4">
-                {['all', 'pending', 'confirmed', 'active', 'completed', 'cancelled'].map(tab => (
-                    <button key={tab} className={`tab ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
-                        {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                        {tab !== 'all' && ` (${bookings.filter(b => b.status === tab).length})`}
-                    </button>
-                ))}
-            </div>
+                {filteredBookings.length === 0 ? (
+                    <div className={ui.sectionBody}>
+                        <div className={ui.emptyState}>
+                            <div className={ui.emptyIcon}>
+                                <FiCalendar />
+                            </div>
+                            <h2 className="font-display text-2xl font-semibold text-text-primary">
+                                No bookings found
+                            </h2>
+                            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-text-secondary">
+                                {ownerView
+                                    ? 'You do not have matching booking requests in this view yet.'
+                                    : 'You do not have matching renter bookings in this view yet.'}
+                            </p>
+                            <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+                                {!ownerView && (
+                                    <Link to="/vehicles" className={ui.button.primary}>
+                                        Browse vehicles
+                                    </Link>
+                                )}
+                                {ownerView && (
+                                    <Link to="/my-vehicles" className={ui.button.secondary}>
+                                        Manage vehicles
+                                    </Link>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="space-y-5 px-5 py-5 sm:px-6 sm:py-6">
+                        <div className="hidden overflow-hidden rounded-[28px] border border-border-light lg:block">
+                            <table className="min-w-full divide-y divide-border-light text-sm">
+                                <thead className="bg-surface-secondary text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-text-tertiary">
+                                    <tr>
+                                        <th className="px-4 py-3.5">Vehicle</th>
+                                        <th className="px-4 py-3.5">{ownerView ? 'Customer' : 'Owner'}</th>
+                                        <th className="px-4 py-3.5">Dates</th>
+                                        <th className="px-4 py-3.5">Amount</th>
+                                        <th className="px-4 py-3.5">Status</th>
+                                        <th className="px-4 py-3.5 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border-light bg-surface-primary">
+                                    {filteredBookings.map((booking) => {
+                                        const counterpart = ownerView ? booking.renter : booking.owner;
+                                        const vehicleImage = booking.vehicles?.thumbnail_url || booking.vehicles?.images?.[0];
 
-            {filteredBookings.length === 0 ? (
-                <div className="empty-state">
-                    <div className="empty-state-icon"><FiCalendar /></div>
-                    <h3>No bookings found</h3>
-                    <p>{activeTab === 'all' ? (viewMode === 'renter' ? 'You haven\'t rented any vehicles yet.' : 'No rental requests for your vehicles.') : `No ${activeTab} bookings.`}</p>
-                    {viewMode === 'renter' && <Link to="/vehicles" className="btn btn-primary">Browse Vehicles</Link>}
-                </div>
-            ) : (
-                <div className="flex flex-col gap-4">
-                    {filteredBookings.map(booking => {
-                        const vehicleImage = booking.vehicles?.thumbnail_url || booking.vehicles?.images?.[0];
-                        const isOwnerView = viewMode === 'owner' || isAdmin;
-                        return (
-                            <div key={booking.id} className="card">
-                                <div className="card-body">
-                                    <div className="flex justify-between items-start gap-3 flex-wrap sm:flex-nowrap">
-                                        <div className="flex gap-4 items-center">
-                                            <div className={`w-16 h-16 rounded-[12px] shrink-0 flex items-center justify-center text-[28px] overflow-hidden ${vehicleImage ? 'bg-transparent' : 'bg-[var(--neutral-100)]'}`}>
-                                                {vehicleImage
-                                                    ? <img src={vehicleImage} alt="vehicle" className="w-full h-full object-cover" />
-                                                    : '🚗'}
+                                        return (
+                                            <tr key={booking.id} className="text-text-secondary">
+                                                <td className="px-4 py-4">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-neutral-100">
+                                                            {vehicleImage ? (
+                                                                <img src={vehicleImage} alt="vehicle" className="h-full w-full object-cover" />
+                                                            ) : (
+                                                                <span className="text-xl">🚗</span>
+                                                            )}
+                                                        </div>
+                                                        <div>
+                                                            <div className="font-semibold text-text-primary">
+                                                                {booking.vehicles?.year} {booking.vehicles?.make} {booking.vehicles?.model}
+                                                            </div>
+                                                            <div className="text-xs text-text-tertiary">
+                                                                {booking.vehicles?.plate_number}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-4">
+                                                    <div className="space-y-1">
+                                                        <div className="font-semibold text-text-primary">
+                                                            {counterpart?.full_name || 'Unavailable'}
+                                                        </div>
+                                                        <div className="text-xs text-text-tertiary">
+                                                            {[counterpart?.email, counterpart?.phone].filter(Boolean).join(' • ') || 'No contact details'}
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-4">
+                                                    <div className="space-y-1 text-sm">
+                                                        <div>{formatDate(booking.start_date)}</div>
+                                                        <div className="text-text-tertiary">to {formatDate(booking.end_date)}</div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-4 font-semibold text-text-primary">
+                                                    {formatCurrency(booking.total_amount)}
+                                                </td>
+                                                <td className="px-4 py-4">
+                                                    <span className={bookingStatusClass(booking.status)}>{booking.status}</span>
+                                                </td>
+                                                <td className="px-4 py-4">
+                                                    <div className="flex justify-end gap-2">
+                                                        {ownerView && booking.status === 'pending' && (
+                                                            <>
+                                                                <button
+                                                                    type="button"
+                                                                    className={`${ui.button.success} ${ui.button.sm}`}
+                                                                    onClick={() => updateBookingStatus(booking.id, 'confirmed')}
+                                                                >
+                                                                    <FiCheck /> Accept
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className={`${ui.button.danger} ${ui.button.sm}`}
+                                                                    onClick={() => updateBookingStatus(booking.id, 'cancelled')}
+                                                                >
+                                                                    <FiX /> Decline
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                        {!ownerView && booking.status === 'pending' && (
+                                                            <button
+                                                                type="button"
+                                                                className={`${ui.button.secondary} ${ui.button.sm}`}
+                                                                onClick={() => {
+                                                                    if (window.confirm('Cancel this booking?')) {
+                                                                        updateBookingStatus(booking.id, 'cancelled');
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <FiX /> Cancel
+                                                            </button>
+                                                        )}
+                                                        {booking.status === 'confirmed' && (
+                                                            <Link to={`/agreements/${booking.id}`} className={`${ui.button.secondary} ${ui.button.sm}`}>
+                                                                <FiFileText /> Agreement
+                                                            </Link>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            className={`${ui.button.ghost} ${ui.button.sm}`}
+                                                            onClick={() => setSelectedBooking(booking)}
+                                                        >
+                                                            <FiEye /> Details
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className={`${ui.button.ghost} ${ui.button.sm}`}
+                                                            onClick={() => navigate(`/messages/${booking.id}`)}
+                                                        >
+                                                            <FiMessageSquare /> Message
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="grid gap-4 lg:hidden">
+                            {filteredBookings.map((booking) => {
+                                const counterpart = ownerView ? booking.renter : booking.owner;
+                                const vehicleImage = booking.vehicles?.thumbnail_url || booking.vehicles?.images?.[0];
+
+                                return (
+                                    <article key={booking.id} className="rounded-[30px] border border-border-light bg-surface-primary p-5 shadow-soft">
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="flex items-start gap-4">
+                                                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-neutral-100">
+                                                    {vehicleImage ? (
+                                                        <img src={vehicleImage} alt="vehicle" className="h-full w-full object-cover" />
+                                                    ) : (
+                                                        <span className="text-2xl">🚗</span>
+                                                    )}
+                                                </div>
+                                                <div>
+                                                    <h2 className="font-semibold text-text-primary">
+                                                        {booking.vehicles?.year} {booking.vehicles?.make} {booking.vehicles?.model}
+                                                    </h2>
+                                                    <p className="mt-1 text-sm text-text-secondary">
+                                                        {counterpart?.full_name || 'Unavailable'}
+                                                    </p>
+                                                    <p className="text-xs text-text-tertiary">
+                                                        {[counterpart?.email, counterpart?.phone].filter(Boolean).join(' • ') || 'No contact details'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <span className={bookingStatusClass(booking.status)}>{booking.status}</span>
+                                        </div>
+
+                                        <div className="mt-5 grid gap-3 rounded-3xl bg-surface-secondary p-4 text-sm text-text-secondary sm:grid-cols-2">
+                                            <div>
+                                                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-text-tertiary">Dates</div>
+                                                <div className="mt-1">{formatDate(booking.start_date)} to {formatDate(booking.end_date)}</div>
                                             </div>
                                             <div>
-                                                <h3 className="text-[16px] font-bold mb-1">
-                                                    {booking.vehicles?.year} {booking.vehicles?.make} {booking.vehicles?.model}
-                                                </h3>
-                                                <div className="text-[13px] text-[var(--text-secondary)] mb-2">
-                                                    {isOwnerView && <><strong>{booking.profiles?.full_name}</strong> • </>}
-                                                    {booking.vehicles?.plate_number}
-                                                </div>
-                                                <div className="flex gap-4 text-[13px] flex-wrap">
-                                                    <span className="text-[var(--text-secondary)] flex items-center gap-1">
-                                                        <FiCalendar />
-                                                        {new Date(booking.start_date).toLocaleDateString()} → {new Date(booking.end_date).toLocaleDateString()}
-                                                    </span>
-                                                    <span className="font-bold font-[var(--font-display)] text-[var(--primary-700)]">
-                                                        ₱{booking.total_amount?.toLocaleString()} ({booking.total_days} day{booking.total_days > 1 ? 's' : ''})
-                                                    </span>
-                                                </div>
+                                                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-text-tertiary">Amount</div>
+                                                <div className="mt-1 font-semibold text-text-primary">{formatCurrency(booking.total_amount)}</div>
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center gap-2 flex-wrap shrink-0">
-                                            <span className={`badge badge-${booking.status === 'confirmed' || booking.status === 'completed' ? 'success' : booking.status === 'pending' ? 'pending' : booking.status === 'cancelled' ? 'error' : 'info'}`}>
-                                                {booking.status}
-                                            </span>
-
-                                            {/* Owner actions on pending bookings */}
-                                            {isOwnerView && booking.status === 'pending' && (
-                                                <div className="flex gap-2">
-                                                    <button className="btn btn-success btn-sm" onClick={() => updateBookingStatus(booking.id, 'confirmed')}>
+                                        <div className="mt-4 flex flex-wrap gap-2">
+                                            {ownerView && booking.status === 'pending' && (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        className={`${ui.button.success} ${ui.button.sm}`}
+                                                        onClick={() => updateBookingStatus(booking.id, 'confirmed')}
+                                                    >
                                                         <FiCheck /> Accept
                                                     </button>
-                                                    <button className="btn btn-danger btn-sm" onClick={() => updateBookingStatus(booking.id, 'cancelled')}>
+                                                    <button
+                                                        type="button"
+                                                        className={`${ui.button.danger} ${ui.button.sm}`}
+                                                        onClick={() => updateBookingStatus(booking.id, 'cancelled')}
+                                                    >
                                                         <FiX /> Decline
                                                     </button>
-                                                </div>
+                                                </>
                                             )}
-
-                                            {/* Renter can cancel pending bookings */}
-                                            {!isOwnerView && booking.status === 'pending' && (
-                                                <button className="btn btn-ghost btn-sm text-[var(--error-500)]"
-                                                    onClick={() => { if (confirm('Cancel this booking?')) updateBookingStatus(booking.id, 'cancelled'); }}>
+                                            {!ownerView && booking.status === 'pending' && (
+                                                <button
+                                                    type="button"
+                                                    className={`${ui.button.secondary} ${ui.button.sm}`}
+                                                    onClick={() => {
+                                                        if (window.confirm('Cancel this booking?')) {
+                                                            updateBookingStatus(booking.id, 'cancelled');
+                                                        }
+                                                    }}
+                                                >
                                                     <FiX /> Cancel
                                                 </button>
                                             )}
-
                                             {booking.status === 'confirmed' && (
-                                                <Link to={`/agreements/${booking.id}`} className="btn btn-secondary btn-sm">
+                                                <Link to={`/agreements/${booking.id}`} className={`${ui.button.secondary} ${ui.button.sm}`}>
                                                     <FiFileText /> Agreement
                                                 </Link>
                                             )}
-
-                                            {/* Eye — view booking details */}
-                                            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedBooking(booking)} title="View Details">
-                                                <FiEye />
+                                            <button
+                                                type="button"
+                                                className={`${ui.button.ghost} ${ui.button.sm}`}
+                                                onClick={() => setSelectedBooking(booking)}
+                                            >
+                                                <FiEye /> Details
                                             </button>
-
-                                            <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/messages/${booking.id}`)} title="Message">
-                                                <FiMessageSquare />
+                                            <button
+                                                type="button"
+                                                className={`${ui.button.ghost} ${ui.button.sm}`}
+                                                onClick={() => navigate(`/messages/${booking.id}`)}
+                                            >
+                                                <FiMessageSquare /> Message
                                             </button>
                                         </div>
-                                    </div>
+                                    </article>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </section>
+
+            {selectedBooking && (
+                <div className={ui.modalOverlay} onClick={() => setSelectedBooking(null)}>
+                    <div className={`${ui.modalPanel} max-w-[680px]`} onClick={(e) => e.stopPropagation()}>
+                        <div className={ui.sectionHeader}>
+                            <div>
+                                <div className="font-display text-2xl font-bold text-text-primary">
+                                    Booking details
+                                </div>
+                                <div className="text-sm text-text-tertiary">
+                                    {selectedBooking.vehicles?.year} {selectedBooking.vehicles?.make} {selectedBooking.vehicles?.model}
                                 </div>
                             </div>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* ── Booking Detail Modal ── */}
-            {selectedBooking && (
-                <div className="modal-overlay" onClick={() => setSelectedBooking(null)}>
-                    <div className="modal max-w-[520px]" onClick={e => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <h2>Booking Details</h2>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedBooking(null)}>✕</button>
+                            <button
+                                type="button"
+                                className={ui.button.ghost}
+                                onClick={() => setSelectedBooking(null)}
+                            >
+                                <FiX />
+                                Close
+                            </button>
                         </div>
-                        <div className="modal-body">
-                            {/* Vehicle image */}
-                            {(selectedBooking.vehicles?.thumbnail_url || selectedBooking.vehicles?.images?.[0]) && (
-                                <img
-                                    src={selectedBooking.vehicles.thumbnail_url || selectedBooking.vehicles.images[0]}
-                                    alt="vehicle"
-                                    className="w-full h-[200px] object-cover rounded-[var(--radius-lg)] mb-4"
-                                />
-                            )}
-
-                            <h3 className="text-[20px] font-extrabold mb-1">
-                                {selectedBooking.vehicles?.year} {selectedBooking.vehicles?.make} {selectedBooking.vehicles?.model}
-                            </h3>
-                            <div className="text-[13px] text-[var(--text-secondary)] mb-5">
-                                {[selectedBooking.vehicles?.pickup_location, selectedBooking.vehicles?.pickup_city, selectedBooking.vehicles?.pickup_province].filter(Boolean).join(', ')}
-                            </div>
-
-                            {/* Status */}
-                            <div className="flex gap-2 mb-5 flex-wrap">
-                                <span className={`badge badge-${selectedBooking.status === 'confirmed' || selectedBooking.status === 'completed' ? 'success' : selectedBooking.status === 'pending' ? 'pending' : selectedBooking.status === 'cancelled' ? 'error' : 'info'} text-[13px] px-3 py-1`}>
-                                    {selectedBooking.status.toUpperCase()}
-                                </span>
-                                <span className="badge badge-neutral text-[13px]">
-                                    {selectedBooking.vehicles?.plate_number}
-                                </span>
-                            </div>
-
-                            {/* Date range */}
-                            <div className="grid grid-cols-2 gap-3 mb-4">
+                        <div className={ui.sectionBody}>
+                            <div className="grid gap-4 sm:grid-cols-2">
                                 {[
-                                    { label: 'Pick-up Date', value: new Date(selectedBooking.start_date).toLocaleDateString('en-PH', { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' }) },
-                                    { label: 'Return Date', value: new Date(selectedBooking.end_date).toLocaleDateString('en-PH', { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' }) },
-                                ].map((item, i) => (
-                                    <div key={i} className="p-3 bg-[var(--neutral-50)] rounded-[var(--radius-md)]">
-                                        <div className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase">{item.label}</div>
-                                        <div className="text-[13px] font-semibold mt-1">{item.value}</div>
+                                    { label: ownerView ? 'Customer' : 'Owner', value: ownerView ? selectedBooking.renter?.full_name : selectedBooking.owner?.full_name },
+                                    { label: 'Status', value: selectedBooking.status },
+                                    { label: 'Start date', value: formatDate(selectedBooking.start_date) },
+                                    { label: 'End date', value: formatDate(selectedBooking.end_date) },
+                                    { label: 'Vehicle', value: `${selectedBooking.vehicles?.year} ${selectedBooking.vehicles?.make} ${selectedBooking.vehicles?.model}` },
+                                    { label: 'Amount', value: formatCurrency(selectedBooking.total_amount) },
+                                ].map((item) => (
+                                    <div key={item.label} className="rounded-3xl border border-border-light bg-surface-secondary p-4">
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-tertiary">
+                                            {item.label}
+                                        </div>
+                                        <div className="mt-2 text-sm font-semibold text-text-primary">
+                                            {item.value || 'Unavailable'}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
-
-                            {/* Pricing breakdown */}
-                            <div className="bg-[var(--neutral-50)] rounded-[var(--radius-lg)] p-4">
-                                <div className="font-bold mb-3 text-[14px]">Price Breakdown</div>
-                                {selectedBooking.vehicles?.pricing_type === 'fixed' ? (
-                                    <div className="flex justify-between text-[14px] mb-2">
-                                        <span>Fixed deal ({selectedBooking.total_days} day{selectedBooking.total_days > 1 ? 's' : ''})</span>
-                                        <span className="font-bold">₱{selectedBooking.total_amount?.toLocaleString()}</span>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="flex justify-between text-[14px] mb-2">
-                                            <span>₱{selectedBooking.daily_rate?.toLocaleString()} × {selectedBooking.total_days} day{selectedBooking.total_days > 1 ? 's' : ''}</span>
-                                            <span className="font-semibold">₱{selectedBooking.subtotal?.toLocaleString()}</span>
-                                        </div>
-                                        {selectedBooking.service_fee > 0 && (
-                                            <div className="flex justify-between text-[14px] mb-2">
-                                                <span>Service fee</span>
-                                                <span className="font-semibold">₱{selectedBooking.service_fee?.toLocaleString()}</span>
-                                            </div>
-                                        )}
-                                        {selectedBooking.security_deposit > 0 && (
-                                            <div className="flex justify-between text-[14px] mb-2">
-                                                <span>Security deposit</span>
-                                                <span className="font-semibold">₱{selectedBooking.security_deposit?.toLocaleString()}</span>
-                                            </div>
-                                        )}
-                                    </>
-                                )}
-                                <div className="border-t border-[var(--border-light)] pt-2 mt-2 flex justify-between font-extrabold text-[18px]">
-                                    <span>Total</span>
-                                    <span className="text-[var(--primary-700)] font-[var(--font-display)]">₱{selectedBooking.total_amount?.toLocaleString()}</span>
-                                </div>
-                            </div>
-
-                            {/* Rentee info (for owner view) */}
-                            {selectedBooking.profiles?.full_name && (
-                                <div className="mt-4 p-[12px_16px] bg-[var(--primary-50)] rounded-[var(--radius-md)] border-l-[3px] border-[var(--primary-300)]">
-                                    <div className="font-bold text-[13px] mb-1">Renter Details</div>
-                                    <div className="text-[13px] text-[var(--text-secondary)]">
-                                        {selectedBooking.profiles.full_name}
-                                        {selectedBooking.profiles.email && <> • {selectedBooking.profiles.email}</>}
-                                        {selectedBooking.profiles.phone && <> • {selectedBooking.profiles.phone}</>}
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>

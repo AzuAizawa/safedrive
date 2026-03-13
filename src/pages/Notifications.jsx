@@ -1,110 +1,173 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../context/AuthContext';
-import { FiBell, FiCheck, FiCalendar, FiTruck, FiUser } from 'react-icons/fi';
+import { FiBell, FiCalendar, FiCheck, FiTruck, FiUser } from 'react-icons/fi';
 import BackButton from '../components/BackButton';
+import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
+import { cx, ui } from '../lib/ui';
+
+function NotificationIcon({ type }) {
+  const iconMap = {
+    booking: <FiCalendar />,
+    vehicle: <FiTruck />,
+    user: <FiUser />,
+  };
+
+  return (
+    <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary-50 text-primary-700">
+      {iconMap[type] || <FiBell />}
+    </div>
+  );
+}
 
 export default function Notifications() {
-    const { user, profile } = useAuth();
-    const navigate = useNavigate();
-    const [notifications, setNotifications] = useState([]);
-    const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        if (user) fetchNotifications();
-    }, [user]);
+  useEffect(() => {
+    if (user) {
+      fetchNotifications();
+    }
+  }, [user]);
 
-    const fetchNotifications = async () => {
-        try {
-            const { data, error } = await supabase
-                .from('notifications')
-                .select('*')
-                .eq('user_id', user.id)
-                .order('created_at', { ascending: false })
-                .limit(50);
+  const fetchNotifications = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
 
-            if (!error) setNotifications(data || []);
-        } catch (err) {
-            console.error('Notifications error:', err);
-        } finally {
-            setLoading(false);
-        }
-    };
+      if (!error) {
+        setNotifications(data || []);
+      }
+    } catch (err) {
+      console.error('Notifications error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const markAllRead = async () => {
-        const unread = notifications.filter(n => !n.is_read).map(n => n.id);
-        if (!unread.length) return;
-        await supabase.from('notifications').update({ is_read: true }).in('id', unread);
-        setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-    };
+  const markAllRead = async () => {
+    const unread = notifications.filter((notification) => !notification.is_read).map((notification) => notification.id);
+    if (!unread.length) {
+      return;
+    }
 
-    const markRead = async (id) => {
-        await supabase.from('notifications').update({ is_read: true }).eq('id', id);
-        setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-    };
+    await supabase.from('notifications').update({ is_read: true }).in('id', unread);
+    setNotifications((previous) => previous.map((notification) => ({ ...notification, is_read: true })));
+  };
 
-    const getIcon = (type) => {
-        const icons = {
-            booking: <FiCalendar className="text-[var(--primary-500)]" />,
-            vehicle: <FiTruck className="text-[var(--accent-500)]" />,
-            user: <FiUser className="text-[var(--success-500)]" />,
-        };
-        return icons[type] || <FiBell className="text-[var(--text-tertiary)]" />;
-    };
-
-    const unreadCount = notifications.filter(n => !n.is_read).length;
-
-    return (
-        <div className="max-w-[680px] mx-auto pb-12">
-            <BackButton />
-            <div className="page-header flex justify-between items-start">
-                <div>
-                    <h1>🔔 Notifications</h1>
-                    <p>{unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : 'All caught up!'}</p>
-                </div>
-                {unreadCount > 0 && (
-                    <button className="btn btn-sm btn-secondary mt-2" onClick={markAllRead}>
-                        <FiCheck /> Mark all read
-                    </button>
-                )}
-            </div>
-
-            {loading ? (
-                <div className="loading-spinner"><div className="spinner" /></div>
-            ) : notifications.length === 0 ? (
-                <div className="text-center p-[60px_24px] bg-[var(--surface-secondary)] rounded-[var(--radius-xl)] border border-[var(--border-light)]">
-                    <div className="text-[52px] mb-4">🔔</div>
-                    <div className="font-bold text-[var(--text-secondary)] mb-2">No notifications yet</div>
-                    <div className="text-[14px] text-[var(--text-tertiary)]">
-                        You'll be notified about bookings, approvals, and messages here.
-                    </div>
-                </div>
-            ) : (
-                <div className="bg-[var(--surface-primary)] rounded-[var(--radius-xl)] border border-[var(--border-light)] overflow-hidden">
-                    {notifications.map((n, i) => (
-                        <div
-                            key={n.id}
-                            onClick={() => { markRead(n.id); if (n.reference_id && n.reference_type === 'booking') navigate(`/bookings`); }}
-                            className={`flex items-start gap-4 p-[16px_20px] transition-all duration-150 ${i < notifications.length - 1 ? 'border-b border-[var(--border-light)]' : ''} ${n.reference_id ? 'cursor-pointer' : 'default'} ${n.is_read ? 'bg-transparent' : 'bg-[var(--primary-50)]'}`}
-                        >
-                            <div className="w-9 h-9 rounded-full shrink-0 bg-[var(--surface-secondary)] flex items-center justify-center">
-                                {getIcon(n.type)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className={`text-[14px] ${n.is_read ? 'font-normal' : 'font-bold'}`}>{n.title}</div>
-                                <div className="text-[13px] text-[var(--text-secondary)] mt-0.5 leading-relaxed">{n.message}</div>
-                                <div className="text-[11px] text-[var(--text-tertiary)] mt-1">
-                                    {new Date(n.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
-                                </div>
-                            </div>
-                            {!n.is_read && (
-                                <div className="w-2 h-2 rounded-full bg-[var(--primary-500)] shrink-0 mt-1.5" />
-                            )}
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
+  const markRead = async (id) => {
+    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    setNotifications((previous) =>
+      previous.map((notification) =>
+        notification.id === id ? { ...notification, is_read: true } : notification
+      )
     );
+  };
+
+  const unreadCount = notifications.filter((notification) => !notification.is_read).length;
+
+  return (
+    <div className={ui.pageCompact}>
+      <BackButton />
+
+      <div className="flex flex-col gap-4 rounded-[32px] border border-border-light bg-surface-primary px-6 py-6 shadow-soft sm:flex-row sm:items-end sm:justify-between">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-text-tertiary">Activity</p>
+          <h1 className={ui.pageTitle}>Notifications</h1>
+          <p className={ui.pageDescription}>
+            {unreadCount > 0
+              ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}`
+              : 'Everything is read. New bookings, approvals, and messages will appear here.'}
+          </p>
+        </div>
+
+        {unreadCount > 0 && (
+          <button type="button" className={cx(ui.button.secondary, ui.button.sm)} onClick={markAllRead}>
+            <FiCheck />
+            Mark all read
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className={ui.loadingScreen}>
+          <div className={ui.spinner} />
+          <p className="text-sm font-medium text-text-secondary">Loading notifications...</p>
+        </div>
+      ) : notifications.length === 0 ? (
+        <div className={ui.emptyState}>
+          <div className={ui.emptyIcon}>
+            <FiBell />
+          </div>
+          <h2 className="text-lg font-semibold text-text-primary">No notifications yet</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-text-secondary">
+            When something needs your attention, we will show it here so you can jump straight into the right booking or listing.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {notifications.map((notification) => {
+            const clickable = notification.reference_id && notification.reference_type === 'booking';
+
+            return (
+              <button
+                key={notification.id}
+                type="button"
+                onClick={() => {
+                  markRead(notification.id);
+                  if (clickable) {
+                    navigate('/bookings');
+                  }
+                }}
+                className={cx(
+                  'w-full rounded-[28px] border px-5 py-4 text-left shadow-soft transition hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-card',
+                  notification.is_read
+                    ? 'border-border-light bg-surface-primary'
+                    : 'border-primary-200 bg-primary-50/60',
+                  !clickable && 'cursor-default hover:translate-y-0 hover:border-border-light hover:shadow-soft'
+                )}
+              >
+                <div className="flex items-start gap-4">
+                  <NotificationIcon type={notification.type} />
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h2
+                          className={cx(
+                            'text-sm',
+                            notification.is_read ? 'font-medium text-text-primary' : 'font-semibold text-text-primary'
+                          )}
+                        >
+                          {notification.title}
+                        </h2>
+                        <p className="mt-1 text-sm leading-6 text-text-secondary">{notification.message}</p>
+                      </div>
+
+                      {!notification.is_read && (
+                        <span className="mt-1 h-2.5 w-2.5 rounded-full bg-primary-500" />
+                      )}
+                    </div>
+
+                    <p className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-text-tertiary">
+                      {new Date(notification.created_at).toLocaleString('en-PH', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }

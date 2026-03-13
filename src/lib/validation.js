@@ -92,7 +92,7 @@ export function validateFullName(name) {
  */
 export function validatePhoneNumber(phone) {
     if (!phone || phone.trim().length === 0) return fail('Phone number is required.');
-    const stripped = phone.replace(/[\s()\-]/g, ''); // strip common formatting chars
+    const stripped = phone.replace(/[\s()-]/g, ''); // strip common formatting chars
     if (!PH_PHONE_REGEX.test(stripped)) {
         return fail('Enter a valid Philippine mobile number (e.g. 09171234567 or +639171234567).');
     }

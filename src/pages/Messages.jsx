@@ -1,229 +1,369 @@
-import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../context/AuthContext';
-import { FiSend, FiArrowLeft, FiUser } from 'react-icons/fi';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { FiMessageCircle, FiSend } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import BackButton from '../components/BackButton';
+import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
+import { cx, ui } from '../lib/ui';
+
+function Avatar({ name }) {
+  return (
+    <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary-50 text-sm font-semibold text-primary-700">
+      {name?.[0]?.toUpperCase() || '?'}
+    </div>
+  );
+}
 
 export default function Messages() {
-    const { user, profile } = useAuth();
-    const navigate = useNavigate();
-    const { bookingId } = useParams();
-    const bottomRef = useRef(null);
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { bookingId } = useParams();
+  const bottomRef = useRef(null);
 
-    const [conversations, setConversations] = useState([]);
-    const [activeConv, setActiveConv] = useState(null);
-    const [messages, setMessages] = useState([]);
-    const [newMessage, setNewMessage] = useState('');
-    const [sending, setSending] = useState(false);
-    const [loading, setLoading] = useState(true);
+  const [conversations, setConversations] = useState([]);
+  const [activeConv, setActiveConv] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchConversations();
-    }, [user]);
+  useEffect(() => {
+    if (user) {
+      fetchConversations();
+    }
+  }, [user]);
 
-    useEffect(() => {
-        if (activeConv) {
-            fetchMessages(activeConv.id);
-            subscribeToMessages(activeConv.id);
+  useEffect(() => {
+    if (!activeConv) {
+      return undefined;
+    }
+
+    fetchMessages(activeConv.id);
+    const channel = subscribeToMessages(activeConv.id);
+
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [activeConv, user?.id]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const fetchConversations = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('conversations')
+        .select(
+          '*, bookings(*, vehicles(make, model, thumbnail_url)), participant_one:profiles!conversations_participant_one_id_fkey(full_name, avatar_url), participant_two:profiles!conversations_participant_two_id_fkey(full_name, avatar_url)'
+        )
+        .or(`participant_one_id.eq.${user.id},participant_two_id.eq.${user.id}`)
+        .order('last_message_at', { ascending: false });
+
+      if (!error) {
+        setConversations(data || []);
+
+        if (bookingId) {
+          const match = data?.find((conversation) => conversation.booking_id === bookingId);
+          if (match) {
+            setActiveConv(match);
+            return;
+          }
         }
-        return () => { supabase.removeAllChannels(); };
-    }, [activeConv]);
 
-    useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
-
-    const fetchConversations = async () => {
-        try {
-            const { data, error } = await supabase
-                .from('conversations')
-                .select('*, bookings(*, vehicles(make, model, thumbnail_url)), participant_one:profiles!conversations_participant_one_id_fkey(full_name, avatar_url), participant_two:profiles!conversations_participant_two_id_fkey(full_name, avatar_url)')
-                .or(`participant_one_id.eq.${user.id},participant_two_id.eq.${user.id}`)
-                .order('last_message_at', { ascending: false });
-
-            if (!error) {
-                setConversations(data || []);
-                if (bookingId) {
-                    const match = data?.find(c => c.booking_id === bookingId);
-                    if (match) setActiveConv(match);
-                } else if (data?.length > 0) {
-                    setActiveConv(data[0]);
-                }
-            }
-        } catch (err) {
-            console.error('Conversations error:', err);
-        } finally {
-            setLoading(false);
+        if (data?.length > 0) {
+          setActiveConv(data[0]);
         }
-    };
+      }
+    } catch (err) {
+      console.error('Conversations error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const fetchMessages = async (convId) => {
-        const { data } = await supabase
-            .from('messages')
-            .select('*, sender:profiles!messages_sender_id_fkey(full_name, avatar_url)')
-            .eq('conversation_id', convId)
-            .order('created_at', { ascending: true });
-        setMessages(data || []);
-        // Mark as read
-        await supabase.from('messages').update({ is_read: true })
-            .eq('conversation_id', convId)
-            .neq('sender_id', user.id);
-    };
+  const fetchMessages = async (conversationId) => {
+    const { data } = await supabase
+      .from('messages')
+      .select('*, sender:profiles!messages_sender_id_fkey(full_name, avatar_url)')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
 
-    const subscribeToMessages = (convId) => {
-        supabase.channel(`messages:${convId}`)
-            .on('postgres_changes', {
-                event: 'INSERT',
-                schema: 'public',
-                table: 'messages',
-                filter: `conversation_id=eq.${convId}`,
-            }, (payload) => {
-                setMessages(prev => [...prev, payload.new]);
-            })
-            .subscribe();
-    };
+    setMessages(data || []);
 
-    const sendMessage = async (e) => {
-        e.preventDefault();
-        if (!newMessage.trim() || !activeConv) return;
-        // Basic XSS check
-        if (newMessage.length > 1000) { toast.error('Message too long (max 1000 chars)'); return; }
-        if (/<script|javascript:/i.test(newMessage)) { toast.error('Invalid message content'); return; }
+    await supabase
+      .from('messages')
+      .update({ is_read: true })
+      .eq('conversation_id', conversationId)
+      .neq('sender_id', user.id);
+  };
 
-        setSending(true);
-        try {
-            const { error } = await supabase.from('messages').insert({
-                conversation_id: activeConv.id,
-                sender_id: user.id,
-                content: newMessage.trim(),
-                is_read: false,
-            });
-            if (error) throw error;
+  const subscribeToMessages = (conversationId) =>
+    supabase
+      .channel(`messages:${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          setMessages((previous) => [...previous, payload.new]);
+        }
+      )
+      .subscribe();
 
-            // Update conversation last_message_at
-            await supabase.from('conversations').update({
+  const sendMessage = async (event) => {
+    event.preventDefault();
+    if (!newMessage.trim() || !activeConv) {
+      return;
+    }
+
+    if (newMessage.length > 1000) {
+      toast.error('Message too long. Limit is 1000 characters.');
+      return;
+    }
+
+    if (/<script|javascript:/i.test(newMessage)) {
+      toast.error('Invalid message content');
+      return;
+    }
+
+    setSending(true);
+    try {
+      const trimmed = newMessage.trim();
+
+      const { error } = await supabase.from('messages').insert({
+        conversation_id: activeConv.id,
+        sender_id: user.id,
+        content: trimmed,
+        is_read: false,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      await supabase
+        .from('conversations')
+        .update({
+          last_message_at: new Date().toISOString(),
+          last_message: trimmed.slice(0, 100),
+        })
+        .eq('id', activeConv.id);
+
+      setConversations((previous) =>
+        previous.map((conversation) =>
+          conversation.id === activeConv.id
+            ? {
+                ...conversation,
                 last_message_at: new Date().toISOString(),
-                last_message: newMessage.trim().slice(0, 100),
-            }).eq('id', activeConv.id);
+                last_message: trimmed.slice(0, 100),
+              }
+            : conversation
+        )
+      );
 
-            setNewMessage('');
-        } catch (err) {
-            toast.error('Failed to send message');
-        } finally {
-            setSending(false);
-        }
-    };
+      setNewMessage('');
+    } catch {
+      toast.error('Failed to send message');
+    } finally {
+      setSending(false);
+    }
+  };
 
-    const getOtherParticipant = (conv) => {
-        if (!conv) return null;
-        return conv.participant_one_id === user.id ? conv.participant_two : conv.participant_one;
-    };
+  const getOtherParticipant = (conversation) => {
+    if (!conversation) {
+      return null;
+    }
 
-    if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
+    return conversation.participant_one_id === user.id
+      ? conversation.participant_two
+      : conversation.participant_one;
+  };
 
+  if (loading) {
     return (
-        <div className="max-w-[900px] mx-auto pb-6">
-            <BackButton />
-            <h1 className="text-[22px] font-extrabold mb-4">💬 Messages</h1>
-
-            <div className="grid grid-cols-[280px_1fr] h-[600px] bg-[var(--surface-primary)] rounded-[var(--radius-xl)] border border-[var(--border-light)] overflow-hidden">
-                {/* Conversation List */}
-                <div className="border-r border-[var(--border-light)] overflow-y-auto">
-                    <div className="p-4 font-bold text-[13px] text-[var(--text-tertiary)] border-b border-[var(--border-light)] uppercase tracking-wider">
-                        Conversations
-                    </div>
-                    {conversations.length === 0 ? (
-                        <div className="p-6 text-center text-[var(--text-tertiary)] text-[13px]">
-                            No conversations yet. Conversations start when a booking is made.
-                        </div>
-                    ) : conversations.map(conv => {
-                        const other = getOtherParticipant(conv);
-                        const isActive = activeConv?.id === conv.id;
-                        return (
-                            <div key={conv.id}
-                                onClick={() => setActiveConv(conv)}
-                                className={`p-[14px_16px] cursor-pointer border-b border-[var(--border-light)] transition-all duration-150 ${isActive ? 'bg-[var(--primary-50)] border-l-[3px] border-l-[var(--primary-500)]' : 'bg-transparent border-l-[3px] border-l-transparent'}`}
-                            >
-                                <div className="flex gap-2.5 items-center">
-                                    <div className="w-9 h-9 rounded-full shrink-0 bg-[var(--primary-100)] flex items-center justify-center text-[14px] font-bold text-[var(--primary-600)]">
-                                        {other?.full_name?.[0]?.toUpperCase() || '?'}
-                                    </div>
-                                    <div className="min-w-0">
-                                        <div className="font-semibold text-[13px] truncate">
-                                            {other?.full_name || 'Unknown'}
-                                        </div>
-                                        <div className="text-[11px] text-[var(--text-tertiary)] truncate">
-                                            {conv.last_message || conv.bookings?.vehicles?.make + ' ' + conv.bookings?.vehicles?.model || 'Booking chat'}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-
-                {/* Chat Area */}
-                {activeConv ? (
-                    <div className="flex flex-col h-full bg-[var(--surface-primary)]">
-                        {/* Chat Header */}
-                        <div className="p-[14px_20px] border-b border-[var(--border-light)] flex items-center gap-3 bg-[var(--surface-secondary)]">
-                            <div className="w-9 h-9 rounded-full bg-[var(--primary-100)] flex items-center justify-center text-[14px] font-bold text-[var(--primary-600)]">
-                                {getOtherParticipant(activeConv)?.full_name?.[0]?.toUpperCase() || '?'}
-                            </div>
-                            <div>
-                                <div className="font-bold">{getOtherParticipant(activeConv)?.full_name}</div>
-                                <div className="text-[12px] text-[var(--text-tertiary)]">
-                                    Re: {activeConv.bookings?.vehicles?.make} {activeConv.bookings?.vehicles?.model}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Messages */}
-                        <div className="flex-1 overflow-y-auto p-[16px_20px] flex flex-col gap-3">
-                            {messages.length === 0 && (
-                                <div className="text-center text-[var(--text-tertiary)] text-[13px] mt-10">
-                                    No messages yet. Start the conversation!
-                                </div>
-                            )}
-                            {messages.map(msg => {
-                                const isMe = msg.sender_id === user.id;
-                                return (
-                                    <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`max-w-[70%] p-[10px_14px] text-[14px] leading-relaxed ${isMe ? 'bg-[var(--primary-500)] text-white rounded-[16px_16px_4px_16px]' : 'bg-[var(--surface-secondary)] text-[var(--text-primary)] rounded-[16px_16px_16px_4px]'}`}>
-                                            {msg.content}
-                                            <div className={`text-[10px] opacity-70 mt-1 text-right ${isMe ? 'text-white' : 'text-[var(--text-tertiary)]'}`}>
-                                                {new Date(msg.created_at).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                            <div ref={bottomRef} />
-                        </div>
-
-                        {/* Message Input */}
-                        <form onSubmit={sendMessage} className="p-[12px_20px] border-t border-[var(--border-light)] flex gap-2.5 bg-[var(--surface-secondary)]">
-                            <input
-                                type="text"
-                                className="form-input flex-1"
-                                placeholder="Type a message..."
-                                value={newMessage}
-                                onChange={e => setNewMessage(e.target.value)}
-                                maxLength={1000}
-                            />
-                            <button type="submit" className="btn btn-primary" disabled={sending || !newMessage.trim()}>
-                                <FiSend />
-                            </button>
-                        </form>
-                    </div>
-                ) : (
-                    <div className="flex items-center justify-center h-full text-[var(--text-tertiary)] text-[14px]">
-                        Select a conversation to start messaging
-                    </div>
-                )}
-            </div>
-        </div>
+      <div className={ui.loadingScreen}>
+        <div className={ui.spinner} />
+        <p className="text-sm font-medium text-text-secondary">Loading conversations...</p>
+      </div>
     );
+  }
+
+  const otherParticipant = getOtherParticipant(activeConv);
+
+  return (
+    <div className={ui.pageNarrow}>
+      <BackButton />
+
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-text-tertiary">Inbox</p>
+        <h1 className={ui.pageTitle}>Messages</h1>
+        <p className={ui.pageDescription}>
+          Chat directly with renters and vehicle owners inside the booking thread.
+        </p>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <section className={ui.section}>
+          <div className={ui.sectionHeader}>
+            <div>
+              <h2 className="text-lg font-semibold text-text-primary">Conversations</h2>
+              <p className="text-sm text-text-secondary">
+                {conversations.length} active thread{conversations.length === 1 ? '' : 's'}
+              </p>
+            </div>
+          </div>
+
+          <div className="max-h-[640px] overflow-y-auto">
+            {conversations.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <div className={ui.emptyIcon}>
+                  <FiMessageCircle />
+                </div>
+                <p className="text-sm font-medium text-text-primary">No conversations yet</p>
+                <p className="mt-2 text-sm leading-6 text-text-secondary">
+                  A conversation opens automatically when a booking is created.
+                </p>
+              </div>
+            ) : (
+              conversations.map((conversation) => {
+                const other = getOtherParticipant(conversation);
+                const isActive = activeConv?.id === conversation.id;
+
+                return (
+                  <button
+                    key={conversation.id}
+                    type="button"
+                    onClick={() => setActiveConv(conversation)}
+                    className={cx(
+                      'flex w-full items-center gap-3 border-b border-border-light px-5 py-4 text-left transition last:border-b-0 hover:bg-primary-50/40',
+                      isActive && 'bg-primary-50'
+                    )}
+                  >
+                    <Avatar name={other?.full_name} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-text-primary">
+                        {other?.full_name || 'Unknown'}
+                      </p>
+                      <p className="truncate text-sm text-text-secondary">
+                        {conversation.last_message ||
+                          `${conversation.bookings?.vehicles?.make || ''} ${conversation.bookings?.vehicles?.model || ''}`.trim() ||
+                          'Booking chat'}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </section>
+
+        <section className={cx(ui.section, 'min-h-[640px]')}>
+          {activeConv ? (
+            <div className="flex h-full flex-col">
+              <div className={ui.sectionHeader}>
+                <div className="flex items-center gap-3">
+                  <Avatar name={otherParticipant?.full_name} />
+                  <div>
+                    <h2 className="text-lg font-semibold text-text-primary">
+                      {otherParticipant?.full_name || 'Conversation'}
+                    </h2>
+                    <p className="text-sm text-text-secondary">
+                      Re: {activeConv.bookings?.vehicles?.make} {activeConv.bookings?.vehicles?.model}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 space-y-3 overflow-y-auto bg-primary-50/50 px-4 py-5 sm:px-6">
+                {messages.length === 0 && (
+                  <div className="mx-auto mt-10 max-w-sm rounded-3xl border border-dashed border-border-light bg-surface-primary px-6 py-8 text-center">
+                    <p className="text-sm font-medium text-text-primary">No messages yet</p>
+                    <p className="mt-2 text-sm leading-6 text-text-secondary">
+                      Start the conversation by sending a message below.
+                    </p>
+                  </div>
+                )}
+
+                {messages.map((message) => {
+                  const isMe = message.sender_id === user.id;
+
+                  return (
+                    <div key={message.id} className={cx('flex', isMe ? 'justify-end' : 'justify-start')}>
+                      <div
+                        className={cx(
+                          'max-w-[85%] rounded-[24px] px-4 py-3 text-sm leading-6 shadow-soft sm:max-w-[70%]',
+                          isMe
+                            ? 'rounded-br-md bg-primary-700 text-white'
+                            : 'rounded-bl-md border border-border-light bg-surface-primary text-text-primary'
+                        )}
+                      >
+                        <p>{message.content}</p>
+                        <p
+                          className={cx(
+                            'mt-2 text-[11px] font-medium',
+                            isMe ? 'text-primary-100' : 'text-text-tertiary'
+                          )}
+                        >
+                          {new Date(message.created_at).toLocaleTimeString('en-PH', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <div ref={bottomRef} />
+              </div>
+
+              <form onSubmit={sendMessage} className="border-t border-border-light bg-surface-primary px-4 py-4 sm:px-6">
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <input
+                    type="text"
+                    className={cx(ui.input, 'flex-1')}
+                    placeholder="Type a message..."
+                    value={newMessage}
+                    onChange={(event) => setNewMessage(event.target.value)}
+                    maxLength={1000}
+                  />
+                  <button
+                    type="submit"
+                    className={cx(ui.button.primary, 'sm:min-w-[140px]')}
+                    disabled={sending || !newMessage.trim()}
+                  >
+                    <FiSend />
+                    {sending ? 'Sending...' : 'Send'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : (
+            <div className="flex h-full min-h-[320px] flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+              <div className={ui.emptyIcon}>
+                <FiMessageCircle />
+              </div>
+              <h2 className="text-lg font-semibold text-text-primary">Choose a conversation</h2>
+              <p className="max-w-sm text-sm leading-6 text-text-secondary">
+                Pick a thread from the left to read messages and reply.
+              </p>
+              {bookingId && (
+                <button type="button" className={ui.button.secondary} onClick={() => navigate('/bookings')}>
+                  Back to bookings
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
 }

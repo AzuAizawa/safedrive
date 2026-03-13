@@ -1,9 +1,58 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { supabase } from '../../lib/supabase';
-import { FiMail, FiLock, FiAlertCircle, FiCheckCircle, FiArrowLeft, FiEye, FiEyeOff } from 'react-icons/fi';
+import { FiAlertCircle, FiArrowLeft, FiCheckCircle, FiEye, FiEyeOff, FiLock, FiMail } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../context/AuthContext';
+import { getDefaultAppPath, getStoredUserMode } from '../../lib/navigation';
+import { ui } from '../../lib/ui';
+import { supabase } from '../../lib/supabase';
+
+function AuthShell({ eyebrow, title, description, sideTitle, sideCopy, children }) {
+    return (
+        <div className="min-h-screen bg-neutral-100 px-4 pb-12 pt-28 sm:px-6 lg:px-8">
+            <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+                <section className="relative overflow-hidden rounded-[36px] border border-primary-400/20 bg-primary-900 px-6 py-10 text-white shadow-float sm:px-10 sm:py-12">
+                    <div className="absolute inset-0 bg-primary-700/15" />
+                    <div className="relative space-y-6">
+                        <div className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/70">
+                            {eyebrow}
+                        </div>
+                        <div className="space-y-4">
+                            <h1 className="max-w-md font-display text-4xl font-bold leading-tight sm:text-5xl">
+                                {sideTitle}
+                            </h1>
+                            <p className="max-w-lg text-sm leading-7 text-white/70 sm:text-base">
+                                {sideCopy}
+                            </p>
+                        </div>
+                        <div className="grid gap-3 text-sm text-white/80 sm:grid-cols-2">
+                            {['Identity-verified users', 'Digital rental agreements', 'Protected booking flows', 'Owner and renter messaging'].map((item) => (
+                                <div key={item} className="rounded-2xl border border-white/12 bg-white/8 px-4 py-3">
+                                    {item}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                <section className="rounded-[36px] border border-border-medium bg-surface-elevated px-6 py-8 shadow-soft sm:px-8 sm:py-10">
+                    <div className="mb-8 space-y-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-tertiary">
+                            {eyebrow}
+                        </div>
+                        <h2 className="font-display text-3xl font-bold tracking-tight text-text-primary">
+                            {title}
+                        </h2>
+                        <p className="text-sm leading-6 text-text-secondary">
+                            {description}
+                        </p>
+                    </div>
+                    {children}
+                </section>
+            </div>
+        </div>
+    );
+}
 
 export default function Login() {
     const { signIn, signOut } = useAuth();
@@ -15,8 +64,6 @@ export default function Login() {
     const [verified, setVerified] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [rememberMe, setRememberMe] = useState(false);
-
-    // Forgot password state
     const [showForgotPassword, setShowForgotPassword] = useState(false);
     const [resetEmail, setResetEmail] = useState('');
     const [resetLoading, setResetLoading] = useState(false);
@@ -27,8 +74,9 @@ export default function Login() {
             setVerified(true);
             toast.success('Email verified! You can now sign in.');
         }
+
         if (searchParams.get('reason') === 'timeout') {
-            setError('Your session has expired due to inactivity. Please sign in again.');
+            setError('Your session expired due to inactivity. Please sign in again.');
         }
     }, [searchParams]);
 
@@ -41,7 +89,6 @@ export default function Login() {
             const { data, error: signInError } = await signIn(formData, rememberMe);
             if (signInError) throw signInError;
 
-            // Check if this is an admin account trying to use the user portal
             const { data: profileData } = await supabase
                 .from('profiles')
                 .select('role')
@@ -49,14 +96,13 @@ export default function Login() {
                 .single();
 
             if (profileData?.role === 'admin') {
-                // Admin trying to use user portal — reject and redirect
                 await signOut();
-                setError('Admin accounts must use the Admin Portal. Please go to /admin-login to access the admin panel.');
+                setError('Admin accounts must use the Admin Portal.');
                 return;
             }
 
             toast.success('Welcome back to SafeDrive!');
-            navigate('/dashboard');
+            navigate(getDefaultAppPath({ mode: getStoredUserMode(data.user.id) }));
         } catch (err) {
             setError(err.message || 'Failed to sign in');
             toast.error(err.message || 'Login failed');
@@ -70,28 +116,21 @@ export default function Login() {
         setError('');
 
         if (!resetEmail) {
-            setError('Please enter your email address');
-            return;
-        }
-
-        // Basic email format check
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(resetEmail)) {
-            setError('Please enter a valid email address');
+            setError('Please enter your email address.');
             return;
         }
 
         setResetLoading(true);
 
         try {
-            const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+            const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
                 redirectTo: `${window.location.origin}/auth/callback`,
             });
 
-            if (error) throw error;
+            if (resetError) throw resetError;
 
             setResetSent(true);
-            toast.success('Password reset link sent! Check your email.');
+            toast.success('Password reset link sent.');
         } catch (err) {
             console.error('Reset password error:', err);
             setError(err.message || 'Failed to send reset email');
@@ -101,217 +140,190 @@ export default function Login() {
         }
     };
 
-    // Forgot Password Form
     if (showForgotPassword) {
         return (
-            <div className="auth-page">
-                <div className="auth-visual">
-                    <div className="auth-visual-content">
-                        <div className="text-[56px] mb-6">🔑</div>
-                        <h2>Reset Your Password</h2>
-                        <p>Enter your email address and we'll send you a secure link to reset your password. No third-party services — it's all handled by SafeDrive.</p>
-                    </div>
-                </div>
-
-                <div className="auth-form-container">
-                    {resetSent ? (
-                        <div className="auth-form text-center">
-                            <div className="w-[72px] h-[72px] rounded-full bg-[var(--success-50,#f0fdf4)] flex items-center justify-center mx-auto mb-6 border-2 border-[var(--success-200,#bbf7d0)]">
-                                <FiCheckCircle size={32} className="text-[var(--success-600,#16a34a)]" />
+            <AuthShell
+                eyebrow="Account recovery"
+                title={resetSent ? 'Check your inbox' : 'Reset your password'}
+                description={resetSent ? 'Your reset link is on the way.' : 'We will email you a secure reset link.'}
+                sideTitle="Get back into SafeDrive quickly."
+                sideCopy="Use your account email and we will send a one-time reset link so you can choose a new password securely."
+            >
+                {resetSent ? (
+                    <div className="space-y-5">
+                        <div className="rounded-3xl border border-success-200 bg-success-50 p-5 text-success-700">
+                            <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                                <FiCheckCircle />
+                                Reset email sent
                             </div>
-                            <h1 className="text-[24px] mb-2">Check Your Email</h1>
-                            <p className="subtitle mb-6">
-                                We've sent a password reset link to <strong>{resetEmail}</strong>.
-                                Click the link in your email to create a new password.
+                            <p className="text-sm leading-6">
+                                We sent a reset link to <strong>{resetEmail}</strong>. Check your inbox or spam folder.
                             </p>
-                            <div className="bg-[var(--warning-50,#fffbeb)] border border-[#f59e0b33] rounded-[var(--radius-md)] p-[12px_16px] text-[13px] text-[var(--warning-700,#b45309)] mb-6 text-left">
-                                💡 <strong>Tips:</strong> Check your spam/junk folder if you don't see the email. The link expires in 1 hour.
-                            </div>
-                            <button
-                                className="btn btn-primary btn-lg w-full mb-3"
-                                onClick={() => {
-                                    setShowForgotPassword(false);
-                                    setResetSent(false);
-                                    setResetEmail('');
-                                }}
-                            >
-                                Back to Sign In
-                            </button>
-                            <button
-                                className="btn btn-ghost w-full"
-                                onClick={() => {
-                                    setResetSent(false);
-                                }}
-                            >
-                                Didn't receive it? Send again
-                            </button>
                         </div>
-                    ) : (
-                        <form className="auth-form" onSubmit={handleForgotPassword}>
-                            <button
-                                type="button"
-                                onClick={() => { setShowForgotPassword(false); setError(''); }}
-                                className="flex items-center gap-1.5 bg-none border-none cursor-pointer text-[var(--primary-600)] text-[14px] font-medium p-0 mb-5"
-                            >
-                                <FiArrowLeft size={16} /> Back to Sign In
-                            </button>
+                        <button
+                            type="button"
+                            className={`${ui.button.primary} w-full`}
+                            onClick={() => {
+                                setShowForgotPassword(false);
+                                setResetSent(false);
+                                setResetEmail('');
+                            }}
+                        >
+                            Back to sign in
+                        </button>
+                    </div>
+                ) : (
+                    <form className="space-y-5" onSubmit={handleForgotPassword}>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowForgotPassword(false);
+                                setError('');
+                            }}
+                            className={`${ui.button.ghost} -ml-2 pl-2`}
+                        >
+                            <FiArrowLeft /> Back to sign in
+                        </button>
 
-                            <h1>Forgot Password?</h1>
-                            <p className="subtitle">
-                                No worries! Enter the email address linked to your account and we'll send you a reset link.
-                            </p>
-
-                             {error && (
-                                <div className="bg-[var(--error-50)] border border-[#ef444433] rounded-[var(--radius-md)] p-[12px_16px] mb-4 flex items-center gap-2 text-[14px] text-[var(--error-600)]">
-                                    <FiAlertCircle /> {error}
-                                </div>
-                            )}
-
-                            <div className="form-group">
-                                <label className="form-label">Email Address</label>
-                                <div className="relative">
-                                    <FiMail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                                    <input
-                                        type="email"
-                                        className="form-input pl-10"
-                                        placeholder="you@gmail.com"
-                                        value={resetEmail}
-                                        onChange={(e) => setResetEmail(e.target.value)}
-                                        required
-                                        autoFocus
-                                    />
+                        {error && (
+                            <div className="rounded-3xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700">
+                                <div className="flex items-start gap-2">
+                                    <FiAlertCircle className="mt-0.5 shrink-0" />
+                                    {error}
                                 </div>
                             </div>
+                        )}
 
-                            <button
-                                type="submit"
-                                className="btn btn-primary btn-lg w-full mt-2"
-                                disabled={resetLoading}
-                            >
-                                {resetLoading ? 'Sending Reset Link...' : 'Send Reset Link'}
-                            </button>
+                        <div>
+                            <label className={ui.label}>Email address</label>
+                            <div className="relative">
+                                <FiMail className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-tertiary" />
+                                <input
+                                    type="email"
+                                    className={ui.inputWithIcon}
+                                    placeholder="you@gmail.com"
+                                    value={resetEmail}
+                                    onChange={(e) => setResetEmail(e.target.value)}
+                                    required
+                                />
+                            </div>
+                        </div>
 
-                            <p className="text-center text-[12px] text-[var(--text-tertiary)] mt-4">
-                                🔒 This uses Supabase's built-in secure email service — completely free, no third-party APIs.
-                            </p>
-                        </form>
-                    )}
-                </div>
-            </div>
+                        <button
+                            type="submit"
+                            className={`${ui.button.primary} w-full`}
+                            disabled={resetLoading}
+                        >
+                            {resetLoading ? 'Sending reset link...' : 'Send reset link'}
+                        </button>
+                    </form>
+                )}
+            </AuthShell>
         );
     }
 
     return (
-        <div className="auth-page">
-            <div className="auth-visual">
-                <div className="auth-visual-content">
-                    <div className="text-[56px] mb-6">🔐</div>
-                    <h2>Welcome Back to SafeDrive</h2>
-                    <p>Sign in to access your verified account, manage bookings, and browse quality vehicles from trusted owners.</p>
-                    <div className="flex gap-6 mt-12 justify-center">
-                        {[
-                            { num: '100%', label: 'Verified Users' },
-                            { num: '24/7', label: 'Support' },
-                        ].map((s, i) => (
-                            <div key={i}>
-                                <div className="text-[24px] font-extrabold">{s.num}</div>
-                                <div className="text-[12px] text-[#ffffff80]">{s.label}</div>
-                            </div>
-                        ))}
+        <AuthShell
+            eyebrow="Welcome back"
+            title="Sign in"
+            description="Enter your credentials to continue renting or listing with SafeDrive."
+            sideTitle="Return to your next trip or listing."
+            sideCopy="SafeDrive keeps renter and lister workflows separate so you can focus on the right side of the marketplace as soon as you sign in."
+        >
+            <form className="space-y-5" onSubmit={handleSubmit}>
+                {verified && (
+                    <div className="rounded-3xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-700">
+                        <div className="flex items-start gap-2">
+                            <FiCheckCircle className="mt-0.5 shrink-0" />
+                            Email verified successfully. You can sign in now.
+                        </div>
+                    </div>
+                )}
+
+                {error && (
+                    <div className="rounded-3xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700">
+                        <div className="flex items-start gap-2">
+                            <FiAlertCircle className="mt-0.5 shrink-0" />
+                            {error}
+                        </div>
+                    </div>
+                )}
+
+                <div>
+                    <label className={ui.label}>Email address</label>
+                    <div className="relative">
+                        <FiMail className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-tertiary" />
+                        <input
+                            type="email"
+                            className={ui.inputWithIcon}
+                            placeholder="you@gmail.com"
+                            value={formData.email}
+                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                            required
+                        />
                     </div>
                 </div>
-            </div>
 
-            <div className="auth-form-container">
-                <form className="auth-form" onSubmit={handleSubmit}>
-                    <h1>Sign In</h1>
-                    <p className="subtitle">Enter your credentials to access your account</p>
-
-                    {verified && (
-                        <div className="bg-[var(--success-50,#f0fdf4)] border border-[#22c55e4d] rounded-[var(--radius-md)] p-[12px_16px] mb-4 flex items-center gap-2 text-[14px] text-[var(--success-600,#16a34a)]">
-                            <FiCheckCircle /> Email verified successfully! You can now sign in.
-                        </div>
-                    )}
-
-                    {error && (
-                        <div className="bg-[var(--error-50)] border border-[#ef444433] rounded-[var(--radius-md)] p-[12px_16px] mb-4 flex items-center gap-2 text-[14px] text-[var(--error-600)]">
-                            <FiAlertCircle /> {error}
-                        </div>
-                    )}
-
-                    <div className="form-group">
-                        <label className="form-label">Email Address</label>
-                        <div className="relative">
-                            <FiMail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                            <input
-                                type="email"
-                                className="form-input pl-10"
-                                placeholder="you@gmail.com"
-                                value={formData.email}
-                                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                required
-                            />
-                        </div>
+                <div>
+                    <div className="mb-2 flex items-center justify-between">
+                        <label className={ui.label}>Password</label>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowForgotPassword(true);
+                                setError('');
+                                setResetEmail(formData.email);
+                            }}
+                            className="text-sm font-medium text-primary-700 transition hover:text-primary-800"
+                        >
+                            Forgot password?
+                        </button>
                     </div>
-
-                    <div className="form-group">
-                        <div className="flex justify-between items-center">
-                            <label className="form-label mb-0">Password</label>
-                            <button
-                                type="button"
-                                onClick={() => { setShowForgotPassword(true); setError(''); setResetEmail(formData.email); }}
-                                className="bg-none border-none text-[var(--primary-600)] cursor-pointer text-[13px] font-medium p-0"
-                            >
-                                Forgot password?
-                            </button>
-                        </div>
-                        <div className="relative mt-1.5">
-                            <FiLock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                            <input
-                                type={showPassword ? 'text' : 'password'}
-                                className="form-input pl-10 pr-11"
-                                placeholder="••••••••"
-                                value={formData.password}
-                                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                required
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 bg-none border-none cursor-pointer text-[var(--text-tertiary)] p-1 flex items-center"
-                            >
-                                {showPassword ? <FiEyeOff size={16} /> : <FiEye size={16} />}
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Remember Me */}
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="relative">
+                        <FiLock className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-tertiary" />
                         <input
-                            type="checkbox"
-                            id="rememberMe"
-                            checked={rememberMe}
-                            onChange={(e) => setRememberMe(e.target.checked)}
-                            className="w-4 h-4 cursor-pointer accent-[var(--primary-500)]"
+                            type={showPassword ? 'text' : 'password'}
+                            className={`${ui.inputWithIcon} pr-12`}
+                            placeholder="Enter your password"
+                            value={formData.password}
+                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                            required
                         />
-                        <label htmlFor="rememberMe" className="text-[13px] text-[var(--text-secondary)] cursor-pointer">
-                            Remember me — stay signed in on this device
-                        </label>
+                        <button
+                            type="button"
+                            onClick={() => setShowPassword((value) => !value)}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-text-tertiary transition hover:text-text-primary"
+                        >
+                            {showPassword ? <FiEyeOff /> : <FiEye />}
+                        </button>
                     </div>
+                </div>
 
-                    <button
-                        type="submit"
-                        className="btn btn-primary btn-lg w-full mt-2"
-                        disabled={loading}
-                    >
-                        {loading ? 'Signing in...' : 'Sign In'}
-                    </button>
+                <label className="flex items-center gap-3 text-sm text-text-secondary">
+                    <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="h-4 w-4 rounded border-border-light text-primary-600 focus:ring-primary-200"
+                    />
+                    Stay signed in on this device
+                </label>
 
-                    <p className="auth-link">
-                        Don't have an account? <Link to="/register">Create Account</Link>
-                    </p>
-                </form>
-            </div>
-        </div>
+                <button
+                    type="submit"
+                    className={`${ui.button.primary} w-full`}
+                    disabled={loading}
+                >
+                    {loading ? 'Signing in...' : 'Sign in'}
+                </button>
+
+                <p className="text-center text-sm text-text-secondary">
+                    Don&apos;t have an account?{' '}
+                    <Link to="/register" className="font-semibold text-primary-700 hover:text-primary-800">
+                        Create one
+                    </Link>
+                </p>
+            </form>
+        </AuthShell>
     );
 }
