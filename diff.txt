@@ -1,0 +1,270 @@
+﻿diff --git a/check_db.js b/check_db.js
+index 1f5d8e4..19db6a6 100644
+--- a/check_db.js
++++ b/check_db.js
+@@ -1,26 +1,14 @@
+ import { createClient } from '@supabase/supabase-js';
+ import dotenv from 'dotenv';
+-import { fileURLToPath } from 'url';
+-import { dirname, resolve } from 'path';
++dotenv.config();
+ 
+-const __filename = fileURLToPath(import.meta.url);
+-const __dirname = dirname(__filename);
+-dotenv.config({ path: resolve(__dirname, '.env') });
+-
+-const supabaseAdmin = createClient(
+-    process.env.VITE_SUPABASE_URL,
+-    process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
+-);
++const supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY);
+ 
+ async function check() {
+-    console.log("Using key:", process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ? 'SERVICE_ROLE' : 'ANON');
+-    const { data: users, error: error1 } = await supabaseAdmin.from('profiles').select('id, full_name, email, role, subscription_status, subscription_end_date');
+-    if (error1) {
+-        console.error("Profiles error:", error1);
+-    } else {
+-        console.log("Profiles:");
+-        console.table(users);
++    const { data, error } = await supabase.from('vehicles').select('*').limit(1);
++    console.log('Error:', error);
++    if (data && data.length > 0) {
++        console.log('Columns:', Object.keys(data[0]));
+     }
+ }
+-
+ check();
+diff --git a/package-lock.json b/package-lock.json
+index 27224bf..2a3ccad 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -60,7 +60,6 @@
+       "integrity": "sha512-CGOfOJqWjg2qW/Mb6zNsDm+u5vFQ8DxXfbM09z69p5Z6+mE1ikP2jUXw+j42Pf1XTYED2Rni5f95npYeuwMDQA==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "dependencies": {
+         "@babel/code-frame": "^7.29.0",
+         "@babel/generator": "^7.29.0",
+@@ -1530,7 +1529,6 @@
+       "integrity": "sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "dependencies": {
+         "csstype": "^3.2.2"
+       }
+@@ -1581,7 +1579,6 @@
+       "integrity": "sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "bin": {
+         "acorn": "bin/acorn"
+       },
+@@ -1687,7 +1684,6 @@
+         }
+       ],
+       "license": "MIT",
+-      "peer": true,
+       "dependencies": {
+         "baseline-browser-mapping": "^2.9.0",
+         "caniuse-lite": "^1.0.30001759",
+@@ -1816,8 +1812,7 @@
+       "version": "3.2.3",
+       "resolved": "https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz",
+       "integrity": "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==",
+-      "license": "MIT",
+-      "peer": true
++      "license": "MIT"
+     },
+     "node_modules/date-fns": {
+       "version": "4.1.0",
+@@ -1944,7 +1939,6 @@
+       "integrity": "sha512-LEyamqS7W5HB3ujJyvi0HQK/dtVINZvd5mAAp9eT5S/ujByGjiZLCzPcHVzuXbpJDJF/cxwHlfceVUDZ2lnSTw==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "dependencies": {
+         "@eslint-community/eslint-utils": "^4.8.0",
+         "@eslint-community/regexpp": "^4.12.1",
+@@ -2649,7 +2643,6 @@
+       "integrity": "sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "engines": {
+         "node": ">=12"
+       },
+@@ -2711,7 +2704,6 @@
+       "resolved": "https://registry.npmjs.org/react/-/react-19.2.4.tgz",
+       "integrity": "sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ==",
+       "license": "MIT",
+-      "peer": true,
+       "engines": {
+         "node": ">=0.10.0"
+       }
+@@ -2721,7 +2713,6 @@
+       "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.2.4.tgz",
+       "integrity": "sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ==",
+       "license": "MIT",
+-      "peer": true,
+       "dependencies": {
+         "scheduler": "^0.27.0"
+       },
+@@ -3028,7 +3019,6 @@
+       "integrity": "sha512-w+N7Hifpc3gRjZ63vYBXA56dvvRlNWRczTdmCBBa+CotUzAPf5b7YMdMR/8CQoeYE5LX3W4wj6RYTgonm1b9DA==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "dependencies": {
+         "esbuild": "^0.27.0",
+         "fdir": "^6.5.0",
+@@ -3171,7 +3161,6 @@
+       "integrity": "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==",
+       "dev": true,
+       "license": "MIT",
+-      "peer": true,
+       "funding": {
+         "url": "https://github.com/sponsors/colinhacks"
+       }
+diff --git a/src/pages/Vehicles.jsx b/src/pages/Vehicles.jsx
+index 2b39948..857f06f 100644
+--- a/src/pages/Vehicles.jsx
++++ b/src/pages/Vehicles.jsx
+@@ -1,5 +1,5 @@
+ import { useEffect, useState } from 'react';
+-import { Link } from 'react-router-dom';
++import { Link, useLocation } from 'react-router-dom';
+ import { supabase } from '../lib/supabase';
+ import { useAuth } from '../context/AuthContext';
+ import { FiSearch, FiMapPin, FiUsers, FiSettings, FiStar, FiHeart, FiFilter, FiX, FiGrid, FiList } from 'react-icons/fi';
+@@ -17,6 +17,7 @@ const BODY_TYPES = ['Sedan', 'SUV', 'MPV', 'Van', 'Hatchback', 'Pickup', 'Crosso
+ 
+ export default function Vehicles() {
+     const { user } = useAuth();
++    const location = useLocation();
+     const [vehicles, setVehicles] = useState([]);
+     const [loading, setLoading] = useState(true);
+     const [searchTerm, setSearchTerm] = useState('');
+@@ -38,7 +39,7 @@ export default function Vehicles() {
+ 
+         const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
+         return () => { mounted = false; clearTimeout(safety); };
+-    }, []);
++    }, [location.key]);
+ 
+     const fetchVehicles = async () => {
+         try {
+@@ -47,6 +48,7 @@ export default function Vehicles() {
+                 .select('*, profiles!vehicles_owner_id_fkey(full_name, average_rating, avatar_url)')
+                 .in('status', ['approved', 'listed'])
+                 .eq('is_available', true)
++                .is('is_active_listing', true)
+                 .order('created_at', { ascending: false });
+ 
+             if (error) throw error;
+diff --git a/src/pages/owner/CreateVehicle.jsx b/src/pages/owner/CreateVehicle.jsx
+index 6e25387..ff9a9c4 100644
+--- a/src/pages/owner/CreateVehicle.jsx
++++ b/src/pages/owner/CreateVehicle.jsx
+@@ -285,12 +285,14 @@ export default function CreateVehicle() {
+             }
+         }
+ 
+-        if (!formData.contact_info?.trim()) {
+-            toast.error('Please provide your contact information for renters'); return;
++        // Validate PH mobile number format (11 digits starting with 09)
++        const phoneRegex = /^09\d{9}$/;
++        if (!phoneRegex.test(formData.contact_info?.trim())) {
++            toast.error('Please provide a valid 11-digit Philippine mobile number starting with 09 (e.g., 09123456789)'); return;
+         }
+ 
+         // Basic sanitization check ΓÇö reject inputs containing HTML tags
+-        const textFields = ['pickup_location', 'pickup_city', 'pickup_province', 'description', 'contact_info'];
++        const textFields = ['pickup_location', 'pickup_city', 'pickup_province', 'description'];
+         for (const key of textFields) {
+             const val = formData[key] || '';
+             if (val && /<[^>]+>/.test(val)) {
+@@ -770,13 +772,20 @@ export default function CreateVehicle() {
+                     </div>
+                     <div className="card-body">
+                         <div className="form-group">
+-                            <label className="form-label">Contact Details *</label>
+-                            <textarea className="form-textarea" style={{ width: '100%' }} rows={3}
+-                                placeholder="e.g. 09XX-XXX-XXXX | Facebook: Juan Dela Cruz | Viber: 09XX-XXX-XXXX"
++                            <label className="form-label">Philippine Mobile Number *</label>
++                            <input type="tel" className="form-input" style={{ width: '100%' }}
++                                placeholder="09XXXXXXXXX"
++                                maxLength={11}
+                                 value={formData.contact_info}
+-                                onChange={e => setFormData({ ...formData, contact_info: e.target.value })} />
++                                onChange={e => {
++                                    // only allow digits
++                                    const val = e.target.value.replace(/\D/g, '');
++                                    if (val.length <= 11) {
++                                        setFormData({ ...formData, contact_info: val });
++                                    }
++                                }} required />
+                             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+-                                Provide your preferred contact method so renters can reach you to coordinate and negotiate.
++                                Renters will use this number to contact you. Must be an 11-digit number starting with 09.
+                             </div>
+                         </div>
+                     </div>
+diff --git a/src/pages/owner/MyVehicles.jsx b/src/pages/owner/MyVehicles.jsx
+index 3aaa5cd..503ba6e 100644
+--- a/src/pages/owner/MyVehicles.jsx
++++ b/src/pages/owner/MyVehicles.jsx
+@@ -1,5 +1,5 @@
+ import { useEffect, useState } from 'react';
+-import { Link, useNavigate } from 'react-router-dom';
++import { Link, useNavigate, useLocation } from 'react-router-dom';
+ import { supabase } from '../../lib/supabase';
+ import { useAuth } from '../../context/AuthContext';
+ import { FiPlus, FiEye, FiTrash2, FiStar, FiToggleLeft, FiToggleRight } from 'react-icons/fi';
+@@ -9,6 +9,7 @@ import { isSubscriptionActive, FREE_LISTING_LIMIT } from '../../lib/paymongo';
+ export default function MyVehicles() {
+     const { user, profile, refreshProfile } = useAuth();
+     const navigate = useNavigate();
++    const location = useLocation();
+     const [vehicles, setVehicles] = useState([]);
+     const [loading, setLoading] = useState(true);
+     const [togglingId, setTogglingId] = useState(null);
+@@ -22,7 +23,7 @@ export default function MyVehicles() {
+         fetchMyVehicles();
+         const safety = setTimeout(() => { if (mounted) setLoading(false); }, 5000);
+         return () => { mounted = false; clearTimeout(safety); };
+-    }, [profile?.id]); // Only refetch vehicles if the actual user changes
++    }, [profile?.id, location.key]); // Refetch on route change to capture newly added vehicles
+ 
+     // 2. Guarantee profile is perfectly synced with DB if they just paid
+     useEffect(() => {
+@@ -47,7 +48,7 @@ export default function MyVehicles() {
+         }
+     };
+ 
+-    const activeCount = vehicles.filter(v => v.is_active_listing !== false && v.is_available).length;
++    const activeCount = vehicles.filter(v => v.is_active_listing === true).length;
+ 
+     /**
+      * Toggle a vehicle's active/inactive listing state.
+@@ -55,7 +56,7 @@ export default function MyVehicles() {
+      * Subscribed users: unlimited.
+      */
+     const toggleActiveListing = async (vehicle) => {
+-        const currentlyActive = vehicle.is_active_listing !== false && vehicle.is_available;
++        const currentlyActive = vehicle.is_active_listing === true;
+ 
+         if (!currentlyActive && !isSubscribed && activeCount >= FREE_LISTING_LIMIT) {
+             toast.error(
+@@ -161,7 +162,7 @@ export default function MyVehicles() {
+                         </thead>
+                         <tbody>
+                             {vehicles.map((v, idx) => {
+-                                const isActive = v.is_active_listing !== false && v.is_available;
++                                const isActive = v.is_active_listing === true;
+                                 const isOldest = idx === 0;
+                                 return (
+                                     <tr key={v.id} style={{ opacity: isActive ? 1 : 0.6 }}>
