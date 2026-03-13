@@ -37,29 +37,29 @@
   --error-500: #ef4444;
   --error-600: #dc2626;
 
-  --neutral-50: #f4efe6;
-  --neutral-100: #e8dece;
-  --neutral-200: #d7cab7;
-  --neutral-300: #bead96;
-  --neutral-400: #9a876f;
-  --neutral-500: #766552;
-  --neutral-600: #5c4f40;
-  --neutral-700: #453a30;
-  --neutral-800: #2f2822;
-  --neutral-900: #1d1916;
+  --neutral-50: #f8fafc;
+  --neutral-100: #f1f5f9;
+  --neutral-200: #e2e8f0;
+  --neutral-300: #cbd5e1;
+  --neutral-400: #94a3b8;
+  --neutral-500: #64748b;
+  --neutral-600: #475569;
+  --neutral-700: #334155;
+  --neutral-800: #1e293b;
+  --neutral-900: #0f172a;
 
-  --surface-primary: #f6f0e6;
-  --surface-secondary: #ebe3d6;
-  --surface-elevated: #fcf7ef;
-  --surface-glass: rgba(252, 247, 239, 0.9);
+  --surface-primary: #ffffff;
+  --surface-secondary: #f8fafc;
+  --surface-elevated: #ffffff;
+  --surface-glass: #ffffff;
 
   --text-primary: #182235;
   --text-secondary: #4a5568;
   --text-tertiary: #7b8494;
   --text-inverse: #ffffff;
 
-  --border-light: #cfc1ad;
-  --border-medium: #b8a78e;
+  --border-light: #e2e8f0;
+  --border-medium: #cbd5e1;
   --border-focus: #3f70f4;
 
   --shadow-xs: 0 1px 2px rgba(24, 34, 53, 0.06);

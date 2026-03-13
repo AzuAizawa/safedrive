@@ -108,7 +108,7 @@ export default function Navbar() {
     if (loading) {
         return (
             <header className="fixed inset-x-0 top-0 z-50 px-4 pt-4 sm:px-6 lg:px-8">
-                <div className="mx-auto flex max-w-7xl items-center justify-between rounded-[32px] border border-border-light bg-surface-glass px-5 py-4 shadow-soft backdrop-blur-xl">
+                <div className="mx-auto flex max-w-7xl items-center justify-between rounded-[32px] border border-border-light bg-surface-elevated px-5 py-4 shadow-soft">
                     <BrandMark />
                     <div className="h-10 w-10 animate-pulse rounded-full bg-neutral-200" />
                 </div>
@@ -119,7 +119,7 @@ export default function Navbar() {
     if (!user) {
         return (
             <header className="fixed inset-x-0 top-0 z-50 px-4 pt-4 sm:px-6 lg:px-8">
-                <div className="mx-auto flex max-w-7xl items-center justify-between rounded-[32px] border border-border-light bg-surface-glass px-5 py-4 shadow-soft backdrop-blur-xl">
+                <div className="mx-auto flex max-w-7xl items-center justify-between rounded-[32px] border border-border-light bg-surface-elevated px-5 py-4 shadow-soft">
                     <Link to="/">
                         <BrandMark />
                     </Link>
@@ -138,7 +138,7 @@ export default function Navbar() {
 
     return (
         <header className="fixed inset-x-0 top-0 z-50 px-4 pt-4 sm:px-6 lg:px-8">
-            <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 rounded-[32px] border border-border-light bg-surface-glass px-5 py-4 shadow-soft backdrop-blur-xl">
+            <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 rounded-[32px] border border-border-light bg-surface-elevated px-5 py-4 shadow-soft">
                 <div className="flex min-w-0 items-center gap-6">
                     <Link to={homePath}>
                         <BrandMark />
@@ -204,7 +204,7 @@ export default function Navbar() {
                         </button>
 
                         {showDropdown && (
-                            <div className="absolute right-0 top-[calc(100%+12px)] z-50 w-[320px] rounded-[28px] border border-border-light bg-surface-glass p-3 shadow-float backdrop-blur-xl">
+                            <div className="absolute right-0 top-[calc(100%+12px)] z-50 w-[320px] rounded-[28px] border border-border-light bg-surface-elevated p-3 shadow-float">
                                 <div className="rounded-3xl border border-border-light bg-surface-secondary p-4">
                                     <div className="text-sm font-bold text-text-primary">
                                         {profile?.full_name || 'User'}

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { supabase as supabaseUser, supabaseAdmin } from '../lib/supabase';
 import {
     logSecurityEvent,
@@ -33,8 +33,11 @@ export function AuthProvider({ children }) {
     }, []);
 
     // ── Fetch profile from DB ──────────────────────────────────────────────
-    const fetchProfile = async (userId, client) => {
+    const fetchProfile = async (userId, client, isBackgroundRefresh = false) => {
         try {
+            if (!isBackgroundRefresh) {
+                setLoading(true);
+            }
             const { data, error } = await client
                 .from('profiles')
                 .select('*')
@@ -45,7 +48,7 @@ export function AuthProvider({ children }) {
 
             if (!error && data) {
                 setProfile(data);
-            } else {
+            } else if (!data) {
                 // Fallback: build a minimal profile from the auth user
                 const { data: { user: authUser } } = await client.auth.getUser();
                 if (authUser && mountedRef.current) {
@@ -66,11 +69,11 @@ export function AuthProvider({ children }) {
     };
 
     // ── Force manual profile refresh ───────────────────────────────────────
-    const refreshProfile = async () => {
+    const refreshProfile = useCallback(async () => {
         if (user) {
-            await fetchProfile(user.id, activeClient);
+            await fetchProfile(user.id, activeClientRef.current, true);
         }
-    };
+    }, [user]);
 
     // ── Attach ONE listener to whichever client won the session check ──────
     // processInitialSession=true when called after a fresh login so that the
@@ -91,7 +94,9 @@ export function AuthProvider({ children }) {
             try {
                 if (session?.user) {
                     setUser(session.user);
-                    await fetchProfile(session.user.id, client);
+                    // If we already have a profile and the user is the same, this is a background refresh (e.g. token refresh on alt-tab)
+                    const isBackgroundRefresh = profile && profile.id === session.user.id;
+                    await fetchProfile(session.user.id, client, isBackgroundRefresh);
 
                     if (event === 'SIGNED_IN') {
                         logSecurityEvent('auth.login', 'User signed in', {

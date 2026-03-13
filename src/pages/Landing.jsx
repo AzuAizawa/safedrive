@@ -49,8 +49,7 @@ export default function Landing() {
                     </div>
 
                     <div className="relative">
-                        <div className="absolute inset-0 -translate-y-6 rounded-[40px] bg-primary-100/80 blur-3xl" />
-                        <div className="relative rounded-[36px] border border-white/70 bg-white/85 p-6 shadow-float backdrop-blur-xl sm:p-8">
+                        <div className="relative rounded-[36px] border border-border-light bg-surface-primary p-6 shadow-float sm:p-8">
                             <div className="mb-6 flex items-center justify-between rounded-3xl border border-border-light bg-surface-secondary px-5 py-4">
                                 <div>
                                     <div className="text-sm font-semibold text-text-primary">SafeDrive renter flow</div>

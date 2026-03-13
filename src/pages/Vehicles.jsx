@@ -40,7 +40,7 @@ export default function Vehicles() {
         fetchVehicles();
         fetchBrands();
         if (user) fetchFavorites();
-    }, [location.key, user]);
+    }, [location.key, user?.id]);
 
     const fetchVehicles = async () => {
         setLoading(true);

@@ -44,7 +44,7 @@ export default function VehicleDetail() {
 
     useEffect(() => {
         fetchVehicle();
-    }, [id, user]);
+    }, [id, user?.id]);
 
     useEffect(() => {
         if (vehicle?.pricing_type === 'fixed' && booking.start_date && vehicle.fixed_rental_days) {
