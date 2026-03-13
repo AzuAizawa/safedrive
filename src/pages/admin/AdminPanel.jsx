@@ -754,7 +754,7 @@ export default function AdminPanel() {
             {/* ========== USER DETAIL MODAL ========== */}
             {selectedUser && (
                 <div className={ui.modalOverlay} onClick={() => setSelectedUser(null)}>
-                    <div className={cx(ui.modalPanel, 'max-h-[90vh] max-w-[700px] overflow-auto')} onClick={(e) => e.stopPropagation()}>
+                    <div className={cx(ui.modalPanel, 'max-w-[700px]')} onClick={(e) => e.stopPropagation()}>
                         <div className={ui.sectionHeader}>
                             <h2>User Details</h2>
                             <button className={cx(ui.button.ghost, ui.button.sm)} onClick={() => setSelectedUser(null)}>✕</button>
@@ -896,7 +896,7 @@ export default function AdminPanel() {
             {/* ========== VEHICLE DETAIL MODAL ========== */}
             {selectedVehicle && (
                 <div className={ui.modalOverlay} onClick={() => setSelectedVehicle(null)}>
-                    <div className={cx(ui.modalPanel, 'max-h-[92vh] max-w-[720px] overflow-auto')} onClick={(e) => e.stopPropagation()}>
+                    <div className={cx(ui.modalPanel, 'max-w-[720px]')} onClick={(e) => e.stopPropagation()}>
                         <div className={ui.sectionHeader}>
                             <h2>🚗 {selectedVehicle.year} {selectedVehicle.make} {selectedVehicle.model}</h2>
                             <button className={cx(ui.button.ghost, ui.button.sm)} onClick={() => setSelectedVehicle(null)}>✕</button>

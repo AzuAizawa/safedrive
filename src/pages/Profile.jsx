@@ -225,6 +225,53 @@ export default function Profile() {
         </div>
       </section>
 
+      {/* Payout Information Section */}
+      <section className={ui.section}>
+        <div className={ui.sectionHeader}>
+          <div>
+            <h2 className="text-lg font-semibold text-text-primary">Payout & Earnings</h2>
+            <p className="text-sm text-text-secondary">How you receive your rental income</p>
+          </div>
+        </div>
+
+        <div className={ui.sectionBody}>
+          <div className="rounded-[28px] border border-primary-100 bg-primary-50/50 px-5 py-5">
+            <h3 className="text-sm font-semibold text-primary-900">Lazy Payout System</h3>
+            <p className="mt-2 text-sm leading-6 text-primary-800">
+              SafeDrive uses the **Xendit Lazy Payout** system for maximum speed and security. 
+              You don't need to provide your bank details now!
+            </p>
+            <div className="mt-4 space-y-3">
+              <div className="flex gap-3 text-sm text-primary-800">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-200 text-[10px] font-bold">1</span>
+                <p>List your car and complete rentals.</p>
+              </div>
+              <div className="flex gap-3 text-sm text-primary-800">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-200 text-[10px] font-bold">2</span>
+                <p>When the rental ends, we send a secure claim link to your email ({profile?.email}).</p>
+              </div>
+              <div className="flex gap-3 text-sm text-primary-800">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-200 text-[10px] font-bold">3</span>
+                <p>Choose your preferred payout method (GCash, Maya, or any Bank) to receive your funds instantly.</p>
+              </div>
+            </div>
+            <p className="mt-4 text-[11px] font-medium uppercase tracking-wider text-primary-600">
+              ⚡ Platform Fee: 10% | Your Share: 90%
+            </p>
+          </div>
+          
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <button 
+              type="button" 
+              className={ui.button.secondary}
+              onClick={() => navigate('/bookings')}
+            >
+              View Earnings in Bookings
+            </button>
+          </div>
+        </div>
+      </section>
+
       <section className={ui.section}>
         <div className={ui.sectionHeader}>
           <div>

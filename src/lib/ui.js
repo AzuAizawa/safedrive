@@ -62,9 +62,9 @@ export const ui = {
   emptyIcon:
     'mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary-50 text-3xl text-primary-700',
   modalOverlay:
-    'fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm',
+    'fixed inset-0 z-[120] flex justify-center bg-slate-950/55 p-4 backdrop-blur-sm overflow-y-auto',
   modalPanel:
-    'w-full max-w-2xl overflow-hidden rounded-[32px] border border-white/60 bg-surface-primary shadow-float',
+    'relative w-full max-w-2xl rounded-[32px] border border-white/60 bg-surface-primary shadow-float my-auto overflow-hidden',
   spinner:
     'h-10 w-10 animate-spin rounded-full border-4 border-border-light border-t-primary-600',
   loadingScreen:
