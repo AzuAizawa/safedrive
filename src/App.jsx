@@ -18,6 +18,8 @@ import Messages from './pages/Messages';
 import Subscribe from './pages/Subscribe';
 import SubscriptionSuccess from './pages/SubscriptionSuccess';
 import SubscriptionFailed from './pages/SubscriptionFailed';
+import PaymentSuccess from './pages/PaymentSuccess';
+import PaymentFailed from './pages/PaymentFailed';
 import CreateVehicle from './pages/owner/CreateVehicle';
 import MyVehicles from './pages/owner/MyVehicles';
 import ManageAvailability from './pages/owner/ManageAvailability';
@@ -159,6 +161,8 @@ function App() {
                 <Route path="/subscribe" element={<Subscribe />} />
                 <Route path="/subscription/success" element={<SubscriptionSuccess />} />
                 <Route path="/subscription/failed" element={<SubscriptionFailed />} />
+                <Route path="/payment/success" element={<PaymentSuccess />} />
+                <Route path="/payment/failed" element={<PaymentFailed />} />
                 <Route path="/agreements/:bookingId" element={<RentalAgreement />} />
                 <Route path="/vehicles/new" element={<CreateVehicle />} />
                 <Route path="/my-vehicles" element={<MyVehicles />} />

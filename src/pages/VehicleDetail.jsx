@@ -5,7 +5,9 @@ import {
     FiCheckCircle,
     FiChevronLeft,
     FiChevronRight,
+    FiClock,
     FiFileText,
+    FiInfo,
     FiMapPin,
     FiSettings,
     FiShield,
@@ -19,10 +21,7 @@ import VerificationGate from '../components/VerificationGate';
 import BackButton from '../components/BackButton';
 import AvailabilityCalendar from '../components/AvailabilityCalendar';
 import { badgeClass, ui } from '../lib/ui';
-
-function money(value) {
-    return `PHP ${Number(value || 0).toLocaleString()}`;
-}
+import { formatPHP, getMinBookingStartDate, calculateSplit, PLATFORM_COMMISSION_RATE } from '../lib/xendit';
 
 function shortDate(value) {
     return new Date(value).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
@@ -42,36 +41,26 @@ export default function VehicleDetail() {
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
     const [existingBooking, setExistingBooking] = useState(null);
 
+    const minStartDate = getMinBookingStartDate();
+
     useEffect(() => {
         fetchVehicle();
     }, [id, user?.id]);
 
-    useEffect(() => {
-        if (vehicle?.pricing_type === 'fixed' && booking.start_date && vehicle.fixed_rental_days) {
-            const start = new Date(booking.start_date);
-            start.setDate(start.getDate() + parseInt(vehicle.fixed_rental_days, 10) - 1);
-            setBooking((current) => ({ ...current, end_date: start.toISOString().split('T')[0] }));
-        }
-    }, [booking.start_date, vehicle]);
-
     const pricing = useMemo(() => {
         if (!vehicle || !booking.start_date || !booking.end_date) {
-            return { days: 0, subtotal: 0, fee: 0, total: 0 };
+            return { days: 0, subtotal: 0, fee: 0, total: 0, commission: 0, ownerPayout: 0 };
         }
 
         const start = new Date(booking.start_date);
         const end = new Date(booking.end_date);
         const days = Math.max(1, Math.ceil((end - start) / 86400000) + 1);
-
-        if (vehicle.pricing_type === 'fixed') {
-            const total = parseFloat(vehicle.fixed_price) || 0;
-            return { days: parseInt(vehicle.fixed_rental_days || 1, 10), subtotal: total, fee: 0, total };
-        }
-
         const subtotal = days * (vehicle.daily_rate || 0);
-        const fee = subtotal * 0.1;
-        const total = subtotal + fee + (vehicle.security_deposit || 0);
-        return { days, subtotal, fee, total };
+        const fee = Math.round(subtotal * PLATFORM_COMMISSION_RATE);
+        const total = subtotal;
+        const { commission, ownerPayout } = calculateSplit(total);
+
+        return { days, subtotal, fee, total, commission, ownerPayout };
     }, [booking.end_date, booking.start_date, vehicle]);
 
     const fetchVehicle = async () => {
@@ -98,7 +87,7 @@ export default function VehicleDetail() {
             if (user) {
                 const { data: activeBooking } = await supabase
                     .from('bookings')
-                    .select('id, start_date, end_date, status, total_amount')
+                    .select('id, start_date, end_date, status, total_amount, payment_status')
                     .eq('vehicle_id', id)
                     .eq('renter_id', user.id)
                     .in('status', ['pending', 'confirmed', 'active'])
@@ -143,6 +132,12 @@ export default function VehicleDetail() {
             return;
         }
 
+        // Validate min start date (2 days from now)
+        if (booking.start_date < minStartDate) {
+            toast.error('Start date must be at least 2 days from today');
+            return;
+        }
+
         try {
             const { data: conflicts } = await supabase
                 .from('vehicle_availability')
@@ -161,6 +156,12 @@ export default function VehicleDetail() {
 
         setBookingLoading(true);
         try {
+            const days = pricing.days;
+            const subtotal = pricing.subtotal;
+            const serviceFee = pricing.fee;
+            const total = pricing.total;
+            const { commission, ownerPayout } = calculateSplit(total);
+
             const { data, error } = await supabase
                 .from('bookings')
                 .insert({
@@ -169,32 +170,35 @@ export default function VehicleDetail() {
                     owner_id: vehicle.owner_id,
                     start_date: booking.start_date,
                     end_date: booking.end_date,
-                    daily_rate: vehicle.pricing_type === 'fixed'
-                        ? parseFloat(vehicle.fixed_price || 0) / parseInt(vehicle.fixed_rental_days || 1, 10)
-                        : vehicle.daily_rate,
-                    total_days: pricing.days,
-                    subtotal: pricing.subtotal,
-                    service_fee: pricing.fee,
-                    security_deposit: vehicle.pricing_type === 'flexible' ? (vehicle.security_deposit || 0) : 0,
-                    total_amount: pricing.total,
+                    daily_rate: vehicle.daily_rate,
+                    total_days: days,
+                    subtotal: subtotal,
+                    service_fee: serviceFee,
+                    security_deposit: 0,
+                    total_amount: total,
                     pickup_location: vehicle.pickup_location,
                     status: 'pending',
+                    payment_status: 'unpaid',
+                    payout_status: 'pending',
+                    commission_amount: commission,
+                    owner_payout_amount: ownerPayout,
                 })
                 .select()
                 .single();
 
             if (error) throw error;
 
+            // Notify owner
             await supabase.from('notifications').insert({
                 user_id: vehicle.owner_id,
                 title: 'New Booking Request',
-                message: `${profile?.full_name || 'A renter'} wants to rent your ${vehicle.year} ${vehicle.make} ${vehicle.model}`,
+                message: `${profile?.full_name || 'A renter'} wants to rent your ${vehicle.year} ${vehicle.make} ${vehicle.model} from ${shortDate(booking.start_date)} to ${shortDate(booking.end_date)}. You have 24 hours to accept or decline.`,
                 type: 'booking',
                 reference_id: data.id,
                 reference_type: 'booking',
             });
 
-            toast.success('Booking request sent');
+            toast.success('Booking request sent! The owner has 24 hours to respond.');
             navigate('/bookings');
         } catch (err) {
             console.error('Booking error:', err);
@@ -217,7 +221,6 @@ export default function VehicleDetail() {
 
     const gallery = [vehicle.thumbnail_url, ...(vehicle.images || []).filter((image) => image && image !== vehicle.thumbnail_url)].filter(Boolean);
     const currentImage = gallery[selectedImageIndex];
-    const isFixed = vehicle.pricing_type === 'fixed';
     const address = [vehicle.pickup_location, vehicle.pickup_city, vehicle.pickup_province].filter(Boolean).join(', ');
 
     return (
@@ -236,9 +239,6 @@ export default function VehicleDetail() {
                             <div className="absolute left-5 top-5 flex gap-2">
                                 <span className={vehicle.is_available ? badgeClass('success') : badgeClass('pending')}>
                                     {vehicle.is_available ? 'Available' : 'Unavailable'}
-                                </span>
-                                <span className={isFixed ? badgeClass('info') : badgeClass('neutral')}>
-                                    {isFixed ? 'Fixed price' : 'Flexible rate'}
                                 </span>
                             </div>
                             {gallery.length > 1 && (
@@ -298,7 +298,7 @@ export default function VehicleDetail() {
                                 ['Fuel type', vehicle.fuel_type],
                                 ['Color', vehicle.color],
                                 ['Seating', `${vehicle.seating_capacity} seats`],
-                                ['Rate', isFixed ? `${money(vehicle.fixed_price)} for ${vehicle.fixed_rental_days} day(s)` : `${money(vehicle.daily_rate)} per day`],
+                                ['Rate', `${formatPHP(vehicle.daily_rate)} per day`],
                             ].map(([label, value]) => (
                                 <div key={label} className="rounded-3xl border border-border-light bg-surface-secondary p-4">
                                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-tertiary">{label}</div>
@@ -373,7 +373,12 @@ export default function VehicleDetail() {
                                     <div className="text-4xl">📋</div>
                                     <h2 className="mt-3 font-display text-2xl font-bold text-primary-800">You already booked this car</h2>
                                     <p className="mt-2 text-sm text-primary-700">{shortDate(existingBooking.start_date)} to {shortDate(existingBooking.end_date)}</p>
-                                    <div className="mt-3 font-display text-3xl font-bold text-primary-800">{money(existingBooking.total_amount)}</div>
+                                    <div className="mt-3 font-display text-3xl font-bold text-primary-800">{formatPHP(existingBooking.total_amount)}</div>
+                                    {existingBooking.payment_status && existingBooking.payment_status !== 'not_applicable' && (
+                                        <div className="mt-2 text-sm text-primary-600">
+                                            Payment: <span className="font-semibold capitalize">{existingBooking.payment_status}</span>
+                                        </div>
+                                    )}
                                 </div>
                                 <button type="button" className={`${ui.button.secondary} w-full`} onClick={() => navigate('/bookings')}>
                                     View my bookings
@@ -382,37 +387,68 @@ export default function VehicleDetail() {
                         ) : (
                             <>
                                 <div className="border-b border-border-light pb-5">
-                                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-tertiary">Pricing</div>
+                                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-tertiary">Daily Rate</div>
                                     <div className="mt-2 font-display text-4xl font-bold text-text-primary">
-                                        {isFixed ? money(vehicle.fixed_price) : money(vehicle.daily_rate)}
+                                        {formatPHP(vehicle.daily_rate)}
                                     </div>
-                                    <div className="mt-1 text-sm text-text-tertiary">{isFixed ? `for ${vehicle.fixed_rental_days} day(s)` : 'per day'}</div>
+                                    <div className="mt-1 text-sm text-text-tertiary">per day</div>
+                                </div>
+
+                                {/* Booking Flow Info */}
+                                <div className="mt-4 space-y-2 rounded-3xl border border-primary-200 bg-primary-50 p-4">
+                                    <div className="flex items-start gap-2 text-sm text-primary-700">
+                                        <FiInfo className="mt-0.5 shrink-0" />
+                                        <span>You choose how long you want to rent. Pricing is daily rate × number of days.</span>
+                                    </div>
+                                    <div className="flex items-start gap-2 text-sm text-primary-700">
+                                        <FiClock className="mt-0.5 shrink-0" />
+                                        <span>After you request, the owner has 24h to approve. Then you have 24h to pay.</span>
+                                    </div>
                                 </div>
 
                                 <form onSubmit={submitBooking} className="space-y-4 pt-5">
                                     <div>
                                         <label className={ui.label}>Pick-up date</label>
-                                        <input type="date" className={ui.input} value={booking.start_date} min={new Date().toISOString().split('T')[0]} onChange={(event) => setBooking((current) => ({ ...current, start_date: event.target.value }))} required />
+                                        <input
+                                            type="date"
+                                            className={ui.input}
+                                            value={booking.start_date}
+                                            min={minStartDate}
+                                            onChange={(event) => setBooking((current) => ({ ...current, start_date: event.target.value }))}
+                                            required
+                                        />
+                                        <p className="mt-1 text-xs text-text-tertiary">
+                                            Earliest available: {shortDate(minStartDate)}
+                                        </p>
                                     </div>
                                     <div>
                                         <label className={ui.label}>Return date</label>
-                                        <input type="date" className={ui.input} value={booking.end_date} min={booking.start_date || new Date().toISOString().split('T')[0]} onChange={(event) => !isFixed && setBooking((current) => ({ ...current, end_date: event.target.value }))} readOnly={isFixed} required />
+                                        <input
+                                            type="date"
+                                            className={ui.input}
+                                            value={booking.end_date}
+                                            min={booking.start_date || minStartDate}
+                                            onChange={(event) => setBooking((current) => ({ ...current, end_date: event.target.value }))}
+                                            required
+                                        />
                                     </div>
                                     {booking.start_date && booking.end_date && (
                                         <div className="rounded-3xl border border-border-light bg-surface-secondary p-4 text-sm">
-                                            {isFixed ? (
-                                                <>
-                                                    <div className="flex justify-between"><span>{vehicle.fixed_rental_days} day package</span><span className="font-semibold text-text-primary">{money(vehicle.fixed_price)}</span></div>
-                                                    <div className="mt-3 flex justify-between border-t border-border-light pt-3 font-semibold text-text-primary"><span>Total</span><span>{money(vehicle.fixed_price)}</span></div>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <div className="flex justify-between"><span>{money(vehicle.daily_rate)} x {pricing.days} day(s)</span><span className="font-semibold text-text-primary">{money(pricing.subtotal)}</span></div>
-                                                    <div className="mt-2 flex justify-between"><span>Service fee</span><span>{money(pricing.fee)}</span></div>
-                                                    {vehicle.security_deposit > 0 && <div className="mt-2 flex justify-between"><span>Security deposit</span><span>{money(vehicle.security_deposit)}</span></div>}
-                                                    <div className="mt-3 flex justify-between border-t border-border-light pt-3 font-semibold text-text-primary"><span>Total</span><span>{money(pricing.total)}</span></div>
-                                                </>
-                                            )}
+                                            <div className="flex justify-between">
+                                                <span>{formatPHP(vehicle.daily_rate)} × {pricing.days} day{pricing.days !== 1 ? 's' : ''}</span>
+                                                <span className="font-semibold text-text-primary">{formatPHP(pricing.subtotal)}</span>
+                                            </div>
+                                            <div className="mt-2 flex justify-between text-text-tertiary">
+                                                <span>Platform fee ({(PLATFORM_COMMISSION_RATE * 100).toFixed(0)}%)</span>
+                                                <span>Included</span>
+                                            </div>
+                                            <div className="mt-3 flex justify-between border-t border-border-light pt-3 font-semibold text-text-primary">
+                                                <span>Total</span>
+                                                <span>{formatPHP(pricing.total)}</span>
+                                            </div>
+                                            <div className="mt-2 text-xs text-text-tertiary">
+                                                Owner receives {formatPHP(pricing.ownerPayout)} · Platform fee {formatPHP(pricing.commission)}
+                                            </div>
                                         </div>
                                     )}
                                     <button type="submit" className={`${ui.button.accent} w-full`} disabled={bookingLoading || !vehicle.is_available}>
@@ -421,7 +457,7 @@ export default function VehicleDetail() {
                                 </form>
                                 <div className="mt-4 flex items-center gap-2 text-sm text-text-tertiary">
                                     <FiShield />
-                                    Verified owner · Digital agreement supported
+                                    Payment is held securely by Xendit until the rental is complete
                                 </div>
                             </>
                         )}

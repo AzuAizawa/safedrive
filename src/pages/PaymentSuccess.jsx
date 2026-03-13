@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { FiArrowRight, FiCheckCircle } from 'react-icons/fi';
 import { supabase } from '../lib/supabase';
-import { formatPHP } from '../lib/paymongo';
+import { checkInvoiceStatus, formatPHP } from '../lib/xendit';
 import { ui } from '../lib/ui';
 
 export default function PaymentSuccess() {
@@ -10,6 +10,7 @@ export default function PaymentSuccess() {
     const bookingId = searchParams.get('booking_id');
     const [booking, setBooking] = useState(null);
     const [loading, setLoading] = useState(Boolean(bookingId));
+    const [verifying, setVerifying] = useState(false);
 
     useEffect(() => {
         if (!bookingId) {
@@ -18,17 +19,9 @@ export default function PaymentSuccess() {
 
         let isActive = true;
 
-        const loadBooking = async () => {
+        const loadAndVerify = async () => {
             try {
-                const { error: updateError } = await supabase
-                    .from('bookings')
-                    .update({ payment_status: 'paid', status: 'confirmed' })
-                    .eq('id', bookingId);
-
-                if (updateError) {
-                    console.error('Error updating booking:', updateError);
-                }
-
+                // 1. Fetch the booking
                 const { data, error: fetchError } = await supabase
                     .from('bookings')
                     .select('*, vehicles(make, model, year, thumbnail_url)')
@@ -39,8 +32,42 @@ export default function PaymentSuccess() {
                     console.error('Error loading booking:', fetchError);
                 }
 
-                if (isActive) {
-                    setBooking(data || null);
+                if (!isActive) return;
+                setBooking(data || null);
+
+                // 2. Verify payment with Xendit if invoice exists
+                if (data?.xendit_invoice_id) {
+                    setVerifying(true);
+                    try {
+                        const invoiceStatus = await checkInvoiceStatus(data.xendit_invoice_id);
+                        if (invoiceStatus.status === 'PAID' || invoiceStatus.status === 'SETTLED') {
+                            // Confirmed paid — update DB
+                            await supabase
+                                .from('bookings')
+                                .update({ payment_status: 'paid' })
+                                .eq('id', bookingId);
+
+                            // Notify the owner
+                            if (data.owner_id) {
+                                await supabase.from('notifications').insert({
+                                    user_id: data.owner_id,
+                                    title: 'Payment Received! 💰',
+                                    message: `Payment of ${formatPHP(data.total_amount)} confirmed for ${data.vehicles?.year} ${data.vehicles?.make} ${data.vehicles?.model}.`,
+                                    type: 'payment',
+                                    reference_id: bookingId,
+                                    reference_type: 'booking',
+                                });
+                            }
+
+                            if (isActive) {
+                                setBooking((prev) => ({ ...prev, payment_status: 'paid' }));
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Verification error:', err);
+                    } finally {
+                        if (isActive) setVerifying(false);
+                    }
                 }
             } finally {
                 if (isActive) {
@@ -49,7 +76,7 @@ export default function PaymentSuccess() {
             }
         };
 
-        loadBooking();
+        loadAndVerify();
 
         return () => {
             isActive = false;
@@ -60,7 +87,7 @@ export default function PaymentSuccess() {
         return (
             <div className={ui.loadingScreen}>
                 <div className={ui.spinner} />
-                <p className="text-sm font-medium text-text-secondary">Loading payment confirmation...</p>
+                <p className="text-sm font-medium text-text-secondary">Verifying your payment...</p>
             </div>
         );
     }
@@ -73,8 +100,16 @@ export default function PaymentSuccess() {
                 </div>
                 <h1 className="mt-5 font-display text-4xl font-bold text-success-700">Payment successful</h1>
                 <p className="mt-3 text-sm leading-7 text-text-secondary">
-                    Your payment was received and your booking is now confirmed.
+                    Your payment was received via Xendit and your booking is now confirmed. The funds are held
+                    securely and will be distributed after your rental period ends.
                 </p>
+
+                {verifying && (
+                    <div className="mt-4 flex items-center justify-center gap-2 text-sm text-text-tertiary">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-border-light border-t-primary-600" />
+                        Confirming with payment provider...
+                    </div>
+                )}
 
                 {booking && (
                     <div className="mt-6 rounded-3xl border border-border-light bg-surface-secondary p-5 text-left">
@@ -87,6 +122,10 @@ export default function PaymentSuccess() {
                             <div className="flex justify-between gap-4">
                                 <span>Duration</span>
                                 <span className="font-semibold text-text-primary">{booking.total_days} day{booking.total_days !== 1 ? 's' : ''}</span>
+                            </div>
+                            <div className="flex justify-between gap-4">
+                                <span>Payment Status</span>
+                                <span className="font-semibold capitalize text-success-700">{booking.payment_status || 'Verifying...'}</span>
                             </div>
                             <div className="flex justify-between gap-4 border-t border-border-light pt-3">
                                 <span className="font-semibold text-text-primary">Total paid</span>

@@ -76,17 +76,21 @@ export function badgeClass(variant = 'neutral') {
 }
 
 export function bookingStatusClass(status) {
-  if (status === 'confirmed' || status === 'completed') {
+  if (status === 'completed') {
     return badgeClass('success');
+  }
+
+  if (status === 'confirmed' || status === 'active') {
+    return badgeClass('info');
   }
 
   if (status === 'pending') {
     return badgeClass('pending');
   }
 
-  if (status === 'cancelled' || status === 'rejected') {
+  if (status === 'cancelled' || status === 'rejected' || status === 'expired') {
     return badgeClass('error');
   }
 
-  return badgeClass('info');
+  return badgeClass('neutral');
 }

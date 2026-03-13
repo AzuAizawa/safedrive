@@ -12,7 +12,8 @@ export default function PaymentFailed() {
                 <div className="text-6xl">✕</div>
                 <h1 className="mt-4 font-display text-4xl font-bold text-error-700">Payment failed</h1>
                 <p className="mt-3 text-sm leading-7 text-text-secondary">
-                    Your payment could not be processed. The booking was not cancelled, so you can try again.
+                    Your payment could not be processed through Xendit. Don't worry — your booking hasn't been cancelled yet.
+                    You can try again from your bookings page.
                 </p>
 
                 <div className="mt-6 rounded-3xl border border-error-200 bg-error-50 p-5 text-left">
@@ -21,13 +22,18 @@ export default function PaymentFailed() {
                         <div>
                             <div className="font-semibold">Common reasons for failure</div>
                             <ul className="mt-2 space-y-1 leading-6 text-text-secondary">
-                                <li>Insufficient balance</li>
-                                <li>Card or provider declined the payment</li>
-                                <li>Payment timed out</li>
+                                <li>Insufficient GCash/Maya/bank balance</li>
+                                <li>Card or payment provider declined the transaction</li>
+                                <li>Payment timed out or session expired</li>
                                 <li>Network issues interrupted the flow</li>
                             </ul>
                         </div>
                     </div>
+                </div>
+
+                <div className="mt-5 rounded-3xl border border-warning-200 bg-warning-50 p-4 text-left text-sm text-warning-700">
+                    <strong>⏰ Remember:</strong> You have 24 hours from when the owner accepted your booking to complete payment.
+                    If the deadline passes, the booking will be automatically cancelled.
                 </div>
 
                 <div className="mt-6 flex flex-col gap-3">

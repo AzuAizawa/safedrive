@@ -235,7 +235,13 @@ TERMS AND CONDITIONS OF RENTAL AGREEMENT
               <InfoCard label="End date" value={new Date(agreement.rental_period_end).toLocaleDateString()} />
               <InfoCard label="Daily rate" value={`P${agreement.daily_rate?.toLocaleString()}`} />
               <InfoCard label="Total amount" value={`P${agreement.total_amount?.toLocaleString()}`} />
+              <InfoCard label="Payment status" value={booking.payment_status?.toUpperCase() || 'UNPAID'} />
+              <InfoCard label="Payment reference" value={booking.xendit_invoice_id || 'N/A'} />
             </div>
+            <p className="mt-4 text-xs text-text-tertiary">
+              * Payment is held securely in escrow via Xendit and will be distributed after the rental period ends. 
+              Platform fee: P{booking.commission_amount?.toLocaleString()} | Owner share: P{booking.owner_payout_amount?.toLocaleString()}
+            </p>
           </AgreementSection>
 
           <AgreementSection title="Terms and conditions">

@@ -1,114 +1,183 @@
-Gemini said
+# Xendit Integration Plan — SafeDrive
 
-Here is a comprehensive markdown file ready for your project documentation. It covers the technical architecture, the payment flow using Xendit, and the "Lazy Option" implementation.
-Technical Specification: Car Rental Disbursement System
+> **Status:** ✅ Implemented  
+> **Last Updated:** January 2025  
+> **Provider:** Xendit (Philippines)
 
-Version: 1.0.0 (2026)
+---
 
-Provider: Xendit (Disbursement API & Payout Links)
+## 1. Payment Architecture
 
-Market: Philippines
-1. System Overview
+SafeDrive uses Xendit to handle all rental payments in the Philippines. The flow follows a three-stage architecture:
 
-The system is designed as a managed marketplace. The platform handles customer acquisition and payment collection, while the Payout Link system handles the transfer of funds to car owners. This "Lazy Option" removes the need for the platform to build complex bank-validation forms or store sensitive financial data.
-2. Payment Architecture
+### Stage 1: Collection (Pay-In)
+- **When:** Renter's booking is accepted by the owner
+- **How:** System creates a Xendit Invoice via `POST /v2/invoices`
+- **Methods:** GCash, GrabPay, Maya, Credit Card, BPI, BDO, UnionBank
+- **Duration:** Invoice valid for 24 hours
+- **Result:** Payment credited to SafeDrive's Xendit Balance (escrow-style)
 
-The money flows through three distinct stages to ensure security and platform profitability.
-Stage 1: Collection (Pay-In)
+### Stage 2: Split Logic (Automatic Calculation)
+When a booking is created, the system automatically calculates:
 
-The customer pays the total booking fee via your website or app.
+| Component | Formula | Example (₱4,200) |
+|-----------|---------|-------------------|
+| **Total Amount (A)** | daily_rate × days | ₱4,200 |
+| **Platform Commission (B)** | A × 10% | ₱420 |
+| **Owner Share (C)** | A - B | ₱3,780 |
 
-    Method: Xendit Invoices or Payment Requests.
+### Stage 3: Payout (Lazy Transfer)
+- **When:** After rental `end_date` passes and payment is confirmed
+- **How:** Edge Function creates a Xendit Payout Link via `POST /payout_links`
+- **Owner receives:** Email/SMS with a claim link
+- **Owner provides:** Their preferred bank/e-wallet details when claiming
+- **Zero data liability:** Platform never stores owner bank credentials
 
-    Status: Funds are held in the Platform’s Xendit Balance.
+---
 
-Stage 2: The Split Logic
+## 2. Booking Flow (from `new_setup_plan.md`)
 
-Before the payout is generated, the system calculates the distribution:
+```
+┌─────────────────────────────────────────────────────────┐
+│ 1. Renter searches & selects vehicle                     │
+│ 2. Renter picks dates (min: today + 2 days)             │
+│ 3. Renter clicks "Request to book"                      │
+│    → Status: PENDING                                     │
+│    → Notification sent to owner                          │
+├─────────────────────────────────────────────────────────┤
+│ 4. Owner has 24h to Accept or Decline                   │
+│    → If no action in 24h: auto-EXPIRED                  │
+│    → If accepted: Status → CONFIRMED                     │
+│    → payment_deadline set (24h from acceptance)          │
+├─────────────────────────────────────────────────────────┤
+│ 5. Renter has 24h to pay via Xendit Invoice             │
+│    → Click "Pay Now" → Xendit checkout page              │
+│    → Payment methods: GCash, Maya, Card, Bank            │
+│    → If not paid in 24h: auto-EXPIRED                   │
+│    → If paid: payment_status → "paid"                   │
+├─────────────────────────────────────────────────────────┤
+│ 6. Rental period occurs                                  │
+│    → Xendit holds funds (escrow-style)                  │
+├─────────────────────────────────────────────────────────┤
+│ 7. After end_date passes:                               │
+│    → Edge Function triggers Payout Link creation        │
+│    → Owner receives claim link via email                │
+│    → Owner claims 90%, platform keeps 10%               │
+│    → Status → COMPLETED                                  │
+└─────────────────────────────────────────────────────────┘
+```
 
-    Total Amount (A): The full price paid by the renter.
+---
 
-    Platform Commission (B): Your percentage cut (e.g., 15%).
+## 3. Technical Implementation
 
-    Disbursement Fee (C): Flat fee charged by Xendit for the transfer (approx. ₱10–₱15).
+### 3.1. Client Library: `src/lib/xendit.js`
 
-    Owner Share (D): A−B−C=D.
+| Function | Purpose |
+|----------|---------|
+| `createBookingInvoice()` | Creates Xendit Invoice for renter payment |
+| `checkInvoiceStatus()` | Verifies payment status with Xendit |
+| `calculateSplit()` | Computes 90/10 commission split |
+| `getMinBookingStartDate()` | Returns today + 2 days |
+| `getDeadline()` | Returns ISO timestamp N hours from now |
+| `isDeadlinePassed()` | Checks if a deadline has expired |
+| `getTimeRemaining()` | Human-readable countdown ("23h 45m") |
+| `formatPHP()` | Formats amount as ₱X,XXX |
 
-Stage 3: Payout (The "Lazy" Transfer)
+### 3.2. Supabase Edge Functions
 
-Instead of asking for the owner's bank details upfront, the system generates a Payout Link.
-3. Integration Workflow (The Lazy Method)
-Step 1: Create Payout Link
+| Function | Trigger | Purpose |
+|----------|---------|---------|
+| `xendit-auto-expire` | Hourly cron / manual | Expires pending bookings (24h no owner response) and unpaid confirmed bookings |
+| `xendit-process-payout` | Hourly cron / manual | Creates Payout Links for completed rentals |
+| `xendit-webhook` | Xendit callback | Handles invoice paid/expired and payout succeeded/failed events |
 
-When the rental is completed (or as per your terms), the backend triggers this request:
-Bash
+### 3.3. Webhook URL
+Configure in Xendit Dashboard → Settings → Webhooks:
+```
+https://hfduyehriemnfgkecmtj.supabase.co/functions/v1/xendit-webhook
+```
 
-POST https://api.xendit.co/payout_links
-Authorization: Basic [Your_Secret_Key]
-Content-Type: application/json
+### 3.4. Environment Variables
 
-{
-  "external_id": "RENTAL-ID-1002",
-  "amount": 4200,
-  "description": "Payout for Toyota Vios Rental - Booking #1002"
-}
+| Variable | Location | Description |
+|----------|----------|-------------|
+| `VITE_XENDIT_SECRET_KEY` | `.env` (frontend) | Xendit API key for Invoice creation |
+| `XENDIT_SECRET_KEY` | Supabase Edge Function secrets | Xendit API key for Payout Link creation |
 
-Step 2: Delivery
+---
 
-The API returns a payout_url. Your system sends this to the owner:
+## 4. Security
 
-    SMS: "Hi [Name], your payout for Booking #1002 is ready. Claim it here: [URL]"
+### Idempotency
+- Every Invoice uses `external_id: SAFEDRIVE-BOOKING-{booking_id}`
+- Every Payout uses `external_id: SAFEDRIVE-PAYOUT-{booking_id}`
+- Prevents duplicate charges/payouts
 
-    Email: Professional breakdown of the earnings with the link button.
+### API Key Best Practice
+- **Frontend:** Uses `VITE_XENDIT_SECRET_KEY` for Invoice creation only
+  - ⚠️ Consider moving Invoice creation to a Supabase Edge Function for production
+- **Edge Functions:** Uses `XENDIT_SECRET_KEY` (server-side only, never exposed)
 
-Step 3: Owner Experience
+### Deadline Enforcement
+- Owner approval window: 24 hours (enforced by `xendit-auto-expire`)
+- Renter payment window: 24 hours (enforced by `xendit-auto-expire`)
+- Payout link expiration: Set by Xendit (configurable)
 
-The owner clicks the link and is redirected to a Xendit-hosted page where they:
+### Webhook Verification
+- Webhook endpoint is JWT-free (Xendit doesn't send JWTs)
+- Consider adding `x-callback-token` verification for production
+- All webhook events are idempotent (safe to replay)
 
-    Choose their destination (e.g., GCash, BPI, BDO, Maya).
+---
 
-    Input their Account Number/Mobile Number.
+## 5. Benefits of This Approach
 
-    Click "Claim."
+### Lazy Payout (No Bank Details Upfront)
+- ✅ Zero data liability — platform never stores bank/e-wallet info
+- ✅ Owner chooses destination at claim time
+- ✅ No KYC friction during onboarding
+- ✅ Supports GCash, Maya, bank transfer, etc.
 
-4. Webhook Implementation (Automatic Tracking)
+### Escrow-Style Holding
+- ✅ Money held until rental completes
+- ✅ Protects both renter and owner
+- ✅ Platform commission deducted automatically
 
-To keep your database updated without manual checking, you must implement a webhook listener.
-Webhook Event: payout_link.status_changed
-Event Status	Required Action
-PENDING	Default state. Link is sent but not opened.
-CLAIMED	Owner has submitted details; Xendit is processing the transfer.
-SUCCEEDED	Money has landed. Update booking status to "Paid to Owner."
-FAILED	Transfer bounced (e.g., closed bank account). Alert Admin.
-Sample Payload Handling (Node.js/Express)
-JavaScript
+### Automated Expiry
+- ✅ No orphaned bookings
+- ✅ Dates freed automatically on expiry
+- ✅ Both parties notified
 
-app.post('/webhooks/xendit', (req, res) => {
-    const { status, external_id, amount } = req.body;
+---
 
-    if (status === 'SUCCEEDED') {
-        // Logic to update your DB
-        db.bookings.update({ id: external_id }, { owner_paid: true });
-        console.log(`Success: ₱${amount} sent for ${external_id}`);
-    }
+## 6. Database Schema (Relevant Columns)
 
-    res.status(200).send('Webhook Received');
-});
+### `bookings` table
+```sql
+-- Xendit payment columns
+xendit_invoice_id      TEXT     -- Xendit Invoice ID
+xendit_external_id     TEXT     -- SAFEDRIVE-BOOKING-{id}
+xendit_payment_url     TEXT     -- Xendit checkout URL
+xendit_payout_id       TEXT     -- Xendit Payout Link ID
+payment_status         TEXT     -- unpaid | pending | paid | failed | refunded
+payout_status          TEXT     -- pending | processing | completed | failed
+commission_amount      NUMERIC  -- Platform commission (10%)
+owner_payout_amount    NUMERIC  -- Owner share (90%)
+booking_accepted_at    TIMESTAMPTZ  -- When owner accepted
+payment_deadline       TIMESTAMPTZ  -- 24h after acceptance
+```
 
-5. Security & Best Practices
+### Status Flow
+```
+Booking Status:  pending → confirmed → completed
+                        ↘ expired (if not paid)
+               pending → expired (if owner doesn't respond)
+               pending → cancelled (by either party)
 
-    Expiration: Set a expiration_date on Payout Links (e.g., 7 days) to prevent old links from being used if a dispute arises.
+Payment Status:  unpaid → pending → paid
+                                   → failed → pending (retry)
 
-    Idempotency: Use the external_id (your Booking ID) to prevent sending duplicate payments for the same rental.
-
-    Balance Monitoring: Ensure your Xendit "Available Balance" is sufficient before triggering payouts, or the links will fail.
-
-6. Summary of Benefits
-
-    Zero Data Liability: You never store bank account numbers on your servers.
-
-    User Preference: Owners choose where they want the money (GCash one week, BDO the next).
-
-    Low Maintenance: Xendit handles the UI and bank-side error messaging.
-
-Would you like me to generate the SQL schema for the payouts table to help you track these link statuses in your database?
+Payout Status:   pending → processing → completed
+                                       → failed
+```
