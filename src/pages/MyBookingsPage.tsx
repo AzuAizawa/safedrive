@@ -2614,7 +2614,7 @@ export default function MyBookingsPage() {
           const selectedOwnerDisplay = getOwnerDisplay(selectedOwner);
           return createPortal(
         <div
-          className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-sm p-4 py-6"
+          className="fixed inset-0 z-[130] flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-sm p-4 py-6"
           onClick={() => setSelectedOwner(null)}
         >
           <div
