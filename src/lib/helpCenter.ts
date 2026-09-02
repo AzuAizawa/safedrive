@@ -63,7 +63,7 @@ export const helpArticles: HelpArticle[] = [
     title: "How cancellation works",
     question: "When can I still cancel a booking?",
     answer:
-      "Cancellation depends on the booking stage and whether the trip has already started. If arrival has already been recorded by either side, the booking can no longer be cancelled automatically through the normal self-service path.",
+      "An unpaid request is free to cancel any time before you pay. A paid booking cancelled at least the configured number of hours before pickup (default 24) is refunded in full automatically. Inside that window, or after the pickup time, you get a published share back (default 50%) with the rest kept as short-notice compensation to the lister, confirmed by support review. Once either side records arrival, the booking can no longer be cancelled through self-service.",
     relatedTags: ["cancel", "refund", "booking"],
     suggestedTicketTag: "booking",
   },

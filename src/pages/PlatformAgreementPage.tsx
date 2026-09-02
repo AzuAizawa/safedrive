@@ -124,10 +124,12 @@ export default function PlatformAgreementPage() {
                 verifications.
               </li>
               <li>
-                <strong>Cancellation Policy:</strong> A renter may cancel a captured payment during the current
-                24-hour automated-refund window. After that window, the system requires support review and does not
-                automatically apply a percentage penalty. A pre-trip lister cancellation starts a full refund attempt,
-                with super-admin review if provider confirmation is unavailable.
+                <strong>Cancellation Policy:</strong> A renter who cancels a paid booking at least the configured
+                number of hours before pickup (default 24) gets an automatic full refund. Inside that window, or after
+                pickup time, only a published share of the captured amount (default 50% to the renter) is recommended,
+                the rest is short-notice lister compensation, and the exact figure is confirmed by support review.
+                A pre-trip lister cancellation always starts a full refund attempt, with super-admin review if provider
+                confirmation is unavailable.
               </li>
             </ul>
           </section>

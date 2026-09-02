@@ -100,6 +100,8 @@ interface BookingRow {
     reviewer_role: string;
   }[];
   security_deposits?: { status: string } | { status: string }[] | null;
+  refund_full_hours_snapshot: number | null;
+  refund_late_renter_percent_snapshot: number | null;
 }
 
 const getSecurityDepositStatus = (booking: BookingRow) => {
@@ -107,12 +109,22 @@ const getSecurityDepositStatus = (booking: BookingRow) => {
   return Array.isArray(relation) ? relation[0]?.status ?? null : relation?.status ?? null;
 };
 
-// Terms 6.1: after payment is confirmed the renter has a 24-hour window for an
-// automatic full refund. After it, cancelling still works before the trip but
-// the refund goes through SafeDrive support review (Terms 6.2, no auto penalty).
-const REFUND_GRACE_MS = 24 * 60 * 60 * 1000;
+// Cancellation-refund policy (Terms 6.1/6.2). Values are snapshot per booking.
+const DEFAULT_REFUND_FULL_HOURS = 24;
+const DEFAULT_REFUND_LATE_RENTER_PERCENT = 50;
 const UNPAID_STATES = ["pending", "awaiting_payment", "confirmed"];
 const PAID_STATES = ["downpayment_paid", "fully_paid"];
+
+const getBookingPickupMs = (booking: BookingRow): number | null => {
+  const [year, month, day] = (booking.start_date || "")
+    .split("-")
+    .map((part) => Number(part));
+  const [hour, minute] = (booking.pickup_time || "09:00")
+    .split(":")
+    .map((part) => Number(part));
+  if (!year || !month || !day) return null;
+  return Date.UTC(year, month - 1, day, hour || 0, minute || 0) - 8 * 3600 * 1000;
+};
 
 interface RatingSummary {
   average: number;
@@ -972,8 +984,8 @@ export default function MyBookingsPage() {
     return `${expired ? "Expired" : "Ends"} ${expired ? "" : "in "}${parts.join(" ")}`.trim();
   };
 
-  const getFirstBookingPaymentAt = (bookingId: string): number | null => {
-    const times = paymentLogs
+  const getCapturedBookingTotal = (bookingId: string) =>
+    paymentLogs
       .filter(
         (payment) =>
           payment.booking_id === bookingId &&
@@ -981,10 +993,7 @@ export default function MyBookingsPage() {
           payment.status === "completed" &&
           Number(payment.amount) > 0,
       )
-      .map((payment) => new Date(payment.created_at).getTime())
-      .filter((time) => !Number.isNaN(time));
-    return times.length ? Math.min(...times) : null;
-  };
+      .reduce((total, payment) => total + Number(payment.amount || 0), 0);
 
   const getCancellationGuidance = (
     booking: BookingRow,
@@ -1003,25 +1012,41 @@ export default function MyBookingsPage() {
     }
 
     if (PAID_STATES.includes(apparentState)) {
-      const firstPaymentAt = getFirstBookingPaymentAt(booking.id);
-      if (firstPaymentAt) {
-        const graceEnds = firstPaymentAt + REFUND_GRACE_MS;
-        if (clockNow < graceEnds) {
-          return {
-            tone: freeTone,
-            note: `Cancel within 24 hours of your payment for a full 100% refund - handled automatically. ${formatCountdown(
-              new Date(graceEnds).toISOString(),
-            )}.`,
-          };
-        }
+      const fullHours =
+        Number(booking.refund_full_hours_snapshot) || DEFAULT_REFUND_FULL_HOURS;
+      const latePercent =
+        booking.refund_late_renter_percent_snapshot === null ||
+        booking.refund_late_renter_percent_snapshot === undefined
+          ? DEFAULT_REFUND_LATE_RENTER_PERCENT
+          : Number(booking.refund_late_renter_percent_snapshot);
+      const pickupMs = getBookingPickupMs(booking);
+      const hoursToPickup =
+        pickupMs === null ? null : (pickupMs - clockNow) / (3600 * 1000);
+
+      if (hoursToPickup === null || hoursToPickup >= fullHours) {
         return {
-          tone: reviewTone,
-          note: "The 24-hour automatic full-refund window has passed. You can still cancel before the trip starts, but the refund is handled through SafeDrive support review - there is no automatic percentage penalty.",
+          tone: freeTone,
+          note: `Cancel now for a full 100% refund, handled automatically. The full-refund window closes ${fullHours} hours before pickup.`,
         };
       }
+
+      if (hoursToPickup <= 0) {
+        return {
+          tone: reviewTone,
+          note: "Your pickup time has passed. You can still cancel, but any refund is decided by SafeDrive support review.",
+        };
+      }
+
+      const capturedTotal = getCapturedBookingTotal(booking.id);
+      const estimate =
+        capturedTotal > 0
+          ? ` About ${formatCurrency(
+              Math.round(capturedTotal * (latePercent / 100)),
+            )} of ${formatCurrency(capturedTotal)}.`
+          : "";
       return {
         tone: reviewTone,
-        note: "Cancelling a paid booking before the trip starts triggers a refund: automatic and full within 24 hours of payment, otherwise through SafeDrive support review.",
+        note: `Short-notice cancellation (less than ${fullHours} hours before pickup). You would get about ${latePercent}% back; the rest compensates the lister.${estimate} Released through SafeDrive support review - no automatic penalty beyond this share.`,
       };
     }
 

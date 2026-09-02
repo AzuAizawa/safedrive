@@ -9,6 +9,26 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Phase B: tiered cancellation-refund policy (measured from pickup)
+
+- Cancellation refunds now key off hours **before pickup** (from the booking's
+  snapshot, default 24), not hours since payment:
+  - unpaid → free;
+  - paid & >= threshold before pickup → automatic full refund (unchanged path);
+  - paid & inside the window → cancellation still goes through, but the refund is
+    a policy-recommended partial (`refund_late_renter_percent`, default 50%) with
+    the remainder recorded as short-notice lister compensation, released via
+    admin review (`createManualRefundReview` now carries the recommended amount
+    and reasoning; `AdminRefundReviewPage` shows the note);
+  - paid & past pickup → support review, recommended 0.
+- `api/booking-action.ts`: new `getCancellationRefundPlan` / `getBookingPickupMs`;
+  removed the `REFUND_GRACE_PERIOD_MS` 24-h-from-payment gate.
+- `MyBookingsPage` cancellation guidance + confirm dialog now show the estimated
+  refund for a short-notice cancel. Terms 6.1/6.2, Platform Agreement, and the
+  help centre updated to the tiered wording. Smoke-check markers updated.
+
+---
+
 ## 2026-09-02 — My Bookings: cancellation copy matches the real 24h rule
 
 - `getCancellationGuidance` / `getCancellationCutoff` in `MyBookingsPage.tsx`

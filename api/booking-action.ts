@@ -37,6 +37,9 @@ type BookingRecord = {
   start_date: string;
   pickup_time: string | null;
   commission: number | string;
+  total_price: number | string;
+  refund_full_hours_snapshot: number | string | null;
+  refund_late_renter_percent_snapshot: number | string | null;
   owner_response_deadline: string | null;
   renter_completed: boolean;
   owner_completed: boolean;
@@ -99,7 +102,6 @@ const isOwner = (booking: BookingRecord, userId: string) =>
 const isRenter = (booking: BookingRecord, userId: string) =>
   booking.renter_id === userId;
 
-const REFUND_GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
 const REQUIRED_TRIP_PHOTO_CATEGORIES = [
   "front",
   "back",
@@ -182,28 +184,108 @@ const getCapturedBookingPaymentTotal = (booking: BookingRecord) =>
     )
     .reduce((total, payment) => total + Number(payment.amount || 0), 0);
 
+const DEFAULT_REFUND_FULL_HOURS = 24;
+const DEFAULT_REFUND_LATE_RENTER_PERCENT = 50;
+
+const clampNumber = (value: unknown, min: number, max: number, fallback: number) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return fallback;
+  return parsed;
+};
+
+const getBookingPickupMs = (booking: BookingRecord) => {
+  const [year, month, day] = (booking.start_date || "")
+    .split("-")
+    .map((part) => Number(part));
+  const [hour, minute] = (booking.pickup_time || "09:00")
+    .split(":")
+    .map((part) => Number(part));
+  if (!year || !month || !day) return null;
+  // start_date is a plain calendar date; treat pickup as Manila local time.
+  const asUtc = Date.UTC(year, month - 1, day, hour || 0, minute || 0);
+  return asUtc - 8 * 60 * 60 * 1000;
+};
+
+/**
+ * Cancellation-refund policy (Terms 6.1/6.2, values snapshot per booking):
+ * cancelling >= refund_full_hours before pickup earns an automatic full refund;
+ * inside that window the renter's share is refund_late_renter_percent and the
+ * rest is short-notice lister compensation, released through admin review.
+ */
+const getCancellationRefundPlan = (booking: BookingRecord) => {
+  const capturedTotal = getCapturedBookingPaymentTotal(booking);
+  const fullHours = Math.round(
+    clampNumber(
+      booking.refund_full_hours_snapshot,
+      0,
+      720,
+      DEFAULT_REFUND_FULL_HOURS,
+    ),
+  );
+  const lateRenterPercent = clampNumber(
+    booking.refund_late_renter_percent_snapshot,
+    0,
+    100,
+    DEFAULT_REFUND_LATE_RENTER_PERCENT,
+  );
+  const pickupMs = getBookingPickupMs(booking);
+  const hoursToPickup =
+    pickupMs === null ? null : (pickupMs - Date.now()) / (60 * 60 * 1000);
+  const isLate = hoursToPickup !== null && hoursToPickup < fullHours;
+  const pastPickup = hoursToPickup !== null && hoursToPickup <= 0;
+
+  const recommendedRenterRefund = !isLate
+    ? capturedTotal
+    : pastPickup
+      ? 0
+      : Math.round(capturedTotal * (lateRenterPercent / 100) * 100) / 100;
+
+  return {
+    capturedTotal,
+    fullHours,
+    lateRenterPercent,
+    hoursToPickup,
+    isLate,
+    pastPickup,
+    recommendedRenterRefund,
+    listerCompensation:
+      Math.round((capturedTotal - recommendedRenterRefund) * 100) / 100,
+  };
+};
+
 const createManualRefundReview = async (
   supabase: ReturnType<typeof getSupabaseAdmin>,
   booking: BookingRecord,
   userId: string,
   manualDestinationNote: string | null,
   automaticFailureReason: string,
+  recommendedRefundAmount?: number,
 ) => {
-  const refundAmount = getCapturedBookingPaymentTotal(booking);
-  if (!Number.isFinite(refundAmount) || refundAmount <= 0) {
+  const capturedTotal = getCapturedBookingPaymentTotal(booking);
+  if (!Number.isFinite(capturedTotal) || capturedTotal <= 0) {
     throw new Error(
       "Manual refund review cannot be created without a captured refundable amount.",
     );
   }
+  const hasRecommendation =
+    typeof recommendedRefundAmount === "number" &&
+    Number.isFinite(recommendedRefundAmount) &&
+    recommendedRefundAmount >= 0 &&
+    recommendedRefundAmount <= capturedTotal;
+  const refundAmount = hasRecommendation ? recommendedRefundAmount : capturedTotal;
 
   const safeDestinationNote =
     manualDestinationNote ||
     "Admin must choose and record the manual refund return method during refund review.";
   const note = [
     "Manual refund review required.",
+    hasRecommendation
+      ? `Policy recommendation: refund PHP ${refundAmount.toLocaleString()} of PHP ${capturedTotal.toLocaleString()} captured (short-notice cancellation). Admin confirms or adjusts.`
+      : null,
     safeDestinationNote,
     `Automatic refund result: ${automaticFailureReason}`,
   ]
+    .filter(Boolean)
     .join(" ")
     .slice(0, 450);
 
@@ -322,6 +404,9 @@ export default async function handler(req: Request) {
         start_date,
         pickup_time,
         commission,
+        total_price,
+        refund_full_hours_snapshot,
+        refund_late_renter_percent_snapshot,
         owner_response_deadline,
         renter_completed,
         owner_completed,
@@ -594,21 +679,22 @@ export default async function handler(req: Request) {
         );
       }
 
+      const refundPlan = hasCapturedBookingPayment
+        ? getCancellationRefundPlan(bookingRecord)
+        : null;
+      // A renter cancelling a paid booking inside the "full refund" window keeps
+      // the automatic full-refund path. Inside the short-notice window the
+      // cancellation still goes through, but the refund is a policy-recommended
+      // partial handled by admin review rather than an automatic full return.
+      const renterLateCancellation = Boolean(
+        renter && refundPlan && refundPlan.isLate,
+      );
+
       if (hasCapturedBookingPayment) {
         const firstPaymentAt = getFirstCapturedBookingPaymentAt(bookingRecord);
         if (renter && !firstPaymentAt) {
           return jsonResponse(
             { error: "This paid booking is missing its captured payment timestamp." },
-            409,
-          );
-        }
-
-        if (renter && firstPaymentAt && Date.now() - firstPaymentAt > REFUND_GRACE_PERIOD_MS) {
-          return jsonResponse(
-            {
-              error:
-                "The 24-hour refund window has already passed for this paid booking. Please contact support for manual review.",
-            },
             409,
           );
         }
@@ -650,7 +736,41 @@ export default async function handler(req: Request) {
         );
       }
 
-      if (hasCapturedBookingPayment) {
+      if (hasCapturedBookingPayment && renterLateCancellation && refundPlan) {
+        // Short-notice renter cancellation: policy-recommended partial refund,
+        // released by admin review (Terms 6.2 - no automatic money movement).
+        const manualRefundPaymentId = await createManualRefundReview(
+          supabase,
+          bookingRecord,
+          user.id,
+          [
+            actionNote,
+            `Renter cancelled ${
+              refundPlan.hoursToPickup !== null
+                ? `${Math.max(0, Math.round(refundPlan.hoursToPickup))}h`
+                : "shortly"
+            } before pickup (policy threshold ${refundPlan.fullHours}h).`,
+            refundPlan.pastPickup
+              ? "Pickup time had already passed with no check-in."
+              : `Recommended renter share ${refundPlan.lateRenterPercent}%; short-notice lister compensation PHP ${refundPlan.listerCompensation.toLocaleString()}.`,
+          ]
+            .filter(Boolean)
+            .join(" "),
+          "Short-notice cancellation - automatic full refund not applied.",
+          refundPlan.recommendedRenterRefund,
+        );
+        cancelState = "cancelled_refund_pending";
+        cancelMessage = refundPlan.pastPickup
+          ? "Booking cancelled. Because pickup had already passed, any refund is decided by SafeDrive support review."
+          : `Booking cancelled. Because this was a short-notice cancellation, SafeDrive support will review and release the recommended ${refundPlan.lateRenterPercent}% refund.`;
+        auditDetails.refund_state = "manual_review";
+        auditDetails.refund_payment_ids = manualRefundPaymentId
+          ? [manualRefundPaymentId]
+          : [];
+        auditDetails.refund_auto_reason = "short_notice_partial_policy";
+        auditDetails.recommended_renter_refund = refundPlan.recommendedRenterRefund;
+        auditDetails.lister_compensation = refundPlan.listerCompensation;
+      } else if (hasCapturedBookingPayment) {
         const refundResult = await processAutomaticRefundForBooking({
           supabase,
           bookingId: bookingRecord.id,
@@ -658,7 +778,7 @@ export default async function handler(req: Request) {
           reason: renter ? "requested_by_customer" : "others",
           note: [
             renter
-              ? "Renter cancelled the paid booking within the 24-hour refund window."
+              ? "Renter cancelled the paid booking inside the full-refund window."
               : "Lister cancelled the accepted paid booking before the trip started; renter refund must be handled regardless of the renter grace window.",
             actionNote,
           ]

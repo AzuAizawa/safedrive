@@ -616,6 +616,11 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                     {formatCurrency(manualTarget.amount)}
                   </span>
                 </p>
+                {manualTarget.notes ? (
+                  <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                    {manualTarget.notes}
+                  </p>
+                ) : null}
               </div>
 
               <div className="mt-4 grid gap-3">
