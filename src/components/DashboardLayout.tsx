@@ -124,29 +124,57 @@ export default function DashboardLayout() {
     (item) => location.pathname === item.to,
   );
 
-  useEffect(() => {
-    const fetchUnreadCount = async () => {
-      if (!user?.id) {
-        setUnreadNotificationCount(0);
-        return;
-      }
+  const fetchUnreadCount = useCallback(async () => {
+    if (!user?.id) {
+      setUnreadNotificationCount(0);
+      return;
+    }
 
-      const { count, error } = await supabase
-        .from("notifications")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .eq("read", false);
+    const { count, error } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("read", false);
 
-      if (error) {
-        console.error("Failed to fetch unread notifications:", error);
-        return;
-      }
+    if (error) {
+      console.error("Failed to fetch unread notifications:", error);
+      return;
+    }
 
-      setUnreadNotificationCount(count ?? 0);
-    };
-
-    void fetchUnreadCount();
+    setUnreadNotificationCount(count ?? 0);
   }, [user?.id]);
+
+  // Re-check on every navigation so the badge clears right after the user
+  // reads notifications and moves to another page.
+  useEffect(() => {
+    void fetchUnreadCount();
+  }, [fetchUnreadCount, location.pathname]);
+
+  // Keep the badge live while the user stays on one page: a light poll plus a
+  // realtime subscription on this user's notification rows (mirrors AdminLayout).
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const pollId = window.setInterval(() => void fetchUnreadCount(), 60_000);
+    const channel = supabase
+      .channel(`notification-count-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => void fetchUnreadCount(),
+      )
+      .subscribe();
+
+    return () => {
+      window.clearInterval(pollId);
+      void supabase.removeChannel(channel);
+    };
+  }, [fetchUnreadCount, user?.id]);
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-500 flex flex-col">
