@@ -688,15 +688,18 @@ export default function AdminLoginPage() {
                   </div>
                 </div>
 
-                {profile && profile.role !== "admin" && user && (
-                  <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-3 animate-shake">
-                    <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                    <p className="text-xs text-red-400 leading-relaxed font-medium">
-                      Access Denied. Your account does not have sufficient
-                      clearance to access the Command Center.
-                    </p>
-                  </div>
-                )}
+                {profile &&
+                  user &&
+                  profile.role !== "admin" &&
+                  profile.role !== "super_admin" && (
+                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-3 animate-shake">
+                      <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-400 leading-relaxed font-medium">
+                        Access Denied. Your account does not have sufficient
+                        clearance to access the Command Center.
+                      </p>
+                    </div>
+                  )}
               </CardContent>
 
               <CardFooter className="flex-col gap-6 p-8 pt-2">
