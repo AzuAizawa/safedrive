@@ -1100,10 +1100,10 @@ export default function CarDetailPage() {
                   </p>
                   <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-left text-xs text-muted-foreground">
                     <p className="font-medium text-blue-600 dark:text-blue-400">
-                      3-day booking process
+                      How the request works
                     </p>
                     <p className="mt-1">
-                      Requests must be made at least 3 days in advance so the lister has time to review, prepare the vehicle, and coordinate the meetup.
+                      A trip can start as early as tomorrow if the car is free. After you send the request the lister has 24 hours to accept and you then have 24 hours to pay - but both steps are capped at the pickup time. If the request is not accepted and paid before pickup, it is automatically cancelled and the car is released.
                     </p>
                   </div>
                 </div>

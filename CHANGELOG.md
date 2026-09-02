@@ -9,6 +9,18 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Car detail: remove stale "3-day booking" copy
+
+- `src/pages/CarDetailPage.tsx` — the booking sidebar still showed a "3-day
+  booking process / Requests must be made at least 3 days in advance" note,
+  contradicting the same page's "Trips can start as early as tomorrow" and the
+  actual validation (date picker `minDate` = tomorrow, `create-booking.ts`
+  `minStartUtcMs = today + 1 day`, deadlines capped at pickup, auto-cancel via
+  `expire-booking-deadlines`). Replaced with copy that matches the real
+  next-day flow. No logic change - the next-day rule was already implemented.
+
+---
+
 ## 2026-09-02 — My Bookings (renter): compact cards + Active/History split
 
 - `src/pages/MyBookingsPage.tsx` — each booking rendered as one very tall card
