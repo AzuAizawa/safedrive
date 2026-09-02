@@ -9,6 +9,23 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — My Bookings: cancellation copy matches the real 24h rule
+
+- `getCancellationGuidance` / `getCancellationCutoff` in `MyBookingsPage.tsx`
+  described a "cancel for free 3 days before pickup" cutoff that the code never
+  enforced (and that contradicts Terms 6.1/6.2 and `booking-action.ts`, which
+  use a 24-hour-after-payment automatic-refund window). It also only showed for
+  pending requests.
+  - Rewrote the guidance around the actual states: unpaid = free to cancel any
+    time before paying; paid & within 24h of payment = automatic full refund
+    (with a live countdown); paid & past 24h = still cancellable pre-trip but
+    the refund goes through support review, no automatic penalty.
+  - Now shown for every cancellable booking, tinted green/amber, and the cancel
+    confirm dialog uses the same wording. Removed `getCancellationCutoff`.
+  - Terms and Platform Agreement pages were already correct; no change there.
+
+---
+
 ## 2026-09-02 — Car detail: show owner blackout dates on the booking calendar
 
 - The renter booking calendar only fetched `bookings`, so owner

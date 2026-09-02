@@ -107,6 +107,13 @@ const getSecurityDepositStatus = (booking: BookingRow) => {
   return Array.isArray(relation) ? relation[0]?.status ?? null : relation?.status ?? null;
 };
 
+// Terms 6.1: after payment is confirmed the renter has a 24-hour window for an
+// automatic full refund. After it, cancelling still works before the trip but
+// the refund goes through SafeDrive support review (Terms 6.2, no auto penalty).
+const REFUND_GRACE_MS = 24 * 60 * 60 * 1000;
+const UNPAID_STATES = ["pending", "awaiting_payment", "confirmed"];
+const PAID_STATES = ["downpayment_paid", "fully_paid"];
+
 interface RatingSummary {
   average: number;
   count: number;
@@ -965,33 +972,60 @@ export default function MyBookingsPage() {
     return `${expired ? "Expired" : "Ends"} ${expired ? "" : "in "}${parts.join(" ")}`.trim();
   };
 
-  const getCancellationCutoff = (booking: BookingRow) => {
-    const start = new Date(booking.start_date);
-    if (Number.isNaN(start.getTime())) return null;
-    const cutoff = new Date(start);
-    cutoff.setDate(cutoff.getDate() - 3);
-    return cutoff.toISOString();
+  const getFirstBookingPaymentAt = (bookingId: string): number | null => {
+    const times = paymentLogs
+      .filter(
+        (payment) =>
+          payment.booking_id === bookingId &&
+          payment.payment_type !== "refund" &&
+          payment.status === "completed" &&
+          Number(payment.amount) > 0,
+      )
+      .map((payment) => new Date(payment.created_at).getTime())
+      .filter((time) => !Number.isNaN(time));
+    return times.length ? Math.min(...times) : null;
   };
 
-  const getCancellationGuidance = (booking: BookingRow) => {
-    const cutoff = getCancellationCutoff(booking);
-    if (!cutoff) return null;
+  const getCancellationGuidance = (
+    booking: BookingRow,
+    apparentState: string,
+  ): { tone: string; note: string } | null => {
+    const freeTone =
+      "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+    const reviewTone =
+      "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300";
 
-    const countdown = formatCountdown(cutoff);
-    const stamp = formatDeadlineStamp(cutoff);
-    // For a short-lead booking the "3 days before pickup" point is already past.
-    // Cancelling an unpaid request is still allowed right up to pickup, so show
-    // the honest message rather than a "window closed" warning.
-    const cutoffPassed = Boolean(countdown && countdown.startsWith("Expired"));
-    return {
-      countdown: cutoffPassed ? null : countdown,
-      stamp: cutoffPassed ? null : stamp,
-      note: cutoffPassed
-        ? "You can cancel this request any time before it is paid and the trip starts."
-        : stamp
-          ? `Cancel for free before ${stamp} (3 days before pickup).`
-          : "Cancel for free before the 3-day cutoff before pickup.",
-    };
+    if (UNPAID_STATES.includes(apparentState)) {
+      return {
+        tone: freeTone,
+        note: "Free to cancel any time before you pay and the trip starts - no money has been collected yet.",
+      };
+    }
+
+    if (PAID_STATES.includes(apparentState)) {
+      const firstPaymentAt = getFirstBookingPaymentAt(booking.id);
+      if (firstPaymentAt) {
+        const graceEnds = firstPaymentAt + REFUND_GRACE_MS;
+        if (clockNow < graceEnds) {
+          return {
+            tone: freeTone,
+            note: `Cancel within 24 hours of your payment for a full 100% refund - handled automatically. ${formatCountdown(
+              new Date(graceEnds).toISOString(),
+            )}.`,
+          };
+        }
+        return {
+          tone: reviewTone,
+          note: "The 24-hour automatic full-refund window has passed. You can still cancel before the trip starts, but the refund is handled through SafeDrive support review - there is no automatic percentage penalty.",
+        };
+      }
+      return {
+        tone: reviewTone,
+        note: "Cancelling a paid booking before the trip starts triggers a refund: automatic and full within 24 hours of payment, otherwise through SafeDrive support review.",
+      };
+    }
+
+    return null;
   };
 
   const formatDateInputMin = (dateValue: string) => {
@@ -1027,7 +1061,7 @@ export default function MyBookingsPage() {
 
   const getProcessGuidance = (booking: BookingRow, apparentState: string) => {
     if (apparentState === "pending") {
-      const cancellationGuidance = getCancellationGuidance(booking);
+      const cancellationGuidance = getCancellationGuidance(booking, apparentState);
       return {
         tone: "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300",
         title: "Waiting for lister response",
@@ -1035,7 +1069,7 @@ export default function MyBookingsPage() {
           ? `${formatCountdown(booking.owner_response_deadline)}. The lister still needs to accept or reject this request.`
           : "The lister still needs to accept or reject this request.",
         footnote: booking.owner_response_deadline
-          ? `Response deadline: ${formatDeadlineStamp(booking.owner_response_deadline)}${cancellationGuidance?.stamp ? ` | Cancel by ${cancellationGuidance.stamp}` : ""}`
+          ? `Response deadline: ${formatDeadlineStamp(booking.owner_response_deadline)}`
           : cancellationGuidance?.note || "You can still cancel while the request is waiting for review.",
       };
     }
@@ -1499,8 +1533,9 @@ export default function MyBookingsPage() {
                 review.reviewer_role === "renter",
             );
             const processGuidance = getProcessGuidance(booking, apparentState);
-            const cancellationGuidance =
-              apparentState === "pending" ? getCancellationGuidance(booking) : null;
+            const cancellationGuidance = canCancelBooking(booking, apparentState)
+              ? getCancellationGuidance(booking, apparentState)
+              : null;
             const latestExtension = getLatestExtension(booking.id);
             const extensionHistory = bookingExtensionsByBooking[booking.id] ?? [];
             const apparentExtensionStatus = latestExtension
@@ -2013,8 +2048,9 @@ export default function MyBookingsPage() {
                       {canCancelBooking(booking, apparentState) && (
                         <div className="mt-2 space-y-2 text-right">
                           {cancellationGuidance ? (
-                            <p className="text-[11px] text-muted-foreground">
-                              {cancellationGuidance.countdown ? `${cancellationGuidance.countdown} | ` : ""}
+                            <p
+                              className={`max-w-[280px] rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${cancellationGuidance.tone}`}
+                            >
                               {cancellationGuidance.note}
                             </p>
                           ) : null}
@@ -2638,13 +2674,16 @@ export default function MyBookingsPage() {
             ? (() => {
                 const apparentState = getApparentStatus(cancelTargetBooking);
                 const vehicleLabel = `${cancelTargetBooking.cars.car_models.car_brands.name} ${cancelTargetBooking.cars.car_models.name} (${cancelTargetBooking.cars.plate_number})`;
-                const cancellationGuidance = getCancellationGuidance(cancelTargetBooking);
-
-                if (["downpayment_paid", "fully_paid"].includes(apparentState)) {
-                  return `This will cancel ${vehicleLabel}. If the captured booking payment is still inside the 24-hour refund window and the trip has not started, SafeDrive will try to refund it automatically through PayMongo.${cancellationGuidance?.stamp ? ` SafeDrive also records a 3-day cancellation cutoff before pickup: ${cancellationGuidance.stamp}.` : ""}`;
-                }
-
-                return `This will cancel your request for ${vehicleLabel}.${cancellationGuidance?.stamp ? ` SafeDrive records a 3-day cancellation cutoff before pickup: ${cancellationGuidance.stamp}.` : ""}`;
+                const cancellationGuidance = getCancellationGuidance(
+                  cancelTargetBooking,
+                  apparentState,
+                );
+                const base = PAID_STATES.includes(apparentState)
+                  ? `This will cancel ${vehicleLabel} and start the refund.`
+                  : `This will cancel your request for ${vehicleLabel}.`;
+                return cancellationGuidance
+                  ? `${base} ${cancellationGuidance.note}`
+                  : base;
               })()
             : ""
         }
