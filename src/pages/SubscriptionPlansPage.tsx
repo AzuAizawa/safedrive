@@ -12,7 +12,19 @@ import {
 } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { getCurrentSubscription } from "@/lib/subscriptions";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { toast } from "sonner";
+
+const formatPlanDate = (value: string | null) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
 
 interface Subscription {
   id: string;
@@ -88,6 +100,8 @@ export default function SubscriptionPlansPage() {
   const [currentSub, setCurrentSub] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
   const [upgrading, setUpgrading] = useState<string | null>(null);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const fetchSubscription = useCallback(async () => {
     if (!user) return;
@@ -160,33 +174,37 @@ export default function SubscriptionPlansPage() {
     );
   }
 
+  const handleCancelSubscription = async () => {
+    if (!user) return;
+    setCancelling(true);
+    try {
+      const response = await fetch("/api/cancel-subscription", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to cancel subscription");
+      }
+      toast.success("Switched to Free. Your account now has 5 vehicle slots.");
+      setShowCancelConfirm(false);
+      await fetchSubscription();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      toast.error("Could not switch to Free", { description: message });
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const handleUpgrade = async (plan: (typeof plans)[number]) => {
-    if (!user || plan.id === currentPlanId) return;
+    if (!user || plan.id === currentPlanId || plan.id === "free") return;
     setUpgrading(plan.id);
 
     try {
-      if (plan.id === "free") {
-        const response = await fetch("/api/cancel-subscription", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session?.access_token ?? ""}`,
-          },
-        });
-
-        const data = (await response.json()) as {
-          error?: string;
-        };
-
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to cancel subscription");
-        }
-
-        toast.success("Subscription cancelled. Your account is now on Free.");
-        await fetchSubscription();
-        return;
-      }
-
       const response = await fetch("/api/create-subscription-checkout", {
         method: "POST",
         headers: {
@@ -236,12 +254,21 @@ export default function SubscriptionPlansPage() {
           Upgrade only the number of vehicle slots available to your lister account.
         </p>
         {!loading && currentSub && (
-          <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-sm text-primary">
-            <Sparkles className="h-3.5 w-3.5" />
-            Currently on{" "}
-            <span className="font-bold capitalize">{currentSub.plan_type}</span>{" "}
-            plan - {5 + currentSub.additional_slots} vehicle slots total
-            {currentSub.end_date ? ` until ${currentSub.end_date}` : ""}
+          <div className="mt-4 space-y-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-sm text-primary">
+              <Sparkles className="h-3.5 w-3.5" />
+              Currently on{" "}
+              <span className="font-bold capitalize">{currentSub.plan_type}</span>{" "}
+              plan - {5 + currentSub.additional_slots} vehicle slots total
+              {formatPlanDate(currentSub.end_date)
+                ? ` until ${formatPlanDate(currentSub.end_date)}`
+                : ""}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              This is a one-time 30-day payment - there is no auto-renewal and you
+              will not be charged again. When it ends, your account reverts to Free
+              (5 slots) automatically.
+            </p>
           </div>
         )}
       </div>
@@ -250,10 +277,8 @@ export default function SubscriptionPlansPage() {
         {plans.map((plan) => {
           const isCurrentPlan = plan.id === currentPlanId;
           const Icon = plan.icon;
-          const buttonLabel =
-            plan.id === "free" && currentPlanId !== "free"
-              ? "Cancel Subscription"
-              : plan.cta;
+          const onPaidPlan = currentPlanId !== "free";
+          const isFreeWhileSubscribed = plan.id === "free" && onPaidPlan;
 
           return (
             <Card
@@ -310,9 +335,27 @@ export default function SubscriptionPlansPage() {
               </CardContent>
 
               <CardFooter className="mt-auto w-full pt-2">
-                {isCurrentPlan ? (
+                {isCurrentPlan && plan.id !== "free" ? (
+                  <div className="w-full space-y-2">
+                    <Button variant="outline" className="h-11 w-full" disabled>
+                      Current Plan
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="h-9 w-full text-sm text-muted-foreground hover:text-destructive"
+                      onClick={() => setShowCancelConfirm(true)}
+                      disabled={loading || cancelling}
+                    >
+                      Switch to Free now
+                    </Button>
+                  </div>
+                ) : isCurrentPlan ? (
                   <Button variant="outline" className="h-11 w-full" disabled>
                     Current Plan
+                  </Button>
+                ) : isFreeWhileSubscribed ? (
+                  <Button variant="outline" className="h-11 w-full" disabled>
+                    Applies automatically when your plan ends
                   </Button>
                 ) : (
                   <Button
@@ -327,7 +370,7 @@ export default function SubscriptionPlansPage() {
                         Processing...
                       </>
                     ) : (
-                      buttonLabel
+                      plan.cta
                     )}
                   </Button>
                 )}
@@ -336,6 +379,24 @@ export default function SubscriptionPlansPage() {
           );
         })}
       </div>
+
+      <ConfirmDialog
+        open={showCancelConfirm}
+        title="Switch to Free now?"
+        description={
+          currentSub && formatPlanDate(currentSub.end_date)
+            ? `Your ${currentSub.plan_type} plan is paid through ${formatPlanDate(
+                currentSub.end_date,
+              )}. Switching now drops your slot allowance to 5 immediately, with no refund for the remaining days. Your current listings stay as they are, but you cannot add new ones until you are back under the limit.`
+            : "Switching to Free drops your slot allowance to 5 immediately, with no refund for any remaining paid days."
+        }
+        confirmText="Switch to Free"
+        cancelText="Keep my plan"
+        destructive
+        isLoading={cancelling}
+        onCancel={() => setShowCancelConfirm(false)}
+        onConfirm={handleCancelSubscription}
+      />
     </div>
   );
 }

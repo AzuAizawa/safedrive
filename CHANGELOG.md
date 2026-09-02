@@ -9,6 +9,24 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Subscription: cancel on the right card + clearer copy
+
+- `src/pages/SubscriptionPlansPage.tsx` — the "Cancel Subscription" action sat
+  on the **Free** card (dev framed it as "downgrade to Free"), so a subscribed
+  user saw no cancel option on their own plan and worried about surprise
+  charges. Now:
+  - the current paid plan card ("Your Plan") shows a "Switch to Free now" action
+    under "Current Plan";
+  - the Free card, while subscribed, is a disabled "Applies automatically when
+    your plan ends" - no action;
+  - a confirm dialog spells out that it is paid through the end date, no refund
+    for remaining days, and current listings are kept;
+  - header copy states plainly: one-time 30-day payment, no auto-renewal,
+    reverts to Free automatically.
+  `handleUpgrade` no longer carries the cancel branch; new `handleCancelSubscription`.
+
+---
+
 ## 2026-09-02 — My Vehicles: remove filter/sort controls
 
 - `src/pages/MyVehiclesPage.tsx` — dropped the Status filter and the 5-option
