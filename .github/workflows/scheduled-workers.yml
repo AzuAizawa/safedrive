@@ -1,0 +1,47 @@
+name: Scheduled workers
+
+# Calls the SafeDrive cron endpoints on a schedule, because Vercel Hobby only
+# allows once-a-day cron jobs. The only thing to configure is one repository
+# secret: CRON_SECRET (must match the CRON_SECRET env var in Vercel).
+# GitHub's shortest cron interval is 5 minutes and scheduled runs can be delayed
+# under load; ~15 min effective cadence is fine for these workers.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # booking-deadline expiry
+    - cron: "7 * * * *" # return reminders, once per hour
+  workflow_dispatch: {}
+
+env:
+  SITE_URL: https://www.safedrive.cfd
+
+jobs:
+  expire-booking-deadlines:
+    if: github.event.schedule == '*/15 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call expire-booking-deadlines
+        run: |
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${SITE_URL}/api/expire-booking-deadlines")
+          echo "HTTP $code"; cat /tmp/out; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::expire-booking-deadlines returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
+            exit 1
+          fi
+
+  send-return-reminders:
+    if: github.event.schedule == '7 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call send-return-reminders
+        run: |
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${SITE_URL}/api/send-return-reminders")
+          echo "HTTP $code"; cat /tmp/out; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::send-return-reminders returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
+            exit 1
+          fi

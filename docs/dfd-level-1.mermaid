@@ -1,0 +1,66 @@
+flowchart LR
+    Visitor[Visitor]
+    User[Registered user]
+    Admin[Admin]
+    SuperAdmin[Super-admin]
+    PayMongo[PayMongo]
+    Gmail[Gmail Apps Script]
+
+    P1((1. Accounts and verification))
+    P2((2. Guest and support communication))
+    P3((3. Vehicle approval and availability))
+    P4((4. Booking and agreement))
+    P5((5. Payment, deposit, and payout))
+    P6((6. Ledger and reconciliation))
+    P7((7. Privacy requests))
+
+    D1[(Profiles and verification)]
+    D2[(Guest inquiries, tickets, notifications)]
+    D3[(Vehicles, documents, blackouts)]
+    D4[(Bookings, agreements, trip reports)]
+    D5[(Payments, deposits, payouts)]
+    D6[(Ledger, reconciliation, audit)]
+    D7[(Retention requests)]
+
+    Visitor -->|question| P2
+    P2 -->|email reply| Gmail
+    Gmail -->|delivery result| P2
+    P2 --> D2
+    Admin -->|review and reply| P2
+
+    User -->|account and KYC evidence| P1
+    Admin -->|verification decision| P1
+    P1 --> D1
+
+    User -->|listing and agreement| P3
+    Admin -->|vehicle decision| P3
+    P3 --> D3
+
+    User -->|dates and acceptance| P4
+    P4 --> D4
+    D1 -->|eligibility| P4
+    D3 -->|approved availability| P4
+
+    User -->|hosted payment| P5
+    P5 <-->|checkout, signed events, payout status| PayMongo
+    SuperAdmin -->|finance decision| P5
+    P5 --> D5
+    P5 --> P6
+    P6 --> D6
+    SuperAdmin -->|review mismatch| P6
+
+    User -->|access, correction, deletion, restriction| P7
+    SuperAdmin -->|identity, hold, decision, evidence| P7
+    P7 --> D7
+    P1 --> D6
+    P2 --> D6
+    P3 --> D6
+    P4 --> D6
+    P7 --> D6
+
+    classDef process fill:#e0f2fe,stroke:#0369a1,color:#082f49
+    classDef store fill:#dcfce7,stroke:#15803d,color:#052e16
+    classDef entity fill:#fee2e2,stroke:#b91c1c,color:#450a0a
+    class P1,P2,P3,P4,P5,P6,P7 process
+    class D1,D2,D3,D4,D5,D6,D7 store
+    class Visitor,User,Admin,SuperAdmin,PayMongo,Gmail entity

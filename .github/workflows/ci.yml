@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check API handlers
+        run: npm run check:api
+
+      - name: Static and logic checks
+        run: |
+          npm run check:booking-flow
+          npm run check:agreement-storage
+          npm run check:financial-logic
+          npm run check:reconciliation-logic
+          npm run check:process-logic
+          npm run check:kyc-ocr
+
+      - name: Repository alignment
+        run: npm run check:alignment
+
+      - name: Production build
+        run: npm run build
+
+# Deliberately not run here: check:api-boundaries and check:browser (need a
+# running server / a browser), and every check:live-* target (need real
+# secrets). Run those locally before a release per the README.

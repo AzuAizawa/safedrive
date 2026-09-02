@@ -1,0 +1,50 @@
+flowchart TD
+    Visitor[Visitor] --> Landing[Public landing and listings]
+    Visitor --> Inquiry[Multi-topic guest inquiry]
+    Inquiry --> GuestAPI[Validated and rate-limited guest API]
+    GuestAPI --> GuestQueue[(Guest inquiry queue)]
+    GuestQueue --> AdminOps[Admin operations]
+    AdminOps --> Gmail[Gmail Apps Script delivery]
+    Gmail -->|delivery confirmed| Resolved[Inquiry resolved]
+    Gmail -->|delivery failed| GuestQueue
+
+    Landing --> Account[Email-confirmed account]
+    Account --> KYC[KYC submission]
+    KYC --> AdminOps
+    AdminOps -->|approved| Verified[Verified user]
+
+    Verified --> Browse[Browse approved vehicles]
+    Verified --> Listing[Submit vehicle and lister agreement]
+    Listing --> VehicleReview[Admin vehicle review]
+    VehicleReview -->|approved| Browse
+    VehicleReview -->|rejected or material edit| Listing
+
+    Browse --> Booking[Server-authoritative booking request]
+    Booking --> Agreement[Snapshot and accept approved lister agreement]
+    Agreement --> OwnerDecision[Lister accepts or rejects]
+    OwnerDecision -->|accepted| Checkout[PayMongo hosted checkout]
+    OwnerDecision -->|rejected or expired| Closed[Booking closed]
+    Checkout --> Webhook[Signed PayMongo webhook]
+    Webhook --> Payment[(Payment record and balanced ledger)]
+    Payment --> Trip[Independent pickup and return reports]
+    Trip --> Deposit[Separate security-deposit review]
+    Trip --> Completion[Completion eligibility]
+    Deposit --> Completion
+    Completion --> SuperAdmin[Super-admin finance review]
+    SuperAdmin --> Payout[Provider payout or documented manual evidence]
+    SuperAdmin --> Reconcile[Ledger and provider reconciliation]
+
+    Account --> Privacy[Privacy request]
+    Privacy --> SuperAdmin
+
+    AdminOps --> Notifications[Admin notification center]
+    SuperAdmin --> Notifications
+    AdminOps --> Audit[(Audit trail)]
+    SuperAdmin --> Audit
+
+    classDef public fill:#dbeafe,stroke:#2563eb,color:#172554
+    classDef admin fill:#fee2e2,stroke:#dc2626,color:#450a0a
+    classDef finance fill:#dcfce7,stroke:#16a34a,color:#052e16
+    class Visitor,Landing,Inquiry,GuestAPI,Account,KYC,Verified,Browse,Listing,Booking,Agreement,OwnerDecision public
+    class AdminOps,VehicleReview,Notifications,Audit,Privacy admin
+    class Checkout,Webhook,Payment,Trip,Deposit,Completion,SuperAdmin,Payout,Reconcile finance
