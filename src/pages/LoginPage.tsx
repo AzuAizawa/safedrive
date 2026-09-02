@@ -17,6 +17,7 @@ import {
 } from "@/lib/authLockout";
 import { recordSecurityEvent } from "@/lib/securityLog";
 import { qrCodeSrc } from "@/lib/qrCode";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,6 +99,7 @@ export default function LoginPage() {
   const [setupUri, setSetupUri] = useState("");
   const [setupCode, setSetupCode] = useState("");
   const [showAuthenticatorSetup, setShowAuthenticatorSetup] = useState(false);
+  const [offerReenroll, setOfferReenroll] = useState(false);
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [, setLockoutTick] = useState(() => Date.now());
@@ -522,9 +524,73 @@ export default function LoginPage() {
     );
     clearAuthFailures("user", normalizedEmail);
     clearUserAuthPending();
+
+    // Signed in with the email-code fallback while an authenticator is still
+    // enrolled - most likely the device was lost. Offer a fresh QR.
+    const { factorId: staleFactorId } = await getAuthenticatorFactor();
+    if (staleFactorId) {
+      setOfferReenroll(true);
+      setIsLoading(false);
+      return;
+    }
+
     toast.success("Welcome back!");
     navigate("/browse");
     setIsLoading(false);
+  };
+
+  const handleReenrollAuthenticator = async () => {
+    setIsLoading(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Sign in again.");
+      }
+
+      const response = await fetch("/api/reset-my-authenticator", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not reset the authenticator");
+      }
+
+      const { enrollment, error: enrollmentError } =
+        await startAuthenticatorEnrollment();
+      if (!enrollment) {
+        throw new Error(
+          enrollmentError?.message ?? "Could not start a new enrollment",
+        );
+      }
+
+      setSetupFactorId(enrollment.factorId);
+      setSetupQrCode(enrollment.qrCode);
+      setSetupSecret(enrollment.secret);
+      setSetupUri(enrollment.uri);
+      setSetupCode("");
+      setOfferReenroll(false);
+      setShowAuthenticatorSetup(true);
+      toast.success("Scan the new QR code with your authenticator app.");
+    } catch (error) {
+      toast.error("Could not set up a new authenticator", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSkipReenroll = () => {
+    setOfferReenroll(false);
+    toast.success("Welcome back!");
+    navigate("/browse");
   };
 
   const handleAuthenticatorSetupSubmit = async (e: React.FormEvent) => {
@@ -1029,6 +1095,17 @@ export default function LoginPage() {
         </div>,
         document.body,
       )}
+
+      <ConfirmDialog
+        open={offerReenroll}
+        title="Set up a new authenticator?"
+        description="You signed in with an email code, but an authenticator app is still connected to this account. If you lost access to it, set up a new one now. Otherwise you can keep using your existing authenticator."
+        confirmText="Set up new authenticator"
+        cancelText="Keep current"
+        isLoading={isLoading}
+        onConfirm={handleReenrollAuthenticator}
+        onCancel={handleSkipReenroll}
+      />
     </div>
   );
 }

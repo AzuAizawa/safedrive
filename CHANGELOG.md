@@ -9,6 +9,27 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Authenticator (MFA) recovery
+
+- If a lister/admin removed the account from their authenticator app there was
+  no way to enrol a new one - every sign-in fell back to "Use Email Code
+  Instead" forever. Added two recovery paths:
+  - **Self-service**: `api/reset-my-authenticator.ts` clears the caller's own
+    factor(s). After an email-code sign-in with a stale factor still attached,
+    `LoginPage` / `AdminLoginPage` now offer "Set up a new authenticator?" - on
+    confirm it calls the endpoint then walks the user through a fresh QR using
+    the existing enrolment UI. No security downgrade: email-code sign-in already
+    bypasses the authenticator.
+  - **Admin-assisted**: `api/admin-reset-authenticator.ts` (super-admin only,
+    standard-user targets, mirrors admin-reset-password) plus a "Reset
+    Authenticator (MFA)" action with a confirm dialog on the Admin > Users
+    review panel.
+- Both use `supabase.auth.admin.mfa.listFactors` / `deleteFactor`, write an
+  audit_log row (`user_mfa_reset` / `admin_reset_user_mfa`), and are documented
+  in the master doc API table.
+
+---
+
 ## 2026-09-02 — Subscription slot-limit enforcement
 
 - Previously a lister could subscribe to Pro (10 slots), list 10 cars, cancel,

@@ -1143,6 +1143,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 
 | Handler | Method and caller | Main responsibility |
 |---|---|---|
+| `api/admin-reset-authenticator.ts` | POST; super-admin | Clear a standard user's enrolled authenticator so they can re-scan a QR, and audit it |
 | `api/admin-reset-password.ts` | POST; super-admin | Reset a non-admin user's password and audit the action |
 | `api/booking-action.ts` | POST; booking participant | Accept/reject/cancel/arrive/finish/no-show booking actions with state gates |
 | `api/booking-extension-action.ts` | POST; participant | Request, approve, reject, or expire a booking extension |
@@ -1165,6 +1166,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/process-security-deposit-release.ts` | POST; super-admin | Create/check PayMongo refund for the refundable deposit remainder |
 | `api/record-security-event.ts` | POST; authenticated or allow-listed login event | Sanitize and record security-relevant activity without secrets |
 | `api/reply-guest-inquiry.ts` | POST; admin/super-admin | Send through Resend with Gmail fallback; resolve only after confirmed delivery |
+| `api/reset-my-authenticator.ts` | POST; authenticated | Clear the caller's own enrolled authenticator (self-service after an email-code sign-in) so the login flow can offer a fresh QR |
 | `api/run-reconciliation.ts` | POST; super-admin | Compare local payments/journals/deposits with PayMongo and save findings |
 | `api/sync-paymongo-refund.ts` | POST; super-admin | Read an existing PayMongo refund state and reconcile only the matching local refund, ledger, and audit record; never creates a new refund |
 | `api/security-deposit-action.ts` | POST; participant/super-admin by action | Submit claim, renter response, or final decision with evidence gates |

@@ -47,7 +47,9 @@ import {
   AlertCircle,
   ZoomIn,
   KeyRound,
+  Smartphone,
 } from "lucide-react";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import type { Profile, VerificationImage } from "@/types/database";
@@ -84,6 +86,8 @@ export default function AdminUsersPage() {
   const [blockReason, setBlockReason] = useState("");
   const [blockDurationHours, setBlockDurationHours] = useState("24");
   const [showPasswordResetInput, setShowPasswordResetInput] = useState(false);
+  const [showAuthenticatorResetConfirm, setShowAuthenticatorResetConfirm] =
+    useState(false);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [confirmResetPasswordValue, setConfirmResetPasswordValue] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
@@ -673,6 +677,52 @@ export default function AdminUsersPage() {
       setConfirmResetPasswordValue("");
     } catch (error) {
       toast.error("Password reset failed", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSuperAdminAuthenticatorReset = async () => {
+    if (!selectedUser || !adminUser || !isSuperAdmin) return;
+
+    setActionLoading(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Your admin session expired. Sign in again first.");
+      }
+
+      const response = await fetch("/api/admin-reset-authenticator", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ targetUserId: selectedUser.id }),
+      });
+
+      const payload = (await response.json()) as {
+        error?: string;
+        cleared?: number;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to reset authenticator");
+      }
+
+      toast.success("Authenticator reset", {
+        description:
+          (payload.cleared ?? 0) > 0
+            ? "The user will be prompted to scan a new QR code on their next sign-in."
+            : "This user had no authenticator enrolled.",
+      });
+      setShowAuthenticatorResetConfirm(false);
+    } catch (error) {
+      toast.error("Authenticator reset failed", {
         description: error instanceof Error ? error.message : "Please try again.",
       });
     } finally {
@@ -1352,6 +1402,32 @@ export default function AdminUsersPage() {
                   </div>
                 ) : null}
 
+                {isSuperAdmin ? (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-3 dark:border-blue-900/50 dark:bg-blue-950/20">
+                    <div>
+                      <p className="text-sm font-semibold flex items-center gap-2">
+                        <Smartphone className="w-4 h-4" />
+                        Reset Authenticator (MFA)
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Clears this user&apos;s enrolled authenticator app when
+                        they have lost the device and cannot use the email-code
+                        fallback. They scan a fresh QR code on their next
+                        sign-in.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowAuthenticatorResetConfirm(true)}
+                      disabled={actionLoading}
+                      className="gap-2 border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                    >
+                      <Smartphone className="w-4 h-4" />
+                      Reset Authenticator
+                    </Button>
+                  </div>
+                ) : null}
+
                 {selectedUser.verified_status === "rejected" &&
                   selectedUser.rejection_reason && (
                     <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50">
@@ -1429,6 +1505,22 @@ export default function AdminUsersPage() {
           </div>,
           document.body,
         )}
+
+      <ConfirmDialog
+        open={showAuthenticatorResetConfirm}
+        title="Reset this user's authenticator?"
+        description={
+          selectedUser
+            ? `Clear the authenticator app enrolled for ${selectedUser.email}. They will scan a new QR code the next time they sign in. Only do this after verifying the request through your support process.`
+            : ""
+        }
+        confirmText="Reset Authenticator"
+        cancelText="Cancel"
+        destructive
+        isLoading={actionLoading}
+        onCancel={() => setShowAuthenticatorResetConfirm(false)}
+        onConfirm={handleSuperAdminAuthenticatorReset}
+      />
     </div>
   );
 }
