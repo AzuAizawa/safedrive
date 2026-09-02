@@ -16,6 +16,7 @@ import {
   registerAuthFailure,
 } from "@/lib/authLockout";
 import { recordSecurityEvent } from "@/lib/securityLog";
+import { qrCodeSrc } from "@/lib/qrCode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,15 +59,6 @@ const maskEmail = (value: string) => {
   if (!name || !domain) return value;
   const visible = name.slice(0, 1);
   return `${visible}${"*".repeat(Math.max(name.length - 1, 4))}@${domain}`;
-};
-
-const qrCodeSrc = (value: string) => {
-  const trimmedValue = value.trim();
-  if (trimmedValue.startsWith("data:image/")) return trimmedValue;
-  if (trimmedValue.startsWith("<svg")) {
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(trimmedValue)}`;
-  }
-  return trimmedValue;
 };
 
 const normalizeEmailCode = (value: string) =>
@@ -745,12 +737,12 @@ export default function LoginPage() {
                     Scan this QR code in Google Authenticator, Authy, Microsoft
                     Authenticator, or 1Password.
                   </p>
-                  <div className="mx-auto flex h-44 w-44 items-center justify-center rounded-lg border bg-white p-3">
+                  <div className="mx-auto flex h-52 w-52 items-center justify-center rounded-lg border bg-white p-3">
                     {setupQrCode && (
                       <img
                         src={qrCodeSrc(setupQrCode)}
                         alt="Authenticator QR code"
-                        className="h-full w-full"
+                        className="h-full w-full [image-rendering:pixelated]"
                       />
                     )}
                   </div>
