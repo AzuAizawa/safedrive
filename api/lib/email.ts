@@ -42,6 +42,11 @@ type PayoutReceiptInput = {
   baseOrigin: string;
 };
 
+type PayoutRecipientProfile = RecipientProfile & {
+  payout_account_name: string | null;
+  payout_account_number: string | null;
+};
+
 type ReceiptBooking = {
   id: string;
   renter_id: string;
@@ -202,8 +207,47 @@ const loadBookingRecipient = async (
 const loadReceiptRecipient = (supabase: ServiceRoleSupabaseClient, bookingId: string) =>
   loadBookingRecipient(supabase, bookingId, "renter");
 
-const loadPayoutRecipient = (supabase: ServiceRoleSupabaseClient, bookingId: string) =>
-  loadBookingRecipient(supabase, bookingId, "owner");
+const loadPayoutRecipient = async (
+  supabase: ServiceRoleSupabaseClient,
+  bookingId: string,
+) => {
+  const base = await loadBookingRecipient(supabase, bookingId, "owner");
+  if (!base) return null;
+
+  const { data: payoutProfile } = await supabase
+    .from("profiles")
+    .select("payout_account_name, payout_account_number")
+    .eq("id", base.booking.owner_id)
+    .single();
+
+  return {
+    booking: base.booking,
+    profile: {
+      ...base.profile,
+      payout_account_name: payoutProfile?.payout_account_name ?? null,
+      payout_account_number: payoutProfile?.payout_account_number ?? null,
+    } as PayoutRecipientProfile,
+  };
+};
+
+// Show only the last 4 characters of a payout account number in receipts so a
+// forwarded or leaked inbox never exposes the full number.
+const maskPayoutAccount = (value: string | null | undefined) => {
+  const trimmed = (value ?? "").replace(/\s+/g, "");
+  if (!trimmed) return null;
+  if (trimmed.length <= 4) return trimmed;
+  return `${"*".repeat(trimmed.length - 4)}${trimmed.slice(-4)}`;
+};
+
+const formatPayoutDestination = (
+  profile: PayoutRecipientProfile,
+  payoutMethod: string,
+) => {
+  const masked = maskPayoutAccount(profile.payout_account_number);
+  if (!masked) return null;
+  const name = profile.payout_account_name?.trim();
+  return `${name ? `${name} - ` : ""}${payoutMethod} ${masked}`;
+};
 
 export const sendPaymentReceiptEmail = async (
   supabase: ServiceRoleSupabaseClient,
@@ -276,17 +320,20 @@ export const sendPayoutReceiptEmail = async (
   const vehicle = getVehicleLabel(recipient.booking);
   const bookingLink = getAppLink(input.baseOrigin, "/lister-bookings");
   const reference = input.transactionId || input.payoutId;
+  const destination = formatPayoutDestination(recipient.profile, input.payoutMethod);
+  const destinationLabel = destination ? "Sent to" : "Method";
+  const destinationValue = destination || input.payoutMethod;
   return sendTransactionalEmail({
     to: recipient.profile.email,
     subject: `SafeDrive payout receipt · ${peso(input.amount)}`,
-    text: `Hello ${recipient.profile.full_name || "there"},\n\nSafeDrive recorded your lister payout for ${vehicle}.\nAmount released: ${peso(input.amount)}\nPayout method: ${input.payoutMethod}\nReference: ${reference}\n\nView your lister bookings: ${bookingLink}\n\nSafeDrive`,
+    text: `Hello ${recipient.profile.full_name || "there"},\n\nSafeDrive recorded your lister payout for ${vehicle}.\nAmount released: ${peso(input.amount)}\n${destinationLabel}: ${destinationValue}\nReference: ${reference}\n\nView your lister bookings: ${bookingLink}\n\nSafeDrive`,
     html: page(
       "Payout receipt",
       `SafeDrive recorded your lister payout for ${vehicle}. Keep this email with your booking records.`,
       [
         ["Vehicle", vehicle],
         ["Amount released", peso(input.amount)],
-        ["Method", input.payoutMethod],
+        [destinationLabel, destinationValue],
         ["Reference", reference],
       ],
       "View lister bookings",

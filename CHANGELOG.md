@@ -9,6 +9,27 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Payouts are in-app only; payout receipt shows the destination
+
+- Removed the out-of-app manual payout path. The Admin > Payouts screen had a
+  "Manual Paid" flow where a super admin sent money by hand (GCash/Maya) and
+  typed back a reference - unverifiable and outside any system control. Deleted
+  `api/mark-manual-payout.ts` and the button/modal/state/handlers in
+  `AdminPayoutsPage`. `Auto Payout` (`/api/process-payout`) is now the only
+  release path. README / SYSTEM_FLOWS / master doc API table / historical spec /
+  smoke-check markers updated.
+- Demo `Auto Payout` now also posts the double-entry ledger journal
+  (`2010 -> 1010`, event key `payout:<txn>`) like the real PayMongo and former
+  manual paths. Before this, demo payouts left the ledger unbalanced and tripped
+  the reconciliation `completed_payment_missing_ledger_journal` check.
+- Payout receipt email + lister notification now show the destination from the
+  lister's saved Payout Details: `<Account Name> - <Method> ****<last4>` (account
+  number masked to the last 4; full number never leaves in an email). Falls back
+  to just the method when no account number is on file. Files:
+  `api/lib/email.ts`, `api/lib/payoutAutomation.ts`.
+
+---
+
 ## 2026-09-02 — Auto Payout button works in demo mode on the deployed site
 
 - The "Auto Payout" button in Admin > Payouts already existed but only the

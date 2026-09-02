@@ -100,6 +100,22 @@ const getAuthToken = (secretKey: string) =>
 const safeString = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 
+// Mask everything but the last 4 characters so notifications never expose a
+// full payout account number.
+const maskPayoutAccount = (value: string | null | undefined) => {
+  const trimmed = (value ?? "").replace(/\s+/g, "");
+  if (!trimmed) return null;
+  if (trimmed.length <= 4) return trimmed;
+  return `${"*".repeat(trimmed.length - 4)}${trimmed.slice(-4)}`;
+};
+
+const describePayoutDestination = (owner: BookingForPayout["owner"]) => {
+  const masked = maskPayoutAccount(owner.payout_account_number);
+  if (!masked || !owner.payout_method) return null;
+  const name = owner.payout_account_name?.trim();
+  return `${name ? `${name} - ` : ""}${owner.payout_method} ${masked}`;
+};
+
 const getPayMongoSettings = () => ({
   secretKey: process.env.PAYMONGO_SECRET_KEY,
   walletId: process.env.PAYMONGO_PAYOUT_WALLET_ID,
@@ -720,11 +736,12 @@ export const processAutomaticPayoutForBooking = async ({
       notes:
         "Demo payout completed. Lister earnings (base price, net of commission) recorded without a real PayMongo transfer.",
     });
+    const sandboxDestination = describePayoutDestination(payoutBooking.owner);
     await createListerNotification(
       supabase,
       payoutBooking.owner.id,
       "Payout Recorded (demo mode)",
-      `Your SafeDrive payout of PHP ${Number(payoutBooking.base_price).toLocaleString()} for ${getVehicleLabel(payoutBooking)} was recorded. This build runs in demo payout mode, so no real PayMongo transfer was sent.`,
+      `Your SafeDrive payout of PHP ${Number(payoutBooking.base_price).toLocaleString()} for ${getVehicleLabel(payoutBooking)} was recorded${sandboxDestination ? ` for ${sandboxDestination}` : ""}. This build runs in demo payout mode, so no real PayMongo transfer was sent.`,
       "success",
     );
     await sendPayoutReceiptEmail(supabase, {
@@ -855,11 +872,12 @@ export const processAutomaticPayoutForBooking = async ({
         transaction_id: walletTransactionId,
         notes: note,
       });
+      const releasedDestination = describePayoutDestination(payoutBooking.owner);
       await createListerNotification(
         supabase,
         payoutBooking.owner.id,
         "Payout Released",
-        `Your SafeDrive payout for ${getVehicleLabel(payoutBooking)} was sent through PayMongo.`,
+        `Your SafeDrive payout for ${getVehicleLabel(payoutBooking)} was sent through PayMongo${releasedDestination ? ` to ${releasedDestination}` : ""}.`,
         "success",
       );
       await sendPayoutReceiptEmail(supabase, {
