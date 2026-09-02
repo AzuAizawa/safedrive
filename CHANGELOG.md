@@ -9,6 +9,29 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Login QR, admin banner, vehicle-form validation
+
+- `src/lib/qrCode.ts` (new) — Supabase returns the enrolled TOTP QR as an SVG
+  that begins with an `<?xml ?>` prolog, so `LoginPage`/`AdminLoginPage`'s old
+  `qrCodeSrc` `startsWith("<svg")` check missed it and the raw XML string went
+  to `<img src>` (broken/blurry). New helper strips the prolog, injects a
+  `viewBox` + `shape-rendering="crispEdges"`, returns a proper data URI. Both
+  pages import it; QR box enlarged, pixelate-scaled.
+- `src/pages/admin/AdminLoginPage.tsx` — the "Access Denied" clearance banner
+  rendered whenever `profile.role !== "admin"`, so a `super_admin` briefly saw
+  it during the post-auth redirect. Now also allows `super_admin`.
+- `src/lib/vehicleValidation.ts` (new) + `src/pages/MyVehiclesPage.tsx` — the
+  listing form only had native `<input pattern>`/`min`, so a malformed plate
+  (`ABC12345`) or an under-500 price could reach admin review. `validatePlateNumber`
+  / `validateListingPrice` now run in the create and edit submit handlers with
+  live inline error text, independent of native constraint validation.
+- **Migration applied:** `cars_plate_number_format` CHECK
+  (`plate_number ~ '^[A-Z]{3}[ -]?[0-9]{3,4}$'`) added to `public.cars` and to
+  `SAFE_DRIVE_DATABASE_MASTER.sql` Chapter 14 + the Chapter 16 verification list.
+  All existing rows conform.
+
+---
+
 ## 2026-08-31 — Receipts
 
 - New `src/lib/receiptPdf.ts` — one branded A4 receipt renderer for renter

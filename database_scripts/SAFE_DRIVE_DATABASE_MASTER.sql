@@ -3787,6 +3787,16 @@ alter table public.cars
   add constraint cars_price_per_day_check
   check (price_per_day >= 500 and price_per_day <= 100000) not valid;
 
+-- Philippine four-wheel plate format: 3 letters, optional space/hyphen, 3-4
+-- digits. Rejects malformed input (e.g. ABC12345) at the database, matching the
+-- client-side check in src/lib/vehicleValidation.ts. Validated: every existing
+-- row already conforms.
+alter table public.cars
+  drop constraint if exists cars_plate_number_format;
+alter table public.cars
+  add constraint cars_plate_number_format
+  check (plate_number ~ '^[A-Z]{3}[ -]?[0-9]{3,4}$');
+
 alter table public.cars
   drop constraint if exists cars_security_deposit_amount_check;
 alter table public.cars
@@ -4892,6 +4902,7 @@ where conname in (
   'bookings_no_active_date_overlap',
   'vehicle_unavailability_no_overlap',
   'cars_price_per_day_check',
+  'cars_plate_number_format',
   'cars_security_deposit_amount_check',
   'trip_condition_reports_booking_id_reporter_id_phase_key'
 )
