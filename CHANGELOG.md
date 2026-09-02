@@ -9,6 +9,19 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — User Inquiries: drop the standalone "Start review" step
+
+- The "Start review" button was optional (you could reply from `open`
+  too) but looked required. Removed it. Opening the reply box now
+  silently claims the inquiry (`open -> in_progress`, assigned admin,
+  timestamp) so the queue still shows who is on it; the reply endpoint's
+  resolved-check remains the real double-answer guard.
+- The reply action is now "Reply & close" / "Send & close" and the modal
+  says it sends one email and closes the inquiry. `AdminGuestInquiriesPage`
+  only. Master doc updated.
+
+---
+
 ## 2026-09-03 — "Support Cases" -> "Support Tickets"; "Guest Inquiries" -> "User Inquiries"
 
 - The admin sidebar called the ticket system "Support Cases" while the

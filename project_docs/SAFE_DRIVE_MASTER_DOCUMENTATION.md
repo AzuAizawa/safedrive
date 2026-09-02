@@ -182,7 +182,7 @@ Each queue item shows the exact elapsed time, such as `Waiting 1d 4h 12m`. Queue
 | Refund/payout | 2h | 4h | 24h |
 | Security event | Immediate | Immediate | Immediate |
 
-The User Inquiries page has a **Start review** action. The user-facing label is “In review”; the internal status remains `in_progress` to match the existing database constraint.
+Opening the reply box silently claims the inquiry (`open → in_progress`, assigned to that admin, with a review-started timestamp) so the queue shows someone is on it - there is no separate "Start review" step. The reply endpoint 409s once an inquiry is resolved, which is the real guard against a second admin answering twice. Sending the reply emails the person once and closes the inquiry (`resolved`). The internal status stays `in_progress` / `resolved` to match the existing database constraint.
 
 ## 5. User Inquiry Workflow
 
@@ -810,7 +810,7 @@ Use this answer pattern during a defense: state the problem, name the control, e
 
 ### E.3 The admin notification center is a work queue, not only a message feed
 
-- **Decision:** The bell summarizes open guest inquiries, support tickets, user and vehicle reviews, and financial exceptions. Each item shows the exact elapsed wait and opens the relevant review page; "Start review" changes ownership/state visibly.
+- **Decision:** The bell summarizes open user inquiries, support tickets, user and vehicle reviews, and financial exceptions. Each item shows the exact elapsed wait and opens the relevant review page; opening an item to act on it claims it (ownership/state change) so another admin sees it is being handled.
 - **Why:** Counts alone do not show urgency or whether someone is already handling an item. A work queue reduces overlooked requests and duplicate effort.
 - **Support:** The Internet Transactions Act calls for responsive redress, while OWASP logging and exceptional-condition guidance supports actionable monitoring rather than silent failure. The exact wait is a usability choice, not a statutory service-level promise.
 - **Defense answer:** "The notification center turns pending work into an accountable queue. Administrators see what needs action, how long it has waited, and whether review has started."

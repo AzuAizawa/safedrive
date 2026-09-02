@@ -65,35 +65,40 @@ export default function AdminGuestInquiriesPage() {
     return inquiries;
   }, [filter, inquiries]);
 
-  const startReview = async (inquiry: GuestInquiry) => {
+  // Opening the reply box silently claims the inquiry (open -> in_progress with
+  // this admin + a review-started timestamp) so the queue shows someone is on
+  // it. There is no separate "Start review" step - the reply endpoint is the
+  // real guard against a second admin resolving it twice.
+  const openReply = (inquiry: GuestInquiry) => {
+    setSelected(inquiry);
+    setReply(inquiry.admin_reply || "");
+    if (inquiry.status !== "open") return;
+
     const adminId = session?.user.id;
     if (!adminId) return;
     const startedAt = new Date().toISOString();
-    const { data: claimed, error } = await supabase
-      .from("guest_inquiries")
-      .update({ status: "in_progress", assigned_admin_id: adminId, review_started_at: startedAt })
-      .eq("id", inquiry.id)
-      .eq("status", "open")
-      .select("id")
-      .maybeSingle();
-    if (error) {
-      toast.error("Review was not started", { description: error.message });
-      return;
-    }
-    if (!claimed) {
-      toast.info("Another administrator already started this review");
+    void (async () => {
+      const { data: claimed, error } = await supabase
+        .from("guest_inquiries")
+        .update({ status: "in_progress", assigned_admin_id: adminId, review_started_at: startedAt })
+        .eq("id", inquiry.id)
+        .eq("status", "open")
+        .select("id")
+        .maybeSingle();
+      if (error || !claimed) {
+        if (!error) toast.info("Another administrator is already on this inquiry");
+        await fetchInquiries();
+        return;
+      }
+      await supabase.from("audit_log").insert({
+        user_id: adminId,
+        action: "guest_inquiry_review_started",
+        entity_type: "guest_inquiry",
+        entity_id: inquiry.id,
+        details: { previous_status: inquiry.status, review_started_at: startedAt },
+      });
       await fetchInquiries();
-      return;
-    }
-    await supabase.from("audit_log").insert({
-      user_id: adminId,
-      action: "guest_inquiry_review_started",
-      entity_type: "guest_inquiry",
-      entity_id: inquiry.id,
-      details: { previous_status: inquiry.status, review_started_at: startedAt },
-    });
-    toast.success("Inquiry is now In review");
-    await fetchInquiries();
+    })();
   };
 
   const sendReply = async () => {
@@ -182,10 +187,9 @@ export default function AdminGuestInquiriesPage() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {inquiry.status === "open" && <Button size="sm" variant="outline" onClick={() => void startReview(inquiry)}>Start review</Button>}
                     {["open", "in_progress"].includes(inquiry.status) && (
-                      <Button size="sm" className="gap-1" onClick={() => { setSelected(inquiry); setReply(inquiry.admin_reply || ""); }}>
-                        <Mail className="h-3.5 w-3.5" /> Reply
+                      <Button size="sm" className="gap-1" onClick={() => openReply(inquiry)}>
+                        <Mail className="h-3.5 w-3.5" /> Reply &amp; close
                       </Button>
                     )}
                   </div>
@@ -208,13 +212,13 @@ export default function AdminGuestInquiriesPage() {
           <div className="w-full max-w-xl rounded-xl border border-border bg-card p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start gap-3">
               <MessageSquare className="mt-1 h-5 w-5 text-primary" />
-              <div><h2 className="text-lg font-semibold">Reply to {selected.name}</h2><p className="text-sm text-muted-foreground">The response will be emailed to {selected.email}.</p></div>
+              <div><h2 className="text-lg font-semibold">Reply to {selected.name}</h2><p className="text-sm text-muted-foreground">Sends one email to {selected.email} and closes this inquiry. For a back-and-forth, the person should open a Support Ticket.</p></div>
             </div>
             <textarea className="mt-4 min-h-40 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" maxLength={3000} value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Write the SafeDrive support response..." />
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="outline" onClick={() => setSelected(null)} disabled={sending}>Cancel</Button>
               <Button className="gap-2" onClick={() => void sendReply()} disabled={sending || !reply.trim()}>
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Send reply
+                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Send &amp; close
               </Button>
             </div>
           </div>
