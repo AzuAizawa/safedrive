@@ -32,3 +32,6 @@ node_modules
 
 # Private local material; never publish this folder.
 ETC ETC DO NOT UPLOAD TO GITHUB/
+
+.vercel
+.env*
