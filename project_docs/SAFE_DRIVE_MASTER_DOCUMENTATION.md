@@ -249,7 +249,9 @@ An electronic timestamp is the trusted server date/time of the acceptance or sub
 
 ## 8. Pickup and Return Condition Reports
 
-Renter and lister submit independent pickup and return reports. Each report requires seven photographs: front, back, left, right, interior, odometer, and fuel/battery level. It also records odometer, fuel/battery percentage, condition notes, and a server timestamp.
+Renter and lister submit independent pickup and return reports. Each report requires **four** photographs: front, back, odometer, and fuel/battery gauge (left, right, and interior are optional). The typed odometer and fuel/battery readings are optional - the odometer and fuel photos carry the evidence. Condition notes and a server timestamp are always recorded.
+
+A report can be submitted with an incomplete photo set only through an explicit **"submit without photos" waiver** (`evidence_waived`). A waived report keeps the trip moving but is flagged: a super admin sees it in any deposit dispute, and a **deposit claim cannot be filed on a waived or incomplete return report** - so a party that skips evidence cannot then claim on nothing.
 
 Location is optional evidence. If a participant actively consents, the browser may store latitude, longitude, accuracy, and capture time. It can help investigate whether evidence was captured near pickup/return, but it is not required, may be inaccurate, and must not be used as automatic proof of fault.
 

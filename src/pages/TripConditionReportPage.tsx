@@ -12,9 +12,14 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const requiredPhotos = [
-  ["front", "Front"], ["back", "Back"], ["left", "Left side"], ["right", "Right side"],
-  ["interior", "Interior"], ["odometer", "Odometer"], ["fuel_or_battery", "Fuel or battery"],
+  ["front", "Front"], ["back", "Back"], ["odometer", "Odometer"], ["fuel_or_battery", "Fuel or battery"],
 ] as const;
+
+const optionalPhotos = [
+  ["left", "Left side"], ["right", "Right side"], ["interior", "Interior"],
+] as const;
+
+const allPhotoSlots = [...requiredPhotos, ...optionalPhotos];
 
 export default function TripConditionReportPage() {
   const { bookingId = "", phase = "" } = useParams();
@@ -42,6 +47,10 @@ export default function TripConditionReportPage() {
 
   const returnTo = profile?.is_lister ? "/lister-bookings" : "/my-bookings";
   const allFilesReady = useMemo(() => requiredPhotos.every(([category]) => files[category]), [files]);
+  const missingRequired = useMemo(
+    () => requiredPhotos.filter(([category]) => !files[category]).map(([, label]) => label),
+    [files],
+  );
 
   const captureLocation = () => {
     if (!navigator.geolocation) return toast.error("Location is not available in this browser");
@@ -52,16 +61,20 @@ export default function TripConditionReportPage() {
     );
   };
 
-  const submit = async (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent, evidenceWaived = false) => {
     event.preventDefault();
-    if (!user?.id || !session?.access_token || !validPhase || saving || !allFilesReady) return;
+    if (!user?.id || !session?.access_token || !validPhase || saving) return;
+    if (!evidenceWaived && !allFilesReady) return;
+    if (evidenceWaived && !window.confirm(
+      `Submit without the ${missingRequired.join(", ")} photo${missingRequired.length === 1 ? "" : "s"}? This is recorded on the report, and you will not be able to file a deposit claim on an incomplete return report.`,
+    )) return;
     setSaving(true);
     const uploaded: Array<{ category: string; storagePath: string }> = [];
     try {
       const reportFolder = crypto.randomUUID();
-      for (const [category] of requiredPhotos) {
+      for (const [category] of allPhotoSlots) {
         const file = files[category];
-        if (!file) throw new Error(`Missing ${category} photo`);
+        if (!file) continue;
         if (file.size > 8 * 1024 * 1024) throw new Error(`${category} photo is larger than 8 MB`);
         const extension = file.name.split(".").pop()?.replace(/[^a-z0-9]/gi, "").toLowerCase() || "jpg";
         const path = `${bookingId}/${user.id}/${reportFolder}/${category}.${extension}`;
@@ -69,7 +82,7 @@ export default function TripConditionReportPage() {
         if (error) throw error;
         uploaded.push({ category, storagePath: path });
       }
-      const response = await fetch("/api/submit-trip-condition-report", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ bookingId, phase: validPhase, odometerReading: Number(odometer), fuelOrBatteryLevel: Number(level), damageNotes, locationConsent, latitude: location?.latitude, longitude: location?.longitude, locationAccuracyMeters: location?.accuracy, photos: uploaded }) });
+      const response = await fetch("/api/submit-trip-condition-report", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ bookingId, phase: validPhase, odometerReading: odometer.trim() === "" ? null : Number(odometer), fuelOrBatteryLevel: level.trim() === "" ? null : Number(level), damageNotes, evidenceWaived, locationConsent, latitude: location?.latitude, longitude: location?.longitude, locationAccuracyMeters: location?.accuracy, photos: uploaded }) });
       const result = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(result.error || "Report was not saved");
       setAlreadySubmitted(true);
@@ -87,12 +100,41 @@ export default function TripConditionReportPage() {
   return (
     <form onSubmit={submit} className="mx-auto max-w-3xl space-y-6">
       <div><h1 className="text-3xl font-bold">{validPhase === "pickup" ? "Pickup" : "Return"} Condition Report</h1><p className="mt-1 text-muted-foreground">Submit your own independent evidence. The server records the timestamp; location is optional and only stored with your consent.</p></div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {requiredPhotos.map(([category, label]) => <label key={category} className="space-y-2 rounded-xl border bg-card p-4"><Label className="flex items-center gap-2"><Camera className="h-4 w-4" />{label} photo</Label><Input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(e) => setFiles((current) => ({ ...current, [category]: e.target.files?.[0] || null }))} required /></label>)}
+      <div>
+        <p className="mb-2 text-sm font-medium">Required photos (4)</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {requiredPhotos.map(([category, label]) => <label key={category} className="space-y-2 rounded-xl border bg-card p-4"><Label className="flex items-center gap-2"><Camera className="h-4 w-4" />{label} photo</Label><Input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setFiles((current) => ({ ...current, [category]: e.target.files?.[0] || null }))} /></label>)}
+        </div>
       </div>
-      <div className="grid gap-4 rounded-xl border bg-card p-5 sm:grid-cols-2"><label className="space-y-2"><Label>Odometer reading</Label><Input type="number" min="0" step="1" value={odometer} onChange={(e) => setOdometer(e.target.value)} required /></label><label className="space-y-2"><Label>Fuel or battery level (%)</Label><Input type="number" min="0" max="100" step="1" value={level} onChange={(e) => setLevel(e.target.value)} required /></label><label className="space-y-2 sm:col-span-2"><Label>Damage or condition notes</Label><textarea className="min-h-28 w-full rounded-md border bg-background p-3 text-sm" maxLength={3000} value={damageNotes} onChange={(e) => setDamageNotes(e.target.value)} placeholder="Write 'No new damage observed' when appropriate." /></label></div>
+      <div>
+        <p className="mb-2 text-sm font-medium text-muted-foreground">Optional photos</p>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {optionalPhotos.map(([category, label]) => <label key={category} className="space-y-2 rounded-xl border bg-card p-4"><Label className="flex items-center gap-2"><Camera className="h-4 w-4" />{label}</Label><Input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setFiles((current) => ({ ...current, [category]: e.target.files?.[0] || null }))} /></label>)}
+        </div>
+      </div>
+      <div className="grid gap-4 rounded-xl border bg-card p-5 sm:grid-cols-2"><label className="space-y-2"><Label>Odometer reading <span className="text-xs text-muted-foreground">(optional)</span></Label><Input type="number" min="0" step="1" value={odometer} onChange={(e) => setOdometer(e.target.value)} /></label><label className="space-y-2"><Label>Fuel or battery level (%) <span className="text-xs text-muted-foreground">(optional)</span></Label><Input type="number" min="0" max="100" step="1" value={level} onChange={(e) => setLevel(e.target.value)} /></label><label className="space-y-2 sm:col-span-2"><Label>Damage or condition notes</Label><textarea className="min-h-28 w-full rounded-md border bg-background p-3 text-sm" maxLength={3000} value={damageNotes} onChange={(e) => setDamageNotes(e.target.value)} placeholder="Write 'No new damage observed' when appropriate." /></label></div>
       <div className="rounded-xl border bg-card p-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><p className="font-medium">Optional location evidence</p><p className="text-sm text-muted-foreground">Only capture it if you consent. You may submit without location.</p></div><Button type="button" variant="outline" className="gap-2" onClick={captureLocation}><MapPin className="h-4 w-4" />{location ? "Location captured" : "Capture location"}</Button></div>{location && <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" checked={locationConsent} onChange={(e) => setLocationConsent(e.target.checked)} />I consent to storing this location with the trip report.</label>}</div>
-      <Button type="submit" className="w-full" disabled={saving || !allFilesReady}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Submit condition report</Button>
+      <div className="space-y-2">
+        <Button type="submit" className="w-full" disabled={saving || !allFilesReady}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Submit condition report</Button>
+        {!allFilesReady && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full text-amber-600"
+            disabled={saving}
+            onClick={(e) => submit(e as unknown as React.FormEvent, true)}
+          >
+            Submit without the {missingRequired.join(", ")} photo{missingRequired.length === 1 ? "" : "s"}
+          </Button>
+        )}
+        {!allFilesReady && (
+          <p className="text-xs text-muted-foreground">
+            Submitting with missing photos is recorded on the report. You will not be able to file a deposit
+            claim on an incomplete return report, and the missing evidence counts against the party that
+            skipped it in any dispute.
+          </p>
+        )}
+      </div>
     </form>
   );
 }

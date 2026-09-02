@@ -90,6 +90,34 @@ const checks = [
     ],
   },
   {
+    file: "api/submit-trip-condition-report.ts",
+    markers: [
+      'requiredCategories = ["front", "back", "odometer", "fuel_or_battery"]',
+      "evidenceWaived",
+      "optionalReading",
+      "missing_photo_categories",
+    ],
+    absentMarkers: [
+      '"front", "back", "left", "right", "interior", "odometer", "fuel_or_battery"',
+    ],
+  },
+  {
+    file: "api/booking-action.ts",
+    markers: [
+      "if (report.evidence_waived) return true;",
+      "id, evidence_waived, trip_condition_photos(category)",
+    ],
+  },
+  {
+    file: "src/pages/TripConditionReportPage.tsx",
+    markers: [
+      "Required photos (4)",
+      "optionalPhotos",
+      "Submit without the",
+      "evidenceWaived",
+    ],
+  },
+  {
     file: "src/pages/MyBookingsPage.tsx",
     markers: [
       "Next step",

@@ -952,9 +952,9 @@ export interface Database {
         Relationships: [];
       };
       trip_condition_reports: {
-        Row: { id: string; booking_id: string; reporter_id: string; reporter_role: string; phase: string; odometer_reading: number; fuel_or_battery_level: number; damage_notes: string; latitude: number | null; longitude: number | null; location_accuracy_meters: number | null; location_consent: boolean; submitted_at: string };
-        Insert: { id?: string; booking_id: string; reporter_id: string; reporter_role: string; phase: string; odometer_reading: number; fuel_or_battery_level: number; damage_notes?: string; latitude?: number | null; longitude?: number | null; location_accuracy_meters?: number | null; location_consent?: boolean; submitted_at?: string };
-        Update: { id?: string; booking_id?: string; reporter_id?: string; reporter_role?: string; phase?: string; odometer_reading?: number; fuel_or_battery_level?: number; damage_notes?: string; latitude?: number | null; longitude?: number | null; location_accuracy_meters?: number | null; location_consent?: boolean; submitted_at?: string };
+        Row: { id: string; booking_id: string; reporter_id: string; reporter_role: string; phase: string; odometer_reading: number | null; fuel_or_battery_level: number | null; evidence_waived: boolean; damage_notes: string; latitude: number | null; longitude: number | null; location_accuracy_meters: number | null; location_consent: boolean; submitted_at: string };
+        Insert: { id?: string; booking_id: string; reporter_id: string; reporter_role: string; phase: string; odometer_reading?: number | null; fuel_or_battery_level?: number | null; evidence_waived?: boolean; damage_notes?: string; latitude?: number | null; longitude?: number | null; location_accuracy_meters?: number | null; location_consent?: boolean; submitted_at?: string };
+        Update: { id?: string; booking_id?: string; reporter_id?: string; reporter_role?: string; phase?: string; odometer_reading?: number | null; fuel_or_battery_level?: number | null; evidence_waived?: boolean; damage_notes?: string; latitude?: number | null; longitude?: number | null; location_accuracy_meters?: number | null; location_consent?: boolean; submitted_at?: string };
         Relationships: [];
       };
       trip_condition_photos: {

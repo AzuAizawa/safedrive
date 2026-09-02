@@ -9,6 +9,31 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Lighter trip condition reports (Phase 4)
+
+- Required photos per report cut from **7 to 4** (front, back, odometer,
+  fuel/battery gauge). Left / right / interior are now optional. File
+  inputs no longer force the live camera, so a gallery photo works.
+- The typed **odometer and fuel/battery readings are optional** (the
+  odometer + fuel photos carry the evidence). `trip_condition_reports`
+  `odometer_reading` / `fuel_or_battery_level` are now nullable; the
+  return >= pickup odometer check only runs when both are present.
+- New **"submit without photos" waiver** (`trip_condition_reports.evidence_waived`):
+  a report with an incomplete photo set can still be submitted so the
+  trip is never stuck, but it is flagged in the audit log and a **deposit
+  claim cannot be filed on a waived or incomplete return report**
+  (`security-deposit-action.ts` `submit_claim`) - keeps the anti-fake-damage
+  guarantee. `booking-action.ts` `hasRequiredTripPhotos` treats a waived
+  report as satisfying the gate.
+- Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql`,
+  `api/submit-trip-condition-report.ts`, `api/booking-action.ts`,
+  `api/security-deposit-action.ts`, `src/pages/TripConditionReportPage.tsx`,
+  `src/types/database.ts`, master doc, smoke-check markers.
+- **Migration:** `alter column ... drop not null` on the two reading
+  columns + `add column evidence_waived` (from the master SQL).
+
+---
+
 ## 2026-09-03 — Payout visibility + payment "confirming" copy (Phase 3)
 
 - Every successful lister payout now notifies **all admins** (previously

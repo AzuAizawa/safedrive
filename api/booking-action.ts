@@ -104,16 +104,15 @@ const isRenter = (booking: BookingRecord, userId: string) =>
 const REQUIRED_TRIP_PHOTO_CATEGORIES = [
   "front",
   "back",
-  "left",
-  "right",
-  "interior",
   "odometer",
   "fuel_or_battery",
 ] as const;
 
 const hasRequiredTripPhotos = (report: {
   trip_condition_photos?: Array<{ category: string }> | null;
+  evidence_waived?: boolean | null;
 }) => {
+  if (report.evidence_waived) return true;
   const categories = new Set(
     (report.trip_condition_photos ?? []).map((photo) => photo.category),
   );
@@ -964,7 +963,7 @@ export default async function handler(req: Request) {
 
       const { data: pickupReport, error: pickupReportError } = await supabase
         .from("trip_condition_reports")
-        .select("id, trip_condition_photos(category)")
+        .select("id, evidence_waived, trip_condition_photos(category)")
         .eq("booking_id", bookingRecord.id)
         .eq("reporter_id", user.id)
         .eq("phase", "pickup")
@@ -1205,7 +1204,7 @@ export default async function handler(req: Request) {
 
       const { data: conditionReports, error: conditionReportError } = await supabase
         .from("trip_condition_reports")
-        .select("id, phase, trip_condition_photos(category)")
+        .select("id, phase, evidence_waived, trip_condition_photos(category)")
         .eq("booking_id", bookingRecord.id)
         .eq("reporter_id", user.id)
         .in("phase", ["pickup", "return"]);

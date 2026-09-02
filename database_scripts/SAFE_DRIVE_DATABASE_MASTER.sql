@@ -4302,6 +4302,16 @@ alter table public.trip_condition_reports
     and (location_consent or (latitude is null and longitude is null and location_accuracy_meters is null))
   );
 
+-- Lighter trip reports: the odometer / fuel typed readings are now optional
+-- (the odometer + fuel photos carry the evidence), and a report can be
+-- submitted with an incomplete photo set as long as it is explicitly flagged
+-- `evidence_waived` - that flag is surfaced to a super admin in any deposit
+-- dispute so the party that skipped evidence is on record.
+alter table public.trip_condition_reports
+  alter column odometer_reading drop not null,
+  alter column fuel_or_battery_level drop not null,
+  add column if not exists evidence_waived boolean not null default false;
+
 create table if not exists public.trip_condition_photos (
   id uuid primary key default gen_random_uuid(),
   report_id uuid not null references public.trip_condition_reports(id) on delete cascade,
