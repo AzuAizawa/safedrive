@@ -9,6 +9,26 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Subscription slot-limit enforcement
+
+- Previously a lister could subscribe to Pro (10 slots), list 10 cars, cancel,
+  and keep all 10 live on Free. Now:
+  - `deactivate_cars_over_slot_limit(uuid)` DB function pauses the newest
+    listings beyond the plan allowance (base 5 + active subscription slots),
+    keeping the oldest.
+  - `subscription_expiry_slot_enforce` trigger runs it on lazy expiry
+    (status active -> expired). The upgrade webhook uses 'cancelled', not
+    'expired', so mid-upgrade housekeeping is unaffected.
+  - `api/cancel-subscription.ts` calls the function via RPC on the explicit
+    "Switch to Free now" cancel and returns `deactivatedListings`.
+  - `enforce_live_car_limit` trigger + a client guard in
+    `MyVehiclesPage.handleToggleVehicleLiveStatus` block reactivating an
+    inactive listing past the allowance.
+- All three DB objects added to `SAFE_DRIVE_DATABASE_MASTER.sql` Chapter 14 and
+  the trigger names to the Chapter 16 verification list.
+
+---
+
 ## 2026-09-02 — Subscription: cancel on the right card + clearer copy
 
 - `src/pages/SubscriptionPlansPage.tsx` — the "Cancel Subscription" action sat

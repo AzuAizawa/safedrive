@@ -83,6 +83,19 @@ export default async function handler(req: Request) {
       throw updateError;
     }
 
+    // Pull any listings that now exceed the (reduced) slot allowance offline so
+    // a lister cannot keep more live listings than the plan they are paying for.
+    let deactivatedListings = 0;
+    const { data: deactivatedCount, error: deactivateError } = await supabase.rpc(
+      "deactivate_cars_over_slot_limit",
+      { p_owner: user.id },
+    );
+    if (deactivateError) {
+      console.error("Failed to enforce slot limit after cancel:", deactivateError);
+    } else if (typeof deactivatedCount === "number") {
+      deactivatedListings = deactivatedCount;
+    }
+
     await supabase.from("audit_log").insert({
       user_id: user.id,
       action: "subscription_cancelled",
@@ -91,6 +104,7 @@ export default async function handler(req: Request) {
       details: {
         previous_plan: currentSubscription.plan_type,
         cancelled_on: endDate,
+        deactivated_listings: deactivatedListings,
       },
     });
 
@@ -98,6 +112,7 @@ export default async function handler(req: Request) {
       success: true,
       cancelledPlan: currentSubscription.plan_type,
       state: "cancelled",
+      deactivatedListings,
     });
   } catch (error: unknown) {
     const message =

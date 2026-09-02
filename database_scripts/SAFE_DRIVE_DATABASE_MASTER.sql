@@ -4086,6 +4086,107 @@ create trigger enforce_vehicle_insurance_approval
 before update of status on public.cars
 for each row execute function public.enforce_vehicle_insurance_approval();
 
+-- Slot-limit enforcement so a lister cannot keep more live listings than the
+-- plan they are paying for (base 5 + any active subscription's additional
+-- slots). deactivate_cars_over_slot_limit pauses the newest listings beyond the
+-- allowance, keeping the oldest; it is called on the explicit "Switch to Free
+-- now" cancel (api/cancel-subscription.ts rpc) and on lazy expiry (trigger).
+-- The upgrade webhook uses status 'cancelled', not 'expired', so mid-upgrade
+-- housekeeping never trips the expiry trigger.
+create or replace function public.deactivate_cars_over_slot_limit(p_owner uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  allowance integer;
+  affected integer;
+begin
+  select 5 + coalesce(max(additional_slots), 0)
+    into allowance
+    from public.subscriptions
+    where user_id = p_owner and status = 'active';
+  allowance := coalesce(allowance, 5);
+
+  with excess as (
+    select id
+    from public.cars
+    where owner_id = p_owner and status in ('approved', 'active')
+    order by created_at asc
+    offset allowance
+  )
+  update public.cars c
+    set status = 'inactive'
+    from excess
+    where c.id = excess.id;
+
+  get diagnostics affected = row_count;
+  return affected;
+end;
+$$;
+
+revoke all on function public.deactivate_cars_over_slot_limit(uuid) from public, anon, authenticated;
+
+create or replace function public.trg_subscription_expiry_slot_enforce()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.status = 'active' and new.status = 'expired' then
+    perform public.deactivate_cars_over_slot_limit(new.user_id);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists subscription_expiry_slot_enforce on public.subscriptions;
+create trigger subscription_expiry_slot_enforce
+  after update on public.subscriptions
+  for each row execute function public.trg_subscription_expiry_slot_enforce();
+
+create or replace function public.trg_enforce_live_car_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  allowance integer;
+  live_count integer;
+begin
+  if old.status = 'inactive' and new.status in ('approved', 'active') then
+    select 5 + coalesce(max(additional_slots), 0)
+      into allowance
+      from public.subscriptions
+      where user_id = new.owner_id and status = 'active';
+    allowance := coalesce(allowance, 5);
+
+    select count(*)
+      into live_count
+      from public.cars
+      where owner_id = new.owner_id
+        and status in ('approved', 'active')
+        and id <> new.id;
+
+    if live_count >= allowance then
+      raise exception
+        'Vehicle slot limit reached: your current plan allows % live listing(s). Upgrade your plan to reactivate more.',
+        allowance
+        using errcode = 'check_violation';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_live_car_limit on public.cars;
+create trigger enforce_live_car_limit
+  before update on public.cars
+  for each row execute function public.trg_enforce_live_car_limit();
+
 -- Lister maintenance and personal-use blackouts.
 create table if not exists public.vehicle_unavailability (
   id uuid primary key default gen_random_uuid(),
@@ -4927,6 +5028,8 @@ where trigger_schema = 'public'
     'return_materially_changed_car_to_review',
     'approve_latest_car_agreement_with_vehicle',
     'enforce_vehicle_insurance_approval',
+    'enforce_live_car_limit',
+    'subscription_expiry_slot_enforce',
     'prevent_blackout_booking_conflict',
     'prevent_booking_blackout_conflict',
     'prevent_finalized_journal_change',

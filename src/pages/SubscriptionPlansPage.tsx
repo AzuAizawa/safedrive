@@ -185,11 +185,21 @@ export default function SubscriptionPlansPage() {
           Authorization: `Bearer ${session?.access_token ?? ""}`,
         },
       });
-      const data = (await response.json()) as { error?: string };
+      const data = (await response.json()) as {
+        error?: string;
+        deactivatedListings?: number;
+      };
       if (!response.ok) {
         throw new Error(data.error || "Failed to cancel subscription");
       }
-      toast.success("Switched to Free. Your account now has 5 vehicle slots.");
+      const paused = data.deactivatedListings ?? 0;
+      toast.success(
+        paused > 0
+          ? `Switched to Free (5 slots). ${paused} listing${
+              paused === 1 ? " was" : "s were"
+            } paused - reactivate from My Vehicles after upgrading.`
+          : "Switched to Free. Your account now has 5 vehicle slots.",
+      );
       setShowCancelConfirm(false);
       await fetchSubscription();
     } catch (err: unknown) {
@@ -387,8 +397,8 @@ export default function SubscriptionPlansPage() {
           currentSub && formatPlanDate(currentSub.end_date)
             ? `Your ${currentSub.plan_type} plan is paid through ${formatPlanDate(
                 currentSub.end_date,
-              )}. Switching now drops your slot allowance to 5 immediately, with no refund for the remaining days. Your current listings stay as they are, but you cannot add new ones until you are back under the limit.`
-            : "Switching to Free drops your slot allowance to 5 immediately, with no refund for any remaining paid days."
+              )}. Switching now drops your slot allowance to 5 immediately, with no refund for the remaining days. Any listings beyond the first 5 are paused (not deleted) and can be reactivated after you upgrade again.`
+            : "Switching to Free drops your slot allowance to 5 immediately, with no refund for any remaining paid days. Listings beyond the first 5 are paused until you upgrade again."
         }
         confirmText="Switch to Free"
         cancelText="Keep my plan"

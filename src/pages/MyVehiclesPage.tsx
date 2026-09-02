@@ -801,6 +801,21 @@ export default function MyVehiclesPage() {
 
     const enabling = vehicle.status === "inactive";
     const nextStatus = enabling ? "approved" : "inactive";
+
+    if (enabling) {
+      const liveCount = vehicles.filter((item) =>
+        isLiveVehicle(item.status),
+      ).length;
+      if (liveCount >= maxSlots) {
+        toast.error("Vehicle slot limit reached", {
+          description: `Your current plan allows ${maxSlots} live listing${
+            maxSlots === 1 ? "" : "s"
+          }. Upgrade your plan to reactivate more.`,
+        });
+        return;
+      }
+    }
+
     setVehicleActionId(vehicle.id);
 
     const toastId = toast.loading(
