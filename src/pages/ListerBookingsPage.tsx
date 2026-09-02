@@ -37,6 +37,7 @@ import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
 import {
   Calendar,
   CheckCircle2,
+  ChevronRight,
   Clock,
   XCircle,
   LayoutDashboard,
@@ -252,6 +253,7 @@ export default function ListerBookingsPage() {
   >({});
   const [extensionDecisionNotes, setExtensionDecisionNotes] = useState<Record<string, string>>({});
   const [extensionActionLoading, setExtensionActionLoading] = useState<string | null>(null);
+  const [openBookingId, setOpenBookingId] = useState<string | null>(null);
   const getApparentStatus = getListerBookingStatus;
 
   useEffect(() => {
@@ -261,6 +263,15 @@ export default function ListerBookingsPage() {
 
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    if (!openBookingId) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenBookingId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openBookingId]);
 
   useEffect(() => {
     let active = true;
@@ -2335,10 +2346,77 @@ export default function ListerBookingsPage() {
               reviewedByOwner,
               extensionBlocksCompletion,
             );
+            const isOpen = openBookingId === b.id;
+            const carTitle = `${b.cars.car_models.car_brands.name} ${b.cars.car_models.name}`;
             return (
-              <Card key={b.id} className="hover:shadow-md transition-shadow">
-                <CardContent className="p-5">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+              <div key={b.id} className="space-y-4">
+                <Card
+                  className="cursor-pointer transition-shadow hover:shadow-md"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setOpenBookingId(b.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setOpenBookingId(b.id);
+                    }
+                  }}
+                >
+                  <CardContent className="flex items-start justify-between gap-4 p-4 sm:p-5">
+                    <div className="min-w-0 space-y-1.5">
+                      <p className="truncate font-semibold">
+                        {carTitle}
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          {b.cars.plate_number}
+                        </span>
+                      </p>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${badge.color}`}
+                      >
+                        {badge.label}
+                      </span>
+                      <p className="text-sm text-muted-foreground">
+                        {renterDisplay.fullName} · {format(new Date(b.start_date), "MMM d")} - {format(new Date(b.end_date), "MMM d, yyyy")}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="font-bold">PHP {Number(b.total_price).toLocaleString()}</p>
+                      <span className="mt-1 inline-flex items-center gap-0.5 text-xs font-medium text-primary">
+                        View details
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {isOpen &&
+                  createPortal(
+                    <div
+                      className="fixed inset-0 z-[110] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:p-8"
+                      onClick={() => setOpenBookingId(null)}
+                    >
+                      <Card
+                        className="my-4 w-full max-w-3xl shadow-2xl md:max-w-4xl"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between gap-3 border-b border-border/50 px-5 py-3">
+                          <p className="min-w-0 truncate font-semibold">
+                            {carTitle}
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {b.cars.plate_number}
+                            </span>
+                          </p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => setOpenBookingId(null)}
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </div>
+                <CardContent className="max-h-[75vh] space-y-4 overflow-y-auto p-5 [&_.justify-end]:justify-start [&_.text-right]:text-left">
+                  <div className="space-y-4">
                     <div className="space-y-2 flex-1">
                       <div className="flex items-center gap-3 flex-wrap">
                         <h3 className="font-semibold">
@@ -2415,7 +2493,7 @@ export default function ListerBookingsPage() {
                       )}
                     </div>
 
-                    <div className="space-y-2 text-right lg:w-[320px]">
+                    <div className="mt-5 space-y-3 border-t border-border/50 pt-5">
                       <p className="text-lg font-bold">
                         PHP {Number(b.total_price).toLocaleString()}
                       </p>
@@ -2707,7 +2785,7 @@ export default function ListerBookingsPage() {
                       {(apparentState === "awaiting_payment" ||
                         apparentState === "confirmed") &&
                         b.paymongo_checkout_id && (
-                          <p className="text-[10px] text-amber-600 mt-2 max-w-[220px] leading-tight">
+                          <p className="text-[10px] text-amber-600 mt-2 max-w-md leading-tight">
                             Checkout created. Wait for the signed PayMongo
                             webhook before treating this booking as paid.
                           </p>
@@ -2738,7 +2816,7 @@ export default function ListerBookingsPage() {
                         b.lister_arrived_at &&
                         !b.owner_completed && (
                         <div className="mt-2 text-right">
-                          <p className="text-[10px] text-green-500 font-semibold flex flex-col items-end mb-2">
+                          <p className="text-[10px] text-green-500 font-semibold flex flex-col items-start mb-2">
                              <span className="flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Arrived: {new Date(b.lister_arrived_at).toLocaleTimeString()}</span>
                           </p>
                           {extensionBlocksCompletion ? (
@@ -2832,8 +2910,12 @@ export default function ListerBookingsPage() {
                       )}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                        </CardContent>
+                      </Card>
+                    </div>,
+                    document.body,
+                  )}
+              </div>
             );
           })}
           <BookingPagination
@@ -2852,7 +2934,7 @@ export default function ListerBookingsPage() {
       {rejectingBooking &&
         createPortal(
           <div
-            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
             onClick={() => {
               if (actionLoading !== rejectingBooking.id) {
                 setRejectingBooking(null);

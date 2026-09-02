@@ -9,6 +9,23 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Lister Bookings: compact card + detail modal
+
+- `ListerBookingsPage` matched the old renter page: every booking was a
+  full card with the whole 2-column detail body (renter info, dates,
+  payout, next step, arrival, completion, deposit, ratings) laid out,
+  taking huge vertical space.
+- Now each booking is a compact summary card (car, plate, status, renter,
+  dates, price, "View details"); clicking it opens a portal modal
+  (Esc / backdrop / X to close) with the full detail body moved in
+  verbatim - the 2-column grid becomes a single stack and right-aligned
+  bits flip left via scoped variants, same as the renter modal.
+- No handler, state, condition, or data logic changed - the entire
+  action body is the same JSX, only relocated and re-wrapped. `rejecting`
+  / rating / renter-info modals bumped above the new modal's z-index.
+
+---
+
 ## 2026-09-03 — User Inquiries: drop the standalone "Start review" step
 
 - The "Start review" button was optional (you could reply from `open`
