@@ -1094,6 +1094,33 @@ export interface Database {
         };
         Relationships: [];
       };
+      platform_setting_change_requests: {
+        Row: {
+          id: string;
+          proposed_by: string;
+          changes: Json;
+          snapshot: Json;
+          reason: string | null;
+          status: "pending" | "applied" | "rejected" | "expired" | "cancelled";
+          created_at: string;
+          resolved_at: string | null;
+          expires_at: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      platform_setting_change_votes: {
+        Row: {
+          request_id: string;
+          voter_id: string;
+          vote: "approve" | "reject";
+          voted_at: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       subscriptions: {
         Row: {
           id: string;
@@ -1318,6 +1345,18 @@ export interface Database {
       get_car_blackout_ranges: {
         Args: { p_car_id: string };
         Returns: { start_date: string; end_date: string; category: string }[];
+      };
+      propose_platform_setting_change: {
+        Args: { p_changes: Json; p_reason?: string | null };
+        Returns: string;
+      };
+      vote_platform_setting_change: {
+        Args: { p_request_id: string; p_vote: string };
+        Returns: string;
+      };
+      cancel_platform_setting_change: {
+        Args: { p_request_id: string };
+        Returns: undefined;
       };
     };
     Enums: { [_ in never]: never };

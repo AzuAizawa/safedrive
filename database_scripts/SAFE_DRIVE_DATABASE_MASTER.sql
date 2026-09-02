@@ -4466,6 +4466,260 @@ alter table public.bookings
   add column if not exists refund_full_hours_snapshot integer,
   add column if not exists refund_late_renter_percent_snapshot numeric;
 
+-- Multi-super-admin consensus for platform_settings changes. A super admin
+-- proposes; it needs ceil(2N/3) approvals (N = current super-admin count,
+-- re-checked on every vote) before it is applied. One pending proposal at a
+-- time. The "Super admins can manage platform settings" ALL policy is dropped
+-- so the only write path is these SECURITY DEFINER functions.
+drop policy if exists "Super admins can manage platform settings" on public.platform_settings;
+
+create table if not exists public.platform_setting_change_requests (
+  id uuid primary key default gen_random_uuid(),
+  proposed_by uuid not null references public.profiles(id) on delete restrict,
+  changes jsonb not null,
+  snapshot jsonb not null,
+  reason text check (reason is null or char_length(reason) <= 500),
+  status text not null default 'pending'
+    check (status in ('pending', 'applied', 'rejected', 'expired', 'cancelled')),
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz,
+  expires_at timestamptz not null default (now() + interval '7 days')
+);
+
+create unique index if not exists platform_setting_change_one_pending
+  on public.platform_setting_change_requests ((status))
+  where status = 'pending';
+
+create table if not exists public.platform_setting_change_votes (
+  request_id uuid not null
+    references public.platform_setting_change_requests(id) on delete cascade,
+  voter_id uuid not null references public.profiles(id) on delete cascade,
+  vote text not null check (vote in ('approve', 'reject')),
+  voted_at timestamptz not null default now(),
+  primary key (request_id, voter_id)
+);
+
+alter table public.platform_setting_change_requests enable row level security;
+alter table public.platform_setting_change_votes enable row level security;
+
+drop policy if exists "Super admins read setting change requests"
+  on public.platform_setting_change_requests;
+create policy "Super admins read setting change requests"
+  on public.platform_setting_change_requests
+  for select using (public.is_super_admin());
+
+drop policy if exists "Super admins read setting change votes"
+  on public.platform_setting_change_votes;
+create policy "Super admins read setting change votes"
+  on public.platform_setting_change_votes
+  for select using (public.is_super_admin());
+
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$$;
+
+create or replace function public.platform_settings_snapshot()
+returns jsonb
+language sql
+stable
+as $$
+  select to_jsonb(s) - 'id' - 'created_at' - 'updated_at' - 'ledger_activated_at'
+  from public.platform_settings s
+  where s.id = 'default';
+$$;
+
+create or replace function public._resolve_platform_setting_change(p_request_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  req public.platform_setting_change_requests%rowtype;
+  n int;
+  threshold int;
+  approvals int;
+  rejects int;
+  k text;
+begin
+  select * into req from public.platform_setting_change_requests
+    where id = p_request_id for update;
+  if not found or req.status <> 'pending' then
+    return coalesce(req.status, 'missing');
+  end if;
+
+  if now() > req.expires_at then
+    update public.platform_setting_change_requests
+      set status = 'expired', resolved_at = now() where id = p_request_id;
+    return 'expired';
+  end if;
+
+  select count(*) into n from public.profiles
+    where role = 'super_admin' and deleted_at is null;
+  threshold := greatest(1, ceil(n * 2.0 / 3.0)::int);
+
+  select
+    count(*) filter (where vote = 'approve'),
+    count(*) filter (where vote = 'reject')
+    into approvals, rejects
+  from public.platform_setting_change_votes where request_id = p_request_id;
+
+  if approvals >= threshold then
+    for k in select jsonb_object_keys(req.changes) loop
+      execute format(
+        'update public.platform_settings set %I = $1, updated_at = now() where id = ''default''',
+        k
+      ) using (req.changes ->> k)::numeric;
+    end loop;
+    update public.platform_setting_change_requests
+      set status = 'applied', resolved_at = now() where id = p_request_id;
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+      values (req.proposed_by, 'platform_setting_change_applied', 'platform_settings',
+        p_request_id::text,
+        jsonb_build_object('changes', req.changes, 'snapshot', req.snapshot,
+          'approvals', approvals, 'threshold', threshold, 'super_admins', n));
+    return 'applied';
+  elsif (n - rejects) < threshold then
+    update public.platform_setting_change_requests
+      set status = 'rejected', resolved_at = now() where id = p_request_id;
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+      values (req.proposed_by, 'platform_setting_change_rejected', 'platform_settings',
+        p_request_id::text,
+        jsonb_build_object('changes', req.changes, 'approvals', approvals,
+          'rejects', rejects, 'threshold', threshold, 'super_admins', n));
+    return 'rejected';
+  end if;
+
+  return 'pending';
+end;
+$$;
+
+create or replace function public.propose_platform_setting_change(
+  p_changes jsonb, p_reason text default null
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_id uuid;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can propose a settings change';
+  end if;
+  if exists (select 1 from public.platform_setting_change_requests where status = 'pending') then
+    raise exception 'Another settings change is already pending review';
+  end if;
+  perform public.validate_platform_setting_change(p_changes);
+
+  insert into public.platform_setting_change_requests (proposed_by, changes, snapshot, reason)
+    values (auth.uid(), p_changes, public.platform_settings_snapshot(), nullif(trim(p_reason), ''))
+    returning id into new_id;
+
+  insert into public.platform_setting_change_votes (request_id, voter_id, vote)
+    values (new_id, auth.uid(), 'approve');
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'platform_setting_change_proposed', 'platform_settings',
+      new_id::text, jsonb_build_object('changes', p_changes));
+
+  perform public._resolve_platform_setting_change(new_id);
+  return new_id;
+end;
+$$;
+
+create or replace function public.vote_platform_setting_change(
+  p_request_id uuid, p_vote text
+) returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can vote';
+  end if;
+  if p_vote not in ('approve', 'reject') then
+    raise exception 'Vote must be approve or reject';
+  end if;
+  if not exists (
+    select 1 from public.platform_setting_change_requests
+    where id = p_request_id and status = 'pending'
+  ) then
+    raise exception 'That change request is no longer open';
+  end if;
+
+  insert into public.platform_setting_change_votes (request_id, voter_id, vote)
+    values (p_request_id, auth.uid(), p_vote)
+  on conflict (request_id, voter_id)
+    do update set vote = excluded.vote, voted_at = now();
+
+  return public._resolve_platform_setting_change(p_request_id);
+end;
+$$;
+
+create or replace function public.cancel_platform_setting_change(p_request_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can cancel a proposal';
+  end if;
+  update public.platform_setting_change_requests
+    set status = 'cancelled', resolved_at = now()
+    where id = p_request_id and status = 'pending'
+      and proposed_by = auth.uid();
+  if not found then
+    raise exception 'Only the proposer can cancel an open proposal';
+  end if;
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'platform_setting_change_cancelled', 'platform_settings',
+      p_request_id::text, '{}'::jsonb);
+end;
+$$;
+
+revoke all on function public.validate_platform_setting_change(jsonb) from public, anon, authenticated;
+revoke all on function public.platform_settings_snapshot() from public, anon, authenticated;
+revoke all on function public._resolve_platform_setting_change(uuid) from public, anon, authenticated;
+grant execute on function public.propose_platform_setting_change(jsonb, text) to authenticated;
+grant execute on function public.vote_platform_setting_change(uuid, text) to authenticated;
+grant execute on function public.cancel_platform_setting_change(uuid) to authenticated;
+
 create table if not exists public.financial_accounts (
   code text primary key,
   name text not null,

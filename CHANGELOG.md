@@ -9,6 +9,31 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Phase C: super-admin consensus for platform configuration
+
+- `platform_settings` changes now go through a proposal + vote flow instead of a
+  direct super-admin write:
+  - `platform_setting_change_requests` + `platform_setting_change_votes` tables
+    (super-admin read RLS; writes only through the functions below).
+  - `propose_platform_setting_change(jsonb, text)` - validates keys/ranges,
+    enforces one pending proposal at a time, records the proposer's approve vote,
+    snapshots the current values.
+  - `vote_platform_setting_change(uuid, text)` - approve/reject (changeable);
+    re-tallies on every vote. Threshold = `ceil(2N/3)` of the current
+    super-admin count (N=3 -> 2, N=4 -> 3, N=1 -> 1). Reaching it applies the
+    change to `platform_settings`; becoming unreachable rejects it; 7-day expiry.
+  - `cancel_platform_setting_change(uuid)` - proposer withdraws.
+  - Every step writes an `audit_log` row.
+- `AdminPlatformSettingsPage` rebuilt: active configuration (all 6 money/policy
+  fields), a propose form (sends only the changed keys), a pending-proposal card
+  with the diff, live tally and approve/reject/withdraw, and a recent-decisions
+  list. Types added to `database.ts`.
+- FOLLOW-UP: drop the old `"Super admins can manage platform settings"` ALL
+  policy on `platform_settings` so raw writes can't bypass consensus (added to
+  the master SQL; run in SQL editor / via the setup token).
+
+---
+
 ## 2026-09-02 — Phase B: tiered cancellation-refund policy (measured from pickup)
 
 - Cancellation refunds now key off hours **before pickup** (from the booking's
