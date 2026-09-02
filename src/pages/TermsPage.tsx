@@ -2,11 +2,13 @@
 import { Button } from "@/components/ui/button";
 import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePlatformContactEmail } from "@/lib/platformSettings";
 
 export default function TermsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile } = useAuth();
+  const contactEmail = usePlatformContactEmail();
 
   const handleBack = () => {
     const returnTo =
@@ -146,7 +148,7 @@ export default function TermsPage() {
             <span>SafeDrive - Peer-to-Peer Car Rental Platform</span>
           </div>
           <p className="text-xs text-muted-foreground/60 mt-2">
-            For legal inquiries: <a href="mailto:admin.no.reply.360@gmail.com" className="text-primary underline underline-offset-2">admin.no.reply.360@gmail.com</a>
+            For legal inquiries: <a href={`mailto:${contactEmail}`} className="text-primary underline underline-offset-2">{contactEmail}</a>
           </p>
         </div>
       </div>

@@ -4586,6 +4586,52 @@ alter table public.bookings
   add column if not exists renter_completed_at timestamptz,
   add column if not exists owner_completed_at timestamptz;
 
+-- Public-facing contact / privacy email shown on Terms, Privacy Policy, Sign Up,
+-- and the auth pages. A super admin edits it directly (contact info, not a
+-- financial/policy value, so it does not go through the consensus vote).
+alter table public.platform_settings
+  add column if not exists contact_email text not null default 'admin.no.reply.360@gmail.com';
+
+create or replace function public.get_platform_contact_email()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(nullif(trim(contact_email), ''), 'admin.no.reply.360@gmail.com')
+  from public.platform_settings
+  where id = 'default';
+$$;
+grant execute on function public.get_platform_contact_email() to anon, authenticated;
+
+create or replace function public.set_platform_contact_email(p_email text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cleaned text := lower(trim(p_email));
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can change the platform contact email';
+  end if;
+  if cleaned !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' or char_length(cleaned) > 320 then
+    raise exception 'Enter a valid email address';
+  end if;
+  update public.platform_settings
+    set contact_email = cleaned, updated_at = now()
+    where id = 'default';
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'platform_contact_email_updated', 'platform_settings', 'default',
+      jsonb_build_object('contact_email', cleaned));
+  return cleaned;
+end;
+$$;
+revoke all on function public.set_platform_contact_email(text) from public, anon;
+grant execute on function public.set_platform_contact_email(text) to authenticated;
+
 -- Multi-super-admin consensus for platform_settings changes. A super admin
 -- proposes; it needs ceil(2N/3) approvals (N = current super-admin count,
 -- re-checked on every vote) before it is applied. One pending proposal at a

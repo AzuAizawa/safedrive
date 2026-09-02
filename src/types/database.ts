@@ -1104,6 +1104,7 @@ export interface Database {
           arrival_checkin_lead_hours: number;
           deposit_claim_window_hours: number;
           lister_completion_timeout_hours: number;
+          contact_email: string;
           created_at: string;
           updated_at: string;
         };
@@ -1119,6 +1120,7 @@ export interface Database {
           arrival_checkin_lead_hours?: number;
           deposit_claim_window_hours?: number;
           lister_completion_timeout_hours?: number;
+          contact_email?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -1134,6 +1136,7 @@ export interface Database {
           arrival_checkin_lead_hours?: number;
           deposit_claim_window_hours?: number;
           lister_completion_timeout_hours?: number;
+          contact_email?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -1405,6 +1408,14 @@ export interface Database {
       cancel_platform_setting_change: {
         Args: { p_request_id: string };
         Returns: undefined;
+      };
+      get_platform_contact_email: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
+      set_platform_contact_email: {
+        Args: { p_email: string };
+        Returns: string;
       };
     };
     Enums: { [_ in never]: never };

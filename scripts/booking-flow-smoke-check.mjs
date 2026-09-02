@@ -51,7 +51,28 @@ const checks = [
       "deposit_claim_window_hours",
       "lister_completion_timeout_hours",
       "apply live to every booking",
+      "set_platform_contact_email",
+      "Platform contact email",
     ],
+  },
+  {
+    file: "src/lib/platformSettings.ts",
+    markers: [
+      "DEFAULT_CONTACT_EMAIL",
+      "fetchPlatformContactEmail",
+      "get_platform_contact_email",
+      "usePlatformContactEmail",
+    ],
+  },
+  {
+    file: "src/pages/TermsPage.tsx",
+    markers: ["usePlatformContactEmail", "mailto:${contactEmail}"],
+    absentMarkers: ["admin.no.reply.360@gmail.com"],
+  },
+  {
+    file: "src/pages/PrivacyPolicyPage.tsx",
+    markers: ["usePlatformContactEmail", "mailto:${contactEmail}"],
+    absentMarkers: ["admin.no.reply.360@gmail.com"],
   },
   {
     file: "api/reply-guest-inquiry.ts",

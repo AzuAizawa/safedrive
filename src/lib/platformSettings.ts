@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 export const DEFAULT_COMMISSION_RATE = 0.1;
@@ -177,6 +178,44 @@ export const fetchPlatformPricingSettings = async (): Promise<PlatformPricingSet
         ? latePercent
         : DEFAULT_REFUND_LATE_RENTER_PERCENT,
   };
+};
+
+// Public-facing contact address shown in Terms, Privacy Policy, auth pages, etc.
+// Super-admin editable (direct edit, no consensus vote - it is contact info, not
+// a policy number). Read live so a change propagates without a redeploy.
+export const DEFAULT_CONTACT_EMAIL = "admin.no.reply.360@gmail.com";
+
+const isEmailShaped = (value: unknown): value is string =>
+  typeof value === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
+
+export const fetchPlatformContactEmail = async (): Promise<string> => {
+  try {
+    const { data, error } = await supabase.rpc("get_platform_contact_email");
+    if (error) throw error;
+    return isEmailShaped(data) ? data.trim().toLowerCase() : DEFAULT_CONTACT_EMAIL;
+  } catch (error) {
+    console.error("Failed to load platform contact email:", error);
+    return DEFAULT_CONTACT_EMAIL;
+  }
+};
+
+/**
+ * Live platform contact email for display in Terms, Privacy Policy, and the auth
+ * pages. Falls back to {@link DEFAULT_CONTACT_EMAIL} until the value loads or if
+ * the lookup fails, so the UI never shows a blank address.
+ */
+export const usePlatformContactEmail = (): string => {
+  const [email, setEmail] = useState(DEFAULT_CONTACT_EMAIL);
+  useEffect(() => {
+    let active = true;
+    void fetchPlatformContactEmail().then((value) => {
+      if (active) setEmail(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return email;
 };
 
 export const fetchPlatformCommissionRate = async () => {

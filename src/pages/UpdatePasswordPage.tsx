@@ -8,20 +8,23 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Eye, EyeOff, Loader2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
+import { usePlatformContactEmail } from "@/lib/platformSettings";
 
 const getErrorMessage = (error: unknown, fallback = "Please try again.") =>
   error instanceof Error ? error.message : fallback;
 
-const SUPPORT_EMAIL = "admin.no.reply.360@gmail.com";
 const SUPPORT_SUBJECT = "SafeDrive MFA Recovery Request";
-const SUPPORT_GMAIL_URL = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-  SUPPORT_EMAIL,
-)}&su=${encodeURIComponent(SUPPORT_SUBJECT)}`;
+const buildSupportGmailUrl = (email: string) =>
+  `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+    email,
+  )}&su=${encodeURIComponent(SUPPORT_SUBJECT)}`;
 
 export default function UpdatePasswordPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { loading, user } = useAuth();
+  const supportEmail = usePlatformContactEmail();
+  const supportGmailUrl = buildSupportGmailUrl(supportEmail);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -340,7 +343,7 @@ export default function UpdatePasswordPage() {
                     type="button"
                     variant="outline"
                     className="flex-1"
-                    onClick={() => window.open(SUPPORT_GMAIL_URL, "_blank", "noopener,noreferrer")}
+                    onClick={() => window.open(supportGmailUrl, "_blank", "noopener,noreferrer")}
                   >
                     Contact Support
                   </Button>
@@ -355,7 +358,7 @@ export default function UpdatePasswordPage() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   If Gmail compose does not open, manually email{" "}
-                  <span className="font-medium text-foreground">{SUPPORT_EMAIL}</span>{" "}
+                  <span className="font-medium text-foreground">{supportEmail}</span>{" "}
                   with the subject{" "}
                   <span className="font-medium text-foreground">{SUPPORT_SUBJECT}</span>.
                 </p>

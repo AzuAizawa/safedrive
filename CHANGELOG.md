@@ -9,6 +9,35 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Super-admin-editable platform contact email
+
+- The public contact address (`admin.no.reply.360@gmail.com`) was
+  hardcoded in the Terms of Service, Privacy Policy, sign-up notice, and
+  the sign-in / password-reset MFA help text - changing it meant a code
+  edit and redeploy.
+- Added `platform_settings.contact_email` plus `get_platform_contact_email()`
+  (anon + authenticated, live read) and `set_platform_contact_email(text)`
+  (super-admin only, email-shape validated, audited as
+  `platform_contact_email_updated`). It is contact info, not a money or
+  policy value, so it is a direct edit - no consensus proposal/vote.
+- New `usePlatformContactEmail()` hook + `fetchPlatformContactEmail()` in
+  `src/lib/platformSettings.ts`; `TermsPage`, `PrivacyPolicyPage`,
+  `SignUpPage`, `LoginPage`, `UpdatePasswordPage` now render it live with
+  a fallback to the seeded default. `/admin/platform-settings` gains a
+  "Platform contact email" card (super admins edit, others view).
+- Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql`,
+  `src/lib/platformSettings.ts`, `src/types/database.ts`,
+  `src/pages/TermsPage.tsx`, `src/pages/PrivacyPolicyPage.tsx`,
+  `src/pages/SignUpPage.tsx`, `src/pages/LoginPage.tsx`,
+  `src/pages/UpdatePasswordPage.tsx`,
+  `src/pages/admin/AdminPlatformSettingsPage.tsx`,
+  `src/pages/admin/AdminAuditTrailPage.tsx`,
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`,
+  `scripts/booking-flow-smoke-check.mjs`.
+- Follow-up: apply `phase8_contact_email.sql` in the Supabase SQL editor.
+
+---
+
 ## 2026-09-03 — Lister Bookings: compact card + detail modal
 
 - `ListerBookingsPage` matched the old renter page: every booking was a

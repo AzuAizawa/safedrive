@@ -49,6 +49,7 @@ const actionLabels: Record<string, string> = {
   guest_inquiry_resolved: "Marked inquiry resolved",
   guest_inquiry_followup: "User added an inquiry follow-up",
   super_admin_updated_pricing_settings: "Updated pricing settings",
+  platform_contact_email_updated: "Updated platform contact email",
   renter_cancelled_booking: "Renter cancelled booking",
   owner_cancelled_booking: "Lister cancelled booking",
   admin_added_car_brand: "Added car brand",

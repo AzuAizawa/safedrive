@@ -413,7 +413,7 @@ Do not run Chapters 1 or 2 merely to obtain Chapter 14. Chapter 1 contains histo
 - `npm run check:live-supabase` passed against the intended project.
 - The required operational, agreement, trip, deposit, retention, ledger, and reconciliation relations are readable through the server verifier.
 - All required private storage buckets exist and remain private.
-- `platform_settings` contains ledger activation, both renter-processing-fee controls, the configurable downpayment/refund terms, and the three lifecycle timings (`arrival_checkin_lead_hours`, `deposit_claim_window_hours`, `lister_completion_timeout_hours`).
+- `platform_settings` contains ledger activation, both renter-processing-fee controls, the configurable downpayment/refund terms, the three lifecycle timings (`arrival_checkin_lead_hours`, `deposit_claim_window_hours`, `lister_completion_timeout_hours`), and `contact_email` - the public contact address shown in the Terms of Service, Privacy Policy, sign-up notice, and the sign-in/password-reset help text. Because it is contact information rather than a money or policy value, a single super-admin edits it directly through `set_platform_contact_email(text)` (super-admin only, audited as `platform_contact_email_updated`); every surface reads it live through `get_platform_contact_email()` and falls back to the seeded default if the lookup fails.
 - All nine required financial accounts are seeded.
 - No active booking overlap, duplicate active payout, duplicate completed checkout event, duplicate active subscription, duplicate open deposit claim, or unbalanced queried ledger journal was found.
 - `npm run check:live-roles` passed all 12 ordinary-user, admin, and super-admin authorization checks and removed its three temporary identities.

@@ -2,11 +2,13 @@
 import { Button } from "@/components/ui/button";
 import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePlatformContactEmail } from "@/lib/platformSettings";
 
 export default function PrivacyPolicyPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile } = useAuth();
+  const contactEmail = usePlatformContactEmail();
 
   const handleBack = () => {
     const returnTo =
@@ -139,7 +141,7 @@ export default function PrivacyPolicyPage() {
             <h2 className="text-xl font-bold text-foreground mb-3">8. Privacy Contact and Requests</h2>
             <p>For a privacy question or security concern, use the contact below. Registered users may also submit and track an access, correction, restriction, anonymization, or deletion request from the Data Requests page. SafeDrive's formal DPO/responsible-person designation and any required NPC registration remain launch requirements and must not be inferred from this contact address.</p>
             <div className="mt-3 bg-primary/5 border border-primary/20 rounded-lg p-4">
-              <p className="font-semibold text-foreground">Email: <a href="mailto:admin.no.reply.360@gmail.com" className="text-primary underline underline-offset-2">admin.no.reply.360@gmail.com</a></p>
+              <p className="font-semibold text-foreground">Email: <a href={`mailto:${contactEmail}`} className="text-primary underline underline-offset-2">{contactEmail}</a></p>
             </div>
             <p className="mt-4 text-sm text-muted-foreground">Using the platform acknowledges receipt of this notice. It does not convert every processing purpose into consent or waive any statutory privacy right. Where consent is the applicable lawful basis, SafeDrive must request it specifically and allow withdrawal subject to other lawful grounds.</p>
           </section>

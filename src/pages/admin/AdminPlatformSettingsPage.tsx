@@ -4,6 +4,7 @@ import {
   Clock,
   Info,
   Loader2,
+  Mail,
   Settings2,
   ThumbsDown,
   ThumbsUp,
@@ -17,6 +18,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
+import { DEFAULT_CONTACT_EMAIL } from "@/lib/platformSettings";
+
+const isEmailShaped = (value: string) =>
+  /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
 
 type SettingsRow = {
   commission_rate: number;
@@ -198,9 +203,13 @@ export default function AdminPlatformSettingsPage() {
   const [superAdminCount, setSuperAdminCount] = useState(1);
   const [history, setHistory] = useState<ChangeRequest[]>([]);
 
+  const [contactEmail, setContactEmail] = useState(DEFAULT_CONTACT_EMAIL);
+  const [contactDraft, setContactDraft] = useState(DEFAULT_CONTACT_EMAIL);
+  const [savingContact, setSavingContact] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [settingsRes, pendingRes, countRes, historyRes] = await Promise.all([
+    const [settingsRes, pendingRes, countRes, historyRes, contactRes] = await Promise.all([
       supabase
         .from("platform_settings")
         .select(
@@ -224,7 +233,15 @@ export default function AdminPlatformSettingsPage() {
         .neq("status", "pending")
         .order("resolved_at", { ascending: false })
         .limit(6),
+      supabase.rpc("get_platform_contact_email"),
     ]);
+
+    const loadedContact =
+      typeof contactRes.data === "string" && isEmailShaped(contactRes.data)
+        ? contactRes.data
+        : DEFAULT_CONTACT_EMAIL;
+    setContactEmail(loadedContact);
+    setContactDraft(loadedContact);
 
     if (settingsRes.error || !settingsRes.data) {
       toast.error("Could not load platform settings.");
@@ -347,6 +364,35 @@ export default function AdminPlatformSettingsPage() {
       });
     } finally {
       setVoting(false);
+    }
+  };
+
+  const handleSaveContactEmail = async () => {
+    const cleaned = contactDraft.trim().toLowerCase();
+    if (!isEmailShaped(cleaned)) {
+      toast.error("Enter a valid email address.");
+      return;
+    }
+    if (cleaned === contactEmail) {
+      toast.info("That is already the platform contact email.");
+      return;
+    }
+    setSavingContact(true);
+    try {
+      const { data, error } = await supabase.rpc("set_platform_contact_email", {
+        p_email: cleaned,
+      });
+      if (error) throw error;
+      const saved = typeof data === "string" ? data : cleaned;
+      setContactEmail(saved);
+      setContactDraft(saved);
+      toast.success("Platform contact email updated. It now shows on Terms, Privacy, and the sign-in pages.");
+    } catch (err) {
+      toast.error("Could not update the contact email", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setSavingContact(false);
     }
   };
 
@@ -535,6 +581,56 @@ export default function AdminPlatformSettingsPage() {
                   they were created under - those only affect new bookings. The
                   three lifecycle timings (arrival lead, deposit claim window,
                   lister completion timeout) apply live to every booking.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5 text-primary" />
+                Platform contact email
+              </CardTitle>
+              <CardDescription>
+                The public address shown in the Terms of Service, Privacy Policy,
+                sign-up notice, and the sign-in / password-reset help text. This
+                is contact information, not a money or policy value, so a single
+                super admin can change it directly - no proposal or vote.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-sm">Contact email</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="email"
+                    value={contactDraft}
+                    onChange={(e) => setContactDraft(e.target.value)}
+                    disabled={!isSuperAdmin || savingContact}
+                    className="max-w-sm"
+                  />
+                  {isSuperAdmin ? (
+                    <Button
+                      onClick={handleSaveContactEmail}
+                      disabled={
+                        savingContact ||
+                        contactDraft.trim().toLowerCase() === contactEmail
+                      }
+                      className="gap-2"
+                    >
+                      {savingContact ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Mail className="h-4 w-4" />
+                      )}
+                      Save email
+                    </Button>
+                  ) : null}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Live: {contactEmail}
+                  {!isSuperAdmin && " · only a super admin can change this."}
                 </p>
               </div>
             </CardContent>

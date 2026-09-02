@@ -31,12 +31,13 @@ import {
 } from "@/components/ui/card";
 import { Car, Eye, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { usePlatformContactEmail } from "@/lib/platformSettings";
 
-const SUPPORT_EMAIL = "admin.no.reply.360@gmail.com";
 const SUPPORT_SUBJECT = "SafeDrive MFA Recovery Request";
-const SUPPORT_GMAIL_URL = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-  SUPPORT_EMAIL,
-)}&su=${encodeURIComponent(SUPPORT_SUBJECT)}`;
+const buildSupportGmailUrl = (email: string) =>
+  `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+    email,
+  )}&su=${encodeURIComponent(SUPPORT_SUBJECT)}`;
 const SESSION_TIMEOUT_NOTICE_KEY = "session_timeout_notice";
 
 const getFriendlyLoginError = (message: string) => {
@@ -115,6 +116,8 @@ export default function LoginPage() {
     cancelAuthenticatorEnrollment,
   } = useAuth();
   const navigate = useNavigate();
+  const supportEmail = usePlatformContactEmail();
+  const supportGmailUrl = buildSupportGmailUrl(supportEmail);
   const lockoutState = getAuthLockoutState("user", email);
   const emailOtpRemainingMs =
     codeMethod === "email" && otpExpiresAt
@@ -1067,17 +1070,17 @@ export default function LoginPage() {
                    <p className="mt-1">
                      Lost access to your authenticator? Contact support at{" "}
                      <a
-                       href={SUPPORT_GMAIL_URL}
+                       href={supportGmailUrl}
                        target="_blank"
                        rel="noopener noreferrer"
                        className="text-blue-600 underline dark:text-blue-400"
                      >
-                       {SUPPORT_EMAIL}
+                       {supportEmail}
                      </a>.
                    </p>
                    <p className="mt-1">
                      If Gmail compose does not open, manually email{" "}
-                     <span className="font-medium text-foreground">{SUPPORT_EMAIL}</span>{" "}
+                     <span className="font-medium text-foreground">{supportEmail}</span>{" "}
                      with the subject{" "}
                      <span className="font-medium text-foreground">{SUPPORT_SUBJECT}</span>.
                    </p>
