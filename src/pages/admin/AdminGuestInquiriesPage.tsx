@@ -27,7 +27,7 @@ export default function AdminGuestInquiriesPage() {
   const fetchInquiries = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabase.from("guest_inquiries").select("*").order("created_at", { ascending: false });
-    if (error) toast.error("Guest inquiries could not be loaded", { description: error.message });
+    if (error) toast.error("Inquiries could not be loaded", { description: error.message });
     else setInquiries((data ?? []) as GuestInquiry[]);
     setLoading(false);
   }, []);
@@ -50,7 +50,7 @@ export default function AdminGuestInquiriesPage() {
     if (!requestedId || inquiries.length === 0) return;
     const requestedInquiry = inquiries.find((item) => item.id === requestedId);
     if (!requestedInquiry) {
-      toast.error("That guest inquiry could not be found");
+      toast.error("That inquiry could not be found");
       return;
     }
     setFilter(["resolved", "closed"].includes(requestedInquiry.status) ? "resolved" : "current");
@@ -107,12 +107,12 @@ export default function AdminGuestInquiriesPage() {
       });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error || "Reply could not be delivered");
-      toast.success("Guest reply sent");
+      toast.success("Reply sent");
       setSelected(null);
       setReply("");
       await fetchInquiries();
     } catch (error) {
-      toast.error("Guest reply failed", { description: error instanceof Error ? error.message : "Please try again." });
+      toast.error("Reply failed", { description: error instanceof Error ? error.message : "Please try again." });
     } finally {
       setSending(false);
     }
@@ -122,8 +122,8 @@ export default function AdminGuestInquiriesPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Guest Inquiries</h1>
-          <p className="mt-1 text-muted-foreground">Questions submitted by visitors without a SafeDrive account.</p>
+          <h1 className="text-3xl font-bold tracking-tight">User Inquiries</h1>
+          <p className="mt-1 text-muted-foreground">Quick questions from the public contact form. Each one is answered with a single email and then closed &mdash; for a back-and-forth, an account holder should open a Support Ticket.</p>
         </div>
         <Button variant="outline" className="gap-2" onClick={() => void fetchInquiries()} disabled={loading}>
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -133,7 +133,7 @@ export default function AdminGuestInquiriesPage() {
       <AdminSectionTabs
         value={filter}
         onChange={setFilter}
-        ariaLabel="Guest inquiry status"
+        ariaLabel="Inquiry status"
         tabs={[
           { value: "current", label: "Open", count: inquiries.filter((item) => ["open", "in_progress"].includes(item.status)).length },
           { value: "resolved", label: "Resolved", count: inquiries.filter((item) => ["resolved", "closed"].includes(item.status)).length },
@@ -144,7 +144,7 @@ export default function AdminGuestInquiriesPage() {
       {loading ? (
         <div className="flex min-h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>
       ) : visible.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">No guest inquiries in this view.</div>
+        <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">No inquiries in this view.</div>
       ) : (
         <div className="grid gap-4">
           {visible.map((inquiry) => {

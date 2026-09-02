@@ -9,6 +9,23 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — "Support Cases" -> "Support Tickets"; "Guest Inquiries" -> "User Inquiries"
+
+- The admin sidebar called the ticket system "Support Cases" while the
+  user side calls it "Support Ticket" - the same `support_tickets` table.
+  Renamed the sidebar to **Support Tickets** so it's clearly one thing.
+- "Guest Inquiries" implied the sender has no account, but the public
+  contact form is open to anyone and account holders use it too. Renamed
+  the admin page, nav, dashboard card, attention feed, audit labels, and
+  the privacy-policy line to **User Inquiries** / "contact inquiry".
+- Display strings only - routes (`/admin/support`, `/admin/guest-inquiries`),
+  the `guest_inquiries` table, and audit action keys are unchanged.
+- Master doc section 5 + route table + SYSTEM_FLOWS updated. Behaviour
+  (auto-routing logged-in users to tickets, "convert to ticket", removing
+  the standalone "Start review") is a separate follow-up.
+
+---
+
 ## 2026-09-03 — Vehicle Availability is a calendar now
 
 - `VehicleAvailabilityPage` replaced the start/end date inputs + "Reason

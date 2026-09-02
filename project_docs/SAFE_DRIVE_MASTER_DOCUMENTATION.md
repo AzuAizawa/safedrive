@@ -29,7 +29,7 @@ Never place service-role keys, PayMongo secret keys, webhook secrets, Gmail shar
 - [2. Roles and Permissions](#2-roles-and-permissions)
 - [3. Architecture and Connections](#3-architecture-and-connections)
 - [4. Admin Notification Work Center](#4-admin-notification-work-center)
-- [5. Guest Inquiry Workflow](#5-guest-inquiry-workflow)
+- [5. User Inquiry Workflow](#5-user-inquiry-workflow)
 - [6. Vehicle Approval, Insurance, and Availability](#6-vehicle-approval-insurance-and-availability)
 - [7. Vehicle-Specific Rental Agreement](#7-vehicle-specific-rental-agreement)
 - [8. Pickup and Return Condition Reports](#8-pickup-and-return-condition-reports)
@@ -124,7 +124,7 @@ One account may act as a renter or lister when eligible. Registered users can co
 
 ### 2.3 Administrator
 
-An administrator sees normal operational work: dashboard, users/profile verification, car catalog, vehicle approval, support cases, guest inquiries, the notification work center, audit trail, security logs, and platform settings in read-only mode.
+An administrator sees normal operational work: dashboard, users/profile verification, car catalog, vehicle approval, Support Tickets, User Inquiries, the notification work center, audit trail, security logs, and platform settings in read-only mode.
 
 ### 2.4 Super administrator
 
@@ -182,13 +182,15 @@ Each queue item shows the exact elapsed time, such as `Waiting 1d 4h 12m`. Queue
 | Refund/payout | 2h | 4h | 24h |
 | Security event | Immediate | Immediate | Immediate |
 
-The guest page has a **Start review** action. The user-facing label is “In review”; the internal status remains `in_progress` to match the existing database constraint.
+The User Inquiries page has a **Start review** action. The user-facing label is “In review”; the internal status remains `in_progress` to match the existing database constraint.
 
-## 5. Guest Inquiry Workflow
+## 5. User Inquiry Workflow
+
+The admin page is **User Inquiries** (table `guest_inquiries`, unchanged). It is the lightweight channel: one question in, one email reply, then closed. Anyone can use it, including a signed-in account holder with a quick question. A conversation with back-and-forth belongs in a **Support Ticket** instead, which needs an account.
 
 ### 5.1 Intake
 
-The guest chooses as many relevant topics as needed:
+The person chooses as many relevant topics as needed:
 
 - What SafeDrive is/how it works;
 - renting, booking availability, cancellation, or rescheduling;
@@ -1147,8 +1149,8 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | User | `/privacy-request` | `PrivacyRequestPage`; access/correction/deletion/other request |
 | Admin | `/admin` | `AdminDashboard`; role-aware operational summary |
 | Admin | `/admin/users` | `AdminUsersPage`; profile/KYC review |
-| Admin | `/admin/support` | `AdminSupportTicketsPage`; support queue and replies |
-| Admin | `/admin/guest-inquiries` | `AdminGuestInquiriesPage`; guest review and email reply |
+| Admin | `/admin/support` | `AdminSupportTicketsPage`; Support Tickets queue and replies |
+| Admin | `/admin/guest-inquiries` | `AdminGuestInquiriesPage`; User Inquiries - one-email reply then close (table `guest_inquiries`) |
 | Admin | `/admin/notifications` | `AdminNotificationsPage`; actionable work queues and wait time |
 | Admin | `/admin/car-catalog` | `AdminCarCatalogPage`; approved make/model catalogue |
 | Admin | `/admin/vehicle-approval` | `AdminVehicleApprovalPage`; listing, ownership, insurance, and agreement review |

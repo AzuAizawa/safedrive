@@ -411,7 +411,7 @@ const checks = [
       "Profiles to verify",
       "Vehicles to approve",
       "Support needing reply",
-      "Guest inquiries",
+      "User inquiries",
       "isSuperAdmin",
       "Payout attention",
       "Deposit review",

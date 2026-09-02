@@ -44,7 +44,7 @@ export async function loadAdminAttentionItems(isSuperAdmin: boolean) {
   const items: AdminAttentionItem[] = [
     ...(guestResult.data ?? []).map((item) => ({
       id: `guest-${item.id}`,
-      title: `Guest inquiry from ${item.name}`,
+      title: `Inquiry from ${item.name}`,
       detail: item.topics?.length ? item.topics.join(", ") : item.subject,
       createdAt: item.created_at,
       kind: "guest" as const,

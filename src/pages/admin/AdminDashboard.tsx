@@ -50,7 +50,7 @@ export default function AdminDashboard() {
         { label: "Profiles to verify", count: profiles.data?.length ?? 0, oldest: profiles.data?.[0]?.updated_at ?? null, to: "/admin/users", icon: UserCheck },
         { label: "Vehicles to approve", count: vehicles.data?.length ?? 0, oldest: vehicles.data?.[0]?.created_at ?? null, to: "/admin/vehicle-approval?tab=pending", icon: Car },
         { label: "Support needing reply", count: support.length, oldest: support[0]?.waiting_since ?? null, to: "/admin/support", icon: Headset },
-        { label: "Guest inquiries", count: guests.data?.length ?? 0, oldest: guests.data?.[0]?.created_at ?? null, to: "/admin/guest-inquiries", icon: MessageSquare },
+        { label: "User inquiries", count: guests.data?.length ?? 0, oldest: guests.data?.[0]?.created_at ?? null, to: "/admin/guest-inquiries", icon: MessageSquare },
       ];
       if (isSuperAdmin) operational.push(
         { label: "Payout attention", count: payouts.data?.length ?? 0, oldest: payouts.data?.[0]?.created_at ?? null, to: "/admin/financial-reviews?view=payouts", icon: CreditCard, finance: true },

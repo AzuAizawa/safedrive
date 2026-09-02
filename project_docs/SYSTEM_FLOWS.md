@@ -17,11 +17,14 @@ server-side. Route guards in `src/components/*Route.tsx` are cosmetic.
 
 - Public pages: `/`, `/contact`. Approved cars are world-readable via RLS
   (`Cars read access USING (true)`).
-- Guest inquiry: `/contact` → `POST /api/create-guest-inquiry` (or RPC
-  `submit_guest_inquiry`). Validates name 2–120, email format, ≥1 topic from a
-  fixed allow-list, message 10–3000; rate-limits ≥5/email/hour; hashes a request
-  fingerprint with `GUEST_INQUIRY_HASH_SALT` (no raw IP). Inserts to
-  `guest_inquiries` with the service-role client. A DB trigger notifies admins.
+- User / contact inquiry: `/contact` → `POST /api/create-guest-inquiry` (or RPC
+  `submit_guest_inquiry`). Open to anyone (no login needed); an account holder
+  can still use it for a quick one-off question. Validates name 2–120, email
+  format, ≥1 topic from a fixed allow-list, message 10–3000; rate-limits
+  ≥5/email/hour; hashes a request fingerprint with `GUEST_INQUIRY_HASH_SALT` (no
+  raw IP). Inserts to `guest_inquiries` (table name unchanged) with the
+  service-role client. A DB trigger notifies admins. The admin page is labelled
+  **User Inquiries**; a back-and-forth belongs in a **Support Ticket**.
 
 ## 2. Registration & auth
 

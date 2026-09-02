@@ -63,7 +63,7 @@ export default function PrivacyPolicyPage() {
               <li><strong>Verification and vehicle documents:</strong> Driver's-license and other accepted identity evidence, selfies used for identity comparison, OR/CR images, insurance declarations, and rental-agreement files.</li>
               <li><strong>Transaction Data:</strong> Records of PayMongo payments, refunds, and booking history.</li>
               <li><strong>Trip and evidence data:</strong> Condition photos, odometer and fuel/battery readings, support records, and optional browser location only when you actively consent to location-backed evidence.</li>
-              <li><strong>Guest inquiry data:</strong> Name, email, optional phone, selected topics, message, reply status, and a salted anti-abuse fingerprint.</li>
+              <li><strong>Contact inquiry data:</strong> Name, email, optional phone, selected topics, message, reply status, and a salted anti-abuse fingerprint submitted through the public contact form.</li>
               <li><strong>Device and usage data:</strong> Timestamped security, audit, and login-related events used for account security, fraud review, and dispute handling.</li>
             </ul>
           </section>
