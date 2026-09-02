@@ -1159,7 +1159,6 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/data-request.ts` | GET/POST; user | List own privacy requests or submit a new request and notify super-admins |
 | `api/expire-booking-deadlines.ts` | GET/POST; cron secret | Expire ignored owner/payment deadlines without browser dependence |
 | `api/get-approved-rental-agreement.ts` | GET; participant | Return only the agreement version approved/snapshotted for the booking |
-| `api/mark-manual-payout.ts` | POST; super-admin | Record an actually completed off-platform payout with reference and audit |
 | `api/mark-manual-refund.ts` | POST; super-admin | Record an actually completed manual refund with method/reference |
 | `api/process-payout.ts` | POST; super-admin | Run payout eligibility and PayMongo/simulator automation |
 | `api/process-refund.ts` | POST; super-admin | Retry one or a controlled batch of refund automation |

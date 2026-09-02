@@ -165,8 +165,10 @@ const checks = [
       "PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION",
       "isPayMongoTestKey",
       "Demo payout completion refuses non-test PayMongo keys",
-      "Payout was not marked paid",
+      "so no payout was sent",
       "payout_sandbox_completed",
+      "Lister payout recorded (demo mode)",
+      "payout:${sandboxTransactionId}",
       "PAYMONGO_PAYOUT_WALLET_ID",
       "createBatchTransfer",
       "ActivePayoutExistsError",
@@ -213,15 +215,6 @@ const checks = [
     absentMarkers: [
       'normalized === "paymongo"',
       "return \"PayMongo\"",
-    ],
-  },
-  {
-    file: "api/mark-manual-payout.ts",
-    markers: [
-      "activePayoutCount",
-      "This booking already has an active payout",
-      "paymentError?.code === \"23505\"",
-      "A provider payout is already pending",
     ],
   },
   {
@@ -312,12 +305,15 @@ const checks = [
   {
     file: "src/pages/admin/AdminPayoutsPage.tsx",
     markers: [
+      "Payouts are released entirely in-app through the Auto Payout action",
       "Auto Payout skips instead of marking money released",
-      "Sandbox showcase completion only works when the explicit server flag is enabled",
-      "Manual Paid remains available",
+      "net of the SafeDrive commission",
     ],
     absentMarkers: [
-      "Auto Payout records a sandbox release for showcase use only",
+      "openManualPayout",
+      "markManualPayoutPaid",
+      "/api/mark-manual-payout",
+      "Manual Paid",
     ],
   },
   {

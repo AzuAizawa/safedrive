@@ -208,9 +208,10 @@ Server recalculates everything:
      account number)
   5. no existing completed payout and no pending payout with a transaction id
   - amount = `base_price` + approved-claim deductions, added **once** (retry-safe).
-- Sandbox mode (`PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true`, localhost +
-  `sk_test_` only): writes a `sandbox_payout_*` row, notifies, audits, sends a
-  **payout receipt** — no wallet call.
+- Demo mode (`PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true`, `sk_test_` key or
+  no key; a live key auto-disables it): writes a `sandbox_payout_*` row, notifies,
+  audits, posts the ledger journal `2010→1010` (event key `payout:<txn>`), sends a
+  **payout receipt** — no wallet call, no real money moved.
 - Real mode: matches the method to a PayMongo InstaPay receiving institution,
   loads the wallet source account, creates `/v2/batch_transfers` with idempotency
   key `safedrive-payout-<paymentId>` and `callback_url` →
@@ -220,10 +221,12 @@ Server recalculates everything:
 - `POST /api/webhooks/paymongo-payouts`: verifies the signature, finds the
   `payout` row by booking + transaction id, transitions `pending → completed/failed`
   (terminal-guarded), notifies/audits, sends the receipt.
-- Manual fallback: `POST /api/mark-manual-payout` (super-admin) records a payout
-  sent outside SafeDrive; posts the ledger journal; sends the receipt.
-- Real automatic payout stays **disabled** until PayMongo Money Movement API
-  access is approved.
+- There is **no out-of-app manual payout path**. Every payout runs through the
+  in-app **Auto Payout** action (`/api/process-payout`); an admin never sends the
+  money by hand and records a reference.
+- Real automatic payout (the live `/v2/batch_transfers` call) stays **disabled**
+  until PayMongo Money Movement API access is approved; demo mode covers the
+  thesis build.
 
 ## 17. Refunds
 

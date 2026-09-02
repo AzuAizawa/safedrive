@@ -743,6 +743,21 @@ export const processAutomaticPayoutForBooking = async ({
       payout_method: payoutBooking.owner.payout_method,
       mode: "sandbox",
     });
+    // Keep the double-entry ledger complete even in demo mode so financial
+    // reports and reconciliation stay balanced. The event key matches the
+    // `payout:<transaction_id>` shape the reconciliation job expects.
+    await postSimpleBalancedJournal(supabase, {
+      bookingId,
+      eventKey: `payout:${sandboxTransactionId}`,
+      eventType: "lister_payout_completed",
+      providerReference: sandboxTransactionId,
+      actorId: initiatedByUserId,
+      debitAccount: "2010",
+      creditAccount: "1010",
+      amountCentavos: Math.round(Number(payoutBooking.base_price) * 100),
+      partyUserId: payoutBooking.owner.id,
+      memo: "Lister payout recorded (demo mode)",
+    });
 
     return {
       state: "completed",
@@ -757,7 +772,7 @@ export const processAutomaticPayoutForBooking = async ({
       state: "skipped",
       bookingId,
       reason:
-        "PayMongo Money Movement is not configured. Payout was not marked paid. Set PAYMONGO_SECRET_KEY and PAYMONGO_PAYOUT_WALLET_ID, or use the manual payout fallback after sending the money outside SafeDrive.",
+        "PayMongo Money Movement is not configured, so no payout was sent. Set PAYMONGO_SECRET_KEY and PAYMONGO_PAYOUT_WALLET_ID for live disbursement, or enable PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION with a test key for demo mode.",
     };
   }
 

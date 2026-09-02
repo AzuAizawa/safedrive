@@ -24,6 +24,9 @@ manual payout review, and audit logging.
 - Payouts/refunds and financial review are super-admin functions. PayMongo
   capabilities remain account- and environment-dependent, and test simulation
   is never evidence of live settlement.
+- The "manual payout review" step was removed. Payouts run only through the
+  in-app Auto Payout action (demo simulation now, PayMongo Money Movement when
+  approved); there is no out-of-app admin-sends-money-by-hand path.
 - The project no longer promises regulated escrow, automatic permanent
   deletion after 30 days, unsupported cancellation percentages, or insurance
   coverage that has not been professionally verified.

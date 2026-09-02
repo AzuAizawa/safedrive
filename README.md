@@ -206,10 +206,12 @@ SafeDrive commission), posts the ledger journal, and sends the receipt email +
 notification. It accepts only a PayMongo test key (or no key) - a live
 `sk_live_` key auto-disables the demo path. Use this for a thesis/demo build
 that will never move real money. **Unset it for any launch that takes real
-payments.** Without the flag and without usable PayMongo Money Movement
+payments** and configure PayMongo Money Movement instead - the same **Auto
+Payout** button then disburses to the lister's GCash or Maya through
+`/v2/batch_transfers`. Without the demo flag and without usable Money Movement
 credentials (`PAYMONGO_PAYOUT_WALLET_ID` + an approved account), Auto Payout
-skips and you fall back to the manual payout (admin sends the money outside
-SafeDrive, then records the reference).
+skips instead of marking money released. There is no out-of-app manual payout
+path - every release runs through the in-app Auto Payout action.
 
 `CRON_SECRET` is required for the booking-deadline expiry and return-reminder
 workers. Vercel's Hobby plan only allows once-a-day cron jobs, which is too slow

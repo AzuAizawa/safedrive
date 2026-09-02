@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import {
   AlertCircle,
@@ -279,13 +278,6 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
   const [loading, setLoading] = useState(true);
   const [processingBookingId, setProcessingBookingId] = useState<string | null>(null);
   const [processingAll, setProcessingAll] = useState(false);
-  const [manualPayoutTarget, setManualPayoutTarget] = useState<PayoutBooking | null>(null);
-  const [manualPayoutDraft, setManualPayoutDraft] = useState({
-    paymentMethod: "GCash",
-    referenceNumber: "",
-    note: "",
-  });
-  const [manualPayoutLoading, setManualPayoutLoading] = useState(false);
   const [pageTab, setPageTab] = useState<PayoutPageTab>("current");
 
   useEffect(() => {
@@ -435,59 +427,6 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
     }
   };
 
-  const openManualPayout = (booking: PayoutBooking) => {
-    setManualPayoutTarget(booking);
-    setManualPayoutDraft({
-      paymentMethod:
-        booking.owner.payout_method === "Maya" ? "Maya" : "GCash",
-      referenceNumber: "",
-      note: "",
-    });
-  };
-
-  const markManualPayoutPaid = async () => {
-    if (!manualPayoutTarget || !session?.access_token) return;
-    if (!manualPayoutDraft.referenceNumber.trim()) {
-      toast.error("Enter the payout reference number");
-      return;
-    }
-
-    setManualPayoutLoading(true);
-    try {
-      const res = await fetch("/api/mark-manual-payout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          bookingId: manualPayoutTarget.id,
-          paymentMethod: manualPayoutDraft.paymentMethod,
-          referenceNumber: manualPayoutDraft.referenceNumber,
-          note: manualPayoutDraft.note,
-        }),
-      });
-
-      const payload = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        throw new Error(payload.error || "Failed to mark payout as paid");
-      }
-
-      toast.success("Manual payout recorded", {
-        description:
-          "The payout was marked released, the lister was notified, and an audit entry was saved.",
-      });
-      setManualPayoutTarget(null);
-      await fetchPayouts();
-    } catch (error) {
-      toast.error("Manual payout failed", {
-        description: error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setManualPayoutLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-6 animate-fade-in">
       <div className={`flex flex-col gap-3 md:flex-row md:items-start ${embedded ? "md:justify-end" : "md:justify-between"}`}>
@@ -495,7 +434,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Payout Review</h1>
             <p className="text-muted-foreground mt-1">
-              Release eligible lister payouts after a booking is fully completed, either through PayMongo automation or the manual payout fallback.
+              Release eligible lister payouts after a booking is fully completed. Every payout runs in-app through the Auto Payout action &mdash; the lister receives their earnings net of the SafeDrive commission.
             </p>
           </div>
         ) : null}
@@ -571,10 +510,10 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
             <div className="p-4 text-sm text-muted-foreground">
               <p className="font-medium text-foreground">How payout release works</p>
               <p className="mt-1">
-                For the live payment environment, PayMongo Money Movement must be configured with a funded wallet/source account for real automated disbursement.
-                If PayMongo is not configured, Auto Payout skips instead of marking money released.
-                Sandbox showcase completion only works when the explicit server flag is enabled.
-                Manual Paid remains available when the admin sends money through GCash or Maya outside the app.
+                Payouts are released entirely in-app through the Auto Payout action &mdash; no admin ever sends money by hand outside SafeDrive.
+                The lister is paid their earnings net of the SafeDrive commission, the payment record and double-entry ledger are written, and the lister gets a receipt email.
+                In this demo build the transfer is simulated (no real PayMongo Money Movement call). For a live environment, PayMongo Money Movement must be configured with a funded wallet, and the same button then disburses to the lister's GCash or Maya automatically.
+                If neither the live wallet nor the demo flag is set, Auto Payout skips instead of marking money released.
               </p>
             </div>
           </Card>
@@ -612,19 +551,13 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                 supportCaseCount === 0 &&
                 support.state === "ready" &&
                 latestPayout?.status !== "pending";
-              const canMarkManual =
-                isSuperAdmin &&
-                supportCaseCount === 0 &&
-                support.state === "ready" &&
-                latestPayout?.status !== "completed" &&
-                !(latestPayout?.status === "pending" && latestPayout.transaction_id);
               const readyForRelease = reconciliation.label === "Ready for automation";
               const issueLabel = readyForRelease ? "Ready to release" : reconciliation.label;
               const issueDetail = readyForRelease
-                ? "Payout details are complete. Try automatic payout, or send manually and mark it paid."
+                ? "Payout details are complete. Run Auto Payout to release the lister's earnings in-app."
                 : reconciliation.description;
               const nextStep = readyForRelease
-                ? "Use Auto Payout first. If PayMongo Money Movement is not available, send the payout through GCash or Maya and record it as manual paid."
+                ? "Run Auto Payout. The lister is paid net of the SafeDrive commission and gets a receipt email."
                 : reconciliation.nextStep;
 
               return (
@@ -713,61 +646,40 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
 
                     <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:justify-end">
                       {isSuperAdmin ? (
-                        <>
-                          <Button
-                            size="sm"
-                            onClick={() => void processPayout(booking.id)}
-                            disabled={
-                              processingBookingId === booking.id || !canRunAutomation
-                            }
-                            title={
-                              canRunAutomation
-                                ? "Run automatic payout"
-                                : supportCaseCount > 0
-                                  ? "Resolve the support case before retrying payout"
-                                  : latestPayout?.status === "pending"
-                                    ? "PayMongo is still processing the last payout attempt"
-                                    : nextStep
-                            }
-                            className="gap-1"
-                          >
-                            {processingBookingId === booking.id ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                Processing...
-                              </>
-                            ) : latestPayout?.status === "failed" ? (
-                              <>
-                                <RefreshCw className="h-3.5 w-3.5" />
-                                Retry Auto
-                              </>
-                            ) : (
-                              <>
-                                <Send className="h-3.5 w-3.5" />
-                                Auto Payout
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => openManualPayout(booking)}
-                            disabled={!canMarkManual}
-                            title={
-                              canMarkManual
-                                ? "Record a manual GCash or Maya payout"
-                                : supportCaseCount > 0
-                                  ? "Resolve the support case before releasing payout"
-                                  : latestPayout?.status === "pending" && latestPayout.transaction_id
-                                    ? "Wait for the provider payout before using manual payout"
-                                    : nextStep
-                            }
-                            className="gap-1"
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Manual Paid
-                          </Button>
-                        </>
+                        <Button
+                          size="sm"
+                          onClick={() => void processPayout(booking.id)}
+                          disabled={
+                            processingBookingId === booking.id || !canRunAutomation
+                          }
+                          title={
+                            canRunAutomation
+                              ? "Run automatic payout"
+                              : supportCaseCount > 0
+                                ? "Resolve the support case before retrying payout"
+                                : latestPayout?.status === "pending"
+                                  ? "PayMongo is still processing the last payout attempt"
+                                  : nextStep
+                          }
+                          className="gap-1"
+                        >
+                          {processingBookingId === booking.id ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Processing...
+                            </>
+                          ) : latestPayout?.status === "failed" ? (
+                            <>
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              Retry Auto
+                            </>
+                          ) : (
+                            <>
+                              <Send className="h-3.5 w-3.5" />
+                              Auto Payout
+                            </>
+                          )}
+                        </Button>
                       ) : (
                         <span className="text-xs font-medium text-amber-500">
                           Super Admin only
@@ -880,141 +792,6 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
           </div>
         </Card>
       ) : null}
-
-      {manualPayoutTarget &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-            onClick={() => {
-              if (!manualPayoutLoading) setManualPayoutTarget(null);
-            }}
-          >
-            <div
-              className="w-full max-w-2xl rounded-xl border border-border bg-card p-5 text-card-foreground shadow-2xl"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="space-y-1">
-                <h2 className="text-lg font-semibold">Mark manual payout as paid</h2>
-                <p className="text-sm text-muted-foreground">
-                  Use this only after you have sent the lister payout through GCash or Maya outside SafeDrive.
-                </p>
-              </div>
-
-              <div className="mt-4 grid gap-3 rounded-lg border border-border/70 bg-muted/30 p-4 text-sm sm:grid-cols-2">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Booking
-                  </p>
-                  <p className="mt-1 font-semibold">
-                    {manualPayoutTarget.cars.car_models.car_brands.name}{" "}
-                    {manualPayoutTarget.cars.car_models.name}
-                  </p>
-                  <p className="mt-1 text-muted-foreground">
-                    Lister: {manualPayoutTarget.owner.full_name || manualPayoutTarget.owner.email}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Send this payout
-                  </p>
-                  <p className="mt-1 text-muted-foreground">
-                    Amount:{" "}
-                    <span className="font-semibold text-foreground">
-                      {formatCurrency(Number(manualPayoutTarget.base_price))}
-                    </span>
-                  </p>
-                  <p className="mt-1 text-muted-foreground">
-                    Method: {manualPayoutTarget.owner.payout_method || "Not configured"}
-                  </p>
-                  <p className="mt-1 text-muted-foreground">
-                    Account name: {manualPayoutTarget.owner.payout_account_name || "No account name"}
-                  </p>
-                  <p className="mt-1 text-muted-foreground">
-                    Account number:{" "}
-                    <span className="font-mono font-semibold text-foreground">
-                      {manualPayoutTarget.owner.payout_account_number || "No account number"}
-                    </span>
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3">
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">Payout method</span>
-                  <select
-                    value={manualPayoutDraft.paymentMethod}
-                    onChange={(event) =>
-                      setManualPayoutDraft((current) => ({
-                        ...current,
-                        paymentMethod: event.target.value,
-                      }))
-                    }
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    <option value="GCash">GCash</option>
-                    <option value="Maya">Maya</option>
-                  </select>
-                </label>
-
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">Reference number</span>
-                  <input
-                    value={manualPayoutDraft.referenceNumber}
-                    onChange={(event) =>
-                      setManualPayoutDraft((current) => ({
-                        ...current,
-                        referenceNumber: event.target.value,
-                      }))
-                    }
-                    placeholder="GCash/Maya transaction reference"
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  />
-                </label>
-
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">Admin note</span>
-                  <textarea
-                    value={manualPayoutDraft.note}
-                    onChange={(event) =>
-                      setManualPayoutDraft((current) => ({
-                        ...current,
-                        note: event.target.value,
-                      }))
-                    }
-                    rows={3}
-                    placeholder="Optional note, such as who sent the payout or where proof is stored"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  />
-                </label>
-              </div>
-
-              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setManualPayoutTarget(null)}
-                  disabled={manualPayoutLoading}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => void markManualPayoutPaid()}
-                  disabled={manualPayoutLoading}
-                  className="gap-2"
-                >
-                  {manualPayoutLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  Mark as Paid
-                </Button>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
     </div>
   );
 }
