@@ -128,27 +128,29 @@ const getConfirmedMessage = (
   planId: string | null,
   stage: BookingPaymentStage,
 ) => {
+  const receiptNote = " Your receipt email has been sent - it may take a few minutes to arrive.";
+
   if (isSubscription) {
-    return `Your ${planId || "selected"} subscription payment is confirmed and the plan is active.`;
+    return `Your ${planId || "selected"} subscription payment is confirmed and the plan is active.${receiptNote}`;
   }
 
   if (stage === "full") {
-    return "Your full booking payment is confirmed. The trip is now fully paid.";
+    return `Your full booking payment is confirmed. The trip is now fully paid.${receiptNote}`;
   }
 
   if (stage === "extension") {
-    return "Your extension payment is confirmed. SafeDrive has updated the booking extension record.";
+    return `Your extension payment is confirmed. SafeDrive has updated the booking extension record.${receiptNote}`;
   }
 
   if (stage === "security_deposit") {
-    return "Your refundable security deposit is confirmed. SafeDrive has updated the deposit record.";
+    return `Your refundable security deposit is confirmed. SafeDrive has updated the deposit record.${receiptNote}`;
   }
 
   if (stage === "balance") {
-    return "Your remaining balance is confirmed. The booking is now fully paid.";
+    return `Your remaining balance is confirmed. The booking is now fully paid.${receiptNote}`;
   }
 
-  return "Your downpayment is confirmed. The booking is now reserved in SafeDrive.";
+  return `Your downpayment is confirmed. The booking is now reserved in SafeDrive.${receiptNote}`;
 };
 
 const getDelayedMessage = (
@@ -264,9 +266,9 @@ export default function PaymentSuccessPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <h1 className="text-2xl font-bold tracking-tight">Verifying Payment...</h1>
+              <h1 className="text-2xl font-bold tracking-tight">Payment received - confirming...</h1>
               <p className="text-muted-foreground text-sm">
-                Securely confirming your transaction with the provider. Please do not close this window.
+                Securely confirming your transaction with the provider. Your receipt email follows once it clears. Please do not close this window.
               </p>
             </div>
           </div>

@@ -107,6 +107,16 @@ const getLatestPayout = (booking: PayoutBooking) =>
         new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
     )[0] ?? null;
 
+const describePayoutRelease = (payout: PayoutPaymentRow | null) => {
+  if (!payout) return "-";
+  const notes = payout.notes ?? "";
+  if (payout.transaction_id?.startsWith("sandbox_payout_") || notes.includes("Demo payout")) {
+    return "Auto - demo";
+  }
+  if (notes.includes("Auto payout via PayMongo")) return "Auto - PayMongo";
+  return "Released";
+};
+
 const getAutomationSupport = (
   booking: PayoutBooking,
 ): { state: PayoutAutomationState; label: string; description: string } => {
@@ -510,10 +520,11 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
             <div className="p-4 text-sm text-muted-foreground">
               <p className="font-medium text-foreground">How payout release works</p>
               <p className="mt-1">
-                Payouts are released entirely in-app through the Auto Payout action &mdash; no admin ever sends money by hand outside SafeDrive.
-                The lister is paid their earnings net of the SafeDrive commission, the payment record and double-entry ledger are written, and the lister gets a receipt email.
-                In this demo build the transfer is simulated (no real PayMongo Money Movement call). For a live environment, PayMongo Money Movement must be configured with a funded wallet, and the same button then disburses to the lister's GCash or Maya automatically.
-                If neither the live wallet nor the demo flag is set, Auto Payout skips instead of marking money released.
+                Payouts are released entirely in-app &mdash; no admin ever sends money by hand outside SafeDrive.
+                Most release <span className="font-medium text-foreground">automatically</span> the moment the trip completes and any deposit review closes; this queue only holds the ones that still need a manual Auto Payout nudge (incomplete lister payout details, an open support case, or a failed attempt).
+                Every release is announced to all admins and logged; the Statistics tab shows whether each payout was auto-released or released by an admin.
+                The lister is paid their earnings net of the SafeDrive commission, with the payment record and double-entry ledger written and a receipt email sent.
+                In this demo build the transfer is simulated. For a live environment, configure PayMongo Money Movement with a funded wallet and the same flow disburses to the lister's GCash or Maya. If neither the live wallet nor the demo flag is set, a payout skips instead of marking money released.
               </p>
             </div>
           </Card>
@@ -736,6 +747,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                       <TableHead>Vehicle</TableHead>
                       <TableHead>Lister</TableHead>
                       <TableHead>Amount</TableHead>
+                      <TableHead>Released via</TableHead>
                       <TableHead>Reference</TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
@@ -757,6 +769,9 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                           <TableCell>{booking.owner.full_name || booking.owner.email}</TableCell>
                           <TableCell className="font-medium">
                             {formatCurrency(Number(booking.base_price))}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {describePayoutRelease(payout)}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {payout?.transaction_id || "No transaction reference stored"}

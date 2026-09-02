@@ -99,7 +99,9 @@ export async function runBookingCompletionSideEffects(
     await processAutomaticPayoutForBooking({
       supabase,
       bookingId: booking.id,
-      initiatedByUserId: options.initiatedByUserId,
+      // A completion-triggered payout is always automatic, never a deliberate
+      // admin release - keep the audit/notification wording accurate.
+      initiatedByUserId: null,
       baseOrigin: options.baseOrigin,
     });
   } catch (payoutError) {

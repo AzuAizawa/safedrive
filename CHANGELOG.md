@@ -9,6 +9,26 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Payout visibility + payment "confirming" copy (Phase 3)
+
+- Every successful lister payout now notifies **all admins** (previously
+  only failures did) and its audit entry records `released_by`
+  `automatic` vs `admin`. A completion-triggered payout always logs as
+  automatic (`api/lib/bookingCompletion.ts` passes a null initiator).
+- `AdminPayoutsPage`: new "Released via" column (Auto - demo / Auto -
+  PayMongo / Released) in the Statistics table, and the overview card now
+  states that most payouts auto-release on completion and the queue is
+  only for the ones needing a manual nudge.
+- `PaymentSuccessPage`: reworded to "Payment received - confirming..." and
+  the confirmed state now tells the renter their receipt email has been
+  sent and may take a few minutes. No second email is added - the single
+  post-webhook receipt stays the confirmation.
+- Files: `api/lib/payoutAutomation.ts`, `api/lib/bookingCompletion.ts`,
+  `src/pages/admin/AdminPayoutsPage.tsx`, `src/pages/PaymentSuccessPage.tsx`,
+  smoke-check markers. No migration.
+
+---
+
 ## 2026-09-03 — Return / deposit flow: lister waiver + auto-release + auto-complete (Phase 2)
 
 - **Lister "Confirm return - no issues"** (`security-deposit-action.ts`

@@ -758,8 +758,14 @@ export const processAutomaticPayoutForBooking = async ({
       transfer_status: "sandbox_completed",
       transfer_id: sandboxTransactionId,
       payout_method: payoutBooking.owner.payout_method,
+      released_by: initiatedByUserId ? "admin" : "automatic",
       mode: "sandbox",
     });
+    await notifyAdmins(
+      supabase,
+      "Lister Payout Released (demo)",
+      `PHP ${Number(payoutBooking.base_price).toLocaleString()} ${initiatedByUserId ? "was released by an admin" : "auto-released on completion"} for ${getVehicleLabel(payoutBooking)}${sandboxDestination ? ` to ${sandboxDestination}` : ""}.`,
+    );
     // Keep the double-entry ledger complete even in demo mode so financial
     // reports and reconciliation stay balanced. The event key matches the
     // `payout:<transaction_id>` shape the reconciliation job expects.
@@ -896,7 +902,13 @@ export const processAutomaticPayoutForBooking = async ({
         batch_transfer_id: transfer.batchTransferId,
         reference_number: referenceNumber,
         payout_method: payoutMethod,
+        released_by: initiatedByUserId ? "admin" : "automatic",
       });
+      await notifyAdmins(
+        supabase,
+        "Lister Payout Released",
+        `PHP ${Number(payoutBooking.base_price).toLocaleString()} ${initiatedByUserId ? "was released by an admin" : "auto-released on completion"} for ${getVehicleLabel(payoutBooking)}${releasedDestination ? ` to ${releasedDestination}` : ""}.`,
+      );
       await postSimpleBalancedJournal(supabase, {
         bookingId,
         eventKey: `payout:${walletTransactionId}`,

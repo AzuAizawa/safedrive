@@ -353,9 +353,12 @@ const checks = [
   {
     file: "src/pages/admin/AdminPayoutsPage.tsx",
     markers: [
-      "Payouts are released entirely in-app through the Auto Payout action",
-      "Auto Payout skips instead of marking money released",
+      "Payouts are released entirely in-app",
+      "no admin ever sends money by hand outside SafeDrive",
+      "a payout skips instead of marking money released",
       "net of the SafeDrive commission",
+      "describePayoutRelease",
+      "Released via",
     ],
     absentMarkers: [
       "openManualPayout",
