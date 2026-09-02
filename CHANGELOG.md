@@ -9,6 +9,23 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — My Bookings (renter): compact cards + Active/History split
+
+- `src/pages/MyBookingsPage.tsx` — each booking rendered as one very tall card
+  with every detail (next step, return status, trip progress, extension, all
+  action buttons, photo capture) inline, and active + finished bookings shared
+  one paginated list.
+  - The Bookings tab now has an **Active | History** sub-toggle (with counts);
+    each view is its own paginated list with its own empty state. `expired`
+    joined completed/cancelled/rejected as a history status.
+  - Each row is now a **compact summary card** (car, plate, status, dates,
+    total, one-line next step, "View details ›"). Clicking it opens a **modal**
+    (`createPortal`, Esc / backdrop / × to close) containing the full,
+    unchanged detail body and all actions - so the list stays short and other
+    rows don't get pushed down.
+
+---
+
 ## 2026-09-02 — Authenticator (MFA) recovery
 
 - If a lister/admin removed the account from their authenticator app there was

@@ -38,6 +38,7 @@ import {
   CreditCard,
   Download,
   Star,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -206,6 +207,8 @@ export default function MyBookingsPage() {
   const [ratingFeedback, setRatingFeedback] = useState("");
   const [submittingRating, setSubmittingRating] = useState(false);
   const [pageTab, setPageTab] = useState<"overview" | "bookings" | "payments">("bookings");
+  const [bookingView, setBookingView] = useState<"active" | "history">("active");
+  const [openBookingId, setOpenBookingId] = useState<string | null>(null);
   const [bookingPage, setBookingPage] = useState(1);
   const [paymentLogs, setPaymentLogs] = useState<Payment[]>([]);
   const [paymentLogsLoading, setPaymentLogsLoading] = useState(false);
@@ -1168,19 +1171,39 @@ export default function MyBookingsPage() {
     return null;
   };
 
-  const historyStatuses = new Set(["completed", "cancelled", "rejected"]);
+  const historyStatuses = new Set([
+    "completed",
+    "cancelled",
+    "rejected",
+    "expired",
+  ]);
   const activeBookings = bookings.filter(
     (booking) => !historyStatuses.has(getApparentStatus(booking)),
   );
   const bookingHistory = bookings.filter((booking) =>
     historyStatuses.has(getApparentStatus(booking)),
   );
-  const sortedBookings = [...activeBookings, ...bookingHistory];
-  const bookingPagination = paginateItems(sortedBookings, bookingPage);
+  const visibleBookings =
+    bookingView === "active" ? activeBookings : bookingHistory;
+  const bookingPagination = paginateItems(visibleBookings, bookingPage);
 
   useEffect(() => {
     if (bookingPagination.page !== bookingPage) setBookingPage(bookingPagination.page);
   }, [bookingPage, bookingPagination.page]);
+
+  useEffect(() => {
+    setBookingPage(1);
+    setOpenBookingId(null);
+  }, [bookingView]);
+
+  useEffect(() => {
+    if (!openBookingId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenBookingId(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [openBookingId]);
 
   const changeBookingPage = (nextPage: number) => {
     setBookingPage(nextPage);
@@ -1413,8 +1436,55 @@ export default function MyBookingsPage() {
         </div>
       ) : (
         <div id="renter-booking-list" className="scroll-mt-24 space-y-4">
-          {bookingPagination.items.map((booking, index) => {
-            const globalIndex = bookingPagination.startIndex + index;
+          <div className="flex flex-wrap gap-2">
+            {([
+              { id: "active", label: "Active", count: activeBookings.length },
+              { id: "history", label: "History", count: bookingHistory.length },
+            ] as const).map((view) => (
+              <button
+                key={view.id}
+                type="button"
+                onClick={() => setBookingView(view.id)}
+                className={`inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                  bookingView === view.id
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : "border-border/60 bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {view.label}
+                <span
+                  className={`rounded-full px-1.5 text-xs ${
+                    bookingView === view.id
+                      ? "bg-primary/20"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {view.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-1">
+            <h2 className="text-xl font-semibold">
+              {bookingView === "active" ? "Active Bookings" : "Booking History"}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {bookingView === "active"
+                ? "Requests and rentals that still need payment, arrival, or completion."
+                : "Completed, cancelled, rejected, and expired bookings stay here for reference."}
+            </p>
+          </div>
+
+          {visibleBookings.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border/60 py-14 text-center text-sm text-muted-foreground">
+              {bookingView === "active"
+                ? "No active bookings right now."
+                : "No past bookings yet."}
+            </div>
+          ) : null}
+
+          {bookingPagination.items.map((booking) => {
             const apparentState = getApparentStatus(booking);
             const status = statusConfig[apparentState] || statusConfig.pending;
             const StatusIcon = status.icon;
@@ -1467,34 +1537,96 @@ export default function MyBookingsPage() {
               0,
             );
             const isManualRefundReview = latestRefund?.payment_method === "manual_review";
-            const isFirstActiveSection =
-              activeBookings.length > 0 && index === 0 && globalIndex < activeBookings.length;
-            const isFirstHistorySection =
-              bookingHistory.length > 0 &&
-              (globalIndex === activeBookings.length ||
-                (index === 0 && globalIndex > activeBookings.length));
             const showTripProgress = ["fully_paid", "active", "completed"].includes(apparentState);
+            const isOpen = openBookingId === booking.id;
+            const carTitle = `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name}`;
 
             return (
               <div key={booking.id} className="space-y-4">
-                {isFirstActiveSection && (
-                  <div className="space-y-1 pt-2">
-                    <h2 className="text-xl font-semibold">Active Bookings</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Requests and rentals that still need payment, arrival, or completion.
-                    </p>
-                  </div>
-                )}
-                {isFirstHistorySection && (
-                  <div className="space-y-1 pt-4">
-                    <h2 className="text-xl font-semibold">Booking History</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Completed, cancelled, and rejected bookings stay here for reference.
-                    </p>
-                  </div>
-                )}
-                <Card className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-5">
+                <Card
+                  className="cursor-pointer transition-shadow hover:shadow-md"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setOpenBookingId(booking.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setOpenBookingId(booking.id);
+                    }
+                  }}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-semibold text-base">{carTitle}</h3>
+                          <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                            {booking.cars.plate_number}
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${status.color}`}
+                          >
+                            <StatusIcon className="h-3 w-3" />
+                            {status.label}
+                          </span>
+                        </div>
+                        <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                          <Calendar className="h-3.5 w-3.5" />
+                          {format(new Date(booking.start_date), "MMM d, yyyy")} -{" "}
+                          {format(new Date(booking.end_date), "MMM d, yyyy")}
+                          <span className="ml-1 font-medium text-foreground">
+                            ({formatDayCount(booking.total_days)})
+                          </span>
+                        </p>
+                        {nextStep ? (
+                          <p className="text-xs text-muted-foreground">
+                            <span className="font-semibold uppercase tracking-wide opacity-70">
+                              Next:{" "}
+                            </span>
+                            {nextStep.title}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-base font-bold">
+                          PHP {Number(booking.total_price).toLocaleString()}
+                        </p>
+                        <span className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary">
+                          View details
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {isOpen &&
+                  createPortal(
+                    <div
+                      className="fixed inset-0 z-[110] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:p-8"
+                      onClick={() => setOpenBookingId(null)}
+                    >
+                      <Card
+                        className="my-4 w-full max-w-3xl shadow-2xl"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between gap-3 border-b border-border/50 px-5 py-3">
+                          <p className="min-w-0 truncate font-semibold">
+                            {carTitle}
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {booking.cars.plate_number}
+                            </span>
+                          </p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => setOpenBookingId(null)}
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <CardContent className="max-h-[75vh] overflow-y-auto p-5">
                   <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
                     <div className="space-y-2 flex-1">
                       <div className="flex items-center gap-3 flex-wrap">
@@ -2066,8 +2198,11 @@ export default function MyBookingsPage() {
                         )}
                     </div>
                   </div>
-                  </CardContent>
-                </Card>
+                        </CardContent>
+                      </Card>
+                    </div>,
+                    document.body,
+                  )}
               </div>
             );
           })}
@@ -2076,7 +2211,7 @@ export default function MyBookingsPage() {
             pageCount={bookingPagination.pageCount}
             startIndex={bookingPagination.startIndex}
             endIndex={bookingPagination.endIndex}
-            total={sortedBookings.length}
+            total={visibleBookings.length}
             onPageChange={changeBookingPage}
           />
         </div>
