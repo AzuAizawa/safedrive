@@ -4437,6 +4437,35 @@ update public.platform_settings
 set ledger_activated_at = coalesce(ledger_activated_at, now())
 where id = 'default';
 
+-- Configurable reservation downpayment share and cancellation-refund policy.
+-- api/create-booking.ts reads these and snapshots them onto each booking row so
+-- a later change never rewrites an existing booking's terms.
+alter table public.platform_settings
+  add column if not exists downpayment_rate numeric not null default 0.5,
+  add column if not exists refund_full_hours integer not null default 24,
+  add column if not exists refund_late_renter_percent numeric not null default 50;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_downpayment_rate_check;
+alter table public.platform_settings
+  add constraint platform_settings_downpayment_rate_check
+  check (downpayment_rate >= 0.2 and downpayment_rate <= 1.0);
+alter table public.platform_settings
+  drop constraint if exists platform_settings_refund_full_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_refund_full_hours_check
+  check (refund_full_hours >= 0 and refund_full_hours <= 720);
+alter table public.platform_settings
+  drop constraint if exists platform_settings_refund_late_renter_percent_check;
+alter table public.platform_settings
+  add constraint platform_settings_refund_late_renter_percent_check
+  check (refund_late_renter_percent >= 0 and refund_late_renter_percent <= 100);
+
+alter table public.bookings
+  add column if not exists downpayment_rate_snapshot numeric,
+  add column if not exists refund_full_hours_snapshot integer,
+  add column if not exists refund_late_renter_percent_snapshot numeric;
+
 create table if not exists public.financial_accounts (
   code text primary key,
   name text not null,

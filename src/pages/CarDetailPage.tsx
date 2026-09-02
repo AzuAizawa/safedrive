@@ -6,6 +6,7 @@ import {
   calculateCommissionAmount,
   calculateProcessingFee,
   DEFAULT_COMMISSION_RATE,
+  DEFAULT_DOWNPAYMENT_RATE,
   fetchPlatformPricingSettings,
   formatCommissionPercent,
 } from "@/lib/platformSettings";
@@ -82,6 +83,7 @@ export default function CarDetailPage() {
   const [commissionRate, setCommissionRate] = useState(DEFAULT_COMMISSION_RATE);
   const [processingFeeRate, setProcessingFeeRate] = useState(0);
   const [processingFixedCentavos, setProcessingFixedCentavos] = useState(0);
+  const [downpaymentRate, setDownpaymentRate] = useState(DEFAULT_DOWNPAYMENT_RATE);
   const [bookedDates, setBookedDates] = useState<
     { start: string; end: string }[]
   >([]);
@@ -189,6 +191,7 @@ export default function CarDetailPage() {
       setCommissionRate(settings.commissionRate);
       setProcessingFeeRate(settings.processingFeeRate);
       setProcessingFixedCentavos(settings.processingFixedCentavos);
+      setDownpaymentRate(settings.downpaymentRate);
     })();
   }, []);
 
@@ -934,13 +937,23 @@ export default function CarDetailPage() {
                       <span>₱{Number(car.security_deposit_amount).toLocaleString()}</span>
                     </div>
                   )}
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Reservation downpayment (50%)</span>
-                    <span>₱{Math.ceil(totalPrice * 0.5).toLocaleString()}</span>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    The 50% downpayment reserves the booking and is part of the rental price. It is not the security deposit.
-                  </p>
+                  {downpaymentRate < 1 ? (
+                    <>
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>
+                          Reservation downpayment ({Math.round(downpaymentRate * 100)}%)
+                        </span>
+                        <span>₱{Math.ceil(totalPrice * downpaymentRate).toLocaleString()}</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        The {Math.round(downpaymentRate * 100)}% downpayment reserves the booking and is part of the rental price. It is not the security deposit.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      This booking must be paid in full to reserve it.
+                    </p>
+                  )}
                   <p className="text-[11px] text-muted-foreground">
                     The renter pays this separately disclosed processing fee. It is never deducted from the lister's base rental.
                   </p>

@@ -355,11 +355,35 @@ export default async function handler(req: Request) {
 
     const { data: settingData, error: settingError } = await supabase
       .from("platform_settings")
-      .select("commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos")
+      .select(
+        "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent",
+      )
       .eq("id", "default")
       .maybeSingle();
 
     if (settingError) throw settingError;
+
+    const rawDownpaymentRate = Number(settingData?.downpayment_rate);
+    const downpaymentRate =
+      Number.isFinite(rawDownpaymentRate) &&
+      rawDownpaymentRate >= 0.2 &&
+      rawDownpaymentRate <= 1
+        ? rawDownpaymentRate
+        : 0.5;
+    const rawRefundFullHours = Number(settingData?.refund_full_hours);
+    const refundFullHours =
+      Number.isFinite(rawRefundFullHours) &&
+      rawRefundFullHours >= 0 &&
+      rawRefundFullHours <= 720
+        ? Math.round(rawRefundFullHours)
+        : 24;
+    const rawLatePercent = Number(settingData?.refund_late_renter_percent);
+    const refundLateRenterPercent =
+      Number.isFinite(rawLatePercent) &&
+      rawLatePercent >= 0 &&
+      rawLatePercent <= 100
+        ? rawLatePercent
+        : 50;
 
     const totalDays = Math.round((endDate.utcMs - startDate.utcMs) / DAY_MS);
     const commissionRate = normalizeCommissionRate(settingData?.commission_rate);
@@ -371,7 +395,7 @@ export default async function handler(req: Request) {
     const grossTotal = processingRate < 1 ? (subtotal + processingFixed) / (1 - processingRate) : subtotal;
     const paymentProcessingFee = Math.max(0, Math.round((grossTotal - subtotal) * 100) / 100);
     const totalPrice = subtotal + paymentProcessingFee;
-    const downpayment = Math.ceil(totalPrice * 0.5);
+    const downpayment = Math.ceil(totalPrice * downpaymentRate);
     const balance = totalPrice - downpayment;
 
     if (totalPrice > MAX_BOOKING_TOTAL) {
@@ -429,6 +453,9 @@ export default async function handler(req: Request) {
         agreement_storage_path_snapshot: agreementVersion.storage_path,
         agreement_sha256_snapshot: agreementVersion.content_sha256,
         payment_processing_fee: paymentProcessingFee,
+        downpayment_rate_snapshot: downpaymentRate,
+        refund_full_hours_snapshot: refundFullHours,
+        refund_late_renter_percent_snapshot: refundLateRenterPercent,
       })
       .select(
         "id, total_days, base_price, commission, total_price, downpayment_amount, balance_amount, status",

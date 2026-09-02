@@ -1062,6 +1062,9 @@ export interface Database {
           ledger_activated_at: string | null;
           payment_processing_fee_rate: number;
           payment_processing_fixed_centavos: number;
+          downpayment_rate: number;
+          refund_full_hours: number;
+          refund_late_renter_percent: number;
           created_at: string;
           updated_at: string;
         };
@@ -1071,6 +1074,9 @@ export interface Database {
           ledger_activated_at?: string | null;
           payment_processing_fee_rate?: number;
           payment_processing_fixed_centavos?: number;
+          downpayment_rate?: number;
+          refund_full_hours?: number;
+          refund_late_renter_percent?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -1080,6 +1086,9 @@ export interface Database {
           ledger_activated_at?: string | null;
           payment_processing_fee_rate?: number;
           payment_processing_fixed_centavos?: number;
+          downpayment_rate?: number;
+          refund_full_hours?: number;
+          refund_late_renter_percent?: number;
           created_at?: string;
           updated_at?: string;
         };
