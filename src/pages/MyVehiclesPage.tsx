@@ -105,6 +105,7 @@ interface VehicleRow {
   insurer_rental_use_confirmed: boolean;
   insurance_verification_status: string;
   status: string;
+  created_at: string | null;
   car_models: { name: string; body_type: string; car_brands: { name: string } };
 }
 
@@ -258,8 +259,6 @@ export default function MyVehiclesPage() {
   const [editing, setEditing] = useState(false);
   const [vehicleActionId, setVehicleActionId] = useState<string | null>(null);
   const [deleteTargetVehicle, setDeleteTargetVehicle] = useState<VehicleRow | null>(null);
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [sortOrder, setSortOrder] = useState("newest");
 
   const [form, setForm] = useState({
     brand_id: null as string | null,
@@ -408,29 +407,21 @@ export default function MyVehiclesPage() {
     : !canAddMore
       ? `Your current plan already uses all ${maxSlots} available listing slots.`
       : null;
-  const filteredVehicles = useMemo(() => {
-    const visibleVehicles = vehicles.filter((vehicle) =>
-      statusFilter === "all" ? true : vehicle.status === statusFilter,
-    );
-
-    return [...visibleVehicles].sort((left, right) => {
-      switch (sortOrder) {
-        case "price_high":
-          return right.price_per_day - left.price_per_day;
-        case "price_low":
-          return left.price_per_day - right.price_per_day;
-        case "brand":
-          return `${left.car_models.car_brands.name} ${left.car_models.name}`.localeCompare(
-            `${right.car_models.car_brands.name} ${right.car_models.name}`,
-          );
-        case "oldest":
-          return left.plate_number.localeCompare(right.plate_number);
-        case "newest":
-        default:
-          return right.id.localeCompare(left.id);
-      }
+  // Fixed order for a lister's own list (no filter/sort controls - this page is
+  // for adding cars and tracking their approval, not browsing): live listings
+  // first, then pending review, then rejected/inactive; newest first in each.
+  const sortedVehicles = useMemo(() => {
+    const statusRank = (status: string) => {
+      if (status === "approved" || status === "active") return 0;
+      if (status === "pending") return 1;
+      return 2; // rejected, inactive, anything else
+    };
+    return [...vehicles].sort((left, right) => {
+      const rankDiff = statusRank(left.status) - statusRank(right.status);
+      if (rankDiff !== 0) return rankDiff;
+      return (right.created_at ?? "").localeCompare(left.created_at ?? "");
     });
-  }, [sortOrder, statusFilter, vehicles]);
+  }, [vehicles]);
   const isLiveVehicle = (status: string) =>
     status === "approved" || status === "active";
 
@@ -1621,47 +1612,7 @@ export default function MyVehiclesPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/50 bg-card p-4">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="vehicle-status-filter">Status</Label>
-              <select
-                id="vehicle-status-filter"
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="all">All</option>
-                <option value="pending">Pending</option>
-                <option value="approved">Approved</option>
-                <option value="active">Active</option>
-                <option value="rejected">Rejected</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="vehicle-sort-order">Sort</Label>
-              <select
-                id="vehicle-sort-order"
-                value={sortOrder}
-                onChange={(event) => setSortOrder(event.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="newest">Newest first</option>
-                <option value="oldest">Plate number</option>
-                <option value="price_high">Highest price</option>
-                <option value="price_low">Lowest price</option>
-                <option value="brand">Brand and model</option>
-              </select>
-            </div>
-          </div>
-
-          {filteredVehicles.length === 0 && (
-            <p className="rounded-xl border border-dashed border-border/60 py-10 text-center text-sm text-muted-foreground">
-              No vehicles match this status filter.
-            </p>
-          )}
-
-          {filteredVehicles.map((v) => {
+          {sortedVehicles.map((v) => {
             const badge = statusBadge[v.status] || statusBadge.pending;
             return (
               <Card key={v.id} className="hover:shadow-md transition-shadow">

@@ -9,6 +9,26 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — My Vehicles: remove filter/sort controls
+
+- `src/pages/MyVehiclesPage.tsx` — dropped the Status filter and the 5-option
+  Sort dropdown. This page is for adding vehicles and tracking their approval,
+  not browsing a marketplace, and with a 5-15 slot cap the controls added
+  clutter (and an orphaned filter bar under the open add-vehicle form). The
+  list now uses one fixed order: live (approved/active) first, then pending,
+  then rejected/inactive; newest-first within each group. Status stays visible
+  as the per-card badge. `created_at` added to the row type for the ordering.
+
+---
+
+## 2026-09-02 — My Vehicles: hide list while adding
+
+- `src/pages/MyVehiclesPage.tsx` — the vehicle list rendered independently of
+  the add-vehicle form, leaving the (now removed) filter bar floating below an
+  open form. List is wrapped in `!showForm`.
+
+---
+
 ## 2026-09-02 — Login QR, admin banner, vehicle-form validation
 
 - `src/lib/qrCode.ts` (new) — Supabase returns the enrolled TOTP QR as an SVG
