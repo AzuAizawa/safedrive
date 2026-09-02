@@ -350,6 +350,14 @@ export default function DashboardLayout() {
                         : "Get Verified"}
                     </DropdownMenuItem>
 
+                    <DropdownMenuItem
+                      onClick={() => navigate("/inquiries")}
+                      className="rounded-xl p-2.5"
+                    >
+                      <Headset className="mr-2 h-4 w-4 opacity-70" />
+                      My Inquiries
+                    </DropdownMenuItem>
+
                     {isLister && (
                       <DropdownMenuItem
                         onClick={() => navigate("/subscriptions")}

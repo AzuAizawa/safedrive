@@ -381,6 +381,7 @@ export const sendGuestInquiryReplyEmail = async (input: {
   reply: string;
   inquiryId: string;
   baseOrigin: string;
+  messageId?: string;
 }) => {
   const actionUrl = getAppLink(input.baseOrigin, "/contact");
   const subject = input.subject?.trim() || "your inquiry";
@@ -396,7 +397,8 @@ export const sendGuestInquiryReplyEmail = async (input: {
       "Contact SafeDrive",
       actionUrl,
     ),
-    idempotencyKey: `guest-inquiry-reply:${input.inquiryId}`,
+    // Key on the reply message so each admin reply in a thread emails once.
+    idempotencyKey: `guest-inquiry-reply:${input.messageId || input.inquiryId}`,
   });
 };
 

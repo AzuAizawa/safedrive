@@ -3195,7 +3195,7 @@ create table if not exists public.guest_inquiries (
   phone text,
   subject text not null check (char_length(subject) between 3 and 160),
   topics text[] not null default '{}',
-  message text not null check (char_length(message) between 10 and 3000),
+  message text not null check (char_length(message) between 5 and 3000),
   status text not null default 'open'
     check (status in ('open', 'in_progress', 'resolved', 'closed')),
   admin_reply text,
@@ -3264,6 +3264,72 @@ using (
       and deleted_at is null
   )
 );
+
+-- Threaded user inquiries: a signed-in person's inquiry is linked to their
+-- account and becomes a back-and-forth conversation in `guest_inquiry_messages`;
+-- a true guest (no token) has no linked user and stays a one-email exchange.
+alter table public.guest_inquiries
+  add column if not exists submitted_by_user_id uuid references public.profiles(id) on delete set null;
+
+alter table public.guest_inquiries
+  drop constraint if exists guest_inquiries_message_check_min;
+-- The base table CHECK still enforces 10-3000; relax it to 5-3000 for quick
+-- questions. `char_length(message) between 10 and 3000` is inlined on the column
+-- so drop/re-add via a named constraint is not possible - use a table CHECK.
+do $$
+begin
+  alter table public.guest_inquiries drop constraint guest_inquiries_message_check;
+exception when undefined_object then null; end $$;
+alter table public.guest_inquiries
+  add constraint guest_inquiries_message_check check (char_length(message) between 5 and 3000);
+
+drop policy if exists "Inquirer reads own inquiries" on public.guest_inquiries;
+create policy "Inquirer reads own inquiries"
+on public.guest_inquiries
+for select
+using (public.is_admin() or submitted_by_user_id = auth.uid());
+
+create table if not exists public.guest_inquiry_messages (
+  id uuid primary key default gen_random_uuid(),
+  inquiry_id uuid not null references public.guest_inquiries(id) on delete cascade,
+  sender_id uuid references public.profiles(id) on delete set null,
+  sender_role text not null check (sender_role in ('inquirer', 'admin')),
+  message text not null check (char_length(message) between 1 and 3000),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_guest_inquiry_messages_inquiry
+  on public.guest_inquiry_messages (inquiry_id, created_at);
+
+alter table public.guest_inquiry_messages enable row level security;
+
+drop policy if exists "Inquiry participants read messages" on public.guest_inquiry_messages;
+create policy "Inquiry participants read messages"
+on public.guest_inquiry_messages
+for select
+using (
+  public.is_admin()
+  or exists (
+    select 1 from public.guest_inquiries gi
+    where gi.id = guest_inquiry_messages.inquiry_id
+      and gi.submitted_by_user_id = auth.uid()
+  )
+);
+
+drop policy if exists "Inquirer posts follow-up messages" on public.guest_inquiry_messages;
+create policy "Inquirer posts follow-up messages"
+on public.guest_inquiry_messages
+for insert
+with check (
+  sender_role = 'inquirer'
+  and sender_id = auth.uid()
+  and exists (
+    select 1 from public.guest_inquiries gi
+    where gi.id = guest_inquiry_messages.inquiry_id
+      and gi.submitted_by_user_id = auth.uid()
+      and gi.status not in ('resolved', 'closed')
+  )
+);
+-- Admin messages are inserted only by the service-role reply route.
 
 create or replace function public.set_guest_inquiry_updated_at()
 returns trigger

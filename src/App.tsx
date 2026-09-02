@@ -43,6 +43,7 @@ const PrivacyPolicyPage = lazy(() => import("@/pages/PrivacyPolicyPage"));
 const TermsPage = lazy(() => import("@/pages/TermsPage"));
 const PlatformAgreementPage = lazy(() => import("@/pages/PlatformAgreementPage"));
 const SupportTicketsPage = lazy(() => import("@/pages/SupportTicketsPage"));
+const InquiriesPage = lazy(() => import("@/pages/InquiriesPage"));
 const PaymentSuccessPage = lazy(() => import("@/pages/PaymentSuccessPage"));
 const UpdatePasswordPage = lazy(() => import("@/pages/UpdatePasswordPage"));
 const SubscriptionPlansPage = lazy(() => import("@/pages/SubscriptionPlansPage"));
@@ -129,6 +130,7 @@ function App() {
                         path="/support"
                         element={<SupportTicketsPage />}
                       />
+                      <Route path="/inquiries" element={<InquiriesPage />} />
                       <Route
                         path="/payment/success"
                         element={<PaymentSuccessPage />}

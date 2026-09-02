@@ -54,6 +54,33 @@ const checks = [
     ],
   },
   {
+    file: "api/reply-guest-inquiry.ts",
+    markers: [
+      'action === "resolve"',
+      "guest_inquiry_messages",
+      'sender_role: "admin"',
+      "guest_inquiry_resolved",
+      "submitted_by_user_id",
+    ],
+  },
+  {
+    file: "api/inquiry-followup.ts",
+    markers: [
+      "guest_inquiry_messages",
+      'sender_role: "inquirer"',
+      "guest_inquiry_followup",
+      "This inquiry belongs to another account",
+    ],
+  },
+  {
+    file: "src/pages/InquiriesPage.tsx",
+    markers: [
+      "/api/inquiry-followup",
+      "guest_inquiry_messages",
+      "My Inquiries",
+    ],
+  },
+  {
     file: "api/lib/bookingCompletion.ts",
     markers: [
       "runBookingCompletionSideEffects",

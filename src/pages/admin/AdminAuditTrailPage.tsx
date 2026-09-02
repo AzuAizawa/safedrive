@@ -46,6 +46,8 @@ const actionLabels: Record<string, string> = {
   return_reminder_sweep: "Return reminder sweep",
   guest_inquiry_review_started: "Started inquiry review",
   guest_inquiry_replied: "Replied to inquiry",
+  guest_inquiry_resolved: "Marked inquiry resolved",
+  guest_inquiry_followup: "User added an inquiry follow-up",
   super_admin_updated_pricing_settings: "Updated pricing settings",
   renter_cancelled_booking: "Renter cancelled booking",
   owner_cancelled_booking: "Lister cancelled booking",

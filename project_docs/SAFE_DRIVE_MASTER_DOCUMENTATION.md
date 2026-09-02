@@ -186,7 +186,12 @@ Opening the reply box silently claims the inquiry (`open → in_progress`, assig
 
 ## 5. User Inquiry Workflow
 
-The admin page is **User Inquiries** (table `guest_inquiries`, unchanged). It is the lightweight channel: one question in, one email reply, then closed. Anyone can use it, including a signed-in account holder with a quick question. A conversation with back-and-forth belongs in a **Support Ticket** instead, which needs an account.
+The admin page is **User Inquiries** (table `guest_inquiries` + thread `guest_inquiry_messages`). It is the questions channel, distinct from **Support Tickets** which carry a reference and signal "an issue to resolve".
+
+- **Signed-in submitter:** the inquiry is linked (`submitted_by_user_id`) and becomes a threaded conversation. They see it at `/inquiries` (`InquiriesPage`), read replies in-app, and post follow-ups (`api/inquiry-followup.ts`, which re-opens the inquiry in the admin queue). An admin reply (`action: reply`) adds a thread message + emails them + sets `in_progress`; it does **not** close the inquiry. An admin marks it resolved separately (`action: resolve`).
+- **Guest (no account):** no token, no link, no in-app thread - a single email reply, then the admin marks it resolved. This is the fallback for a true visitor.
+
+Inquiries do not carry a reference number - that is a Support Ticket signal.
 
 ### 5.1 Intake
 
@@ -211,13 +216,12 @@ The API validates lengths and email format, rate-limits repeated requests, hashe
 ### 5.2 Admin handling
 
 1. An admin receives a bell/work-center item.
-2. **Start review** changes the queue state and records the action.
-3. The admin replies from SafeDrive.
-4. Apps Script sends the email.
-5. Only a successful delivery marks the inquiry resolved.
-6. A failed delivery leaves it open for retry and shows a specific error.
+2. Opening the reply box claims the inquiry (`open → in_progress`); there is no separate "Start review" step.
+3. The admin replies from SafeDrive. Resend delivers the email (Apps Script fallback while Resend is absent); a linked account also gets the reply in its `/inquiries` thread and a notification.
+4. A failed delivery is not recorded and shows a specific error.
+5. Replying does not resolve the inquiry - the person can follow up. The admin clicks **Mark resolved** when the question is answered; a follow-up after that requires a new inquiry.
 
-This is for casual pre-account questions. A registered user with booking, payment, vehicle, or identity context should use a support ticket so evidence and participants remain linked.
+A registered user with booking, payment, vehicle, or identity context should still use a Support Ticket so evidence and participants remain linked.
 
 ## 6. Vehicle Approval, Insurance, and Availability
 
@@ -1122,7 +1126,7 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | Access | Route | Main component and purpose |
 |---|---|---|
 | Public | `/` | `LandingPage`; platform introduction and entry actions |
-| Public | `/contact` | `GuestInquiryPage`; no-account, multi-topic inquiry |
+| Public | `/contact` | `GuestInquiryPage`; multi-topic inquiry - signed-in submitters get a linked threaded inquiry, guests get an email-only exchange |
 | Public | `/login` | `LoginPage`; registered user login |
 | Public | `/auth/confirm` | `AuthConfirmPage`; email/auth callback completion |
 | Public | `/signup` | `SignUpPage`; account creation and agreement display |
@@ -1140,7 +1144,8 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | User | `/lister-bookings` | `ListerBookingsPage`; owner booking decisions and trip state |
 | User | `/notifications` | `NotificationsPage`; personal notifications |
 | User | `/car-renewals` | `ListerCarRenewalPage`; expiring document renewal |
-| User | `/support` | `SupportTicketsPage`; authenticated support cases |
+| User | `/support` | `SupportTicketsPage`; authenticated Support Tickets (issues, with a reference) |
+| User | `/inquiries` | `InquiriesPage`; the signed-in person's own threaded inquiries and replies |
 | User | `/payment/success` | `PaymentSuccessPage`; provider-return waiting screen, not payment authority |
 | User | `/subscriptions` | `SubscriptionPlansPage`; hosted subscription checkout |
 | User | `/vehicle-availability` | `VehicleAvailabilityPage`; maintenance/blackout management |
@@ -1183,7 +1188,8 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/create-booking-extension-checkout.ts` | POST; renter | Create hosted checkout for an approved extension |
 | `api/create-car-inquiry.ts` | POST; authenticated user | Send a listing-specific inquiry to the vehicle owner |
 | `api/create-checkout.ts` | POST; renter | Create hosted downpayment/full checkout from server-calculated records |
-| `api/create-guest-inquiry.ts` | POST; public, rate/duplicate guarded | Validate minimal fields/topics and enqueue a no-account question |
+| `api/create-guest-inquiry.ts` | POST; public (optional bearer), rate/duplicate guarded | Validate fields/topics and enqueue an inquiry; a bearer token links it to the account and seeds the first thread message |
+| `api/inquiry-followup.ts` | POST; the inquiry's own account holder | Add a follow-up message to a non-resolved inquiry, re-open it in the queue, notify admins |
 | `api/create-security-deposit-checkout.ts` | POST; renter | Create the separate refundable-deposit checkout idempotently |
 | `api/create-subscription-checkout.ts` | POST; user | Create hosted subscription checkout |
 | `api/data-request.ts` | GET/POST; user | List own privacy requests or submit a new request and notify super-admins |
@@ -1194,7 +1200,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/process-refund.ts` | POST; super-admin | Retry one or a controlled batch of refund automation |
 | `api/process-security-deposit-release.ts` | POST; super-admin | Create/check PayMongo refund for the refundable deposit remainder |
 | `api/record-security-event.ts` | POST; authenticated or allow-listed login event | Sanitize and record security-relevant activity without secrets |
-| `api/reply-guest-inquiry.ts` | POST; admin/super-admin | Send through Resend with Gmail fallback; resolve only after confirmed delivery |
+| `api/reply-guest-inquiry.ts` | POST; admin/super-admin | `action: reply` adds a thread message + emails (Resend, Gmail fallback), sets `in_progress`, notifies a linked account; `action: resolve` closes the inquiry |
 | `api/reset-my-authenticator.ts` | POST; authenticated | Clear the caller's own enrolled authenticator (self-service after an email-code sign-in) so the login flow can offer a fresh QR |
 | `api/run-reconciliation.ts` | POST; super-admin | Compare local payments/journals/deposits with PayMongo and save findings |
 | `api/sync-paymongo-refund.ts` | POST; super-admin | Read an existing PayMongo refund state and reconcile only the matching local refund, ledger, and audit record; never creates a new refund |

@@ -8,6 +8,7 @@ export const config = {
 type ReplyPayload = {
   inquiryId?: string;
   reply?: string;
+  action?: "reply" | "resolve";
 };
 
 type GmailWebhookResult = {
@@ -114,30 +115,67 @@ export default async function handler(req: Request) {
 
     const payload = (await req.json()) as ReplyPayload;
     const inquiryId = payload.inquiryId?.trim();
+    const action = payload.action === "resolve" ? "resolve" : "reply";
     const reply = payload.reply?.trim();
-    if (!inquiryId || !reply || reply.length > 3000) {
-      return jsonResponse({ error: "Inquiry and reply are required" }, 400);
-    }
 
     const { data: inquiry, error: inquiryError } = await supabase
       .from("guest_inquiries")
-      .select("id, name, email, subject, status")
-      .eq("id", inquiryId)
+      .select("id, name, email, subject, status, submitted_by_user_id")
+      .eq("id", inquiryId ?? "")
       .single();
     if (inquiryError || !inquiry) return jsonResponse({ error: "Inquiry not found" }, 404);
+
+    // --- Resolve: close the thread, no email.
+    if (action === "resolve") {
+      if (["resolved", "closed"].includes(inquiry.status)) {
+        return jsonResponse({ success: true, alreadyResolved: true });
+      }
+      const resolvedAt = new Date().toISOString();
+      const { error: resolveError } = await supabase
+        .from("guest_inquiries")
+        .update({ status: "resolved", resolved_at: resolvedAt, assigned_admin_id: user.id })
+        .eq("id", inquiry.id);
+      if (resolveError) throw resolveError;
+      if (inquiry.submitted_by_user_id) {
+        await supabase.from("notifications").insert({
+          user_id: inquiry.submitted_by_user_id,
+          title: "Inquiry Resolved",
+          message: `Your inquiry about ${inquiry.subject || "SafeDrive"} was marked resolved. Reopen it by asking a new question.`,
+          type: "success",
+          link: "/inquiries",
+        });
+      }
+      await supabase.from("audit_log").insert({
+        user_id: user.id,
+        action: "guest_inquiry_resolved",
+        entity_type: "guest_inquiry",
+        entity_id: inquiry.id,
+      });
+      return jsonResponse({ success: true });
+    }
+
+    if (!inquiryId || !reply || reply.length > 3000) {
+      return jsonResponse({ error: "Inquiry and reply are required" }, 400);
+    }
     if (["resolved", "closed"].includes(inquiry.status)) {
       return jsonResponse({ error: "This inquiry has already been completed" }, 409);
     }
 
-    // The email idempotency key is keyed on inquiry.id alone (not the reply
-    // text). Safe only because this handler 409s above once the inquiry is
-    // resolved/closed, so a second distinct reply can never reach this point.
+    // Record the reply as a thread message first so the email idempotency key
+    // is per-message: each reply in a thread emails exactly once.
+    const { data: threadMessage } = await supabase
+      .from("guest_inquiry_messages")
+      .insert({ inquiry_id: inquiry.id, sender_id: user.id, sender_role: "admin", message: reply })
+      .select("id")
+      .maybeSingle();
+
     const resendResult = await sendGuestInquiryReplyEmail({
       to: inquiry.email,
       name: inquiry.name,
       subject: inquiry.subject,
       reply,
       inquiryId: inquiry.id,
+      messageId: threadMessage?.id,
       baseOrigin: new URL(req.url).origin,
     });
     let deliveryProvider = "resend";
@@ -197,39 +235,49 @@ export default async function handler(req: Request) {
       );
     }
 
-    const resolvedAt = new Date().toISOString();
+    // A reply no longer auto-closes the inquiry - the person can follow up, and
+    // an admin marks it resolved separately. `admin_reply` keeps the latest
+    // reply as a list preview.
+    const repliedAt = new Date().toISOString();
     let { error: updateError } = await supabase
       .from("guest_inquiries")
       .update({
         admin_reply: reply,
-        replied_at: resolvedAt,
-        resolved_at: resolvedAt,
+        replied_at: repliedAt,
         assigned_admin_id: user.id,
-        status: "resolved",
+        status: "in_progress",
       })
       .eq("id", inquiry.id);
 
-    // Keep replies operational while an older live schema is awaiting the
-    // additive Chapter 10 migration. replied_at remains the completion proof.
     if (isMissingResolvedAtColumn(updateError)) {
       ({ error: updateError } = await supabase
         .from("guest_inquiries")
         .update({
           admin_reply: reply,
-          replied_at: resolvedAt,
+          replied_at: repliedAt,
           assigned_admin_id: user.id,
-          status: "resolved",
+          status: "in_progress",
         })
         .eq("id", inquiry.id));
     }
     if (updateError) throw updateError;
+
+    if (inquiry.submitted_by_user_id) {
+      await supabase.from("notifications").insert({
+        user_id: inquiry.submitted_by_user_id,
+        title: "SafeDrive Replied to Your Inquiry",
+        message: `SafeDrive support replied about ${inquiry.subject || "your question"}. Open the thread to read it or follow up.`,
+        type: "info",
+        link: "/inquiries",
+      });
+    }
 
     await supabase.from("audit_log").insert({
       user_id: user.id,
       action: "guest_inquiry_replied",
       entity_type: "guest_inquiry",
       entity_id: inquiry.id,
-      details: { recipient: inquiry.email, previous_status: inquiry.status, delivery_provider: deliveryProvider },
+      details: { recipient: inquiry.email, previous_status: inquiry.status, delivery_provider: deliveryProvider, thread_message_id: threadMessage?.id ?? null },
     });
 
     return jsonResponse({ success: true });

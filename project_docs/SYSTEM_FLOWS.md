@@ -17,14 +17,17 @@ server-side. Route guards in `src/components/*Route.tsx` are cosmetic.
 
 - Public pages: `/`, `/contact`. Approved cars are world-readable via RLS
   (`Cars read access USING (true)`).
-- User / contact inquiry: `/contact` → `POST /api/create-guest-inquiry` (or RPC
-  `submit_guest_inquiry`). Open to anyone (no login needed); an account holder
-  can still use it for a quick one-off question. Validates name 2–120, email
-  format, ≥1 topic from a fixed allow-list, message 10–3000; rate-limits
-  ≥5/email/hour; hashes a request fingerprint with `GUEST_INQUIRY_HASH_SALT` (no
-  raw IP). Inserts to `guest_inquiries` (table name unchanged) with the
-  service-role client. A DB trigger notifies admins. The admin page is labelled
-  **User Inquiries**; a back-and-forth belongs in a **Support Ticket**.
+- User inquiry: `/contact` → `POST /api/create-guest-inquiry`. Open to anyone;
+  a bearer token links the inquiry to the account (`submitted_by_user_id`) and
+  seeds the first `guest_inquiry_messages` row. Validates name 2–120, email
+  format, ≥1 topic, message 5–3000; rate-limits ≥5/email/hour; hashes a request
+  fingerprint with `GUEST_INQUIRY_HASH_SALT`. A DB trigger notifies admins.
+- Threaded inquiry (signed-in): the person reads replies and posts follow-ups at
+  `/inquiries` (`InquiriesPage`). Admin reply = `POST /api/reply-guest-inquiry`
+  `action: reply` (thread message + email + `in_progress`, not resolved) or
+  `action: resolve` (close). Follow-up = `POST /api/inquiry-followup` (RLS lets
+  the owner insert an `inquirer` message; the route re-opens the inquiry and
+  notifies admins). Guests with no account stay a one-email exchange.
 
 ## 2. Registration & auth
 

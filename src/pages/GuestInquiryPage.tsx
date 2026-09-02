@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { ArrowLeft, CheckCircle2, Loader2, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GUEST_INQUIRY_TOPICS } from "@/lib/guestInquiryTopics";
+import { useAuth } from "@/contexts/AuthContext";
 
 const initialForm = {
   name: "",
@@ -18,7 +19,13 @@ const initialForm = {
 };
 
 export default function GuestInquiryPage() {
-  const [form, setForm] = useState(initialForm);
+  const { user, session } = useAuth();
+  const navigate = useNavigate();
+  const [form, setForm] = useState(() => ({
+    ...initialForm,
+    name: (user && (user.user_metadata?.full_name as string)) || "",
+    email: user?.email || "",
+  }));
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -43,12 +50,25 @@ export default function GuestInquiryPage() {
     try {
       const response = await fetch("/api/create-guest-inquiry", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
         body: JSON.stringify(form),
       });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        linked?: boolean;
+      };
       if (!response.ok) throw new Error(payload.error || "Unable to submit inquiry");
 
+      if (payload.linked) {
+        toast.success("Inquiry sent - continue the conversation in My Inquiries");
+        navigate("/inquiries");
+        return;
+      }
       setSubmitted(true);
       setForm(initialForm);
     } catch (error) {
@@ -75,8 +95,10 @@ export default function GuestInquiryPage() {
             <div>
               <h1 className="text-2xl font-bold">Ask SafeDrive a question</h1>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                You do not need an account or identity verification to ask about SafeDrive. Do not include passwords,
-                one-time codes, government ID numbers, or payment credentials.
+                {user
+                  ? "You're signed in - SafeDrive replies in My Inquiries so you can read it in your account and follow up."
+                  : "You do not need an account to ask about SafeDrive; the reply comes to your email."}{" "}
+                Do not include passwords, one-time codes, government ID numbers, or payment credentials.
               </p>
             </div>
           </div>

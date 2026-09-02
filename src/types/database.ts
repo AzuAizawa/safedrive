@@ -880,6 +880,7 @@ export interface Database {
           review_started_at: string | null;
           resolved_at: string | null;
           assigned_admin_id: string | null;
+          submitted_by_user_id: string | null;
           request_fingerprint: string;
           source: string;
           created_at: string;
@@ -899,6 +900,7 @@ export interface Database {
           review_started_at?: string | null;
           resolved_at?: string | null;
           assigned_admin_id?: string | null;
+          submitted_by_user_id?: string | null;
           request_fingerprint: string;
           source?: string;
           created_at?: string;
@@ -918,6 +920,7 @@ export interface Database {
           review_started_at?: string | null;
           resolved_at?: string | null;
           assigned_admin_id?: string | null;
+          submitted_by_user_id?: string | null;
           request_fingerprint?: string;
           source?: string;
           created_at?: string;
@@ -932,6 +935,33 @@ export interface Database {
             referencedColumns: ["id"];
           },
         ];
+      };
+      guest_inquiry_messages: {
+        Row: {
+          id: string;
+          inquiry_id: string;
+          sender_id: string | null;
+          sender_role: "inquirer" | "admin";
+          message: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          inquiry_id: string;
+          sender_id?: string | null;
+          sender_role: "inquirer" | "admin";
+          message: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          inquiry_id?: string;
+          sender_id?: string | null;
+          sender_role?: "inquirer" | "admin";
+          message?: string;
+          created_at?: string;
+        };
+        Relationships: [];
       };
       car_agreement_versions: {
         Row: { id: string; car_id: string; document_id: string | null; version_number: number; storage_path: string; content_sha256: string | null; status: string; uploaded_by: string | null; approved_by: string | null; approved_at: string | null; created_at: string };
@@ -1395,6 +1425,8 @@ export type BookingReview =
   Database["public"]["Tables"]["booking_reviews"]["Row"];
 export type AuditLog = Database["public"]["Tables"]["audit_log"]["Row"];
 export type GuestInquiry = Database["public"]["Tables"]["guest_inquiries"]["Row"];
+export type GuestInquiryMessage =
+  Database["public"]["Tables"]["guest_inquiry_messages"]["Row"];
 export type SecurityLog = Database["public"]["Tables"]["security_logs"]["Row"];
 export type Subscription = Database["public"]["Tables"]["subscriptions"]["Row"];
 export type VerificationImage =

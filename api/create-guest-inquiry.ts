@@ -121,9 +121,9 @@ export default async function handler(req: Request) {
     const subject = topics.join(", ").slice(0, 160);
     const message = normalizeMessage(payload.message);
 
-    if (name.length < 2 || topics.length < 1 || message.length < 10 || !isValidEmail(email)) {
+    if (name.length < 2 || topics.length < 1 || message.length < 5 || !isValidEmail(email)) {
       return jsonResponse(
-        { error: "Enter a valid name and email, select at least one topic, and write a message of at least 10 characters" },
+        { error: "Enter a valid name and email, select at least one topic, and write a message of at least 5 characters" },
         400,
       );
     }
@@ -131,6 +131,18 @@ export default async function handler(req: Request) {
     const supabase = createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    // A signed-in person's inquiry is linked to their account so it becomes a
+    // threaded conversation they can follow up on in /inquiries. Anonymous
+    // visitors have no token and stay a one-email exchange.
+    let submittedByUserId: string | null = null;
+    const bearer = req.headers.get("authorization")?.startsWith("Bearer ")
+      ? req.headers.get("authorization")!.slice("Bearer ".length).trim()
+      : null;
+    if (bearer && serviceRoleKey) {
+      const { data: authData } = await supabase.auth.getUser(bearer);
+      submittedByUserId = authData.user?.id ?? null;
+    }
     const fingerprintSecret = fingerprintSalt || serviceRoleKey;
     const fingerprint = fingerprintSecret
       ? await createFingerprint(req, fingerprintSecret)
@@ -185,20 +197,43 @@ export default async function handler(req: Request) {
       message,
       request_fingerprint: fingerprint,
       source: "public_contact",
+      ...(submittedByUserId ? { submitted_by_user_id: submittedByUserId } : {}),
     };
-    let { error } = await supabase.from("guest_inquiries").insert(inquiryRecord);
+    let inserted: { id: string } | null = null;
+    let { data, error } = await supabase.from("guest_inquiries").insert(inquiryRecord).select("id").single();
+    inserted = data;
 
     // Compatibility for a live database that has not yet applied the Chapter
     // 10 multi-topic ALTER. The complete selected topic list remains in the
     // legacy subject field until the additive migration is applied.
     if (isMissingTopicsColumn(error)) {
       const { topics: _topics, ...legacyInquiryRecord } = inquiryRecord;
-      ({ error } = await supabase.from("guest_inquiries").insert(legacyInquiryRecord));
+      ({ data, error } = await supabase.from("guest_inquiries").insert(legacyInquiryRecord).select("id").single());
+      inserted = data;
     }
 
     if (error) throw error;
 
-    return jsonResponse({ success: true }, 201);
+    // Seed the first thread message so a linked inquiry renders as a
+    // conversation from the start. Best-effort - the table may not exist yet
+    // on a live DB awaiting the migration.
+    if (inserted?.id) {
+      await supabase
+        .from("guest_inquiry_messages")
+        .insert({
+          inquiry_id: inserted.id,
+          sender_id: submittedByUserId,
+          sender_role: "inquirer",
+          message,
+        })
+        .then(({ error: msgError }) => {
+          if (msgError && !["42P01", "PGRST205"].includes(msgError.code || "")) {
+            console.warn("Inquiry seed message failed", msgError.code);
+          }
+        });
+    }
+
+    return jsonResponse({ success: true, id: inserted?.id ?? null, linked: Boolean(submittedByUserId) }, 201);
   } catch (error) {
     console.error("Guest inquiry creation failed", error);
     return jsonResponse({ error: "Unable to submit your inquiry right now" }, 500);

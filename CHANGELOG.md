@@ -26,6 +26,31 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Threaded user inquiries (Phase 7)
+
+- Inquiries are now a conversation with history, not a one-shot email -
+  while staying separate from Support Tickets (which carry a reference
+  number and signal "an issue to fix"). Panel's model.
+- New `guest_inquiry_messages` table (thread) + `guest_inquiries.submitted_by_user_id`.
+  Message minimum lowered 10 -> 5 chars.
+- **Signed-in submitter** (`/contact` sends a bearer token): the inquiry
+  links to the account, seeds a first thread message, and shows in a new
+  **`/inquiries`** page (`InquiriesPage`) - read replies, post follow-ups.
+  Follow-up = `api/inquiry-followup.ts` (RLS-guarded insert + re-open +
+  admin notify). "My Inquiries" added to the account dropdown.
+- **Guest** (no token): unchanged one-email exchange.
+- `api/reply-guest-inquiry.ts`: `action: reply` adds a thread message +
+  emails (idempotency now per-message) + `in_progress` (no longer
+  auto-resolves) + notifies a linked account; `action: resolve` closes it.
+- `AdminGuestInquiriesPage`: inline conversation view, "Reply" + "Mark
+  resolved" buttons, "Account holder - threaded" vs "Guest - email only"
+  badge.
+- **Migration:** `guest_inquiry_messages` + `submitted_by_user_id` + RLS +
+  message CHECK 5-3000 + backfill from existing intake/reply, from the
+  master SQL.
+
+---
+
 ## 2026-09-03 — User Inquiries: drop the standalone "Start review" step
 
 - The "Start review" button was optional (you could reply from `open`
