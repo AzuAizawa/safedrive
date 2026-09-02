@@ -52,7 +52,7 @@ export default async function handler(req: Request) {
 
     const { data: currentSubscription, error: currentError } = await supabase
       .from("subscriptions")
-      .select("id, plan_type")
+      .select("id, plan_type, end_date, cancelled_at")
       .eq("user_id", user.id)
       .eq("status", "active")
       .order("created_at", { ascending: false })
@@ -67,33 +67,32 @@ export default async function handler(req: Request) {
       return jsonResponse({ error: "No active subscription to cancel" }, 404);
     }
 
-    const endDate = new Date().toISOString().slice(0, 10);
+    if (currentSubscription.cancelled_at) {
+      return jsonResponse({
+        success: true,
+        cancelledPlan: currentSubscription.plan_type,
+        endsOn: currentSubscription.end_date,
+        state: "already_cancelled",
+      });
+    }
+
+    // Netflix-style: mark it not-to-renew but keep every perk (slots, status)
+    // until end_date, when getCurrentSubscription's lazy expiry flips it to
+    // "expired" and the slot-limit trigger pauses any over-limit listings.
+    // This plan is a one-time 30-day purchase with no auto-renewal, so there is
+    // nothing else to stop - end_date is left untouched.
+    const cancelledAt = new Date().toISOString();
 
     const { error: updateError } = await supabase
       .from("subscriptions")
-      .update({
-        status: "cancelled",
-        end_date: endDate,
-      })
+      .update({ cancelled_at: cancelledAt })
       .eq("id", currentSubscription.id)
       .eq("user_id", user.id)
-      .eq("status", "active");
+      .eq("status", "active")
+      .is("cancelled_at", null);
 
     if (updateError) {
       throw updateError;
-    }
-
-    // Pull any listings that now exceed the (reduced) slot allowance offline so
-    // a lister cannot keep more live listings than the plan they are paying for.
-    let deactivatedListings = 0;
-    const { data: deactivatedCount, error: deactivateError } = await supabase.rpc(
-      "deactivate_cars_over_slot_limit",
-      { p_owner: user.id },
-    );
-    if (deactivateError) {
-      console.error("Failed to enforce slot limit after cancel:", deactivateError);
-    } else if (typeof deactivatedCount === "number") {
-      deactivatedListings = deactivatedCount;
     }
 
     await supabase.from("audit_log").insert({
@@ -102,17 +101,18 @@ export default async function handler(req: Request) {
       entity_type: "subscription_plan",
       entity_id: currentSubscription.id,
       details: {
-        previous_plan: currentSubscription.plan_type,
-        cancelled_on: endDate,
-        deactivated_listings: deactivatedListings,
+        plan: currentSubscription.plan_type,
+        cancelled_at: cancelledAt,
+        active_until: currentSubscription.end_date,
+        note: "Perks retained until end_date; no auto-renewal.",
       },
     });
 
     return jsonResponse({
       success: true,
       cancelledPlan: currentSubscription.plan_type,
+      endsOn: currentSubscription.end_date,
       state: "cancelled",
-      deactivatedListings,
     });
   } catch (error: unknown) {
     const message =

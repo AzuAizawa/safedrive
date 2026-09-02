@@ -9,6 +9,25 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Subscription: "Cancel" keeps perks until the end date
+
+- The "Switch to Free now" action did an immediate downgrade (forfeiting the
+  paid days) - pointless for a plan that never auto-renews. Replaced with a
+  proper "Cancel Subscription":
+  - `subscriptions.cancelled_at` column; `api/cancel-subscription.ts` now only
+    stamps `cancelled_at` and leaves `status`/`end_date` alone (and no longer
+    deactivates any listings). Perks stay until `end_date`, when the existing
+    lazy expiry flips it to `expired` and the slot-limit trigger pauses any
+    over-limit cars.
+  - `SubscriptionPlansPage`: button relabelled, confirm dialog reworded (no
+    longer destructive), and once cancelled the current-plan card shows
+    "Cancelled · active until <date>" with the header explaining it reverts to
+    Free with no further charge.
+  - `getCurrentSubscription` + `Subscription`/`database.ts` types carry
+    `cancelled_at`.
+
+---
+
 ## 2026-09-02 — Phase C: super-admin consensus for platform configuration
 
 - `platform_settings` changes now go through a proposal + vote flow instead of a

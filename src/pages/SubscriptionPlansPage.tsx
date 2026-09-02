@@ -33,6 +33,7 @@ interface Subscription {
   status: string;
   start_date: string;
   end_date: string | null;
+  cancelled_at: string | null;
 }
 
 const plans = [
@@ -187,24 +188,23 @@ export default function SubscriptionPlansPage() {
       });
       const data = (await response.json()) as {
         error?: string;
-        deactivatedListings?: number;
+        endsOn?: string;
       };
       if (!response.ok) {
         throw new Error(data.error || "Failed to cancel subscription");
       }
-      const paused = data.deactivatedListings ?? 0;
       toast.success(
-        paused > 0
-          ? `Switched to Free (5 slots). ${paused} listing${
-              paused === 1 ? " was" : "s were"
-            } paused - reactivate from My Vehicles after upgrading.`
-          : "Switched to Free. Your account now has 5 vehicle slots.",
+        data.endsOn
+          ? `Subscription cancelled. Your plan stays active until ${
+              formatPlanDate(data.endsOn) ?? data.endsOn
+            }, then reverts to Free. No further charges.`
+          : "Subscription cancelled. It will not renew.",
       );
       setShowCancelConfirm(false);
       await fetchSubscription();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      toast.error("Could not switch to Free", { description: message });
+      toast.error("Could not cancel the subscription", { description: message });
     } finally {
       setCancelling(false);
     }
@@ -275,9 +275,11 @@ export default function SubscriptionPlansPage() {
                 : ""}
             </div>
             <p className="text-sm text-muted-foreground">
-              This is a one-time 30-day payment - there is no auto-renewal and you
-              will not be charged again. When it ends, your account reverts to Free
-              (5 slots) automatically.
+              {currentSub.cancelled_at
+                ? `Cancelled - your ${currentSub.plan_type} slots stay active until ${
+                    formatPlanDate(currentSub.end_date) ?? "the end date"
+                  }, then your account reverts to Free (5 slots). No further charges.`
+                : "This is a one-time 30-day payment - there is no auto-renewal and you will not be charged again. When it ends, your account reverts to Free (5 slots) automatically."}
             </p>
           </div>
         )}
@@ -350,14 +352,21 @@ export default function SubscriptionPlansPage() {
                     <Button variant="outline" className="h-11 w-full" disabled>
                       Current Plan
                     </Button>
-                    <Button
-                      variant="ghost"
-                      className="h-9 w-full text-sm text-muted-foreground hover:text-destructive"
-                      onClick={() => setShowCancelConfirm(true)}
-                      disabled={loading || cancelling}
-                    >
-                      Switch to Free now
-                    </Button>
+                    {currentSub?.cancelled_at ? (
+                      <p className="text-center text-xs text-muted-foreground">
+                        Cancelled · active until{" "}
+                        {formatPlanDate(currentSub.end_date) ?? "the end date"}
+                      </p>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        className="h-9 w-full text-sm text-muted-foreground hover:text-destructive"
+                        onClick={() => setShowCancelConfirm(true)}
+                        disabled={loading || cancelling}
+                      >
+                        Cancel Subscription
+                      </Button>
+                    )}
                   </div>
                 ) : isCurrentPlan ? (
                   <Button variant="outline" className="h-11 w-full" disabled>
@@ -392,17 +401,18 @@ export default function SubscriptionPlansPage() {
 
       <ConfirmDialog
         open={showCancelConfirm}
-        title="Switch to Free now?"
+        title="Cancel subscription?"
         description={
           currentSub && formatPlanDate(currentSub.end_date)
-            ? `Your ${currentSub.plan_type} plan is paid through ${formatPlanDate(
+            ? `Your ${currentSub.plan_type} plan keeps all ${
+                5 + currentSub.additional_slots
+              } slots until ${formatPlanDate(
                 currentSub.end_date,
-              )}. Switching now drops your slot allowance to 5 immediately, with no refund for the remaining days. Any listings beyond the first 5 are paused (not deleted) and can be reactivated after you upgrade again.`
-            : "Switching to Free drops your slot allowance to 5 immediately, with no refund for any remaining paid days. Listings beyond the first 5 are paused until you upgrade again."
+              )}. It simply will not renew and you will not be charged again. On that date your account automatically reverts to Free (5 slots), and any listings beyond 5 are paused (not deleted).`
+            : "Your plan keeps its slots until the end date, then reverts to Free. It will not renew and you will not be charged again."
         }
-        confirmText="Switch to Free"
-        cancelText="Keep my plan"
-        destructive
+        confirmText="Cancel subscription"
+        cancelText="Keep it"
         isLoading={cancelling}
         onCancel={() => setShowCancelConfirm(false)}
         onConfirm={handleCancelSubscription}

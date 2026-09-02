@@ -1134,6 +1134,7 @@ export interface Database {
           provider_payment_id: string | null;
           amount_centavos: number | null;
           paid_at: string | null;
+          cancelled_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -1148,6 +1149,7 @@ export interface Database {
           provider_payment_id?: string | null;
           amount_centavos?: number | null;
           paid_at?: string | null;
+          cancelled_at?: string | null;
           created_at?: string;
         };
         Update: {
@@ -1162,6 +1164,7 @@ export interface Database {
           provider_payment_id?: string | null;
           amount_centavos?: number | null;
           paid_at?: string | null;
+          cancelled_at?: string | null;
           created_at?: string;
         };
         Relationships: [

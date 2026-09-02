@@ -4,7 +4,7 @@ import type { Subscription } from "@/types/database";
 export type ActiveSubscriptionSummary = Pick<
   Subscription,
   "id" | "plan_type" | "additional_slots" | "status" | "start_date" | "end_date"
->;
+> & { cancelled_at: string | null };
 
 const todayString = () => new Date().toISOString().slice(0, 10);
 
@@ -19,7 +19,9 @@ export const getCurrentSubscription = async (
 ): Promise<ActiveSubscriptionSummary | null> => {
   const { data, error } = await supabase
     .from("subscriptions")
-    .select("id, plan_type, additional_slots, status, start_date, end_date")
+    .select(
+      "id, plan_type, additional_slots, status, start_date, end_date, cancelled_at",
+    )
     .eq("user_id", userId)
     .eq("status", "active")
     .order("created_at", { ascending: false })

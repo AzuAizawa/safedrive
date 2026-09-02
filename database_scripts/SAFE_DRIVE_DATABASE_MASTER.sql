@@ -4352,7 +4352,12 @@ alter table public.subscriptions
   add column if not exists provider_checkout_id text,
   add column if not exists provider_payment_id text,
   add column if not exists amount_centavos bigint,
-  add column if not exists paid_at timestamptz;
+  add column if not exists paid_at timestamptz,
+  -- Set by api/cancel-subscription.ts. The plan is a one-time 30-day purchase
+  -- with no auto-renewal, so cancelling only marks intent: status and end_date
+  -- are left alone, every perk is kept until end_date, and the normal lazy
+  -- expiry then flips it to 'expired'.
+  add column if not exists cancelled_at timestamptz;
 
 alter table public.subscriptions
   drop constraint if exists subscriptions_amount_centavos_check;
