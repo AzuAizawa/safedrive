@@ -1667,7 +1667,7 @@ export default function MyBookingsPage() {
                       onClick={() => setOpenBookingId(null)}
                     >
                       <Card
-                        className="my-4 w-full max-w-3xl shadow-2xl"
+                        className="my-4 w-full max-w-3xl shadow-2xl md:max-w-4xl"
                         onClick={(event) => event.stopPropagation()}
                       >
                         <div className="flex items-center justify-between gap-3 border-b border-border/50 px-5 py-3">
@@ -1686,9 +1686,9 @@ export default function MyBookingsPage() {
                             <XCircle className="h-4 w-4" />
                           </Button>
                         </div>
-                        <CardContent className="max-h-[75vh] overflow-y-auto p-5">
-                  <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                    <div className="space-y-2 flex-1">
+                        <CardContent className="max-h-[75vh] space-y-5 overflow-y-auto p-5 [&_.justify-end]:justify-start [&_.text-right]:text-left">
+                  <div className="space-y-3">
+                    <div className="space-y-2">
                       <div className="flex items-center gap-3 flex-wrap">
                         <h3 className="font-semibold text-base">
                           {booking.cars.car_models.car_brands.name}{" "}
@@ -1771,29 +1771,43 @@ export default function MyBookingsPage() {
                         )}
                     </div>
 
-                    <div className="text-right space-y-2 shrink-0">
-                      <p className="text-lg font-bold">
-                        PHP {Number(booking.total_price).toLocaleString()}
-                      </p>
-                      <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
-                        <p>
-                          Down: PHP 
-                          {Number(booking.downpayment_amount).toLocaleString()}
-                        </p>
-                        <p>
-                          Balance: PHP 
-                          {Number(booking.balance_amount).toLocaleString()}
-                        </p>
-                        {Number(booking.cars.security_deposit_amount ?? 0) > 0 ? (
-                          <p>
-                            Security deposit: PHP {Number(booking.cars.security_deposit_amount).toLocaleString()}
-                          </p>
-                        ) : null}
+                    <div className="mt-5 space-y-3 border-t border-border/50 pt-5">
+                      <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Total
+                          </span>
+                          <span className="text-lg font-bold">
+                            PHP {Number(booking.total_price).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <span>
+                            Down:{" "}
+                            <span className="font-medium text-foreground">
+                              PHP {Number(booking.downpayment_amount).toLocaleString()}
+                            </span>
+                          </span>
+                          <span>
+                            Balance:{" "}
+                            <span className="font-medium text-foreground">
+                              PHP {Number(booking.balance_amount).toLocaleString()}
+                            </span>
+                          </span>
+                          {Number(booking.cars.security_deposit_amount ?? 0) > 0 ? (
+                            <span>
+                              Security deposit:{" "}
+                              <span className="font-medium text-foreground">
+                                PHP {Number(booking.cars.security_deposit_amount).toLocaleString()}
+                              </span>
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
 
                       {nextStep ? (
                         <div
-                          className={`mt-3 max-w-[280px] rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${nextStep.tone}`}
+                          className={`mt-3 rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${nextStep.tone}`}
                         >
                           <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
                             Next step
@@ -1805,7 +1819,7 @@ export default function MyBookingsPage() {
 
                       {processGuidance && (
                         <div
-                          className={`mt-3 max-w-[260px] rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${processGuidance.tone}`}
+                          className={`mt-3 max-w-xl rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${processGuidance.tone}`}
                         >
                           <p className="font-semibold">{processGuidance.title}</p>
                           <p className="mt-1">{processGuidance.body}</p>
@@ -1816,7 +1830,7 @@ export default function MyBookingsPage() {
                       )}
 
                       {showTripProgress && (
-                        <div className="mt-3 max-w-[280px] rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed">
+                        <div className="mt-3 max-w-xl rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed">
                           <div className="mb-2 flex items-center justify-between gap-2">
                             <p className="font-semibold text-foreground">Trip progress</p>
                             <span className="text-[10px] text-muted-foreground">
@@ -1848,7 +1862,7 @@ export default function MyBookingsPage() {
 
                       {apparentState === "cancelled" ? (
                         <div
-                          className={`mt-3 max-w-[280px] rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${
+                          className={`mt-3 rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${
                             latestRefund?.status === "completed"
                               ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                               : latestRefund
@@ -1899,7 +1913,7 @@ export default function MyBookingsPage() {
 
                       {latestExtension ? (
                         <div
-                          className={`mt-3 max-w-[260px] rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${getExtensionTone(apparentExtensionStatus ?? latestExtension.status)}`}
+                          className={`mt-3 max-w-xl rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${getExtensionTone(apparentExtensionStatus ?? latestExtension.status)}`}
                         >
                           <p className="font-semibold">Booking extension</p>
                           <p className="mt-1">
@@ -2014,7 +2028,7 @@ export default function MyBookingsPage() {
                       {(apparentState === "awaiting_payment" ||
                         apparentState === "confirmed") && (
                         <div className="mt-2 text-right">
-                          <p className="text-[10px] text-muted-foreground mb-2 max-w-[220px] leading-tight">
+                          <p className="text-[10px] text-muted-foreground mb-2 max-w-md leading-tight">
                             After the lister accepts, you can secure the booking with the reservation downpayment or settle the full amount in one checkout.
                           </p>
                           <div className="flex flex-wrap justify-end gap-2">
@@ -2063,7 +2077,7 @@ export default function MyBookingsPage() {
                             )}
                             Pay Balance PHP {Number(booking.balance_amount).toLocaleString()}
                           </Button>
-                          <p className="text-[10px] text-amber-600 mt-2 max-w-[220px] leading-tight">
+                          <p className="text-[10px] text-amber-600 mt-2 max-w-md leading-tight">
                             Remaining balance must be confirmed before the rental can start.
                           </p>
                         </div>
@@ -2074,7 +2088,7 @@ export default function MyBookingsPage() {
                         <div className="mt-2 space-y-2 text-right">
                           {cancellationGuidance ? (
                             <p
-                              className={`max-w-[280px] rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${cancellationGuidance.tone}`}
+                              className={`max-w-xl rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${cancellationGuidance.tone}`}
                             >
                               {cancellationGuidance.note}
                             </p>
@@ -2200,14 +2214,14 @@ export default function MyBookingsPage() {
                       {(apparentState === "awaiting_payment" ||
                         apparentState === "confirmed") &&
                         booking.paymongo_checkout_id && (
-                          <p className="text-[10px] text-amber-600 mt-2 max-w-[220px] leading-tight">
+                          <p className="text-[10px] text-amber-600 mt-2 max-w-md leading-tight">
                             Checkout created. Your payment stays pending until
                             PayMongo confirms it through the signed webhook.
                           </p>
                         )}
                       {apparentState === "downpayment_paid" &&
                         booking.paymongo_balance_checkout_id && (
-                          <p className="text-[10px] text-amber-600 mt-2 max-w-[220px] leading-tight">
+                          <p className="text-[10px] text-amber-600 mt-2 max-w-md leading-tight">
                             Balance checkout created. The booking becomes fully paid only after the signed PayMongo webhook confirms it.
                           </p>
                         )}
@@ -2220,7 +2234,7 @@ export default function MyBookingsPage() {
                       {/* Confirm Agreement */}
                       {(apparentState === "fully_paid" || apparentState === "active") && booking.renter_arrived_at && !booking.renter_completed && (
                         <div className="mt-2 text-right">
-                          <p className="text-[10px] text-green-500 font-semibold flex flex-col items-end mb-2">
+                          <p className="text-[10px] text-green-500 font-semibold flex flex-col items-start mb-2">
                              <span className="flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Arrived: {new Date(booking.renter_arrived_at).toLocaleTimeString()}</span>
                           </p>
                           {extensionBlocksCompletion ? (
