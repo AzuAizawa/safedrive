@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { ServiceRoleSupabaseClient } from "../lib/supabaseTypes.js";
 import { postCompletedPaymentToLedger, postCompletedRefundToLedger } from "../lib/ledger.js";
 import { finalizeSecurityDepositRelease } from "../lib/securityDeposit.js";
-import { sendPaymentReceiptEmail, sendRefundReceiptEmail } from "../lib/email.js";
+import { sendPaymentReceiptEmail, sendRefundReceiptEmail, sendUserNotificationEmail } from "../lib/email.js";
 
 export const config = {
   runtime: "edge",
@@ -934,6 +934,14 @@ export default async function handler(req: Request) {
           link: "/lister-bookings",
         },
       ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: bookingRecord.owner_id,
+        title: "Booking Fully Paid",
+        message: `The renter paid the remaining balance for this booking. SafeDrive holds the full payment - your share (rental minus the SafeDrive commission) is released to your payout method after the trip is completed.`,
+        link: "/lister-bookings",
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `lister-balance:${bookingId}`,
+      });
 
       await recordWebhookSecurityEvent("success", {
         event_id: event.id,
@@ -1446,6 +1454,14 @@ export default async function handler(req: Request) {
           link: "/lister-bookings",
         },
       ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: bookingRecord.owner_id,
+        title: "Booking Fully Paid",
+        message: `The renter paid this booking in full. SafeDrive holds the payment - your share (rental minus the SafeDrive commission) is released to your payout method after the trip is completed.`,
+        link: "/lister-bookings",
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `lister-fullpayment:${bookingId}`,
+      });
 
       await recordWebhookSecurityEvent("success", {
         event_id: event.id,
@@ -1646,6 +1662,14 @@ export default async function handler(req: Request) {
         link: "/lister-bookings",
       },
     ]);
+    await sendUserNotificationEmail(supabase, {
+      userId: bookingRecord.owner_id,
+      title: "Downpayment Received",
+      message: `The renter's downpayment for this booking was confirmed by PayMongo. SafeDrive holds the payment - your share (the rental amount minus the SafeDrive commission) is released to your payout method after the trip is completed.`,
+      link: "/lister-bookings",
+      baseOrigin: new URL(req.url).origin,
+      eventKey: `lister-downpayment:${bookingId}`,
+    });
 
     await recordWebhookSecurityEvent("success", {
       event_id: event.id,

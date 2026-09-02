@@ -1,6 +1,7 @@
 import { postSimpleBalancedJournal } from "./ledger.js";
 import { processAutomaticPayoutForBooking } from "./payoutAutomation.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
+import { sendUserNotificationEmail } from "./email.js";
 
 const DEFAULT_DEPOSIT_CLAIM_WINDOW_HOURS = 24;
 
@@ -61,6 +62,16 @@ export async function runBookingCompletionSideEffects(
       memo: "Platform commission recognized after both parties completed the trip",
     });
   }
+
+  await sendUserNotificationEmail(supabase, {
+    userId: booking.owner_id,
+    title: "Trip Completed",
+    message:
+      "This booking is now complete. Your payout - the rental amount net of the SafeDrive commission - is being processed to your payout method (after any security-deposit review closes). A separate payout receipt email follows.",
+    link: "/lister-bookings",
+    baseOrigin: options.baseOrigin,
+    eventKey: `lister-trip-completed:${booking.id}`,
+  });
 
   const claimWindowHours = await fetchDepositClaimWindowHours(supabase);
   const claimDeadline = new Date(

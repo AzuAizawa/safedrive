@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { sendUserNotificationEmail } from "./lib/email.js";
 
 export const config = {
   runtime: "edge",
@@ -512,12 +513,21 @@ export default async function handler(req: Request) {
       },
     });
 
+    const requesterLabel = profile.full_name || profile.email || "A renter";
     await supabase.from("notifications").insert({
       user_id: car.owner_id,
       title: "New Booking Request",
-      message: `${profile.full_name || profile.email || "A renter"} requested to book ${vehicleLabel}.`,
+      message: `${requesterLabel} requested to book ${vehicleLabel}.`,
       type: "info",
       link: "/lister-bookings",
+    });
+    await sendUserNotificationEmail(supabase, {
+      userId: car.owner_id,
+      title: "New Booking Request",
+      message: `${requesterLabel} requested to book ${vehicleLabel} for ${startDate.iso} to ${endDate.iso}. Open SafeDrive to accept or decline it within 24 hours - it auto-expires after that.`,
+      link: "/lister-bookings",
+      baseOrigin: new URL(req.url).origin,
+      eventKey: `booking-requested:${bookingId}`,
     });
 
     return jsonResponse({

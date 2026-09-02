@@ -26,6 +26,23 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Lister email notifications for the booking lifecycle
+
+- The lister only got an email on cancellation (and accept/decline, which
+  actually go to the renter). Added `sendUserNotificationEmail` to the
+  lister for:
+  - **New booking request** (`api/create-booking.ts`) - "accept or
+    decline within 24 hours".
+  - **Downpayment / balance / full payment confirmed** (three
+    `api/webhooks/paymongo.ts` paths) - each says SafeDrive holds the
+    payment and releases the lister's share (rental minus commission)
+    after the trip completes, so it is no longer just "the renter paid".
+  - **Trip completed** (`api/lib/bookingCompletion.ts`) - payout is
+    processing, receipt follows.
+- All keyed with an idempotency key; the in-app notification is unchanged.
+
+---
+
 ## 2026-09-03 — Threaded user inquiries (Phase 7)
 
 - Inquiries are now a conversation with history, not a one-shot email -

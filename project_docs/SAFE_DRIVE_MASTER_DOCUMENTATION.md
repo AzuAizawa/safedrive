@@ -152,7 +152,7 @@ The PayMongo wallet visible in the dashboard proves that a test wallet exists; i
 
 ### 3.5 Gmail Apps Script
 
-Resend is the primary transactional mail service for guest replies and return reminders. A deployed Apps Script `/exec` URL remains a legacy fallback only when Resend is not configured. `GMAIL_WEBHOOK_SHARED_SECRET` in SafeDrive must equal the Apps Script property `SAFEDRIVE_WEBHOOK_SECRET`. Email failure leaves a guest inquiry unresolved, while in-app return reminders still remain visible.
+Resend is the primary transactional mail service. It carries payment/refund/payout receipts, inquiry replies, return reminders, and lifecycle notifications to both parties. The lister is emailed on a new booking request, on each confirmed payment (downpayment / balance / full - the message states SafeDrive holds the money and releases the lister's share, net of commission, after completion), on trip completion, on cancellation, and on extension decisions. A deployed Apps Script `/exec` URL remains a legacy fallback only when Resend is not configured. `GMAIL_WEBHOOK_SHARED_SECRET` in SafeDrive must equal the Apps Script property `SAFEDRIVE_WEBHOOK_SECRET`. Every email is keyed with an idempotency key; an in-app notification is always written even if the email fails.
 
 ## 4. Admin Notification Work Center
 
