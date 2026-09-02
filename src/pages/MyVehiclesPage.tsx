@@ -42,6 +42,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { CarBrand, CarModel } from "@/types/database";
+import {
+  PLATE_NUMBER_PATTERN,
+  PLATE_NUMBER_HINT,
+  validatePlateNumber,
+  validateListingPrice,
+} from "@/lib/vehicleValidation";
 
 const MAX_LISTING_PRICE = 100000;
 const MAX_SECURITY_DEPOSIT = 100000;
@@ -476,14 +482,19 @@ export default function MyVehiclesPage() {
       });
       return;
     }
-    
-    const pricePerDay = Number(form.price_per_day);
-    if (!Number.isFinite(pricePerDay) || pricePerDay < 500 || pricePerDay > MAX_LISTING_PRICE) {
-      toast.error("Invalid listing price", {
-        description: `Daily price must be between PHP 500 and PHP ${MAX_LISTING_PRICE.toLocaleString()}.`,
-      });
+
+    const plateError = validatePlateNumber(form.plate_number);
+    if (plateError) {
+      toast.error("Invalid plate number", { description: plateError });
       return;
     }
+
+    const priceError = validateListingPrice(form.price_per_day);
+    if (priceError) {
+      toast.error("Invalid listing price", { description: priceError });
+      return;
+    }
+    const pricePerDay = Number(form.price_per_day);
 
     const securityDepositAmount =
       form.security_deposit_amount === ""
@@ -669,13 +680,12 @@ export default function MyVehiclesPage() {
 
   const handleUpdateVehicle = async () => {
     if (!editVehicle || !editPrice) return;
-    const nextPrice = Number(editPrice);
-    if (!Number.isFinite(nextPrice) || nextPrice < 500 || nextPrice > MAX_LISTING_PRICE) {
-      toast.error("Invalid listing price", {
-        description: `Daily price must be between PHP 500 and PHP ${MAX_LISTING_PRICE.toLocaleString()}.`,
-      });
+    const editPriceError = validateListingPrice(editPrice);
+    if (editPriceError) {
+      toast.error("Invalid listing price", { description: editPriceError });
       return;
     }
+    const nextPrice = Number(editPrice);
 
     const nextSecurityDeposit =
       editSecurityDeposit === "" ? 0 : Number(editSecurityDeposit);
@@ -1117,23 +1127,38 @@ export default function MyVehiclesPage() {
                     }}
                     onBlur={() => checkPlateNumber(form.plate_number)}
                     placeholder="e.g. ABC 1234 or ABC-1234"
-                    title="Philippine Plate Number format (e.g. ABC-1234 or ABC 1234)"
-                    pattern="^[A-Z]{3} ?-?[0-9]{3,4}$"
+                    title={PLATE_NUMBER_HINT}
+                    pattern={PLATE_NUMBER_PATTERN}
                     required
                   />
-                  {plateCheck.message && (
-                    <p
-                      className={`text-xs font-medium ${
-                        plateCheck.status === "taken"
-                          ? "text-red-500"
-                          : plateCheck.status === "available"
-                            ? "text-green-600"
-                            : "text-muted-foreground"
-                      }`}
-                    >
-                      {plateCheck.message}
-                    </p>
-                  )}
+                  {(() => {
+                    const formatError = form.plate_number
+                      ? validatePlateNumber(form.plate_number)
+                      : null;
+                    if (formatError) {
+                      return (
+                        <p className="text-xs font-medium text-red-500">
+                          {formatError}
+                        </p>
+                      );
+                    }
+                    if (plateCheck.message) {
+                      return (
+                        <p
+                          className={`text-xs font-medium ${
+                            plateCheck.status === "taken"
+                              ? "text-red-500"
+                              : plateCheck.status === "available"
+                                ? "text-green-600"
+                                : "text-muted-foreground"
+                          }`}
+                        >
+                          {plateCheck.message}
+                        </p>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
                 <div className="space-y-2">
                   <Label>Mileage (km)</Label>
@@ -1174,6 +1199,12 @@ export default function MyVehiclesPage() {
                     className="pl-12 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                   </div>
+                  {form.price_per_day !== "" &&
+                    validateListingPrice(form.price_per_day) && (
+                      <p className="text-xs font-medium text-red-500">
+                        {validateListingPrice(form.price_per_day)}
+                      </p>
+                    )}
                 </div>
                 <div className="space-y-2">
                   <Label>Security Deposit (PHP)</Label>
@@ -1791,6 +1822,11 @@ export default function MyVehiclesPage() {
                         className="pl-12"
                       />
                     </div>
+                    {editPrice !== "" && validateListingPrice(editPrice) && (
+                      <p className="text-xs font-medium text-red-500">
+                        {validateListingPrice(editPrice)}
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Security Deposit (PHP)</Label>
