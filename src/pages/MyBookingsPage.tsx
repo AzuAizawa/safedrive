@@ -29,6 +29,10 @@ import { formatDayCount } from "@/lib/formatCount";
 import { paginateItems } from "@/lib/pagination";
 import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
 import {
+  DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+  fetchPlatformPolicyTimings,
+} from "@/lib/platformSettings";
+import {
   Calendar,
   Clock,
   CheckCircle2,
@@ -219,6 +223,9 @@ export default function MyBookingsPage() {
   const [documentUrls, setDocumentUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [arrivalLeadHours, setArrivalLeadHours] = useState(
+    DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+  );
   const [payingFor, setPayingFor] = useState<string | null>(null);
   const [selectedOwner, setSelectedOwner] = useState<BookingRow | null>(null);
   const [ratingBooking, setRatingBooking] = useState<BookingRow | null>(null);
@@ -248,6 +255,16 @@ export default function MyBookingsPage() {
     }, 60_000);
 
     return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetchPlatformPolicyTimings().then((timings) => {
+      if (active) setArrivalLeadHours(timings.arrivalCheckinLeadHours);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -1600,6 +1617,15 @@ export default function MyBookingsPage() {
             const showTripProgress = ["fully_paid", "active", "completed"].includes(apparentState);
             const isOpen = openBookingId === booking.id;
             const carTitle = `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name}`;
+            const bookingPickupMs = getBookingPickupMs(booking);
+            const arrivalCheckinOpensMs =
+              bookingPickupMs === null
+                ? null
+                : bookingPickupMs - arrivalLeadHours * 60 * 60 * 1000;
+            const arrivalCheckinOpen =
+              arrivalCheckinOpensMs === null || clockNow >= arrivalCheckinOpensMs;
+            const tripHasStarted =
+              bookingPickupMs === null || clockNow >= bookingPickupMs;
 
             return (
               <div key={booking.id} className="space-y-4">
@@ -2112,8 +2138,21 @@ export default function MyBookingsPage() {
                         </div>
                       )}
 
-                      {/* Arrival Phase */}
-                      {(apparentState === "fully_paid" || apparentState === "active") && !booking.renter_arrived_at && (
+                      {/* Arrival Phase - opens only near the booked pickup time */}
+                      {(apparentState === "fully_paid" || apparentState === "active") &&
+                        !booking.renter_arrived_at &&
+                        !arrivalCheckinOpen &&
+                        arrivalCheckinOpensMs !== null && (
+                          <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
+                            <p className="font-semibold text-foreground">Arrival check-in not open yet</p>
+                            <p className="mt-1">
+                              Opens {arrivalLeadHours} hour{arrivalLeadHours === 1 ? "" : "s"} before pickup -{" "}
+                              {format(new Date(arrivalCheckinOpensMs), "MMM d, yyyy h:mm a")}.
+                            </p>
+                          </div>
+                        )}
+
+                      {(apparentState === "fully_paid" || apparentState === "active") && !booking.renter_arrived_at && arrivalCheckinOpen && (
                         <div className="mt-2 text-right">
                           {Number(booking.cars.security_deposit_amount ?? 0) > 0 && (
                             <div className="mb-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-left text-xs">
@@ -2240,6 +2279,11 @@ export default function MyBookingsPage() {
                           {extensionBlocksCompletion ? (
                             <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
                               Complete or cancel the extension request before marking the agreement done.
+                            </div>
+                          ) : !tripHasStarted && bookingPickupMs !== null ? (
+                            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
+                              You can finish the trip once it starts - pickup is{" "}
+                              {format(new Date(bookingPickupMs), "MMM d, yyyy h:mm a")}.
                             </div>
                           ) : (
                             <div className="flex flex-wrap justify-end gap-2">

@@ -9,6 +9,32 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Trip lifecycle time gates + 3 new configurable timings (Phase 1)
+
+- The arrival check-in and "Finish Trip" buttons had no clock gate, so a
+  Sept-4 booking could be arrived, finished, and completed on Sept 3.
+  - `api/booking-action.ts` now rejects `arrive` before
+    `arrival_checkin_lead_hours` (default 3 h) ahead of the scheduled pickup,
+    and rejects `complete` before the pickup datetime.
+  - `MyBookingsPage` / `ListerBookingsPage` show "check-in opens ..." /
+    "finish once it starts ..." notes instead of the buttons until the gate
+    opens; both fetch the lead-hours value live.
+- Three lifecycle timings are now consensus-configurable in
+  `platform_settings` (`/admin/platform-settings`): `arrival_checkin_lead_hours`
+  (0-48), `deposit_claim_window_hours` (1-168), `lister_completion_timeout_hours`
+  (1-72). Read **live**, never snapshotted per booking. Only the first is wired
+  in this phase; the other two are consumed in Phase 2 (return/deposit flow).
+- Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (columns, checks,
+  `validate_platform_setting_change` keys), `src/types/database.ts`,
+  `src/lib/platformSettings.ts` (`fetchPlatformPolicyTimings`),
+  `src/pages/admin/AdminPlatformSettingsPage.tsx`, `api/booking-action.ts`,
+  `src/pages/MyBookingsPage.tsx`, `src/pages/ListerBookingsPage.tsx`, master doc,
+  smoke-check markers.
+- **Migration:** apply the new `platform_settings` columns/constraints and the
+  updated `validate_platform_setting_change` function from the master SQL.
+
+---
+
 ## 2026-09-02 — Payouts are in-app only; payout receipt shows the destination
 
 - Removed the out-of-app manual payout path. The Admin > Payouts screen had a

@@ -53,6 +53,70 @@ export const normalizeDownpaymentRate = (
   return rate;
 };
 
+// Operational lifecycle timings. Read live (never snapshotted per booking).
+export const DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS = 3;
+export const DEFAULT_DEPOSIT_CLAIM_WINDOW_HOURS = 24;
+export const DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS = 18;
+
+const clampWholeHours = (
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return fallback;
+  return Math.round(parsed);
+};
+
+export type PlatformPolicyTimings = {
+  arrivalCheckinLeadHours: number;
+  depositClaimWindowHours: number;
+  listerCompletionTimeoutHours: number;
+};
+
+export const fetchPlatformPolicyTimings = async (): Promise<PlatformPolicyTimings> => {
+  const fallback: PlatformPolicyTimings = {
+    arrivalCheckinLeadHours: DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+    depositClaimWindowHours: DEFAULT_DEPOSIT_CLAIM_WINDOW_HOURS,
+    listerCompletionTimeoutHours: DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS,
+  };
+
+  const { data, error } = await supabase
+    .from("platform_settings")
+    .select(
+      "arrival_checkin_lead_hours, deposit_claim_window_hours, lister_completion_timeout_hours",
+    )
+    .eq("id", "default")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load platform policy timings:", error);
+    return fallback;
+  }
+
+  return {
+    arrivalCheckinLeadHours: clampWholeHours(
+      data?.arrival_checkin_lead_hours,
+      0,
+      48,
+      DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+    ),
+    depositClaimWindowHours: clampWholeHours(
+      data?.deposit_claim_window_hours,
+      1,
+      168,
+      DEFAULT_DEPOSIT_CLAIM_WINDOW_HOURS,
+    ),
+    listerCompletionTimeoutHours: clampWholeHours(
+      data?.lister_completion_timeout_hours,
+      1,
+      72,
+      DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS,
+    ),
+  };
+};
+
 export type PlatformPricingSettings = {
   commissionRate: number;
   processingFeeRate: number;

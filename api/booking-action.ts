@@ -193,6 +193,31 @@ const clampNumber = (value: unknown, min: number, max: number, fallback: number)
   return parsed;
 };
 
+const DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS = 3;
+
+// Live (never snapshotted) - how early before pickup the arrival check-in opens.
+const fetchArrivalCheckinLeadHours = async (
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+) => {
+  const { data } = await supabase
+    .from("platform_settings")
+    .select("arrival_checkin_lead_hours")
+    .eq("id", "default")
+    .maybeSingle();
+  return Math.round(
+    clampNumber(data?.arrival_checkin_lead_hours, 0, 48, DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS),
+  );
+};
+
+const formatManilaStamp = (ms: number) =>
+  new Date(ms).toLocaleString("en-PH", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
 const getBookingPickupMs = (booking: BookingRecord) => {
   const [year, month, day] = (booking.start_date || "")
     .split("-")
@@ -908,6 +933,20 @@ export default async function handler(req: Request) {
         );
       }
 
+      const pickupMs = getBookingPickupMs(bookingRecord);
+      if (pickupMs !== null) {
+        const leadHours = await fetchArrivalCheckinLeadHours(supabase);
+        const opensAtMs = pickupMs - leadHours * 60 * 60 * 1000;
+        if (Date.now() < opensAtMs) {
+          return jsonResponse(
+            {
+              error: `Arrival check-in opens ${leadHours} hour${leadHours === 1 ? "" : "s"} before pickup (from ${formatManilaStamp(opensAtMs)}).`,
+            },
+            409,
+          );
+        }
+      }
+
       const { data: requiredDeposit, error: requiredDepositError } = await supabase
         .from("security_deposits")
         .select("id, status")
@@ -1129,6 +1168,16 @@ export default async function handler(req: Request) {
       ) {
         return jsonResponse(
           { error: "This booking is not ready for completion" },
+          409,
+        );
+      }
+
+      const completePickupMs = getBookingPickupMs(bookingRecord);
+      if (completePickupMs !== null && Date.now() < completePickupMs) {
+        return jsonResponse(
+          {
+            error: `You can't finish a trip before it starts. Pickup is ${formatManilaStamp(completePickupMs)}.`,
+          },
           409,
         );
       }

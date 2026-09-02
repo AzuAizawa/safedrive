@@ -255,6 +255,15 @@ Location is optional evidence. If a participant actively consents, the browser m
 
 The photos use a private `trip-condition-evidence` bucket. Only participants and authorized admins may read them. Each participant can submit one report per booking phase; reports are not silently overwritten.
 
+### 8.1 Lifecycle time gates
+
+The trip lifecycle is gated against the clock so it cannot be completed before it starts:
+
+- **Arrival check-in** opens only from `arrival_checkin_lead_hours` before the scheduled pickup datetime (default 3 h). `api/booking-action.ts` rejects an earlier `arrive` call; both dashboards show a "check-in opens ..." note instead of the button.
+- **Completion** (`Finish Trip`) is rejected before the scheduled pickup datetime - a trip that has not started cannot be finished. Early checkout is allowed any time from pickup onward.
+
+`arrival_checkin_lead_hours` is one of three configurable lifecycle timings in `platform_settings` (`arrival_checkin_lead_hours`, `deposit_claim_window_hours`, `lister_completion_timeout_hours`). Unlike the financial terms they are read **live**, not snapshotted per booking, and are changed through the same multi-super-admin consensus flow (`/admin/platform-settings`).
+
 ## 9. Security Deposit: Option B
 
 SafeDrive uses a **separate refundable deposit**, not a hidden deduction from rental income. This is simpler to explain and reconcile than mixing the deposit with rental revenue.
@@ -385,7 +394,7 @@ Do not run Chapters 1 or 2 merely to obtain Chapter 14. Chapter 1 contains histo
 - `npm run check:live-supabase` passed against the intended project.
 - The required operational, agreement, trip, deposit, retention, ledger, and reconciliation relations are readable through the server verifier.
 - All required private storage buckets exist and remain private.
-- `platform_settings` contains ledger activation and both renter-processing-fee controls.
+- `platform_settings` contains ledger activation, both renter-processing-fee controls, the configurable downpayment/refund terms, and the three lifecycle timings (`arrival_checkin_lead_hours`, `deposit_claim_window_hours`, `lister_completion_timeout_hours`).
 - All nine required financial accounts are seeded.
 - No active booking overlap, duplicate active payout, duplicate completed checkout event, duplicate active subscription, duplicate open deposit claim, or unbalanced queried ledger journal was found.
 - `npm run check:live-roles` passed all 12 ordinary-user, admin, and super-admin authorization checks and removed its three temporary identities.

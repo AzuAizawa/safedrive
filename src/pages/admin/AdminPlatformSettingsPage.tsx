@@ -25,6 +25,9 @@ type SettingsRow = {
   downpayment_rate: number;
   refund_full_hours: number;
   refund_late_renter_percent: number;
+  arrival_checkin_lead_hours: number;
+  deposit_claim_window_hours: number;
+  lister_completion_timeout_hours: number;
 };
 
 type ChangeRequest = {
@@ -121,6 +124,45 @@ const FIELDS: Record<
     },
     formatStored: (s) => `${Math.round(s * 100) / 100}%`,
   },
+  arrival_checkin_lead_hours: {
+    label: "Arrival check-in lead time",
+    hint: "How early before pickup the arrival check-in opens (0-48 hours). Applies live.",
+    unit: "hours",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return Number.isFinite(n) && n >= 0 && n <= 48 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} h`,
+  },
+  deposit_claim_window_hours: {
+    label: "Security deposit claim window",
+    hint: "Hours the lister has to file a deposit claim after completion (1-168). Applies live.",
+    unit: "hours",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return Number.isFinite(n) && n >= 1 && n <= 168 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} h`,
+  },
+  lister_completion_timeout_hours: {
+    label: "Lister completion timeout",
+    hint: "After the renter completes, hours to wait for the lister before auto-completing (1-72). Applies live.",
+    unit: "hours",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return Number.isFinite(n) && n >= 1 && n <= 72 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} h`,
+  },
 };
 
 const FIELD_KEYS = Object.keys(FIELDS) as (keyof SettingsRow)[];
@@ -162,7 +204,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent",
+          "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, deposit_claim_window_hours, lister_completion_timeout_hours",
         )
         .eq("id", "default")
         .maybeSingle(),
@@ -490,8 +532,9 @@ export default function AdminPlatformSettingsPage() {
                 <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                 <p>
                   Existing bookings keep the downpayment and cancellation terms
-                  they were created under - a change here only affects new
-                  bookings.
+                  they were created under - those only affect new bookings. The
+                  three lifecycle timings (arrival lead, deposit claim window,
+                  lister completion timeout) apply live to every booking.
                 </p>
               </div>
             </CardContent>

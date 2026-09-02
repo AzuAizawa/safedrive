@@ -1065,6 +1065,9 @@ export interface Database {
           downpayment_rate: number;
           refund_full_hours: number;
           refund_late_renter_percent: number;
+          arrival_checkin_lead_hours: number;
+          deposit_claim_window_hours: number;
+          lister_completion_timeout_hours: number;
           created_at: string;
           updated_at: string;
         };
@@ -1077,6 +1080,9 @@ export interface Database {
           downpayment_rate?: number;
           refund_full_hours?: number;
           refund_late_renter_percent?: number;
+          arrival_checkin_lead_hours?: number;
+          deposit_claim_window_hours?: number;
+          lister_completion_timeout_hours?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -1089,6 +1095,9 @@ export interface Database {
           downpayment_rate?: number;
           refund_full_hours?: number;
           refund_late_renter_percent?: number;
+          arrival_checkin_lead_hours?: number;
+          deposit_claim_window_hours?: number;
+          lister_completion_timeout_hours?: number;
           created_at?: string;
           updated_at?: string;
         };

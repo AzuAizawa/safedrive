@@ -4471,6 +4471,38 @@ alter table public.bookings
   add column if not exists refund_full_hours_snapshot integer,
   add column if not exists refund_late_renter_percent_snapshot numeric;
 
+-- Configurable operational timings for the trip lifecycle. Unlike the financial
+-- terms above these are NOT snapshotted per booking - they are read live:
+--   arrival_checkin_lead_hours       how early before pickup the arrival
+--                                    check-in opens (api/booking-action.ts).
+--   deposit_claim_window_hours       how long the lister has to file a
+--                                    security-deposit claim after completion,
+--                                    read when api/booking-action.ts sets
+--                                    security_deposits.claim_deadline.
+--   lister_completion_timeout_hours  after the renter completes, how long the
+--                                    system waits for the lister before
+--                                    auto-completing (api/expire-booking-deadlines.ts).
+alter table public.platform_settings
+  add column if not exists arrival_checkin_lead_hours integer not null default 3,
+  add column if not exists deposit_claim_window_hours integer not null default 24,
+  add column if not exists lister_completion_timeout_hours integer not null default 18;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_arrival_checkin_lead_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_arrival_checkin_lead_hours_check
+  check (arrival_checkin_lead_hours >= 0 and arrival_checkin_lead_hours <= 48);
+alter table public.platform_settings
+  drop constraint if exists platform_settings_deposit_claim_window_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_deposit_claim_window_hours_check
+  check (deposit_claim_window_hours >= 1 and deposit_claim_window_hours <= 168);
+alter table public.platform_settings
+  drop constraint if exists platform_settings_lister_completion_timeout_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_lister_completion_timeout_hours_check
+  check (lister_completion_timeout_hours >= 1 and lister_completion_timeout_hours <= 72);
+
 -- Multi-super-admin consensus for platform_settings changes. A super admin
 -- proposes; it needs ceil(2N/3) approvals (N = current super-admin count,
 -- re-checked on every vote) before it is applied. One pending proposal at a
@@ -4548,6 +4580,12 @@ begin
       if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
     elsif k = 'refund_late_renter_percent' then
       if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'deposit_claim_window_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'deposit_claim_window_hours must be a whole number 1-168'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
     else
       raise exception 'Setting % is not configurable', k;
     end if;

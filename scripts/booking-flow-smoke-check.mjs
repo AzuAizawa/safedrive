@@ -39,6 +39,18 @@ const checks = [
       "Claim the cancellable booking row before starting refund work",
       "This booking changed state before arrival could be recorded",
       "This booking changed state before completion could be recorded",
+      "fetchArrivalCheckinLeadHours",
+      "Arrival check-in opens",
+      "You can't finish a trip before it starts",
+    ],
+  },
+  {
+    file: "src/pages/admin/AdminPlatformSettingsPage.tsx",
+    markers: [
+      "arrival_checkin_lead_hours",
+      "deposit_claim_window_hours",
+      "lister_completion_timeout_hours",
+      "apply live to every booking",
     ],
   },
   {

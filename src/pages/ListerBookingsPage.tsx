@@ -54,6 +54,25 @@ import {
 import { toast } from "sonner";
 import { format } from "date-fns";
 import type { Payment } from "@/types/database";
+import {
+  DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+  fetchPlatformPolicyTimings,
+} from "@/lib/platformSettings";
+
+const getBookingPickupMs = (booking: {
+  start_date: string;
+  pickup_time: string | null;
+}): number | null => {
+  const [year, month, day] = (booking.start_date || "")
+    .split("-")
+    .map((part) => Number(part));
+  const [hour, minute] = (booking.pickup_time || "09:00")
+    .split(":")
+    .map((part) => Number(part));
+  if (!year || !month || !day) return null;
+  // start_date is a plain calendar date; treat pickup as Manila local time.
+  return Date.UTC(year, month - 1, day, hour || 0, minute || 0) - 8 * 60 * 60 * 1000;
+};
 
 interface ListerBooking {
   id: string;
@@ -202,6 +221,9 @@ export default function ListerBookingsPage() {
   const [verificationImageUrls, setVerificationImageUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [arrivalLeadHours, setArrivalLeadHours] = useState(
+    DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+  );
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedRenter, setSelectedRenter] = useState<ListerBooking | null>(
     null,
@@ -238,6 +260,16 @@ export default function ListerBookingsPage() {
     }, 60_000);
 
     return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetchPlatformPolicyTimings().then((timings) => {
+      if (active) setArrivalLeadHours(timings.arrivalCheckinLeadHours);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -2261,6 +2293,15 @@ export default function ListerBookingsPage() {
                 review.reviewer_role === "owner",
             );
             const showTripProgress = ["fully_paid", "active", "completed"].includes(apparentState);
+            const bookingPickupMs = getBookingPickupMs(b);
+            const arrivalCheckinOpensMs =
+              bookingPickupMs === null
+                ? null
+                : bookingPickupMs - arrivalLeadHours * 60 * 60 * 1000;
+            const arrivalCheckinOpen =
+              arrivalCheckinOpensMs === null || clockNow >= arrivalCheckinOpensMs;
+            const tripHasStarted =
+              bookingPickupMs === null || clockNow >= bookingPickupMs;
             const nextStep = getNextStep(
               b,
               apparentState,
@@ -2533,8 +2574,21 @@ export default function ListerBookingsPage() {
                         </div>
                       )}
 
-                      {/* Arrival Phase */}
-                      {(apparentState === "fully_paid" || apparentState === "active") && !b.lister_arrived_at && (
+                      {/* Arrival Phase - opens only near the booked pickup time */}
+                      {(apparentState === "fully_paid" || apparentState === "active") &&
+                        !b.lister_arrived_at &&
+                        !arrivalCheckinOpen &&
+                        arrivalCheckinOpensMs !== null && (
+                          <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
+                            <p className="font-semibold text-foreground">Arrival check-in not open yet</p>
+                            <p className="mt-1">
+                              Opens {arrivalLeadHours} hour{arrivalLeadHours === 1 ? "" : "s"} before pickup -{" "}
+                              {format(new Date(arrivalCheckinOpensMs), "MMM d, yyyy h:mm a")}.
+                            </p>
+                          </div>
+                        )}
+
+                      {(apparentState === "fully_paid" || apparentState === "active") && !b.lister_arrived_at && arrivalCheckinOpen && (
                         <div className="mt-2 text-right">
                           {Number(b.cars.security_deposit_amount ?? 0) > 0 && (
                             <div className="mb-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-left text-xs">
@@ -2663,6 +2717,11 @@ export default function ListerBookingsPage() {
                           {extensionBlocksCompletion ? (
                             <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
                               Complete or cancel the extension request before marking the agreement done.
+                            </div>
+                          ) : !tripHasStarted && bookingPickupMs !== null ? (
+                            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
+                              You can finish the trip once it starts - pickup is{" "}
+                              {format(new Date(bookingPickupMs), "MMM d, yyyy h:mm a")}.
                             </div>
                           ) : (
                             <div className="flex flex-wrap justify-end gap-2">
