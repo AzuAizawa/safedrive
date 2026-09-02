@@ -68,12 +68,21 @@ export default async function handler(req: Request) {
       if (!isLister || deposit.status !== "return_review") return respond({ error: "A claim may only be submitted by the lister during return review" }, 409);
       if (!deposit.claim_deadline || new Date(deposit.claim_deadline).getTime() < Date.now()) return respond({ error: "The deposit claim window has ended" }, 409);
       if (!Number.isInteger(amount) || amount <= 0 || amount > Number(deposit.amount_centavos) || reason.length < 10) return respond({ error: "Enter a supported claim amount and at least 10 characters of explanation" }, 400);
-      const { data: returnReport } = await supabase.from("trip_condition_reports").select("id, submitted_at, evidence_waived, trip_condition_photos(category, storage_path, captured_at)").eq("booking_id", payload.bookingId).eq("reporter_id", user.id).eq("phase", "return").maybeSingle();
-      if (!returnReport) return respond({ error: "Submit your return condition report and required photos before making a deposit claim" }, 409);
-      const claimPhotoCategories = new Set((returnReport.trip_condition_photos ?? []).map((p: { category: string }) => p.category));
+      // To claim, the lister must have documented BOTH ends themselves: a
+      // complete pickup ("before") report and a complete return ("after")
+      // report. The return report is otherwise optional for the lister, but it
+      // is the price of raising a damage claim.
       const claimRequired = ["front", "back", "odometer", "fuel_or_battery"];
-      if (returnReport.evidence_waived || claimRequired.some((c) => !claimPhotoCategories.has(c))) {
-        return respond({ error: "A deposit claim needs a complete return condition report with the required photos - you cannot claim on a waived or incomplete report." }, 409);
+      const isCompleteReport = (report: { evidence_waived?: boolean | null; trip_condition_photos?: Array<{ category: string }> | null } | null) => {
+        if (!report || report.evidence_waived) return false;
+        const cats = new Set((report.trip_condition_photos ?? []).map((p) => p.category));
+        return claimRequired.every((c) => cats.has(c));
+      };
+      const { data: claimReports } = await supabase.from("trip_condition_reports").select("id, phase, submitted_at, evidence_waived, trip_condition_photos(category, storage_path, captured_at)").eq("booking_id", payload.bookingId).eq("reporter_id", user.id).in("phase", ["pickup", "return"]);
+      const pickupReport = (claimReports ?? []).find((r) => r.phase === "pickup") ?? null;
+      const returnReport = (claimReports ?? []).find((r) => r.phase === "return") ?? null;
+      if (!pickupReport || !returnReport || !isCompleteReport(pickupReport) || !isCompleteReport(returnReport)) {
+        return respond({ error: "A deposit claim needs your own complete pickup AND return condition reports (all required photos, not waived)." }, 409);
       }
       const evidence = { return_report_id: returnReport.id, submitted_at: returnReport.submitted_at, photos: returnReport.trip_condition_photos || [] };
       const { data: claim, error } = await supabase.from("security_deposit_claims").insert({ security_deposit_id: deposit.id, requested_by: user.id, amount_centavos: amount, reason, evidence }).select("id").single();

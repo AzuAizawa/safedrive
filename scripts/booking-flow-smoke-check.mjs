@@ -96,9 +96,19 @@ const checks = [
       "evidenceWaived",
       "optionalReading",
       "missing_photo_categories",
+      "photosRequiredForRole",
+      'payload.phase === "pickup" && reporterRole === "lister"',
     ],
     absentMarkers: [
       '"front", "back", "left", "right", "interior", "odometer", "fuel_or_battery"',
+    ],
+  },
+  {
+    file: "api/security-deposit-action.ts",
+    markers: [
+      "lister_confirm_return",
+      "your own complete pickup AND return condition reports",
+      "isCompleteReport",
     ],
   },
   {
@@ -111,10 +121,20 @@ const checks = [
   {
     file: "src/pages/TripConditionReportPage.tsx",
     markers: [
-      "Required photos (4)",
       "optionalPhotos",
       "Submit without the",
       "evidenceWaived",
+      "photosRequired",
+      "This report is optional for you",
+    ],
+  },
+  {
+    file: "api/booking-action.ts",
+    markers: [
+      "Handover Confirmed by Lister",
+      "The lister owns the \"before\" evidence",
+      "Asymmetric evidence: the lister must have filed the pickup",
+      'const requiredReportPhase = renter ? "return" : "pickup"',
     ],
   },
   {

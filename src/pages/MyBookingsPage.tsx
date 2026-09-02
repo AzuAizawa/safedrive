@@ -2163,8 +2163,17 @@ export default function MyBookingsPage() {
                               </Button>
                             </div>
                           )}
-                          <p className="mb-2 text-xs font-medium text-foreground">I Have Arrived</p>
-                          <Button size="sm" variant="outline" className="mb-2" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>Complete pickup report first</Button>
+                          <p className="mb-2 text-xs font-medium text-foreground">
+                            {booking.lister_arrived_at
+                              ? "The lister confirmed the handover - confirm you have the car"
+                              : "Confirm you have the car"}
+                          </p>
+                          {!booking.lister_arrived_at && (
+                            <p className="mb-2 text-[10px] text-muted-foreground leading-tight">
+                              The lister confirms the handover first. You can also confirm now if you have the car.
+                            </p>
+                          )}
+                          <Button size="sm" variant="outline" className="mb-2" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>Add pickup photos (optional)</Button>
                           <ArrivalPhotoCapture
                             loading={payingFor === booking.id}
                             disabled={payingFor === booking.id || (Number(booking.cars.security_deposit_amount ?? 0) > 0 && getSecurityDepositStatus(booking) !== "paid")}
@@ -2174,7 +2183,7 @@ export default function MyBookingsPage() {
                             onPhotoReady={(file) => handleArriveWithPhoto(booking.id, file)}
                           />
                           <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                            The required pickup report protects both parties. Arrival location remains optional and is stored only with your consent.
+                            Your own pickup photos are optional - the lister files the "before" report. Arrival location is optional and stored only with your consent.
                           </p>
                         </div>
                       )}
@@ -2286,23 +2295,28 @@ export default function MyBookingsPage() {
                               {format(new Date(bookingPickupMs), "MMM d, yyyy h:mm a")}.
                             </div>
                           ) : (
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>Pickup report</Button>
-                              <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/return`)}>Return report</Button>
-                              <Button size="sm" variant="outline" onClick={() => navigate(`/security-deposit/${booking.id}`)}>Deposit</Button>
-                              <Button
-                                size="sm"
-                                onClick={() => handleComplete(booking)}
-                                disabled={payingFor === booking.id}
-                                className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
-                              >
-                                {payingFor === booking.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                )}
-                                Finish Trip
-                              </Button>
+                            <div className="space-y-1.5">
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/return`)}>Return report (required)</Button>
+                                <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>Pickup photos (optional)</Button>
+                                <Button size="sm" variant="outline" onClick={() => navigate(`/security-deposit/${booking.id}`)}>Deposit</Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleComplete(booking)}
+                                  disabled={payingFor === booking.id}
+                                  className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
+                                >
+                                  {payingFor === booking.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                  )}
+                                  Finish Trip
+                                </Button>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground text-right leading-tight">
+                                As the renter you must submit the return ("after") report with photos. Your pickup photos are optional.
+                              </p>
                             </div>
                           )}
                         </div>

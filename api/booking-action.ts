@@ -961,19 +961,24 @@ export default async function handler(req: Request) {
         );
       }
 
-      const { data: pickupReport, error: pickupReportError } = await supabase
-        .from("trip_condition_reports")
-        .select("id, evidence_waived, trip_condition_photos(category)")
-        .eq("booking_id", bookingRecord.id)
-        .eq("reporter_id", user.id)
-        .eq("phase", "pickup")
-        .maybeSingle();
-      if (pickupReportError) throw pickupReportError;
-      if (!pickupReport || !hasRequiredTripPhotos(pickupReport)) {
-        return jsonResponse(
-          { error: "Submit your pickup condition report and required photos before confirming arrival" },
-          409,
-        );
+      // The lister owns the "before" evidence, so only the lister must file a
+      // pickup condition report before the handover. The renter's pickup report
+      // is optional; the renter just confirms they received the car.
+      if (owner) {
+        const { data: pickupReport, error: pickupReportError } = await supabase
+          .from("trip_condition_reports")
+          .select("id, evidence_waived, trip_condition_photos(category)")
+          .eq("booking_id", bookingRecord.id)
+          .eq("reporter_id", user.id)
+          .eq("phase", "pickup")
+          .maybeSingle();
+        if (pickupReportError) throw pickupReportError;
+        if (!pickupReport || !hasRequiredTripPhotos(pickupReport)) {
+          return jsonResponse(
+            { error: "Submit your pickup condition report and photos before confirming the handover" },
+            409,
+          );
+        }
       }
 
       const arrivalTime = new Date().toISOString();
@@ -1124,10 +1129,10 @@ export default async function handler(req: Request) {
 
       await supabase.from("notifications").insert({
         user_id: counterpartyId,
-        title: renter ? "Renter Has Arrived" : "Lister Has Arrived",
+        title: renter ? "Renter Confirmed Pickup" : "Handover Confirmed by Lister",
         message: renter
-          ? `The renter marked arrival for ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`
-          : `The lister marked arrival for ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`,
+          ? `The renter confirmed they have the car for ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`
+          : `The lister confirmed the handover for ${getVehicleLabel(bookingRecord)}. Open the booking and tap "Confirm - I have the car" to start your trip.`,
         type: "info",
         link: renter ? "/lister-bookings" : "/my-bookings",
       });
@@ -1218,11 +1223,20 @@ export default async function handler(req: Request) {
         }
         throw conditionReportError;
       }
-      const submittedPhases = new Set((conditionReports ?? []).map((report) => report.phase));
-      const reportsHaveEvidence = (conditionReports ?? []).every(hasRequiredTripPhotos);
-      if (!submittedPhases.has("pickup") || !submittedPhases.has("return") || !reportsHaveEvidence) {
+      // Asymmetric evidence: the lister must have filed the pickup ("before")
+      // report; the renter must have filed the return ("after") report. The
+      // other phase is optional for each side.
+      const requiredReportPhase = renter ? "return" : "pickup";
+      const requiredReport = (conditionReports ?? []).find(
+        (report) => report.phase === requiredReportPhase,
+      );
+      if (!requiredReport || !hasRequiredTripPhotos(requiredReport)) {
         return jsonResponse(
-          { error: "Submit both your pickup and return condition reports with all required photos before finishing the trip" },
+          {
+            error: renter
+              ? "Submit your return condition report with photos before finishing the trip."
+              : "Submit your pickup condition report with photos before finishing the trip.",
+          },
           409,
         );
       }

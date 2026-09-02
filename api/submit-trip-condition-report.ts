@@ -64,6 +64,13 @@ export default async function handler(req: Request) {
       return respond({ error: "Return evidence is accepted only after both parties complete arrival check-in" }, 409);
     }
 
+    // Photos are required only for the party that owns the evidence at each
+    // phase: the lister at pickup ("before" state) and the renter at return
+    // ("after" state). The other side's report is optional but encouraged.
+    const photosRequiredForRole =
+      (payload.phase === "pickup" && reporterRole === "lister") ||
+      (payload.phase === "return" && reporterRole === "renter");
+
     if (payload.phase === "return") {
       const { data: pickupReport, error: pickupReportError } = await supabase
         .from("trip_condition_reports")
@@ -73,12 +80,13 @@ export default async function handler(req: Request) {
         .eq("phase", "pickup")
         .maybeSingle();
       if (pickupReportError) throw pickupReportError;
-      if (!pickupReport) {
+      if (reporterRole === "lister" && !pickupReport) {
         return respond({ error: "Submit your pickup condition report before the return report" }, 409);
       }
       if (
         odometer !== null &&
-        pickupReport.odometer_reading !== null &&
+        pickupReport?.odometer_reading !== null &&
+        pickupReport?.odometer_reading !== undefined &&
         odometer < Number(pickupReport.odometer_reading)
       ) {
         return respond({ error: "Return odometer cannot be lower than the pickup reading" }, 400);
@@ -88,9 +96,10 @@ export default async function handler(req: Request) {
     const photos = (payload.photos ?? []).filter((photo): photo is { category: string; storagePath: string } => Boolean(photo.category && photo.storagePath && allowedCategories.has(photo.category)));
     const categories = new Set(photos.map((photo) => photo.category));
     const missingRequired = requiredCategories.filter((category) => !categories.has(category));
-    if (missingRequired.length > 0 && !evidenceWaived) {
+    if (missingRequired.length > 0 && photosRequiredForRole && !evidenceWaived) {
       return respond({ error: "Front, back, odometer, and fuel/battery photos are required (or submit with an explicit waiver)." }, 400);
     }
+    const waivedThisReport = photosRequiredForRole && missingRequired.length > 0 && evidenceWaived;
     if (photos.some((photo) => !photo.storagePath.startsWith(`${booking.id}/${user.id}/`))) return respond({ error: "Invalid evidence path" }, 400);
     if (payload.locationConsent) {
       const latitude = Number(payload.latitude);
@@ -128,7 +137,7 @@ export default async function handler(req: Request) {
       phase: payload.phase,
       odometer_reading: odometer,
       fuel_or_battery_level: level,
-      evidence_waived: evidenceWaived && missingRequired.length > 0,
+      evidence_waived: waivedThisReport,
       damage_notes: String(payload.damageNotes || "").trim().slice(0, 3000),
       latitude: payload.locationConsent ? payload.latitude ?? null : null,
       longitude: payload.locationConsent ? payload.longitude ?? null : null,
@@ -145,7 +154,7 @@ export default async function handler(req: Request) {
       await supabase.from("trip_condition_reports").delete().eq("id", report.id);
       throw photoError;
     }
-    await supabase.from("audit_log").insert({ user_id: user.id, action: "trip_condition_report_submitted", entity_type: "booking", entity_id: booking.id, details: { report_id: report.id, phase: payload.phase, reporter_role: reporterRole, photo_categories: [...categories], evidence_waived: evidenceWaived && missingRequired.length > 0, missing_photo_categories: missingRequired, location_supplied: Boolean(payload.locationConsent) } });
+    await supabase.from("audit_log").insert({ user_id: user.id, action: "trip_condition_report_submitted", entity_type: "booking", entity_id: booking.id, details: { report_id: report.id, phase: payload.phase, reporter_role: reporterRole, photo_categories: [...categories], photos_required: photosRequiredForRole, evidence_waived: waivedThisReport, missing_photo_categories: missingRequired, location_supplied: Boolean(payload.locationConsent) } });
     return respond({ success: true, reportId: report.id, submittedAt: report.submitted_at }, 201);
   } catch (error) {
     console.error("Trip condition report failed", error);

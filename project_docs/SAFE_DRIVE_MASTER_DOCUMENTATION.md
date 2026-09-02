@@ -249,9 +249,18 @@ An electronic timestamp is the trusted server date/time of the acceptance or sub
 
 ## 8. Pickup and Return Condition Reports
 
-Renter and lister submit independent pickup and return reports. Each report requires **four** photographs: front, back, odometer, and fuel/battery gauge (left, right, and interior are optional). The typed odometer and fuel/battery readings are optional - the odometer and fuel photos carry the evidence. Condition notes and a server timestamp are always recorded.
+Each condition report requires **four** photographs: front, back, odometer, and fuel/battery gauge (left, right, and interior are optional). The typed odometer and fuel/battery readings are optional - the odometer and fuel photos carry the evidence. Condition notes and a server timestamp are always recorded.
 
-A report can be submitted with an incomplete photo set only through an explicit **"submit without photos" waiver** (`evidence_waived`). A waived report keeps the trip moving but is flagged: a super admin sees it in any deposit dispute, and a **deposit claim cannot be filed on a waived or incomplete return report** - so a party that skips evidence cannot then claim on nothing.
+**Asymmetric requirement.** The party that owns the evidence at each phase must file the report; the other side's report is optional:
+
+- **Pickup**: the **lister** files the required "before" report; the renter's pickup report is optional.
+- **Return**: the **renter** files the required "after" report; the lister's return report is optional.
+
+Comparing the lister's before against the renter's after is the dispute evidence. To raise a **deposit claim**, the lister must have their own complete pickup **and** return reports (all four photos, not waived) - the return report is otherwise optional but it is the price of claiming.
+
+A required report can be submitted with an incomplete photo set only through an explicit **"submit without photos" waiver** (`evidence_waived`). A waived report keeps the trip moving but is flagged for the super admin in any dispute, and a deposit claim cannot be filed on a waived or incomplete report.
+
+**Handover confirmation.** At pickup the **lister** confirms the handover (after filing the pickup report); the **renter** then taps a single "Confirm - I have the car". Both marks are recorded, but it is a two-tap handshake, not two independent multi-step flows. The booking becomes `active` once both have confirmed.
 
 Location is optional evidence. If a participant actively consents, the browser may store latitude, longitude, accuracy, and capture time. It can help investigate whether evidence was captured near pickup/return, but it is not required, may be inaccurate, and must not be used as automatic proof of fault.
 

@@ -2624,8 +2624,8 @@ export default function ListerBookingsPage() {
                               <Button size="sm" variant="outline" className="mt-2" onClick={() => navigate(`/security-deposit/${b.id}`)}>Review deposit</Button>
                             </div>
                           )}
-                          <p className="mb-2 text-xs font-medium text-foreground">I Have Arrived</p>
-                          <Button size="sm" variant="outline" className="mb-2" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>Complete pickup report first</Button>
+                          <p className="mb-2 text-xs font-medium text-foreground">Handover complete - renter has the car</p>
+                          <Button size="sm" variant="outline" className="mb-2" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>Complete pickup report first (required)</Button>
                           <ArrivalPhotoCapture
                             loading={actionLoading === b.id}
                             disabled={actionLoading === b.id || (Number(b.cars.security_deposit_amount ?? 0) > 0 && getSecurityDepositStatus(b) !== "paid")}
@@ -2635,7 +2635,7 @@ export default function ListerBookingsPage() {
                             onPhotoReady={(file) => handleArriveWithPhoto(b.id, file)}
                           />
                           <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                            The required pickup report protects both parties. Arrival location remains optional and is stored only with your consent.
+                            You file the "before" pickup report (4 photos). The renter then confirms they have the car. Arrival location is optional and stored only with your consent.
                           </p>
                         </div>
                       )}
@@ -2751,19 +2751,24 @@ export default function ListerBookingsPage() {
                               {format(new Date(bookingPickupMs), "MMM d, yyyy h:mm a")}.
                             </div>
                           ) : (
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>Pickup report</Button>
-                              <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${b.id}/return`)}>Return report</Button>
-                              <Button size="sm" variant="outline" onClick={() => navigate(`/security-deposit/${b.id}`)}>Deposit</Button>
-                              <Button
-                                size="sm"
-                                onClick={() => handleComplete(b)}
-                                disabled={actionLoading === b.id}
-                                className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                Finish Trip
-                              </Button>
+                            <div className="space-y-1.5">
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>Pickup report (required)</Button>
+                                <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/trip-report/${b.id}/return`)}>Return photos (for a claim)</Button>
+                                <Button size="sm" variant="outline" onClick={() => navigate(`/security-deposit/${b.id}`)}>Deposit</Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleComplete(b)}
+                                  disabled={actionLoading === b.id}
+                                  className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  Finish Trip
+                                </Button>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground text-right leading-tight">
+                                As the lister you must have filed the pickup ("before") report. A return report is optional - but you need your own complete pickup AND return reports to file a deposit claim.
+                              </p>
                             </div>
                           )}
                         </div>

@@ -9,6 +9,32 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Asymmetric evidence + handover handshake (Phase 5)
+
+- **Handover confirmation is now a two-tap handshake.** The lister files
+  the pickup report and confirms "Handover complete - renter has the
+  car"; the renter then taps a single "Confirm - I have the car". Both
+  marks are still recorded (booking goes `active` on both), but the
+  renter no longer needs their own pickup report to check in.
+- **Asymmetric photo requirement** (`api/submit-trip-condition-report.ts`,
+  `api/booking-action.ts`):
+  - Pickup: **lister** report required (4 photos), renter optional.
+  - Return: **renter** report required (4 photos), lister optional.
+  - The `complete` action checks the caller's required-phase report only;
+    the `arrive` action requires the pickup report from the lister only.
+- **Deposit claim** now needs the lister's own complete pickup **and**
+  return reports (`api/security-deposit-action.ts` `submit_claim`) - the
+  return report is optional for the lister generally but mandatory to
+  claim, so "skip evidence, then claim on nothing" stays closed.
+- `TripConditionReportPage` shows whether the report is required or
+  optional for the current user, and only offers the waiver on a required
+  report. File inputs already dropped forced-camera in Phase 4.
+- No migration (reuses Phase 4's `evidence_waived`; Phase 4 migration is a
+  prerequisite). Files: the four above + `src/pages/MyBookingsPage.tsx`,
+  `src/pages/ListerBookingsPage.tsx`, master doc, smoke-check markers.
+
+---
+
 ## 2026-09-03 — Lighter trip condition reports (Phase 4)
 
 - Required photos per report cut from **7 to 4** (front, back, odometer,
