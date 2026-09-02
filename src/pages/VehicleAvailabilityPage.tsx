@@ -19,14 +19,17 @@ type BookingRow = { car_id: string; start_date: string; end_date: string; status
 const AUTO_REASON = "Blocked by owner";
 const AUTO_CATEGORY = "other";
 
-const BOOKING_BLOCKING_STATUSES = [
-  "pending",
+// A pending request also holds the date - the lister must accept or reject it
+// first. Everything from "confirmed" onward is a committed / paid booking.
+const REQUESTED_STATUSES = ["pending"];
+const COMMITTED_STATUSES = [
   "confirmed",
   "awaiting_payment",
   "downpayment_paid",
   "fully_paid",
   "active",
 ];
+const BOOKING_BLOCKING_STATUSES = [...REQUESTED_STATUSES, ...COMMITTED_STATUSES];
 
 const toDate = (iso: string) => new Date(`${iso}T00:00:00`);
 const toISODate = (value: Date) => format(value, "yyyy-MM-dd");
@@ -94,7 +97,21 @@ export default function VehicleAvailabilityPage() {
   const bookedRanges = useMemo(
     () =>
       bookings
-        .filter((booking) => booking.car_id === carId)
+        .filter(
+          (booking) =>
+            booking.car_id === carId && COMMITTED_STATUSES.includes(booking.status),
+        )
+        .map((booking) => ({ from: toDate(booking.start_date), to: toDate(booking.end_date) })),
+    [bookings, carId],
+  );
+
+  const requestedRanges = useMemo(
+    () =>
+      bookings
+        .filter(
+          (booking) =>
+            booking.car_id === carId && REQUESTED_STATUSES.includes(booking.status),
+        )
         .map((booking) => ({ from: toDate(booking.start_date), to: toDate(booking.end_date) })),
     [bookings, carId],
   );
@@ -109,8 +126,8 @@ export default function VehicleAvailabilityPage() {
   );
 
   const disabledDays = useMemo(
-    () => [{ before: startOfToday() }, ...bookedRanges, ...blockedRanges],
-    [bookedRanges, blockedRanges],
+    () => [{ before: startOfToday() }, ...bookedRanges, ...requestedRanges, ...blockedRanges],
+    [bookedRanges, requestedRanges, blockedRanges],
   );
 
   const blockDates = async () => {
@@ -193,7 +210,8 @@ export default function VehicleAvailabilityPage() {
         </h1>
         <p className="mt-1 text-muted-foreground">
           Tap dates on the calendar to block them for maintenance, repairs, or personal use.
-          Dates with a booking are shown in red and cannot be blocked.
+          Booked dates (red) and dates with a pending request (orange) cannot be blocked -
+          accept or reject the request first.
         </p>
       </div>
 
@@ -229,6 +247,9 @@ export default function VehicleAvailabilityPage() {
                 <span className="h-3 w-3 rounded-sm bg-red-500/20 ring-1 ring-red-500/40" /> Booked
               </span>
               <span className="flex items-center gap-1.5">
+                <span className="h-3 w-3 rounded-sm bg-orange-500/20 ring-1 ring-orange-500/40" /> Pending request
+              </span>
+              <span className="flex items-center gap-1.5">
                 <span className="h-3 w-3 rounded-sm bg-amber-500/20 ring-1 ring-amber-500/40" /> Already blocked
               </span>
               <span className="flex items-center gap-1.5">
@@ -242,12 +263,20 @@ export default function VehicleAvailabilityPage() {
                 selected={range}
                 onSelect={setRange}
                 disabled={disabledDays}
-                modifiers={{ booked: bookedRanges, blocked: blockedRanges }}
+                modifiers={{
+                  booked: bookedRanges,
+                  requested: requestedRanges,
+                  blocked: blockedRanges,
+                }}
                 modifiersStyles={{
                   booked: {
                     backgroundColor: "rgb(239 68 68 / 0.15)",
                     color: "rgb(239 68 68)",
                     textDecoration: "line-through",
+                  },
+                  requested: {
+                    backgroundColor: "rgb(249 115 22 / 0.15)",
+                    color: "rgb(234 88 12)",
                   },
                   blocked: {
                     backgroundColor: "rgb(245 158 11 / 0.15)",
