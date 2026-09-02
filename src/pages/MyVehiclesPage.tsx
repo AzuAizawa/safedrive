@@ -1583,8 +1583,10 @@ export default function MyVehiclesPage() {
         </Card>
       )}
 
-      {/* Vehicle list */}
-      {loading ? (
+      {/* Vehicle list - hidden while the add-vehicle form is open so the
+          Status/Sort filter never appears orphaned below the form. */}
+      {!showForm &&
+        (loading ? (
         <div className="space-y-4">
           {Array.from({ length: 2 }).map((_, i) => (
             <Card key={i}>
@@ -1598,7 +1600,7 @@ export default function MyVehiclesPage() {
             </Card>
           ))}
         </div>
-      ) : vehicles.length === 0 && !showForm ? (
+      ) : vehicles.length === 0 ? (
         <div className="text-center py-20">
           <Car className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
           <h3 className="text-lg font-semibold">No vehicles listed</h3>
@@ -1652,6 +1654,12 @@ export default function MyVehiclesPage() {
               </select>
             </div>
           </div>
+
+          {filteredVehicles.length === 0 && (
+            <p className="rounded-xl border border-dashed border-border/60 py-10 text-center text-sm text-muted-foreground">
+              No vehicles match this status filter.
+            </p>
+          )}
 
           {filteredVehicles.map((v) => {
             const badge = statusBadge[v.status] || statusBadge.pending;
@@ -1778,7 +1786,7 @@ export default function MyVehiclesPage() {
             );
           })}
         </div>
-      )}
+        ))}
 
       {editVehicle &&
         createPortal(
