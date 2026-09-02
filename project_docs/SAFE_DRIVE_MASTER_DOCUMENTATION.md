@@ -436,11 +436,17 @@ Do not run Chapters 1 or 2 merely to obtain Chapter 14. Chapter 1 contains histo
 - `GMAIL_RETURN_REMINDER_WEBHOOK_URL`
 - `PAYMONGO_WEBHOOK_TOLERANCE_SECONDS=300` (default signature replay tolerance)
 
-### Demo payout mode
+### Demo money-movement mode
 
 - `PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true`
 
-With this on, the Auto Payout button records the lister earnings (base price, net of SafeDrive commission) + ledger journal + receipt email without a PayMongo transfer. It accepts only a `sk_test_` key (a live key auto-disables it). Set it on a thesis/demo deployment; omit it for any launch that moves real money. Never prefix a server secret with `VITE_`.
+With this on (and a `sk_test_` key, or no key - a live key auto-disables it), SafeDrive records **all three money-movement paths** with the full ledger + notification + receipt trail but **without calling PayMongo**:
+
+- **Payouts** - `payoutAutomation.ts`, `sandbox_payout_*` reference, journal `2010 -> 1010`.
+- **Cancellation refunds** - `refundAutomation.ts`, `sandbox_refund_*` reference, `payments` row `refund` completed, reversal journal via `postCompletedRefundToLedger`.
+- **Security-deposit releases** - `securityDeposit.ts` `runSecurityDepositRelease`, `sandbox_deposit_refund_*` reference, journal `2020 -> 1010`.
+
+The shared gate is `api/lib/paymongoMode.ts` `isDemoMoneyMovementEnabled`. Set the flag on a thesis/demo deployment; omit it for any launch that moves real money. Never prefix a server secret with `VITE_`.
 
 ## 17. Local Run and Test Procedure
 

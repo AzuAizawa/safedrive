@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { postSimpleBalancedJournal } from "./ledger.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { sendPayoutReceiptEmail } from "./email.js";
+import { isPayMongoTestKey } from "./paymongoMode.js";
 
 type PaymentRecord = {
   id: string;
@@ -122,9 +123,6 @@ const getPayMongoSettings = () => ({
   allowSandboxCompletion:
     process.env.PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION === "true",
 });
-
-const isPayMongoTestKey = (secretKey: string | undefined) =>
-  Boolean(secretKey?.startsWith("sk_test_"));
 
 const parseJsonResponse = (rawBody: string) => {
   if (!rawBody.trim()) return {};

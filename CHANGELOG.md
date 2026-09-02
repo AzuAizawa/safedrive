@@ -9,6 +9,30 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Demo money-movement mode for refunds + deposit releases (Phase 6)
+
+- The payout flow already simulated cleanly in demo mode; refunds and
+  security-deposit releases still called PayMongo test refunds, which are
+  unreliable in test mode (they mostly fail).
+- New shared gate `api/lib/paymongoMode.ts` `isDemoMoneyMovementEnabled`
+  (the existing `PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION` flag + test
+  key). When on:
+  - `refundAutomation.ts`: cancellation refunds record a completed
+    `refund` payment (`sandbox_refund_*`), post the reversal ledger
+    journal, notify, and send the refund receipt - no PayMongo call.
+  - `securityDeposit.ts` `runSecurityDepositRelease`: the refundable
+    portion finalizes with a `sandbox_deposit_refund_*` reference and no
+    PayMongo call, so the lister "Confirm return - no issues" button and
+    the 24h auto-release work on a synthetic deposit.
+- `payoutAutomation.ts` now imports the shared `isPayMongoTestKey`
+  instead of a local copy. `check-local-env` warning reworded.
+- No migration. Files: `api/lib/paymongoMode.ts` (new),
+  `api/lib/refundAutomation.ts`, `api/lib/securityDeposit.ts`,
+  `api/lib/payoutAutomation.ts`, `scripts/check-local-env.mjs`, master
+  doc, smoke-check markers.
+
+---
+
 ## 2026-09-03 — Asymmetric evidence + handover handshake (Phase 5)
 
 - **Handover confirmation is now a two-tap handshake.** The lister files

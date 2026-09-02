@@ -116,7 +116,7 @@ if ((values.get("PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION") || "").toLowerCase(
     failed = true;
   } else {
     console.warn(
-      "[WARN] Demo payout mode enabled: the Auto Payout button records the lister earnings (net of commission) + ledger + receipt without a real PayMongo transfer. Unset this for a real launch.",
+      "[WARN] Demo money-movement mode enabled: payouts, cancellation refunds, and security-deposit releases are recorded with full ledger + receipt but NO real PayMongo transfer (test key only). Unset this for a real launch.",
     );
   }
 }

@@ -297,6 +297,26 @@ const checks = [
       "A PayMongo refund is already pending for this booking",
       "getAppRefundStatus",
       "booking_refund_failed_auto",
+      "isDemoMoneyMovementEnabled",
+      "sandbox_refund_",
+      "Demo refund - no PayMongo transfer",
+    ],
+  },
+  {
+    file: "api/lib/paymongoMode.ts",
+    markers: [
+      "isDemoMoneyMovementEnabled",
+      "PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION",
+      'secretKey?.startsWith("sk_test_")',
+    ],
+  },
+  {
+    file: "api/lib/securityDeposit.ts",
+    markers: [
+      "runSecurityDepositRelease",
+      "isDemoMoneyMovementEnabled",
+      "sandbox_deposit_refund_",
+      "Demo refund (no real transfer)",
     ],
   },
   {

@@ -2,6 +2,7 @@ import { postSimpleBalancedJournal } from "./ledger.js";
 import { processAutomaticPayoutForBooking } from "./payoutAutomation.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { sendRefundReceiptEmail } from "./email.js";
+import { isDemoMoneyMovementEnabled } from "./paymongoMode.js";
 
 type ReleaseResult = {
   state: "released" | "refund_pending" | "blocked" | "already_finalized";
@@ -86,6 +87,18 @@ export async function runSecurityDepositRelease(
   if (refundable === 0) {
     const finalized = await finalizeSecurityDepositRelease(supabase, {
       depositId: deposit.id,
+      actorId: input.actorId,
+      baseOrigin: input.baseOrigin,
+    });
+    return { state: "released", status: finalized.status };
+  }
+
+  // Demo money-movement mode: finalize the refundable release (ledger +
+  // notifications + receipt) with a synthetic reference and no PayMongo call.
+  if (isDemoMoneyMovementEnabled(paymongoKey)) {
+    const finalized = await finalizeSecurityDepositRelease(supabase, {
+      depositId: deposit.id,
+      providerRefundId: `sandbox_deposit_refund_${deposit.id.slice(0, 8)}_${Date.now()}`,
       actorId: input.actorId,
       baseOrigin: input.baseOrigin,
     });
@@ -313,7 +326,11 @@ export async function finalizeSecurityDepositRelease(
       bookingId: deposit.booking_id,
       amount: refundable / 100,
       refundId: providerReference || `security-deposit-${deposit.id}`,
-      refundMethod: providerReference ? "PayMongo" : "Manual security-deposit return",
+      refundMethod: providerReference
+        ? providerReference.startsWith("sandbox_deposit_refund_")
+          ? "Demo refund (no real transfer)"
+          : "PayMongo"
+        : "Manual security-deposit return",
       baseOrigin: input.baseOrigin,
     });
     if (receipt.state !== "sent" && receipt.state !== "not_configured") {

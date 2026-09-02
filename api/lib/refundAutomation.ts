@@ -1,6 +1,7 @@
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { postCompletedRefundToLedger } from "./ledger.js";
 import { sendRefundReceiptEmail } from "./email.js";
+import { isDemoMoneyMovementEnabled } from "./paymongoMode.js";
 
 type PaymentRecord = {
   id: string;
@@ -423,6 +424,78 @@ export const processAutomaticRefundForBooking = async ({
       bookingId,
       reason: "No refundable PayMongo payment records were found for this booking.",
     };
+  }
+
+  // Demo money-movement mode: record the refund (row + ledger + email) without
+  // calling PayMongo. Test key only; a live key falls through to the real path.
+  if (isDemoMoneyMovementEnabled(secretKey)) {
+    const demoRefundPaymentIds: string[] = [];
+    const demoRefundIds: string[] = [];
+    const demoCompleted: Array<{ refundId: string; amount: number }> = [];
+    for (const group of groups) {
+      const sandboxRefundId = `sandbox_refund_${bookingId.slice(0, 8)}_${Date.now()}_${demoRefundIds.length}`;
+      const notes = limitPayMongoNotes(
+        [
+          "Demo refund - no PayMongo transfer.",
+          `Source transaction IDs: ${group.sourceTransactionIds.join(", ")};`,
+          `SafeDrive refund for ${getVehicleLabel(refundBooking)}.`,
+          note ?? null,
+          `Types: ${group.paymentTypes.join(", ")}.`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+      const refundPaymentId = await createRefundRecord(
+        supabase,
+        refundBooking.id,
+        group.amount,
+        "demo",
+        sandboxRefundId,
+        "completed",
+        notes,
+      );
+      demoRefundPaymentIds.push(refundPaymentId);
+      demoRefundIds.push(sandboxRefundId);
+      await postCompletedRefundToLedger(supabase, {
+        bookingId: refundBooking.id,
+        amount: group.amount,
+        refundId: sandboxRefundId,
+        actorId: initiatedByUserId,
+      });
+      demoCompleted.push({ refundId: sandboxRefundId, amount: group.amount });
+    }
+
+    await insertAudit(supabase, initiatedByUserId, "booking_refund_completed_auto", refundBooking, {
+      reason,
+      refund_ids: demoRefundIds,
+      refund_payment_ids: demoRefundPaymentIds,
+      mode: "demo",
+    });
+    await notifyBookingUsers(
+      supabase,
+      refundBooking,
+      "Refund Completed",
+      `Your refund for ${getVehicleLabel(refundBooking)} was recorded. This build runs in demo mode, so no real PayMongo transfer was sent.`,
+      "Booking Refund Completed",
+      `The renter refund for ${getVehicleLabel(refundBooking)} was recorded in demo mode.`,
+      "success",
+    );
+    for (const completedRefund of demoCompleted) {
+      const receipt = await sendRefundReceiptEmail(supabase, {
+        bookingId: refundBooking.id,
+        amount: completedRefund.amount,
+        refundId: completedRefund.refundId,
+        refundMethod: "Demo refund (no real transfer)",
+        baseOrigin,
+      });
+      if (receipt.state !== "sent" && receipt.state !== "not_configured") {
+        console.warn("Demo refund receipt email was not delivered", {
+          state: receipt.state,
+          bookingId: refundBooking.id,
+        });
+      }
+    }
+    return { state: "completed", bookingId, refundPaymentIds: demoRefundPaymentIds, refundIds: demoRefundIds };
   }
 
   const refundPaymentIds: string[] = [];
