@@ -261,6 +261,7 @@ The trip lifecycle is gated against the clock so it cannot be completed before i
 
 - **Arrival check-in** opens only from `arrival_checkin_lead_hours` before the scheduled pickup datetime (default 3 h). `api/booking-action.ts` rejects an earlier `arrive` call; both dashboards show a "check-in opens ..." note instead of the button.
 - **Completion** (`Finish Trip`) is rejected before the scheduled pickup datetime - a trip that has not started cannot be finished. Early checkout is allowed any time from pickup onward.
+- **Lister-absent completion:** once the renter has completed (return report submitted, car dropped off), `api/expire-booking-deadlines.ts` auto-completes the lister's side after `lister_completion_timeout_hours` (default 18) so an unreachable lister cannot hold the renter or the deposit indefinitely. The deposit review window and the lister's claim right still apply from the evidence on file.
 
 `arrival_checkin_lead_hours` is one of three configurable lifecycle timings in `platform_settings` (`arrival_checkin_lead_hours`, `deposit_claim_window_hours`, `lister_completion_timeout_hours`). Unlike the financial terms they are read **live**, not snapshotted per booking, and are changed through the same multi-super-admin consensus flow (`/admin/platform-settings`).
 
@@ -272,13 +273,14 @@ SafeDrive uses a **separate refundable deposit**, not a hidden deduction from re
 
 1. The renter pays the stated refundable deposit through a separate test/live checkout.
 2. The ledger records it as a liability, not SafeDrive income.
-3. After return, a 48-hour claim window opens.
-4. With no claim, the deposit moves to refund/release processing.
-5. A lister claim must state an amount and detailed reason; it never deducts automatically.
-6. The renter can respond.
-7. Only a super-admin can approve, partly approve, or reject after reviewing the agreement and evidence.
-8. Approved deduction cannot exceed the claim or deposit.
-9. The remaining amount is refunded; failures enter review and reconciliation.
+3. After both sides complete the trip, a claim window opens for `deposit_claim_window_hours` (default 24, configurable through platform consensus).
+4. During the window the lister either **confirms the return with no issues** (`lister_confirm_return`, releases the deposit to the renter immediately and lets the payout proceed) or files a documented claim. Once they confirm - or the window closes - they can no longer claim, so a lister cannot wait for the renter to leave and then raise a late claim.
+5. With no claim, `api/expire-booking-deadlines.ts` auto-releases the full deposit to the renter after the window.
+6. A lister claim must state an amount and detailed reason; it never deducts automatically.
+7. The renter can respond.
+8. Only a super-admin can approve, partly approve, or reject after reviewing the agreement and evidence.
+9. Approved deduction cannot exceed the claim or deposit.
+10. The remaining amount is refunded; failures enter review and reconciliation.
 
 Only one open claim is allowed per deposit. All actions are audit-logged. A less complicated future alternative is PayMongo authorization/hold-then-capture, but it should be adopted only if the relevant payment methods, hold duration, refund behavior, and SafeDrive merchant account are confirmed to support the complete rental period.
 

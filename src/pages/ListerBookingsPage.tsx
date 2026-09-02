@@ -717,6 +717,33 @@ export default function ListerBookingsPage() {
     setActionLoading(null);
   };
 
+  const handleConfirmReturnNoIssues = async (booking: ListerBooking) => {
+    setActionLoading(booking.id);
+    try {
+      const res = await fetch("/api/security-deposit-action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        body: JSON.stringify({
+          bookingId: booking.id,
+          action: "lister_confirm_return",
+        }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error || "Could not confirm the return");
+      toast.success("Return confirmed - the renter's deposit is being released.");
+      await fetchBookings();
+    } catch (error) {
+      toast.error("Could not confirm the return", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleApproveExtension = async (extension: BookingExtensionRow) => {
     setExtensionActionLoading(extension.id);
     try {
@@ -2749,6 +2776,40 @@ export default function ListerBookingsPage() {
                             Waiting for renter to complete
                           </p>
                         )}
+                      {apparentState === "completed" &&
+                        getSecurityDepositStatus(b) === "return_review" && (
+                          <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-left text-[11px] leading-relaxed">
+                            <p className="font-semibold text-foreground">Refundable deposit review</p>
+                            <p className="mt-1 text-muted-foreground">
+                              If the car came back fine, confirm the return now to release the renter's
+                              deposit. Otherwise file a documented claim before the window closes - after
+                              you confirm or the window ends you can no longer claim.
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => handleConfirmReturnNoIssues(b)}
+                                disabled={actionLoading === b.id}
+                                className="gap-1"
+                              >
+                                {actionLoading === b.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                )}
+                                Confirm return - no issues
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => navigate(`/security-deposit/${b.id}`)}
+                              >
+                                File a claim
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+
                       {apparentState === "completed" && !reviewedByOwner && (
                           <Button
                             size="sm"

@@ -9,6 +9,34 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Return / deposit flow: lister waiver + auto-release + auto-complete (Phase 2)
+
+- **Lister "Confirm return - no issues"** (`security-deposit-action.ts`
+  `lister_confirm_return`): during the deposit review window the lister can
+  release the renter's deposit immediately instead of waiting out the timer.
+  Once confirmed - or once the window closes - the lister can no longer file a
+  claim, so a lister cannot wait for the renter to leave and then raise a fake
+  claim. Surfaced on `ListerBookingsPage` with a "File a claim" alternative.
+- **Deposit auto-release:** `api/expire-booking-deadlines.ts` now releases the
+  full deposit to the renter once `deposit_claim_window_hours` (default 24, was a
+  hard-coded 48) elapses with no claim filed.
+- **Lister-absent auto-completion:** the same job auto-completes the lister's
+  side `lister_completion_timeout_hours` (default 18) after the renter completes,
+  so an unreachable lister can't hold the renter or the deposit. Needs new
+  `bookings.renter_completed_at` / `owner_completed_at` columns, set by
+  `api/booking-action.ts` on completion.
+- Shared paths extracted: `api/lib/bookingCompletion.ts`
+  (`runBookingCompletionSideEffects` - commission journal + deposit review +
+  payout) and `api/lib/securityDeposit.ts` `runSecurityDepositRelease` (PayMongo
+  refund + finalize), now used by `booking-action.ts`,
+  `process-security-deposit-release.ts`, `security-deposit-action.ts`, and the
+  expiry job.
+- **Migration:** add `bookings.renter_completed_at` / `owner_completed_at`
+  (+ a best-effort backfill) from the master SQL. Point an external scheduler at
+  `GET /api/expire-booking-deadlines` (~15 min) for the auto transitions to fire.
+
+---
+
 ## 2026-09-03 — Trip lifecycle time gates + 3 new configurable timings (Phase 1)
 
 - The arrival check-in and "Finish Trip" buttons had no clock gate, so a

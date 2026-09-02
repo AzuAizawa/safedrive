@@ -1,8 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
+import { runBookingCompletionSideEffects } from "./lib/bookingCompletion.js";
+import { runSecurityDepositRelease } from "./lib/securityDeposit.js";
 
 export const config = {
   runtime: "edge",
 };
+
+const DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS = 18;
 
 type DeadlineBooking = {
   id: string;
@@ -150,10 +154,129 @@ export default async function handler(req: Request) {
       paymentExpired += 1;
     }
 
+    // --- Auto-complete when the renter finished but the lister never confirmed.
+    const { data: settingsRow } = await supabase
+      .from("platform_settings")
+      .select("lister_completion_timeout_hours")
+      .eq("id", "default")
+      .maybeSingle();
+    const timeoutHours = (() => {
+      const parsed = Number(settingsRow?.lister_completion_timeout_hours);
+      return Number.isFinite(parsed) && parsed >= 1 && parsed <= 72
+        ? Math.round(parsed)
+        : DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS;
+    })();
+    const timeoutCutoff = new Date(
+      Date.now() - timeoutHours * 60 * 60 * 1000,
+    ).toISOString();
+
+    const { data: staleCompletions, error: staleError } = await supabase
+      .from("bookings")
+      .select("id, owner_id, renter_id, commission, renter_completed_at")
+      .in("status", ["fully_paid", "active"])
+      .eq("renter_completed", true)
+      .eq("owner_completed", false)
+      .not("renter_completed_at", "is", null)
+      .lte("renter_completed_at", timeoutCutoff)
+      .limit(100);
+    if (staleError) throw staleError;
+
+    let listerCompletionAuto = 0;
+    for (const booking of staleCompletions ?? []) {
+      const { data: updated, error } = await supabase
+        .from("bookings")
+        .update({
+          owner_completed: true,
+          owner_completed_at: new Date().toISOString(),
+          status: "completed",
+        })
+        .eq("id", booking.id)
+        .in("status", ["fully_paid", "active"])
+        .eq("renter_completed", true)
+        .eq("owner_completed", false)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!updated) continue;
+
+      await supabase.from("audit_log").insert({
+        user_id: null,
+        action: "owner_completion_auto_after_timeout",
+        entity_type: "booking",
+        entity_id: booking.id,
+        details: { timeout_hours: timeoutHours, automated: true },
+      });
+      await supabase.from("notifications").insert([
+        {
+          user_id: booking.owner_id,
+          title: "Trip Auto-Completed",
+          message: `The renter finished this trip and it was auto-completed after ${timeoutHours} hours without your confirmation. Any deposit review still runs.`,
+          type: "warning",
+          link: "/lister-bookings",
+        },
+        {
+          user_id: booking.renter_id,
+          title: "Trip Completed",
+          message: "Your trip was completed automatically because the lister did not confirm in time.",
+          type: "info",
+          link: "/my-bookings",
+        },
+      ]);
+      await runBookingCompletionSideEffects(
+        supabase,
+        {
+          id: booking.id,
+          owner_id: booking.owner_id,
+          renter_id: booking.renter_id,
+          commission: booking.commission,
+        },
+        { initiatedByUserId: null, baseOrigin: new URL(req.url).origin },
+      );
+      listerCompletionAuto += 1;
+    }
+
+    // --- Auto-release security deposits whose claim window closed with no claim.
+    const { data: staleDeposits, error: staleDepositError } = await supabase
+      .from("security_deposits")
+      .select("id, booking_id")
+      .eq("status", "return_review")
+      .not("claim_deadline", "is", null)
+      .lte("claim_deadline", now)
+      .limit(100);
+    if (staleDepositError) throw staleDepositError;
+
+    let depositAutoReleased = 0;
+    for (const deposit of staleDeposits ?? []) {
+      const { data: openClaims } = await supabase
+        .from("security_deposit_claims")
+        .select("id")
+        .eq("security_deposit_id", deposit.id)
+        .not("status", "in", "(rejected)");
+      if ((openClaims ?? []).length > 0) continue;
+      try {
+        const result = await runSecurityDepositRelease(supabase, {
+          depositId: deposit.id,
+          actorId: null,
+          baseOrigin: new URL(req.url).origin,
+          enforceClaimWindow: false,
+        });
+        if (result.state === "released" || result.state === "refund_pending") {
+          depositAutoReleased += 1;
+        }
+      } catch (releaseError) {
+        console.error(
+          "Auto deposit release failed",
+          releaseError instanceof Error ? releaseError.message : releaseError,
+        );
+      }
+    }
+
     return jsonResponse({
       success: true,
       ownerResponseExpired,
       paymentExpired,
+      listerCompletionAuto,
+      depositAutoReleased,
     });
   } catch (error) {
     return jsonResponse(

@@ -54,6 +54,42 @@ const checks = [
     ],
   },
   {
+    file: "api/lib/bookingCompletion.ts",
+    markers: [
+      "runBookingCompletionSideEffects",
+      "fetchDepositClaimWindowHours",
+      "platform_commission_earned",
+      "return_review",
+    ],
+  },
+  {
+    file: "api/lib/securityDeposit.ts",
+    markers: [
+      "runSecurityDepositRelease",
+      "enforceClaimWindow",
+      "The lister claim window is still open",
+      "safedrive-deposit-refund-",
+    ],
+  },
+  {
+    file: "api/security-deposit-action.ts",
+    markers: [
+      "lister_confirm_return",
+      "runSecurityDepositRelease",
+      "security_deposit_lister_confirmed_return",
+    ],
+  },
+  {
+    file: "api/expire-booking-deadlines.ts",
+    markers: [
+      "owner_completion_auto_after_timeout",
+      "lister_completion_timeout_hours",
+      "runBookingCompletionSideEffects",
+      "runSecurityDepositRelease",
+      "depositAutoReleased",
+    ],
+  },
+  {
     file: "src/pages/MyBookingsPage.tsx",
     markers: [
       "Next step",

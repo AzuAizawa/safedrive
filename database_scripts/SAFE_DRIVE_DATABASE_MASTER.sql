@@ -4503,6 +4503,13 @@ alter table public.platform_settings
   add constraint platform_settings_lister_completion_timeout_hours_check
   check (lister_completion_timeout_hours >= 1 and lister_completion_timeout_hours <= 72);
 
+-- Completion timestamps so api/expire-booking-deadlines.ts can auto-complete a
+-- booking when the renter has finished but the lister has not confirmed within
+-- lister_completion_timeout_hours.
+alter table public.bookings
+  add column if not exists renter_completed_at timestamptz,
+  add column if not exists owner_completed_at timestamptz;
+
 -- Multi-super-admin consensus for platform_settings changes. A super admin
 -- proposes; it needs ceil(2N/3) approvals (N = current super-admin count,
 -- re-checked on every vote) before it is applied. One pending proposal at a

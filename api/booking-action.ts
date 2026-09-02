@@ -1,8 +1,7 @@
 import { addDays } from "date-fns";
 import { createClient } from "@supabase/supabase-js";
-import { processAutomaticPayoutForBooking } from "./lib/payoutAutomation.js";
-import { postSimpleBalancedJournal } from "./lib/ledger.js";
 import { processAutomaticRefundForBooking } from "./lib/refundAutomation.js";
+import { runBookingCompletionSideEffects } from "./lib/bookingCompletion.js";
 import { sendUserNotificationEmail } from "./lib/email.js";
 
 export const config = {
@@ -1231,6 +1230,7 @@ export default async function handler(req: Request) {
 
       const updatePayload: Record<string, boolean | string> = {};
       const ownCompletionField = renter ? "renter_completed" : "owner_completed";
+      const completionStamp = new Date().toISOString();
 
       if (renter) {
         if (!bookingRecord.renter_arrived_at) {
@@ -1246,6 +1246,7 @@ export default async function handler(req: Request) {
           );
         }
         updatePayload.renter_completed = true;
+        updatePayload.renter_completed_at = completionStamp;
         if (bookingRecord.owner_completed) {
           nextStatus = "completed";
           updatePayload.status = nextStatus;
@@ -1264,6 +1265,7 @@ export default async function handler(req: Request) {
           );
         }
         updatePayload.owner_completed = true;
+        updatePayload.owner_completed_at = completionStamp;
         if (bookingRecord.renter_completed) {
           nextStatus = "completed";
           updatePayload.status = nextStatus;
@@ -1334,50 +1336,16 @@ export default async function handler(req: Request) {
       });
 
       if (completedByThisRequest) {
-        if (Number(bookingRecord.commission) > 0) {
-          await postSimpleBalancedJournal(supabase, {
-            bookingId: bookingRecord.id,
-            eventKey: `booking:commission-earned:${bookingRecord.id}`,
-            eventType: "platform_commission_earned",
-            actorId: user.id,
-            debitAccount: "2040",
-            creditAccount: "4010",
-            amountCentavos: Math.round(Number(bookingRecord.commission) * 100),
-            memo: "Platform commission recognized after both parties completed the trip",
-          });
-        }
-        const claimDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
-        const { data: depositForReview, error: depositReviewError } = await supabase
-          .from("security_deposits")
-          .update({ status: "return_review", claim_deadline: claimDeadline })
-          .eq("booking_id", bookingRecord.id)
-          .eq("status", "paid")
-          .select("id")
-          .maybeSingle();
-        if (depositReviewError) throw depositReviewError;
-
-        if (depositForReview) {
-          await supabase.from("notifications").insert([
-            { user_id: bookingRecord.owner_id, title: "Security Deposit Review Window", message: "You have 48 hours to submit a documented deposit claim. No deduction is automatic.", type: "warning", link: "/lister-bookings" },
-            { user_id: bookingRecord.renter_id, title: "Security Deposit Under Return Review", message: "The refundable deposit is in a 48-hour evidence review window before release.", type: "info", link: "/my-bookings" },
-          ]);
-        }
-
-        if (!depositForReview) {
-        try {
-          await processAutomaticPayoutForBooking({
-            supabase,
-            bookingId: bookingRecord.id,
-            initiatedByUserId: user.id,
-            baseOrigin: new URL(req.url).origin,
-          });
-        } catch (payoutError) {
-          console.error(
-            "Automatic payout attempt failed after booking completion:",
-            payoutError instanceof Error ? payoutError.message : payoutError,
-          );
-        }
-        }
+        await runBookingCompletionSideEffects(
+          supabase,
+          {
+            id: bookingRecord.id,
+            owner_id: bookingRecord.owner_id,
+            renter_id: bookingRecord.renter_id,
+            commission: bookingRecord.commission,
+          },
+          { initiatedByUserId: user.id, baseOrigin: new URL(req.url).origin },
+        );
       }
 
       return jsonResponse({

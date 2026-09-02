@@ -3,6 +3,198 @@ import { processAutomaticPayoutForBooking } from "./payoutAutomation.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { sendRefundReceiptEmail } from "./email.js";
 
+type ReleaseResult = {
+  state: "released" | "refund_pending" | "blocked" | "already_finalized";
+  status?: string;
+  providerRefundId?: string | null;
+  reason?: string;
+};
+
+/**
+ * Shared security-deposit release path used by the super-admin endpoint, the
+ * lister "confirm return - no issues" action, and the claim-window auto-release
+ * job. Decides approved vs refundable, requests the PayMongo refund for the
+ * refundable remainder when needed, and finalizes (ledger + notifications +
+ * receipt + payout) once the refund is accepted.
+ *
+ * `enforceClaimWindow` is true only for the manual super-admin path; the lister
+ * waiver and the auto-release job pass false because the window no longer
+ * matters (the lister is waiving, or it has already elapsed).
+ */
+export async function runSecurityDepositRelease(
+  supabase: ServiceRoleSupabaseClient,
+  input: {
+    depositId: string;
+    actorId: string | null;
+    baseOrigin: string;
+    enforceClaimWindow: boolean;
+  },
+): Promise<ReleaseResult> {
+  const paymongoKey = process.env.PAYMONGO_SECRET_KEY;
+
+  const { data: deposit, error: depositError } = await supabase
+    .from("security_deposits")
+    .select("*")
+    .eq("id", input.depositId)
+    .single();
+  if (depositError || !deposit) throw depositError || new Error("Security deposit not found");
+
+  if (["released", "partially_released", "claimed"].includes(deposit.status)) {
+    return { state: "already_finalized", status: deposit.status };
+  }
+
+  const { data: unresolvedClaims } = await supabase
+    .from("security_deposit_claims")
+    .select("id")
+    .eq("security_deposit_id", deposit.id)
+    .in("status", ["submitted", "renter_responded"]);
+  if ((unresolvedClaims ?? []).length > 0) {
+    return { state: "blocked", reason: "Decide every open claim before releasing the deposit" };
+  }
+
+  if (
+    input.enforceClaimWindow &&
+    deposit.status === "return_review" &&
+    deposit.claim_deadline &&
+    new Date(deposit.claim_deadline).getTime() > Date.now()
+  ) {
+    return { state: "blocked", reason: "The lister claim window is still open" };
+  }
+
+  if (deposit.status === "return_review") {
+    await supabase
+      .from("security_deposits")
+      .update({ status: "no_claim" })
+      .eq("id", deposit.id)
+      .eq("status", "return_review");
+  }
+
+  const { data: approvedClaims } = await supabase
+    .from("security_deposit_claims")
+    .select("approved_amount_centavos")
+    .eq("security_deposit_id", deposit.id)
+    .in("status", ["approved", "partially_approved"]);
+  const approved = Math.min(
+    Number(deposit.amount_centavos),
+    (approvedClaims ?? []).reduce(
+      (sum, claim) => sum + Number(claim.approved_amount_centavos || 0),
+      0,
+    ),
+  );
+  const refundable = Math.max(0, Number(deposit.amount_centavos) - approved);
+
+  if (refundable === 0) {
+    const finalized = await finalizeSecurityDepositRelease(supabase, {
+      depositId: deposit.id,
+      actorId: input.actorId,
+      baseOrigin: input.baseOrigin,
+    });
+    return { state: "released", status: finalized.status };
+  }
+
+  if (!String(deposit.provider_payment_id || "").startsWith("pay_")) {
+    return {
+      state: "blocked",
+      reason:
+        "The original PayMongo Payment ID is missing. Run reconciliation before attempting a refund.",
+    };
+  }
+  if (!paymongoKey) {
+    return { state: "blocked", reason: "PayMongo is not configured for deposit refunds" };
+  }
+
+  const authHeader = `Basic ${btoa(`${paymongoKey}:`)}`;
+
+  if (deposit.status === "refund_pending" && deposit.provider_refund_id) {
+    const check = await fetch(
+      `https://api.paymongo.com/v1/refunds/${deposit.provider_refund_id}`,
+      { headers: { Accept: "application/json", Authorization: authHeader } },
+    );
+    const checked = await check.json();
+    const status = checked?.data?.attributes?.status as string | undefined;
+    if (!check.ok) {
+      return { state: "blocked", reason: "PayMongo refund status could not be checked" };
+    }
+    if (status === "succeeded") {
+      const finalized = await finalizeSecurityDepositRelease(supabase, {
+        depositId: deposit.id,
+        providerRefundId: deposit.provider_refund_id,
+        actorId: input.actorId,
+        baseOrigin: input.baseOrigin,
+      });
+      return { state: "released", status: finalized.status };
+    }
+    if (status === "failed") {
+      await supabase
+        .from("security_deposits")
+        .update({ status: "failed" })
+        .eq("id", deposit.id)
+        .eq("status", "refund_pending");
+      return { state: "blocked", reason: "The PayMongo deposit refund failed" };
+    }
+    return { state: "refund_pending", providerRefundId: deposit.provider_refund_id };
+  }
+
+  const providerResponse = await fetch("https://api.paymongo.com/v1/refunds", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: authHeader,
+      "Idempotency-Key": `safedrive-deposit-refund-${deposit.id}`,
+    },
+    body: JSON.stringify({
+      data: {
+        attributes: {
+          amount: refundable,
+          payment_id: deposit.provider_payment_id,
+          reason: "others",
+          notes: `SafeDrive refundable security deposit release for booking ${deposit.booking_id}`,
+        },
+      },
+    }),
+  });
+  const providerData = await providerResponse.json();
+  if (!providerResponse.ok) {
+    return { state: "blocked", reason: "PayMongo did not accept the deposit refund" };
+  }
+  const refundId = providerData?.data?.id as string | undefined;
+  const refundStatus = providerData?.data?.attributes?.status as string | undefined;
+  if (!refundId) {
+    return { state: "blocked", reason: "PayMongo returned an incomplete refund" };
+  }
+
+  await supabase
+    .from("security_deposits")
+    .update({ status: "refund_pending", provider_refund_id: refundId })
+    .eq("id", deposit.id)
+    .in("status", ["no_claim", "deduction_approved", "failed"]);
+  await supabase.from("audit_log").insert({
+    user_id: input.actorId,
+    action: "security_deposit_refund_requested",
+    entity_type: "security_deposit",
+    entity_id: deposit.id,
+    details: {
+      booking_id: deposit.booking_id,
+      refund_id: refundId,
+      refund_status: refundStatus,
+      refunded_centavos: refundable,
+      approved_deduction_centavos: approved,
+    },
+  });
+
+  if (refundStatus === "succeeded") {
+    const finalized = await finalizeSecurityDepositRelease(supabase, {
+      depositId: deposit.id,
+      providerRefundId: refundId,
+      actorId: input.actorId,
+      baseOrigin: input.baseOrigin,
+    });
+    return { state: "released", status: finalized.status };
+  }
+  return { state: "refund_pending", providerRefundId: refundId };
+}
+
 export function calculateSecurityDepositDisposition(
   totalCentavos: number,
   approvedClaimAmounts: number[],

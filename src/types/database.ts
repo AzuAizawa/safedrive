@@ -483,6 +483,8 @@ export interface Database {
           owner_response_deadline: string | null;
           renter_completed: boolean;
           owner_completed: boolean;
+          renter_completed_at: string | null;
+          owner_completed_at: string | null;
           paymongo_checkout_id: string | null;
           paymongo_balance_checkout_id: string | null;
           pickup_time: string | null;
@@ -526,6 +528,8 @@ export interface Database {
           paymongo_balance_checkout_id?: string | null;
           renter_completed?: boolean | null;
           owner_completed?: boolean | null;
+          renter_completed_at?: string | null;
+          owner_completed_at?: string | null;
           pickup_time?: string | null;
           dropoff_time?: string | null;
           lister_arrived_at?: string | null;
@@ -567,6 +571,8 @@ export interface Database {
           paymongo_balance_checkout_id?: string | null;
           renter_completed?: boolean | null;
           owner_completed?: boolean | null;
+          renter_completed_at?: string | null;
+          owner_completed_at?: string | null;
           pickup_time?: string | null;
           dropoff_time?: string | null;
           lister_arrived_at?: string | null;

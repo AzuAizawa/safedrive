@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { runSecurityDepositRelease } from "./lib/securityDeposit";
 
 export const config = { runtime: "edge" };
 const respond = (body: Record<string, unknown>, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
@@ -26,11 +27,46 @@ export default async function handler(req: Request) {
     const isLister = deposit.owner_id === user.id;
     if (!isSuperAdmin && !isRenter && !isLister) return respond({ error: "Not allowed" }, 403);
 
+    if (payload.action === "lister_confirm_return") {
+      if (!isLister || deposit.status !== "return_review") {
+        return respond(
+          { error: "Only the lister can confirm the return while the deposit is in review" },
+          409,
+        );
+      }
+      const { data: openClaims } = await supabase
+        .from("security_deposit_claims")
+        .select("id")
+        .eq("security_deposit_id", deposit.id)
+        .not("status", "in", "(rejected)");
+      if ((openClaims ?? []).length > 0) {
+        return respond(
+          { error: "You already filed a deposit claim for this booking; it must be decided instead." },
+          409,
+        );
+      }
+      const result = await runSecurityDepositRelease(supabase, {
+        depositId: deposit.id,
+        actorId: user.id,
+        baseOrigin: new URL(req.url).origin,
+        enforceClaimWindow: false,
+      });
+      await supabase.from("audit_log").insert({
+        user_id: user.id,
+        action: "security_deposit_lister_confirmed_return",
+        entity_type: "security_deposit",
+        entity_id: deposit.id,
+        details: { booking_id: payload.bookingId, release_state: result.state },
+      });
+      if (result.state === "blocked") return respond({ error: result.reason }, 409);
+      return respond({ success: true, state: result.state });
+    }
+
     if (payload.action === "submit_claim") {
       const amount = Math.round(Number(payload.amountCentavos));
       const reason = String(payload.reason || "").trim();
       if (!isLister || deposit.status !== "return_review") return respond({ error: "A claim may only be submitted by the lister during return review" }, 409);
-      if (!deposit.claim_deadline || new Date(deposit.claim_deadline).getTime() < Date.now()) return respond({ error: "The 48-hour claim window has ended" }, 409);
+      if (!deposit.claim_deadline || new Date(deposit.claim_deadline).getTime() < Date.now()) return respond({ error: "The deposit claim window has ended" }, 409);
       if (!Number.isInteger(amount) || amount <= 0 || amount > Number(deposit.amount_centavos) || reason.length < 10) return respond({ error: "Enter a supported claim amount and at least 10 characters of explanation" }, 400);
       const { data: returnReport } = await supabase.from("trip_condition_reports").select("id, submitted_at, trip_condition_photos(category, storage_path, captured_at)").eq("booking_id", payload.bookingId).eq("reporter_id", user.id).eq("phase", "return").maybeSingle();
       if (!returnReport) return respond({ error: "Submit your return condition report and required photos before making a deposit claim" }, 409);
