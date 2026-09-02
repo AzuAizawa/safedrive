@@ -9,6 +9,23 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Vehicle Availability is a calendar now
+
+- `VehicleAvailabilityPage` replaced the start/end date inputs + "Reason
+  type" dropdown + "Reason" text field with a **month calendar**
+  (react-day-picker). Booked dates render red and disabled; already
+  blocked dates amber and disabled; the lister taps a free range and hits
+  "Block selected dates".
+- No reason/category is asked. `vehicle_unavailability.reason` /
+  `category` are NOT NULL, so inserts write fixed values
+  ("Blocked by owner" / "other") - no migration.
+- The page also loads the car's own bookings (owner RLS) so conflicts are
+  visible up front instead of only failing on the DB trigger after submit.
+- Files: `src/pages/VehicleAvailabilityPage.tsx`, master doc,
+  SYSTEM_FLOWS.
+
+---
+
 ## 2026-09-03 — Demo money-movement mode for refunds + deposit releases (Phase 6)
 
 - The payout flow already simulated cleanly in demo mode; refunds and

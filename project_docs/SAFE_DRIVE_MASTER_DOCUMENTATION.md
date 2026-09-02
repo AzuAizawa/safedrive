@@ -230,7 +230,7 @@ SafeDrive therefore warns that:
 
 When a lister changes critical vehicle, ownership, pricing, deposit, insurance, location, or agreement information, database triggers return the vehicle to `pending`. It becomes public again only after admin review, following the same principle used during initial registration.
 
-Vehicle maintenance and blackout dates are stored separately from bookings. Owners can block dates for servicing or personal use, but a blackout cannot conflict with an active booking. Booking creation checks both bookings and blackouts.
+Vehicle maintenance and blackout dates are stored separately from bookings. The lister manages them on a **month calendar** (`/vehicle-availability`): dates with a booking show red and are not selectable, already-blocked dates show amber, and the lister taps a free range to block it. No reason or category is collected - an unavailable date is simply unavailable. A blackout cannot conflict with an active booking. Booking creation checks both bookings and blackouts.
 
 ## 7. Vehicle-Specific Rental Agreement
 

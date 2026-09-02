@@ -72,7 +72,10 @@ server-side. Route guards in `src/components/*Route.tsx` are cosmetic.
 
 ## 5. Availability / maintenance
 
-- `/vehicle-availability`: lister blocks dates → `vehicle_unavailability`.
+- `/vehicle-availability`: a month calendar (react-day-picker). Booked dates
+  show red (disabled), already-blocked dates amber (disabled); the lister taps a
+  free range and blocks it → `vehicle_unavailability`. No reason / category is
+  asked (the row still stores a fixed `reason`/`category` for legacy columns).
   Constraint `vehicle_unavailability_no_overlap` + trigger
   `prevent_blackout_booking_conflict` prevent overlaps with each other and with
   active bookings.
