@@ -414,11 +414,11 @@ Do not run Chapters 1 or 2 merely to obtain Chapter 14. Chapter 1 contains histo
 - `GMAIL_RETURN_REMINDER_WEBHOOK_URL`
 - `PAYMONGO_WEBHOOK_TOLERANCE_SECONDS=300` (default signature replay tolerance)
 
-### Local demonstration only
+### Demo payout mode
 
 - `PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true`
 
-Omit or set the simulator to false on any hosted environment. Never prefix a server secret with `VITE_`.
+With this on, the Auto Payout button records the lister earnings (base price, net of SafeDrive commission) + ledger journal + receipt email without a PayMongo transfer. It accepts only a `sk_test_` key (a live key auto-disables it). Set it on a thesis/demo deployment; omit it for any launch that moves real money. Never prefix a server secret with `VITE_`.
 
 ## 17. Local Run and Test Procedure
 
@@ -450,7 +450,7 @@ These automated checks are regression evidence, not a replacement for authentica
 
 **Simulation A - ordinary payout state machine:**
 
-1. Keep a PayMongo `sk_test_` key and `PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true` on localhost only.
+1. Keep a PayMongo `sk_test_` key and `PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true` (demo payout mode).
 2. Use a completed test booking with valid payout details, required return reports, a terminal deposit state, and no dispute/reconciliation hold.
 3. As super-admin, run the automatic payout action.
 4. Confirm one `sandbox_payout_*` record, notification, audit entry, and balanced payout journal.
@@ -1227,7 +1227,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | PayMongo checkout | SafeDrive API -> `api.paymongo.com` | Secret-key Basic auth, server-calculated amount, stable idempotency key, hosted card entry |
 | PayMongo webhook | PayMongo -> SafeDrive API | Verify signature and timestamp tolerance, record event id, then make an idempotent state change |
 | PayMongo refund | SafeDrive API -> PayMongo | Super-admin/state eligibility, provider reference, retry-safe key, terminal webhook confirmation |
-| PayMongo payout/wallet | SafeDrive API -> PayMongo Money Movement | Disabled until account/API approval; localhost simulator never calls this boundary |
+| PayMongo payout/wallet | SafeDrive API -> PayMongo Money Movement | Disabled until account/API approval; demo payout mode never calls this boundary |
 | Gmail Apps Script | SafeDrive API -> `/exec` | HTTPS plus matching shared secret; inquiry remains open when delivery fails |
 | Resend | SafeDrive API -> Resend Email API | Server-only API key, verified sender domain, transactional receipts and lifecycle notices |
 | Browser `/api/*` | page -> same-origin handler | JSON request, bearer token where required, server validation, structured JSON response |

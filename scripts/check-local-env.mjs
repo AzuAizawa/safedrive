@@ -109,11 +109,11 @@ if (isConfigured("VITE_PAYMONGO_PUBLIC_KEY") && isConfigured("PAYMONGO_SECRET_KE
 
 if ((values.get("PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION") || "").toLowerCase() === "true") {
   if (isConfigured("PAYMONGO_SECRET_KEY") && !secretKey.startsWith("sk_test_")) {
-    console.error("[FAIL] The local payout simulator requires a PayMongo test key");
+    console.error("[FAIL] Demo payout mode requires a PayMongo test key (a live key auto-disables it)");
     failed = true;
   } else {
     console.warn(
-      "[WARN] Local payout simulator enabled; it records a demo payout without calling PayMongo transfers",
+      "[WARN] Demo payout mode enabled: the Auto Payout button records the lister earnings (net of commission) + ledger + receipt without a real PayMongo transfer. Unset this for a real launch.",
     );
   }
 }

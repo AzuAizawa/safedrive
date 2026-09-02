@@ -163,9 +163,8 @@ const checks = [
     file: "api/lib/payoutAutomation.ts",
     markers: [
       "PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION",
-      "isLocalDevelopmentOrigin",
       "isPayMongoTestKey",
-      "Sandbox payout completion refuses non-test PayMongo keys",
+      "Demo payout completion refuses non-test PayMongo keys",
       "Payout was not marked paid",
       "payout_sandbox_completed",
       "PAYMONGO_PAYOUT_WALLET_ID",

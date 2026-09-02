@@ -9,6 +9,20 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-02 — Auto Payout button works in demo mode on the deployed site
+
+- The "Auto Payout" button in Admin > Payouts already existed but only the
+  localhost sandbox simulator could complete it without real PayMongo Money
+  Movement. Removed the `isLocalDevelopmentOrigin` restriction from
+  `payoutAutomation.ts` - `PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true` +
+  a `sk_test_` key (a live key still auto-disables it) now lets the button
+  record the lister's earnings (`base_price`, net of SafeDrive commission),
+  post the ledger journal, and send the receipt email + notification with no
+  real transfer. Flag set in Vercel + `.env`; copy in README / master doc /
+  check-local-env updated; smoke-check markers updated.
+
+---
+
 ## 2026-09-02 — Subscription: "Cancel" keeps perks until the end date
 
 - The "Switch to Free now" action did an immediate downgrade (forfeiting the

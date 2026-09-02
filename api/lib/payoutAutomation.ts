@@ -107,14 +107,6 @@ const getPayMongoSettings = () => ({
     process.env.PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION === "true",
 });
 
-const isLocalDevelopmentOrigin = (origin: string) => {
-  try {
-    return ["localhost", "127.0.0.1", "::1"].includes(new URL(origin).hostname);
-  } catch {
-    return false;
-  }
-};
-
 const isPayMongoTestKey = (secretKey: string | undefined) =>
   Boolean(secretKey?.startsWith("sk_test_"));
 
@@ -685,21 +677,17 @@ export const processAutomaticPayoutForBooking = async ({
 
   const { secretKey, walletId, allowSandboxCompletion } = getPayMongoSettings();
   if (allowSandboxCompletion) {
-    if (!isLocalDevelopmentOrigin(baseOrigin)) {
-      return {
-        state: "skipped",
-        bookingId,
-        reason:
-          "Sandbox payout completion is restricted to localhost. No payout was recorded or sent.",
-      };
-    }
-
+    // Demo / thesis payout: the "Auto Payout" button records the lister's
+    // earnings (base_price, net of SafeDrive commission), posts the ledger
+    // journal, and sends the receipt e-mail + notification WITHOUT calling
+    // PayMongo or moving real money. Gated on an opt-in env flag and a test
+    // key - a live PayMongo key auto-disables this path.
     if (secretKey && !isPayMongoTestKey(secretKey)) {
       return {
         state: "skipped",
         bookingId,
         reason:
-          "Sandbox payout completion refuses non-test PayMongo keys. No payout was recorded or sent.",
+          "Demo payout completion refuses non-test PayMongo keys. No payout was recorded or sent.",
       };
     }
 
@@ -709,7 +697,7 @@ export const processAutomaticPayoutForBooking = async ({
         sandboxPayout = await createPendingPayoutRecord(
           supabase,
           payoutBooking,
-          "Local sandbox payout queued. No PayMongo wallet transfer was requested.",
+          "Demo payout queued. No PayMongo wallet transfer was requested.",
         );
       } catch (error) {
         if (error instanceof ActivePayoutExistsError) {
@@ -730,13 +718,13 @@ export const processAutomaticPayoutForBooking = async ({
       transaction_id: sandboxTransactionId,
       payment_method: payoutBooking.owner.payout_method,
       notes:
-        "Sandbox payout completed for system showcase. No real PayMongo wallet transfer was sent.",
+        "Demo payout completed. Lister earnings (base price, net of commission) recorded without a real PayMongo transfer.",
     });
     await createListerNotification(
       supabase,
       payoutBooking.owner.id,
-      "Sandbox Payout Recorded",
-      `Your SafeDrive payout for ${getVehicleLabel(payoutBooking)} was marked released in sandbox showcase mode. No real PayMongo wallet transfer was sent.`,
+      "Payout Recorded (demo mode)",
+      `Your SafeDrive payout of PHP ${Number(payoutBooking.base_price).toLocaleString()} for ${getVehicleLabel(payoutBooking)} was recorded. This build runs in demo payout mode, so no real PayMongo transfer was sent.`,
       "success",
     );
     await sendPayoutReceiptEmail(supabase, {

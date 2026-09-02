@@ -194,19 +194,22 @@ Return reminders now notify both renter and lister through Resend. `RESEND_REPLY
 is optional. The existing Gmail Apps Script delivery remains the fallback for
 guest-inquiry replies and return reminders only when Resend is not configured.
 
-Optional demo-only payout flag:
+Optional demo payout flag:
 
 ```text
 PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true
 ```
 
-This flag enables SafeDrive's local payout simulator even when a PayMongo test
-key is configured. It never calls the PayMongo transfer endpoint, accepts only a
-test key (or no key), and refuses to complete outside localhost. Leave it unset
-in every hosted environment. Without an enabled local simulator or usable
-PayMongo Money Movement credentials, Auto Payout skips instead of marking money
-as released; use the manual payout fallback only after the admin actually sends
-the money outside SafeDrive.
+With this flag on, the admin **Auto Payout** button completes the payout without
+calling PayMongo: it records the lister's earnings (`base_price`, already net of
+SafeDrive commission), posts the ledger journal, and sends the receipt email +
+notification. It accepts only a PayMongo test key (or no key) - a live
+`sk_live_` key auto-disables the demo path. Use this for a thesis/demo build
+that will never move real money. **Unset it for any launch that takes real
+payments.** Without the flag and without usable PayMongo Money Movement
+credentials (`PAYMONGO_PAYOUT_WALLET_ID` + an approved account), Auto Payout
+skips and you fall back to the manual payout (admin sends the money outside
+SafeDrive, then records the reference).
 
 `CRON_SECRET` is required for the booking-deadline expiry and return-reminder
 workers. Vercel's Hobby plan only allows once-a-day cron jobs, which is too slow
