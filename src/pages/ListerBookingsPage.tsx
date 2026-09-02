@@ -293,8 +293,8 @@ export default function ListerBookingsPage() {
     return () => window.removeEventListener("pageshow", resetCheckoutLoading);
   }, []);
 
-  const fetchBookings = useCallback(async () => {
-    setLoading(true);
+  const fetchBookings = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     try {
       const { data, error } = await supabase
         .from("bookings")
@@ -372,6 +372,36 @@ export default function ListerBookingsPage() {
   useEffect(() => {
     if (user) fetchBookings();
   }, [user, fetchBookings]);
+
+  // Keep the list live: refetch on tab focus, and subscribe to this lister's
+  // booking rows so a payment / status change shows within ~1s without a
+  // reload. Silent so the loading skeleton never flashes.
+  useEffect(() => {
+    if (!user?.id) return;
+    const refetch = () => void fetchBookings({ silent: true });
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refetch();
+    };
+    window.addEventListener("focus", refetch);
+    document.addEventListener("visibilitychange", onVisible);
+    const channel = supabase
+      .channel(`lister-bookings-live-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookings", filter: `owner_id=eq.${user.id}` },
+        refetch,
+      )
+      .subscribe();
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState === "visible") refetch();
+    }, 60_000);
+    return () => {
+      window.removeEventListener("focus", refetch);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(pollId);
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.id, fetchBookings]);
 
   useEffect(() => {
     if (!user || bookings.length === 0) return;
