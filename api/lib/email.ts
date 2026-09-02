@@ -85,6 +85,17 @@ const peso = (amount: number) =>
     minimumFractionDigits: 2,
   }).format(Math.abs(amount));
 
+const shortDate = (value: string | null | undefined) => {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleDateString("en-PH", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
+
 const paymentLabel = (type: ReceiptInput["paymentType"]) => {
   if (type === "downpayment") return "Reservation downpayment";
   if (type === "balance") return "Booking balance";
@@ -323,24 +334,149 @@ export const sendPayoutReceiptEmail = async (
   const destination = formatPayoutDestination(recipient.profile, input.payoutMethod);
   const destinationLabel = destination ? "Sent to" : "Method";
   const destinationValue = destination || input.payoutMethod;
+
+  // Itemize what makes up this single payout so the lister can see the base
+  // rental, any paid trip extension, fuel/charge reimbursements, and an approved
+  // security-deposit claim - and the renter payment timeline behind it.
+  const [bookingRes, extensionsRes, paymentsRes] = await Promise.all([
+    supabase
+      .from("bookings")
+      .select("base_price, commission, total_days")
+      .eq("id", input.bookingId)
+      .maybeSingle(),
+    supabase
+      .from("booking_extensions")
+      .select("extension_amount, fuel_top_up_amount, extension_days")
+      .eq("booking_id", input.bookingId)
+      .eq("status", "paid"),
+    supabase
+      .from("payments")
+      .select("payment_type, amount, created_at")
+      .eq("booking_id", input.bookingId)
+      .eq("status", "completed")
+      .in("payment_type", ["downpayment", "balance", "full_payment", "extension"])
+      .order("created_at", { ascending: true }),
+  ]);
+
+  const extensions = (extensionsRes.data ?? []) as Array<{
+    extension_amount: number | string;
+    fuel_top_up_amount: number | string;
+    extension_days: number | string;
+  }>;
+  const dbBasePrice = Number(bookingRes.data?.base_price ?? input.amount);
+  const commission = Number(bookingRes.data?.commission ?? 0);
+  const totalDays = Number(bookingRes.data?.total_days ?? 0);
+  const extRental = extensions.reduce((sum, ext) => sum + Number(ext.extension_amount || 0), 0);
+  const extDays = extensions.reduce((sum, ext) => sum + Number(ext.extension_days || 0), 0);
+  const fuel = extensions.reduce(
+    (sum, ext) => sum + Math.max(0, Number(ext.fuel_top_up_amount || 0)),
+    0,
+  );
+  // `input.amount` is the authoritative released total. The DB base_price holds
+  // only the rental (original + extension days); fuel and any approved deposit
+  // claim were added on top at payout time.
+  const baseRental = Math.max(0, dbBasePrice - extRental);
+  const approvedClaim = Math.max(
+    0,
+    Math.round((input.amount - dbBasePrice - fuel) * 100) / 100,
+  );
+  const baseDays = Math.max(0, totalDays - extDays);
+
+  const rows: Array<[string, string]> = [
+    ["Vehicle", vehicle],
+    [`Base rental${baseDays ? ` (${baseDays} day${baseDays === 1 ? "" : "s"})` : ""}`, peso(baseRental)],
+  ];
+  if (extRental > 0) {
+    rows.push([
+      `Trip extension${extDays ? ` (${extDays} day${extDays === 1 ? "" : "s"})` : ""}`,
+      peso(extRental),
+    ]);
+  }
+  if (fuel > 0) rows.push(["Fuel / charge reimbursement", peso(fuel)]);
+  if (approvedClaim > 0) rows.push(["Approved security-deposit claim", peso(approvedClaim)]);
+  rows.push(["Total released", peso(input.amount)]);
+  rows.push([destinationLabel, destinationValue]);
+  rows.push(["Reference", reference]);
+
+  const timeline = ((paymentsRes.data ?? []) as Array<{
+    payment_type: ReceiptInput["paymentType"];
+    amount: number | string;
+    created_at: string;
+  }>)
+    .map((row) => {
+      const when = shortDate(row.created_at);
+      return `${paymentLabel(row.payment_type)} ${peso(Number(row.amount))}${when ? ` on ${when}` : ""}`;
+    })
+    .join("; ");
+
+  const commissionNote =
+    commission > 0
+      ? ` SafeDrive's ${peso(commission)} commission was retained separately and is not part of this amount.`
+      : "";
+  const intro =
+    `SafeDrive released your lister payout for ${vehicle}.` +
+    (timeline ? ` Renter payments: ${timeline}.` : "") +
+    commissionNote +
+    " Keep this email with your booking records.";
+
   return sendTransactionalEmail({
     to: recipient.profile.email,
     subject: `SafeDrive payout receipt · ${peso(input.amount)}`,
-    text: `Hello ${recipient.profile.full_name || "there"},\n\nSafeDrive recorded your lister payout for ${vehicle}.\nAmount released: ${peso(input.amount)}\n${destinationLabel}: ${destinationValue}\nReference: ${reference}\n\nView your lister bookings: ${bookingLink}\n\nSafeDrive`,
-    html: page(
-      "Payout receipt",
-      `SafeDrive recorded your lister payout for ${vehicle}. Keep this email with your booking records.`,
-      [
-        ["Vehicle", vehicle],
-        ["Amount released", peso(input.amount)],
-        [destinationLabel, destinationValue],
-        ["Reference", reference],
-      ],
-      "View lister bookings",
-      bookingLink,
-    ),
+    text:
+      `Hello ${recipient.profile.full_name || "there"},\n\n${intro}\n\n` +
+      rows.map(([label, value]) => `${label}: ${value}`).join("\n") +
+      `\n\nView your lister bookings: ${bookingLink}\n\nSafeDrive`,
+    html: page("Payout receipt", intro, rows, "View lister bookings", bookingLink),
     idempotencyKey: `payout-receipt:${input.payoutId}:${recipient.booking.owner_id}`,
   });
+};
+
+/**
+ * One-off operational alert to every admin / super admin. Use only for
+ * exceptions that need a human (failed payout, refund that needs manual review,
+ * reconciliation mismatch) - never for routine, successful money movement,
+ * which stays an in-app notification.
+ */
+export const sendAdminAlertEmail = async (
+  supabase: ServiceRoleSupabaseClient,
+  input: {
+    subject: string;
+    message: string;
+    link: string;
+    baseOrigin: string;
+    eventKey: string;
+  },
+) => {
+  const { data: admins } = await supabase
+    .from("profiles")
+    .select("id, email, full_name")
+    .in("role", ["admin", "super_admin"])
+    .is("deleted_at", null);
+  const recipients = ((admins ?? []) as Array<{
+    id: string;
+    email: string | null;
+    full_name: string | null;
+  }>).filter((admin) => admin.email && isEmail(admin.email));
+  if (!recipients.length) {
+    return { state: "not_configured" as const, reason: "No admin email recipients" };
+  }
+  const actionUrl = getAppLink(input.baseOrigin, input.link);
+  const results = await Promise.all(
+    recipients.map((admin) =>
+      sendTransactionalEmail({
+        to: admin.email as string,
+        subject: `SafeDrive ops: ${input.subject}`,
+        text: `Hello ${admin.full_name || "there"},\n\n${input.message}\n\nOpen the admin console: ${actionUrl}\n\nSafeDrive`,
+        html: page(input.subject, input.message, [], "Open admin console", actionUrl),
+        idempotencyKey: `admin-alert:${input.eventKey}:${admin.id}`,
+      }),
+    ),
+  );
+  return {
+    state: "sent" as const,
+    delivered: results.filter((result) => result.state === "sent").length,
+    recipients: recipients.length,
+  };
 };
 
 export const sendVerificationDecisionEmail = async (input: {

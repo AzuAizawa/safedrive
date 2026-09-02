@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { postSimpleBalancedJournal } from "./ledger.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
-import { sendPayoutReceiptEmail } from "./email.js";
+import { sendAdminAlertEmail, sendPayoutReceiptEmail } from "./email.js";
 import { isPayMongoTestKey } from "./paymongoMode.js";
 
 type PaymentRecord = {
@@ -632,6 +632,25 @@ export const processAutomaticPayoutForBooking = async ({
     payoutBooking.base_price = payoutAmount;
   }
 
+  // Fuel / charge reimbursements from paid trip extensions are owed to the
+  // lister on top of the rental. The extension rental days were already folded
+  // into base_price when the extension was paid; only the fuel top-up is still
+  // sitting in the clearing account waiting to be released here.
+  const { data: paidExtensions, error: paidExtensionError } = await supabase
+    .from("booking_extensions")
+    .select("fuel_top_up_amount")
+    .eq("booking_id", bookingId)
+    .eq("status", "paid");
+  if (paidExtensionError) throw paidExtensionError;
+  const fuelReimbursementPesos = (paidExtensions ?? []).reduce(
+    (sum, ext) => sum + Math.max(0, Number(ext.fuel_top_up_amount) || 0),
+    0,
+  );
+  if (fuelReimbursementPesos > 0) {
+    payoutAmount += fuelReimbursementPesos;
+    payoutBooking.base_price = payoutAmount;
+  }
+
   if (!Number.isFinite(payoutAmount) || payoutAmount <= 0) {
     return {
       state: "skipped",
@@ -939,6 +958,13 @@ export const processAutomaticPayoutForBooking = async ({
         "Auto payout failed",
         `${getVehicleLabel(payoutBooking)} could not be disbursed automatically. Review the payout queue.`,
       );
+      await sendAdminAlertEmail(supabase, {
+        subject: "Auto payout failed",
+        message: `The automatic lister payout for ${getVehicleLabel(payoutBooking)} did not go through. No money moved. Open Financial Reviews -> Lister payouts to retry or record it manually.`,
+        link: "/admin/financial-reviews?view=payouts",
+        baseOrigin,
+        eventKey: `payout-failed:${paymentRecord.id}`,
+      });
       await insertPayoutAudit(supabase, initiatedByUserId, "payout_auto_failed", payoutBooking, {
         amount: Number(payoutBooking.base_price),
         payment_id: paymentRecord.id,

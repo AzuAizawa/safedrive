@@ -108,6 +108,7 @@ const checks = [
       "fetchDepositClaimWindowHours",
       "platform_commission_earned",
       "return_review",
+      "Payout did not run after completion",
     ],
   },
   {
@@ -317,6 +318,10 @@ const checks = [
       "createBatchTransfer",
       "ActivePayoutExistsError",
       "An active payout was created by another request",
+      "fuelReimbursementPesos",
+      "Fuel / charge reimbursements from paid trip extensions",
+      "sendAdminAlertEmail",
+      "payout-failed:${paymentRecord.id}",
     ],
   },
   {
@@ -336,6 +341,9 @@ const checks = [
       "Full-payment webhook payment rows existed but booking state was already claimed",
       "Extension webhook payment row existed but extension state was already claimed",
       "Duplicate subscription webhook found an already-active subscription",
+      "lister-extension:${extensionId}",
+      "allocationOverride",
+      "Extension Payment Received",
     ],
   },
   {
@@ -348,6 +356,25 @@ const checks = [
       "isDemoMoneyMovementEnabled",
       "sandbox_refund_",
       "Demo refund - no PayMongo transfer",
+      "alertRefundNeedsReview",
+      "Renter refund needs manual review",
+    ],
+  },
+  {
+    file: "api/lib/ledger.ts",
+    markers: [
+      "allocationOverride",
+      "Ledger allocation override exceeds the captured amount",
+    ],
+  },
+  {
+    file: "api/lib/email.ts",
+    markers: [
+      "sendAdminAlertEmail",
+      "Trip extension",
+      "Fuel / charge reimbursement",
+      "commission was retained separately",
+      "admin-alert:${input.eventKey}",
     ],
   },
   {

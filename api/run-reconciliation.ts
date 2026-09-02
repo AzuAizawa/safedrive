@@ -6,6 +6,7 @@ import {
   paymentLedgerEventKey,
 } from "./lib/reconciliation";
 import type { ServiceRoleSupabaseClient } from "./lib/supabaseTypes.js";
+import { sendAdminAlertEmail } from "./lib/email.js";
 
 export const config = { runtime: "edge" };
 
@@ -164,6 +165,13 @@ export default async function handler(req: Request) {
           link: "/admin/reconciliation",
         })));
       }
+      await sendAdminAlertEmail(supabase, {
+        subject: "Financial reconciliation needs review",
+        message: `The latest reconciliation run flagged ${criticalCount} critical mismatch${criticalCount === 1 ? "" : "es"}. No money was moved automatically. Open the reconciliation page to review each item.`,
+        link: "/admin/reconciliation",
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `reconciliation-critical:${run.id}`,
+      }).catch(() => undefined);
     }
     await supabase.from("audit_log").insert({ user_id: user.id, action: "financial_reconciliation_run", entity_type: "reconciliation_run", entity_id: run.id, details: { period_start: periodStart, period_end: periodEnd, issues: issues.length, provider_checks_enabled: Boolean(paymongoKey) } });
     failedRun = null;

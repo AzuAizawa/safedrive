@@ -5,6 +5,17 @@ type CompletedPayment = {
   amount: number;
   paymentType: string;
   transactionId: string;
+  /**
+   * Explicit lister / commission / fee split for this payment, in pesos. Used
+   * when the booking-wide ratio would misallocate - e.g. a paid trip extension,
+   * whose fuel top-up is a lister reimbursement and whose commission is a fixed
+   * slice, not a proportion of the whole booking.
+   */
+  allocationOverride?: {
+    ownerPesos: number;
+    commissionPesos: number;
+    feePesos: number;
+  };
 };
 
 type LedgerEntryDraft = {
@@ -81,16 +92,30 @@ export async function postCompletedPaymentToLedger(
   if (payment.paymentType === "security_deposit") {
     lines.push({ journal_id: journal.id, account_code: "2020", credit_centavos: amountCentavos, party_user_id: booking.renter_id, memo: "Refundable deposit liability" });
   } else {
-    const {
-      ownerShare,
-      commissionShare,
-      processingFeeShare: feeShare,
-    } = calculatePaymentLedgerAllocation({
-      amountCentavos,
-      basePrice: Number(booking.base_price),
-      commission: Number(booking.commission),
-      totalPrice: Number(booking.total_price),
-    });
+    let ownerShare: number;
+    let commissionShare: number;
+    let feeShare: number;
+    if (payment.allocationOverride) {
+      commissionShare = Math.max(0, Math.round(payment.allocationOverride.commissionPesos * 100));
+      feeShare = Math.max(0, Math.round(payment.allocationOverride.feePesos * 100));
+      // Give the lister the exact remainder so the three lines always sum to the
+      // captured amount even after per-part rounding.
+      ownerShare = amountCentavos - commissionShare - feeShare;
+      if (ownerShare < 0) {
+        throw new Error("Ledger allocation override exceeds the captured amount");
+      }
+    } else {
+      ({
+        ownerShare,
+        commissionShare,
+        processingFeeShare: feeShare,
+      } = calculatePaymentLedgerAllocation({
+        amountCentavos,
+        basePrice: Number(booking.base_price),
+        commission: Number(booking.commission),
+        totalPrice: Number(booking.total_price),
+      }));
+    }
     if (ownerShare) lines.push({ journal_id: journal.id, account_code: "2010", credit_centavos: ownerShare, party_user_id: booking.owner_id, memo: "Lister payable allocation" });
     if (commissionShare) lines.push({ journal_id: journal.id, account_code: "2040", credit_centavos: commissionShare, memo: "Platform fee deferred until completion" });
     if (feeShare) lines.push({ journal_id: journal.id, account_code: "4020", credit_centavos: feeShare, memo: "Disclosed renter processing-fee recovery" });

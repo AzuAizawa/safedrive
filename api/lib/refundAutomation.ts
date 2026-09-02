@@ -1,6 +1,6 @@
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { postCompletedRefundToLedger } from "./ledger.js";
-import { sendRefundReceiptEmail } from "./email.js";
+import { sendAdminAlertEmail, sendRefundReceiptEmail } from "./email.js";
 import { isDemoMoneyMovementEnabled } from "./paymongoMode.js";
 
 type PaymentRecord = {
@@ -405,6 +405,15 @@ export const processAutomaticRefundForBooking = async ({
   const refundBooking = booking as unknown as BookingForRefund;
   const secretKey = getPayMongoSecretKey();
 
+  const alertRefundNeedsReview = (detail: string) =>
+    sendAdminAlertEmail(supabase, {
+      subject: "Renter refund needs manual review",
+      message: `An automatic refund for ${getVehicleLabel(refundBooking)} could not complete: ${detail}. No money moved. Open Financial Reviews -> Renter refunds to confirm the provider result and record it.`,
+      link: "/admin/financial-reviews?view=refunds",
+      baseOrigin,
+      eventKey: `refund-failed:${bookingId}`,
+    }).catch(() => undefined);
+
   if (!secretKey) {
     return {
       state: "skipped",
@@ -531,6 +540,7 @@ export const processAutomaticRefundForBooking = async ({
           },
         );
 
+        await alertRefundNeedsReview(message);
         return {
           state: "failed",
           bookingId,
@@ -620,6 +630,7 @@ export const processAutomaticRefundForBooking = async ({
         },
       );
 
+      await alertRefundNeedsReview(message);
       return {
         state: "failed",
         bookingId,
@@ -649,12 +660,14 @@ export const processAutomaticRefundForBooking = async ({
   );
 
   if (failedSeen) {
+    const detail = failureNotes.join(" ") || "PayMongo reported refund failure.";
+    await alertRefundNeedsReview(detail);
     return {
       state: "failed",
       bookingId,
       refundPaymentIds,
       refundIds,
-      reason: failureNotes.join(" ") || "PayMongo reported refund failure.",
+      reason: detail,
     };
   }
 

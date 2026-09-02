@@ -152,7 +152,11 @@ The PayMongo wallet visible in the dashboard proves that a test wallet exists; i
 
 ### 3.5 Gmail Apps Script
 
-Resend is the primary transactional mail service. It carries payment/refund/payout receipts, inquiry replies, return reminders, and lifecycle notifications to both parties. The lister is emailed on a new booking request, on each confirmed payment (downpayment / balance / full - the message states SafeDrive holds the money and releases the lister's share, net of commission, after completion), on trip completion, on cancellation, and on extension decisions. A deployed Apps Script `/exec` URL remains a legacy fallback only when Resend is not configured. `GMAIL_WEBHOOK_SHARED_SECRET` in SafeDrive must equal the Apps Script property `SAFEDRIVE_WEBHOOK_SECRET`. Every email is keyed with an idempotency key; an in-app notification is always written even if the email fails.
+Resend is the primary transactional mail service. It carries payment/refund/payout receipts, inquiry replies, return reminders, and lifecycle notifications to both parties. The lister is emailed on a new booking request, on each confirmed payment (downpayment / balance / full / **paid extension** - the message states SafeDrive holds the money and releases the lister's share, net of commission, after completion, in one payout), on trip completion, on cancellation, and on extension decisions.
+
+The **lister payout receipt** is a single itemized email: base rental (with day count), any paid trip extension, any fuel/charge reimbursement, any approved security-deposit claim, the total released, the masked destination, and a one-line renter-payment timeline (each downpayment / balance / full / extension payment with its date). A paid extension folds its rental into `base_price` and its commission into the deferred-fee account at payment time; the extension's fuel top-up is a lister reimbursement released with the same payout (`payoutAutomation` adds it on top of `base_price`; the extension payment's ledger split is taken as an explicit `allocationOverride`, not the booking-wide ratio).
+
+Admins and super-admins additionally receive an **operational alert email** (`sendAdminAlertEmail`) only for money-movement exceptions that need a human - a failed automatic payout, a refund that needs manual review, or a critical reconciliation mismatch. Routine successful payouts and refunds stay in-app notifications only. A deployed Apps Script `/exec` URL remains a legacy fallback only when Resend is not configured. `GMAIL_WEBHOOK_SHARED_SECRET` in SafeDrive must equal the Apps Script property `SAFEDRIVE_WEBHOOK_SECRET`. Every email is keyed with an idempotency key; an in-app notification is always written even if the email fails.
 
 ## 4. Admin Notification Work Center
 
@@ -1222,7 +1226,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/lib/payoutAutomation.ts` | `createSupabaseAdmin`, `processAutomaticPayoutForBooking` | Service client plus payout eligibility/idempotency/provider/simulator flow |
 | `api/lib/refundAutomation.ts` | `processAutomaticRefundForBooking` | Refund eligibility, provider attempt, fallback review, audit, and notification |
 | `api/lib/securityDeposit.ts` | `calculateSecurityDepositDisposition`, `finalizeSecurityDepositRelease` | Cap approved claims, calculate renter remainder, and post terminal deposit effects |
-| `api/lib/email.ts` | `sendTransactionalEmail`, receipt, verification, and user-notification helpers | Server-only Resend delivery, HTML/text transactional templates, and idempotency keys |
+| `api/lib/email.ts` | `sendTransactionalEmail`, receipt (itemized payout), verification, user-notification, and `sendAdminAlertEmail` helpers | Server-only Resend delivery, HTML/text transactional templates, and idempotency keys; admin alerts fire only on money-movement exceptions |
 | `src/contexts/AuthContext.tsx` | `AuthProvider`, `useAuth` | Session/profile/MFA state and auth operations |
 | `src/lib/adminWorkQueue.ts` | `loadSupportTicketsNeedingAdminReply` | Find support cases where the newest participant message needs an admin answer |
 | `src/lib/authLockout.ts` | `getAuthLockoutState`, `registerAuthFailure`, `clearAuthFailures`, `formatLockoutRemaining` | Browser-side progressive login lockout UX; server auth remains authoritative |

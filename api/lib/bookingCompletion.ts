@@ -1,7 +1,7 @@
 import { postSimpleBalancedJournal } from "./ledger.js";
 import { processAutomaticPayoutForBooking } from "./payoutAutomation.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
-import { sendUserNotificationEmail } from "./email.js";
+import { sendAdminAlertEmail, sendUserNotificationEmail } from "./email.js";
 
 const DEFAULT_DEPOSIT_CLAIM_WINDOW_HOURS = 24;
 
@@ -120,6 +120,13 @@ export async function runBookingCompletionSideEffects(
       "Automatic payout attempt failed after booking completion:",
       payoutError instanceof Error ? payoutError.message : payoutError,
     );
+    await sendAdminAlertEmail(supabase, {
+      subject: "Payout did not run after completion",
+      message: `Booking ${booking.id} completed but the automatic lister payout threw an error and did not finish. No money moved. Open Financial Reviews -> Lister payouts and release it manually.`,
+      link: "/admin/financial-reviews?view=payouts",
+      baseOrigin: options.baseOrigin,
+      eventKey: `payout-exception:${booking.id}`,
+    }).catch(() => undefined);
   }
   return { depositInReview: false };
 }

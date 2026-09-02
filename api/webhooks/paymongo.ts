@@ -330,6 +330,11 @@ const insertCompletedPaymentIfMissing = async (
     paymentMethod: string;
     transactionId: string;
     notes: string;
+    allocationOverride?: {
+      ownerPesos: number;
+      commissionPesos: number;
+      feePesos: number;
+    };
   },
   baseOrigin: string,
   receipt: { amount: number; paymentType: "downpayment" | "balance" | "extension" | "security_deposit" | "full_payment" } | false = {
@@ -1095,18 +1100,18 @@ export default async function handler(req: Request) {
         return new Response("OK", { status: 200 });
       }
 
-      await insertCompletedPaymentIfMissing(supabase, {
-        bookingId: extension.booking_id,
-        amount: Number(extension.total_additional_amount),
-        paymentType: "extension",
-        paymentMethod: getPaymentMethodLabel(checkoutAttributes),
-        transactionId: checkoutId,
-        notes: buildPaymentNotes(
-          "Automated extension payment via PayMongo webhook",
-          paymongoPaymentMetadata,
-        ),
-      }, new URL(req.url).origin);
+      const extensionRentalAmount = Number(extension.extension_amount);
+      const extensionFuelTopUp = Math.max(0, Number(extension.fuel_top_up_amount));
+      const extensionCommission = Math.max(
+        0,
+        Number(extension.total_additional_amount) -
+          extensionRentalAmount -
+          extensionFuelTopUp,
+      );
 
+      // Claim the extension row first - this is the idempotency gate. A retried
+      // webhook that finds it already `paid` returns before touching the booking
+      // totals, the payment ledger, or the emails a second time.
       const { data: extensionStateChanged, error: extensionUpdateError } =
         await supabase
           .from("booking_extensions")
@@ -1147,15 +1152,8 @@ export default async function handler(req: Request) {
         .update({
           end_date: extension.requested_end_date,
           total_days: Number(booking.total_days) + Number(extension.extension_days),
-          base_price: Number(booking.base_price) + Number(extension.extension_amount),
-          commission:
-            Number(booking.commission) +
-            Math.max(
-              0,
-              Number(extension.total_additional_amount) -
-                Number(extension.extension_amount) -
-                Number(extension.fuel_top_up_amount),
-            ),
+          base_price: Number(booking.base_price) + extensionRentalAmount,
+          commission: Number(booking.commission) + extensionCommission,
           total_price: Number(booking.total_price) + Number(extension.total_additional_amount),
         })
         .eq("id", extension.booking_id);
@@ -1164,6 +1162,28 @@ export default async function handler(req: Request) {
         console.error("Failed to update booking after extension payment", bookingUpdateError);
         throw bookingUpdateError;
       }
+
+      // Record the extension payment against the now-updated booking. The
+      // explicit split routes the extension rental + fuel top-up to the lister
+      // payable and only the extension commission to the deferred-fee account -
+      // the booking-wide ratio would smear the fuel reimbursement across
+      // commission and fees.
+      await insertCompletedPaymentIfMissing(supabase, {
+        bookingId: extension.booking_id,
+        amount: Number(extension.total_additional_amount),
+        paymentType: "extension",
+        paymentMethod: getPaymentMethodLabel(checkoutAttributes),
+        transactionId: checkoutId,
+        notes: buildPaymentNotes(
+          "Automated extension payment via PayMongo webhook",
+          paymongoPaymentMetadata,
+        ),
+        allocationOverride: {
+          ownerPesos: extensionRentalAmount + extensionFuelTopUp,
+          commissionPesos: extensionCommission,
+          feePesos: 0,
+        },
+      }, new URL(req.url).origin);
 
       await supabase.from("audit_log").insert({
         action: "booking_extension_paid",
@@ -1175,14 +1195,9 @@ export default async function handler(req: Request) {
           amount_in_centavos: paidAmountInCentavos,
           checkout_id: checkoutId,
           requested_end_date: extension.requested_end_date,
-          extension_amount: Number(extension.extension_amount),
-          extension_commission: Math.max(
-            0,
-            Number(extension.total_additional_amount) -
-              Number(extension.extension_amount) -
-              Number(extension.fuel_top_up_amount),
-          ),
-          fuel_top_up_amount: Number(extension.fuel_top_up_amount),
+          extension_amount: extensionRentalAmount,
+          extension_commission: extensionCommission,
+          fuel_top_up_amount: extensionFuelTopUp,
           webhook: true,
         },
         user_id: extension.renter_id,
@@ -1204,6 +1219,19 @@ export default async function handler(req: Request) {
           link: "/lister-bookings",
         },
       ]);
+
+      await sendUserNotificationEmail(supabase, {
+        userId: extension.owner_id,
+        title: "Extension Payment Received",
+        message:
+          `The renter paid the approved ${Number(extension.extension_days)}-day extension for this booking. ` +
+          "SafeDrive holds the payment - the added rental" +
+          (extensionFuelTopUp > 0 ? " and fuel/charge reimbursement" : "") +
+          " (minus the SafeDrive commission) is released to your payout method after the trip is completed, in the same payout as the rest of the booking.",
+        link: "/lister-bookings",
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `lister-extension:${extensionId}`,
+      });
 
       await recordWebhookSecurityEvent("success", {
         event_id: event.id,

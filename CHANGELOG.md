@@ -9,6 +9,50 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Extension in payout, itemized payout receipt, admin exception alerts
+
+Follow-up to the lister email work. Four related gaps around trip
+extensions and payout visibility:
+
+- **Lister extension email.** A paid trip extension only pinged the
+  lister in-app. Added the `lister-extension:<id>` email (same
+  "SafeDrive holds it, released after completion in one payout"
+  wording as the other payment emails).
+- **Fuel top-up now reaches the lister.** An extension's
+  `fuel_top_up_amount` was charged to the renter and added to
+  `total_price` but never to `base_price`, so it was stranded in the
+  clearing account and never paid out. `payoutAutomation` now adds the
+  sum of paid-extension fuel top-ups on top of `base_price`, the same
+  way approved deposit claims are added.
+- **Correct ledger split for extension payments.** The extension
+  webhook recorded the payment *before* bumping the booking totals, so
+  `postCompletedPaymentToLedger` allocated the extension amount by the
+  stale booking-wide ratio (smearing the fuel reimbursement across
+  commission and fees). Reordered: mark extension paid (idempotency
+  gate) -> bump booking -> record payment with an explicit
+  `allocationOverride` (rental + fuel -> lister payable, commission ->
+  deferred fee).
+- **Itemized payout receipt.** `sendPayoutReceiptEmail` was one line
+  ("Amount released"). Now it breaks out base rental (day count),
+  trip extension (day count), fuel/charge reimbursement, approved
+  deposit claim, total released, masked destination, and a one-line
+  renter-payment timeline with dates. Notes the retained commission.
+- **Admin exception alerts.** New `sendAdminAlertEmail(supabase, ...)`
+  emails every admin/super-admin, but only on money-movement
+  exceptions: failed auto payout (`payoutAutomation` x2 +
+  `bookingCompletion` catch), refund needing manual review
+  (`refundAutomation` x3), critical reconciliation mismatch
+  (`run-reconciliation`). Routine success stays in-app only.
+
+- Files: `api/webhooks/paymongo.ts`, `api/lib/ledger.ts`,
+  `api/lib/payoutAutomation.ts`, `api/lib/refundAutomation.ts`,
+  `api/lib/bookingCompletion.ts`, `api/run-reconciliation.ts`,
+  `api/lib/email.ts`, `scripts/booking-flow-smoke-check.mjs`,
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+- No migration. No schema change.
+
+---
+
 ## 2026-09-03 — Super-admin-editable platform contact email
 
 - The public contact address (`admin.no.reply.360@gmail.com`) was
