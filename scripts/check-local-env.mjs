@@ -31,7 +31,10 @@ const isConfigured = (name) => {
   return Boolean(
     value &&
       !value.includes("YOUR_") &&
-      !value.includes("<") &&
+      // `<...>`-style unfilled placeholders only. A real value like the Resend
+      // sender `SafeDrive <receipts@send.safedrive.cfd>` legitimately contains
+      // angle brackets, so do not treat a bare `<` as a placeholder.
+      !/<[A-Z][A-Z0-9_]*>/.test(value) &&
       !value.includes("...") &&
       !value.startsWith("GENERATE_"),
   );
