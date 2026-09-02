@@ -4248,6 +4248,28 @@ begin
 end;
 $$;
 
+-- Renter-facing read of a listed car's blackout ranges (dates + category only,
+-- never the free-text reason). The "Owners manage vehicle blackouts" RLS policy
+-- only exposes an owner's own rows, so the booking calendar in
+-- src/pages/CarDetailPage.tsx calls this SECURITY DEFINER function to grey out
+-- owner-blocked dates instead of letting the request fail on the trigger below.
+create or replace function public.get_car_blackout_ranges(p_car_id uuid)
+returns table(start_date date, end_date date, category text)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select u.start_date, u.end_date, u.category
+  from public.vehicle_unavailability u
+  join public.cars c on c.id = u.car_id
+  where u.car_id = p_car_id
+    and c.status in ('approved', 'active')
+    and u.end_date >= current_date;
+$$;
+
+grant execute on function public.get_car_blackout_ranges(uuid) to anon, authenticated;
+
 drop trigger if exists prevent_booking_blackout_conflict on public.bookings;
 create trigger prevent_booking_blackout_conflict
 before insert or update of car_id, start_date, end_date, status on public.bookings

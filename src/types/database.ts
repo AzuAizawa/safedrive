@@ -1306,6 +1306,10 @@ export interface Database {
         };
         Returns: string;
       };
+      get_car_blackout_ranges: {
+        Args: { p_car_id: string };
+        Returns: { start_date: string; end_date: string; category: string }[];
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

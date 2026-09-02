@@ -9,15 +9,26 @@ The authoritative detail still lives in
 
 ---
 
-## 2026-09-02 — Car detail: remove stale "3-day booking" copy
+## 2026-09-02 — Car detail: show owner blackout dates on the booking calendar
 
-- `src/pages/CarDetailPage.tsx` — the booking sidebar still showed a "3-day
-  booking process / Requests must be made at least 3 days in advance" note,
-  contradicting the same page's "Trips can start as early as tomorrow" and the
-  actual validation (date picker `minDate` = tomorrow, `create-booking.ts`
-  `minStartUtcMs = today + 1 day`, deadlines capped at pickup, auto-cancel via
-  `expire-booking-deadlines`). Replaced with copy that matches the real
-  next-day flow. No logic change - the next-day rule was already implemented.
+- The renter booking calendar only fetched `bookings`, so owner
+  maintenance / personal-use blackouts (`vehicle_unavailability`) showed as
+  selectable and the request failed only afterwards on the
+  `prevent_booking_blackout_conflict` DB trigger.
+  - New `get_car_blackout_ranges(uuid)` SECURITY DEFINER function returns a
+    listed car's blackout date ranges + category (never the free-text reason);
+    granted to `anon`/`authenticated`. Added to the master SQL next to the
+    blackout triggers.
+  - `src/pages/CarDetailPage.tsx` fetches it, disables those days, styles them
+    amber + strikethrough with a new "Amber dates" legend entry, and
+    `isDateOverlapping` (so the request button + messages) now covers blackouts.
+  - Added `get_car_blackout_ranges` to `src/types/database.ts`.
+- Also removed the last stale "3-day" copy: the "3-day booking process" note and
+  a "3-to-30-day booking window" line, both contradicting the same page's "as
+  early as tomorrow" and the actual validation (`minDate` = tomorrow,
+  `create-booking.ts` `minStart = today + 1 day`, deadlines capped at pickup,
+  auto-cancel via `expire-booking-deadlines`). No booking-logic change - the
+  next-day rule was already implemented per master doc K.2.
 
 ---
 

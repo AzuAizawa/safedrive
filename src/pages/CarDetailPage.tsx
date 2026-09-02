@@ -85,6 +85,9 @@ export default function CarDetailPage() {
   const [bookedDates, setBookedDates] = useState<
     { start: string; end: string }[]
   >([]);
+  const [blackoutDates, setBlackoutDates] = useState<
+    { start: string; end: string; category: string }[]
+  >([]);
   const [showAgreement, setShowAgreement] = useState(false);
   const [acceptedAgreement, setAcceptedAgreement] = useState(false);
   const [agreementAccess, setAgreementAccess] = useState<AgreementAccess | null>(null);
@@ -140,6 +143,23 @@ export default function CarDetailPage() {
       if (bookings) {
         setBookedDates(
           bookings.map((b) => ({ start: b.start_date, end: b.end_date })),
+        );
+      }
+
+      // Owner maintenance / personal-use blackouts (date ranges only, no reason).
+      const { data: blackouts, error: blackoutError } = await supabase.rpc(
+        "get_car_blackout_ranges",
+        { p_car_id: id },
+      );
+      if (blackoutError) {
+        console.warn("Unable to load vehicle blackouts:", blackoutError.message);
+      } else if (blackouts) {
+        setBlackoutDates(
+          blackouts.map((b) => ({
+            start: b.start_date,
+            end: b.end_date,
+            category: b.category,
+          })),
         );
       }
 
@@ -292,7 +312,7 @@ export default function CarDetailPage() {
     }
 
     if (isOverlapping) {
-      toast.error("Selected dates overlap with an existing booking.");
+      toast.error("Selected dates overlap an existing booking or an owner-blocked period.");
       return;
     }
 
@@ -450,17 +470,19 @@ export default function CarDetailPage() {
   // Price calculations for preview
   const isDateOverlapping = (start: Date, end: Date) => {
     if (!start || !end) return false;
-    return bookedDates.some((booking) => {
-      const bStart = new Date(booking.start);
-      const bEnd = new Date(booking.end);
-      bStart.setHours(0, 0, 0, 0);
-      bEnd.setHours(0, 0, 0, 0);
-      const s = new Date(start);
-      const e = new Date(end);
-      s.setHours(0, 0, 0, 0);
-      e.setHours(0, 0, 0, 0);
-      return s <= bEnd && e >= bStart; // Standard overlap formula
-    });
+    const s = new Date(start);
+    const e = new Date(end);
+    s.setHours(0, 0, 0, 0);
+    e.setHours(0, 0, 0, 0);
+    const rangeHits = (ranges: { start: string; end: string }[]) =>
+      ranges.some((range) => {
+        const rStart = new Date(range.start);
+        const rEnd = new Date(range.end);
+        rStart.setHours(0, 0, 0, 0);
+        rEnd.setHours(0, 0, 0, 0);
+        return s <= rEnd && e >= rStart; // Standard overlap formula
+      });
+    return rangeHits(bookedDates) || rangeHits(blackoutDates);
   };
 
   const totalDays =
@@ -492,7 +514,7 @@ export default function CarDetailPage() {
     : totalDays <= 0
       ? "Choose a valid rental duration."
         : isOverlapping
-        ? "Those dates are already booked. Pick another schedule."
+        ? "Those dates are booked or blocked by the owner. Pick another schedule."
         : exceedsPaymentLimit
           ? `Online checkout is limited to bookings worth ${MAX_BOOKING_TOTAL.toLocaleString()} pesos or less.`
           : !pickupTime || !dropoffTime
@@ -552,6 +574,10 @@ export default function CarDetailPage() {
     from: new Date(b.start),
     to: new Date(b.end),
   }));
+  const blackoutDayRanges = blackoutDates.map((b) => ({
+    from: new Date(b.start),
+    to: new Date(b.end),
+  }));
   const availabilityWindow = {
     before: minDate,
     after: maxDate,
@@ -559,6 +585,7 @@ export default function CarDetailPage() {
   const disabledDays = [
     availabilityWindow, // Keep requests between tomorrow and 30 days out
     ...bookedDayRanges,
+    ...blackoutDayRanges,
   ];
 
   return (
@@ -807,7 +834,7 @@ export default function CarDetailPage() {
                   <p className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1">
                     <Calendar className="w-3 h-3" /> Availability guide
                   </p>
-                  <div className="grid gap-2 sm:grid-cols-3 text-xs">
+                  <div className="grid gap-2 sm:grid-cols-2 text-xs">
                     <div className="flex items-start gap-2">
                       <span className="mt-0.5 h-3 w-3 rounded-sm bg-red-500/20 ring-1 ring-red-500/30" />
                       <div>
@@ -816,10 +843,17 @@ export default function CarDetailPage() {
                       </div>
                     </div>
                     <div className="flex items-start gap-2">
+                      <span className="mt-0.5 h-3 w-3 rounded-sm bg-amber-500/20 ring-1 ring-amber-500/30" />
+                      <div>
+                        <p className="font-medium text-amber-600 dark:text-amber-400">Amber dates</p>
+                        <p className="text-muted-foreground">Owner marked the car unavailable (maintenance or personal use).</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
                       <span className="mt-0.5 h-3 w-3 rounded-sm bg-muted ring-1 ring-border" />
                       <div>
                         <p className="font-medium text-foreground">Gray dates</p>
-                        <p className="text-muted-foreground">Outside the allowed booking window or otherwise unavailable.</p>
+                        <p className="text-muted-foreground">Outside the allowed booking window.</p>
                       </div>
                     </div>
                     <div className="flex items-start gap-2">
@@ -844,12 +878,18 @@ export default function CarDetailPage() {
                   min={1}
                   modifiers={{
                     booked: bookedDayRanges,
+                    blackout: blackoutDayRanges,
                     unavailableWindow: availabilityWindow,
                   }}
                   modifiersStyles={{
                     booked: {
                       backgroundColor: "rgb(239 68 68 / 0.15)",
                       color: "rgb(239 68 68)",
+                      textDecoration: "line-through",
+                    },
+                    blackout: {
+                      backgroundColor: "rgb(245 158 11 / 0.15)",
+                      color: "rgb(217 119 6)",
                       textDecoration: "line-through",
                     },
                     unavailableWindow: {
@@ -921,12 +961,12 @@ export default function CarDetailPage() {
 
                 {isOverlapping && (
                   <p className="text-sm font-semibold text-red-500 bg-red-500/10 p-2 rounded text-center">
-                    Dates unavailable. Overlaps with an existing booking.
+                    Dates unavailable. They overlap an existing booking or a period the owner blocked off.
                   </p>
                 )}
                 {!isOverlapping && dateRange?.from && !dateRange?.to && (
                   <p className="text-sm text-muted-foreground bg-muted/40 p-2 rounded text-center">
-                    Pick a return date next. Only dates inside the 3-to-30-day booking window can be selected.
+                    Pick a return date next. Only dates from tomorrow through 30 days out can be selected.
                   </p>
                 )}
                 {exceedsPaymentLimit && (
