@@ -8,6 +8,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import AdminRoute from "@/components/AdminRoute";
 import SuperAdminRoute from "@/components/SuperAdminRoute";
 import PermissionRoute from "@/components/PermissionRoute";
+import ModeRoute from "@/components/ModeRoute";
 import UserRoute from "@/components/UserRoute";
 import DashboardLayout from "@/components/DashboardLayout";
 import AdminLayout from "@/components/AdminLayout";
@@ -112,40 +113,31 @@ function App() {
                   {/* Protected User Routes */}
                   <Route element={<UserRoute />}>
                     <Route element={<DashboardLayout />}>
+                      {/* Neutral - belong to no single portal mode */}
                       <Route path="/browse" element={<BrowseCarsPage />} />
                       <Route path="/cars/:id" element={<CarDetailPage />} />
-                      <Route path="/my-bookings" element={<MyBookingsPage />} />
                       <Route path="/verify" element={<VerificationPage />} />
-                      <Route path="/my-vehicles" element={<MyVehiclesPage />} />
-                      <Route
-                        path="/lister-bookings"
-                        element={<ListerBookingsPage />}
-                      />
-                      <Route
-                        path="/notifications"
-                        element={<NotificationsPage />}
-                      />
-                      <Route
-                        path="/car-renewals"
-                        element={<ListerCarRenewalPage />}
-                      />
-                      <Route
-                        path="/support"
-                        element={<SupportTicketsPage />}
-                      />
-                      <Route path="/inquiries" element={<InquiriesPage />} />
-                      <Route
-                        path="/payment/success"
-                        element={<PaymentSuccessPage />}
-                      />
-                      <Route
-                        path="/subscriptions"
-                        element={<SubscriptionPlansPage />}
-                      />
-                      <Route path="/vehicle-availability" element={<VehicleAvailabilityPage />} />
+                      <Route path="/notifications" element={<NotificationsPage />} />
+                      <Route path="/support" element={<SupportTicketsPage />} />
+                      <Route path="/payment/success" element={<PaymentSuccessPage />} />
                       <Route path="/trip-report/:bookingId/:phase" element={<TripConditionReportPage />} />
                       <Route path="/security-deposit/:bookingId" element={<SecurityDepositPage />} />
                       <Route path="/privacy-request" element={<PrivacyRequestPage />} />
+
+                      {/* Renter space - a direct entry switches back to renter mode */}
+                      <Route element={<ModeRoute mode="renter" />}>
+                        <Route path="/my-bookings" element={<MyBookingsPage />} />
+                        <Route path="/inquiries" element={<InquiriesPage />} />
+                        <Route path="/subscriptions" element={<SubscriptionPlansPage />} />
+                      </Route>
+
+                      {/* Lister space - a direct entry switches into lister mode */}
+                      <Route element={<ModeRoute mode="lister" />}>
+                        <Route path="/my-vehicles" element={<MyVehiclesPage />} />
+                        <Route path="/lister-bookings" element={<ListerBookingsPage />} />
+                        <Route path="/car-renewals" element={<ListerCarRenewalPage />} />
+                        <Route path="/vehicle-availability" element={<VehicleAvailabilityPage />} />
+                      </Route>
                     </Route>
                   </Route>
 

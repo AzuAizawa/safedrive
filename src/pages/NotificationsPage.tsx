@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { portalModeForPath, setPortalMode } from "@/lib/listerMode";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,7 +35,7 @@ const colorMap: Record<string, string> = {
 };
 
 export default function NotificationsPage() {
-  const { user } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [totalNotifications, setTotalNotifications] = useState(0);
@@ -95,7 +96,29 @@ export default function NotificationsPage() {
         .update({ read: true })
         .eq("id", notif.id);
     }
-    if (notif.link) navigate(notif.link);
+    if (!notif.link) return;
+
+    // Follow the notification into the right portal space (Airbnb-style):
+    // a booking-request notification opens in lister mode, a trip notification
+    // in renter mode. Neutral links (support, verification, ...) never switch.
+    const targetMode = portalModeForPath(notif.link);
+    const currentMode = profile?.is_lister ? "lister" : "renter";
+    const canSwitch =
+      targetMode !== null &&
+      targetMode !== currentMode &&
+      !(targetMode === "lister" && profile?.verified_status !== "verified");
+
+    if (canSwitch) {
+      const changed = await setPortalMode(user?.id, targetMode);
+      if (changed) {
+        await refreshProfile();
+        // Hard navigation so the layout loads already in the right mode with
+        // no flash of the mismatched navigation.
+        window.location.href = notif.link;
+        return;
+      }
+    }
+    navigate(notif.link);
   };
 
   return (

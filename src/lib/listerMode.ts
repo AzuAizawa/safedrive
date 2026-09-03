@@ -1,37 +1,77 @@
 import { supabase } from "@/lib/supabase";
 
 /**
- * Return the account to renter (default) mode.
+ * `profiles.is_lister` is a UI-context flag (nav + landing page), not a
+ * permission - the server always authorises by ownership. It is a deliberate
+ * in-session choice made through the "Switch to Lister" control.
  *
- * Lister mode is a deliberate, in-session choice made through the "Switch to
- * Lister" control. Airbnb-style, it does not survive leaving the session: this
- * runs on every sign-out AND at the end of every fresh sign-in, so opening the
- * app by logging in always lands in the renter UI. A plain page refresh (the
- * Supabase session is resumed, not re-created) does not call this, so a lister
- * who reloads stays in lister mode.
- *
- * The `is_lister = true` filter makes it a no-op when already in renter mode.
- * Returns true only when it actually flipped a row, so callers can decide
- * whether a state refresh is needed. Any error is logged, never thrown.
+ * Airbnb-style, it does not survive leaving the session (every sign-out and
+ * every fresh sign-in resets it to renter), and following a notification into
+ * the other space switches context for you rather than showing a mismatched
+ * screen.
  */
-export async function resetToRenterMode(
+
+export type PortalMode = "lister" | "renter";
+
+/**
+ * Set the account's portal mode. The `is_lister = <opposite>` filter makes it a
+ * no-op when already in the target mode. Returns true only when it actually
+ * flipped a row, so callers can decide whether to refresh state / hard-navigate.
+ * Any error is logged, never thrown - the caller falls back to just navigating.
+ *
+ * Switching *into* lister mode requires a verified account (enforced by the
+ * `protect_profile_sensitive_fields` DB trigger); callers should check that
+ * first to avoid a pointless failed request.
+ */
+export async function setPortalMode(
   userId: string | null | undefined,
+  mode: PortalMode,
 ): Promise<boolean> {
   if (!userId) return false;
+  const enable = mode === "lister";
   try {
     const { data, error } = await supabase
       .from("profiles")
-      .update({ is_lister: false })
+      .update({ is_lister: enable })
       .eq("id", userId)
-      .eq("is_lister", true)
+      .eq("is_lister", !enable)
       .select("id");
     if (error) {
-      console.warn("Could not reset lister mode:", error.message);
+      console.warn("Could not change portal mode:", error.message);
       return false;
     }
     return (data ?? []).length > 0;
   } catch (error) {
-    console.warn("Could not reset lister mode:", error);
+    console.warn("Could not change portal mode:", error);
     return false;
   }
+}
+
+/** Back-compat helper used by the auth flows. */
+export const resetToRenterMode = (userId: string | null | undefined) =>
+  setPortalMode(userId, "renter");
+
+const LISTER_PREFIXES = [
+  "/lister-bookings",
+  "/my-vehicles",
+  "/vehicle-availability",
+  "/car-renewals",
+];
+const RENTER_PREFIXES = ["/my-bookings", "/inquiries", "/subscriptions"];
+
+/**
+ * Which portal mode a destination belongs to, or null when it is neutral
+ * (Support, verification, a security-deposit page, Browse, ...) and should not
+ * force a switch. Query strings and hashes are ignored.
+ */
+export function portalModeForPath(
+  path: string | null | undefined,
+): PortalMode | null {
+  if (!path) return null;
+  const clean = path.split("?")[0].split("#")[0];
+  const matches = (prefix: string) =>
+    clean === prefix || clean.startsWith(`${prefix}/`);
+  if (LISTER_PREFIXES.some(matches)) return "lister";
+  if (RENTER_PREFIXES.some(matches)) return "renter";
+  return null;
 }
