@@ -122,6 +122,8 @@ A guest can read public pages and ask a question without creating an account. Th
 
 One account may act as a renter or lister when eligible. Registered users can complete identity verification, browse approved vehicles, request bookings, pay through hosted checkout, submit their own trip reports, view the agreement accepted for a booking, manage vehicle availability, submit deposit claims or responses when they are a booking participant, and open authenticated support cases.
 
+Lister mode is a deliberate in-session choice made with the "Switch to Lister" control (`profiles.is_lister`). It does not persist across a session boundary: every sign-out (explicit or the 10-minute inactivity timeout) and every fresh sign-in resets the account to renter mode, so logging in always lands in the renter UI. A plain page reload resumes the existing session and keeps the current mode.
+
 ### 2.3 Administrator
 
 An administrator's access is a per-account checklist of nine operational permissions (`users.verify`, `users.moderate`, `vehicles.review`, `vehicles.delete`, `catalog.manage`, `support.handle`, `inquiries.handle`, `audit.view`, `security.view`) held in `public.admin_permissions` and toggled by a super admin in `/admin/admins`. The dashboard and the notification work center are always available; every other operational page (users/profile verification, car catalog, vehicle approval, Support Tickets, User Inquiries, audit trail, security logs) appears only when the matching key is granted. The database gate is `public.admin_can(<key>)`, enforced by RLS and the `/api` handlers; the navigation filter is cosmetic. An administrator never sees finance, platform settings, retention requests, or admin management. See `project_docs/RBAC_DESIGN.md`.

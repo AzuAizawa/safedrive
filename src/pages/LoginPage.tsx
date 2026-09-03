@@ -16,6 +16,7 @@ import {
   registerAuthFailure,
 } from "@/lib/authLockout";
 import { recordSecurityEvent } from "@/lib/securityLog";
+import { resetToRenterMode } from "@/lib/listerMode";
 import { qrCodeSrc } from "@/lib/qrCode";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
@@ -115,6 +116,16 @@ export default function LoginPage() {
     verifyAuthenticatorCode,
     cancelAuthenticatorEnrollment,
   } = useAuth();
+
+  // Every fresh sign-in lands in renter mode (Airbnb-style). The logout paths
+  // already reset is_lister, so this is normally a no-op; when it does clear a
+  // stale flag (session ended without a sign-out), do a hard navigation so the
+  // freshly reset profile loads with no flash of the lister UI.
+  const goToRenterHome = async (userId: string | null | undefined) => {
+    const changed = await resetToRenterMode(userId);
+    if (changed) window.location.href = "/browse";
+    else navigate("/browse");
+  };
   const navigate = useNavigate();
   const supportEmail = usePlatformContactEmail();
   const supportGmailUrl = buildSupportGmailUrl(supportEmail);
@@ -484,7 +495,7 @@ export default function LoginPage() {
       clearAuthFailures("user", normalizedEmail);
       clearUserAuthPending();
       toast.success("Welcome back!");
-      navigate("/browse");
+      await goToRenterHome(verifiedUser?.id);
       setIsLoading(false);
       return;
     }
@@ -538,7 +549,7 @@ export default function LoginPage() {
     }
 
     toast.success("Welcome back!");
-    navigate("/browse");
+    await goToRenterHome(data.user?.id);
     setIsLoading(false);
   };
 
@@ -590,10 +601,13 @@ export default function LoginPage() {
     }
   };
 
-  const handleSkipReenroll = () => {
+  const handleSkipReenroll = async () => {
     setOfferReenroll(false);
+    const {
+      data: { user: currentUser },
+    } = await supabase.auth.getUser();
     toast.success("Welcome back!");
-    navigate("/browse");
+    await goToRenterHome(currentUser?.id);
   };
 
   const handleAuthenticatorSetupSubmit = async (e: React.FormEvent) => {
@@ -640,7 +654,7 @@ export default function LoginPage() {
     );
     clearUserAuthPending();
     toast.success("Authenticator app connected. Welcome back!");
-    navigate("/browse");
+    await goToRenterHome(verifiedUser?.id);
     setIsLoading(false);
   };
 

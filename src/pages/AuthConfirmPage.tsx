@@ -7,6 +7,7 @@ import {
   clearUserAuthPending,
 } from "@/lib/authPending";
 import { recordSecurityEvent } from "@/lib/securityLog";
+import { resetToRenterMode } from "@/lib/listerMode";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -166,12 +167,17 @@ export default function AuthConfirmPage() {
         }
 
         clearUserAuthPending();
+        const listerModeCleared = await resetToRenterMode(user.id);
         await recordSecurityEvent(
           "user_login_success",
           { email: user.email, method: "magic_link" },
           user.id,
         );
-        navigate("/browse", { replace: true });
+        if (listerModeCleared) {
+          window.location.href = "/browse";
+        } else {
+          navigate("/browse", { replace: true });
+        }
       } catch (error) {
         if (cancelled) return;
         const description =

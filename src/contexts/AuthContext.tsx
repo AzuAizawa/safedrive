@@ -12,6 +12,7 @@ import { clearAllAuthPending } from "@/lib/authPending";
 import { signInWithTransientJwtRetry } from "@/lib/authRetry";
 import { recordSecurityEvent } from "@/lib/securityLog";
 import { hasPermission } from "@/lib/permissions";
+import { resetToRenterMode } from "@/lib/listerMode";
 import type { User, Session, AuthResponse } from "@supabase/supabase-js";
 import type { Profile, AdminPermissionKey } from "@/types/database";
 import { ADMIN_PERMISSION_KEYS } from "@/types/database";
@@ -333,6 +334,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
         session?.user.id ?? user?.id ?? null,
       );
+      await resetToRenterMode(session?.user.id ?? user?.id);
       await supabase.auth.signOut();
     } catch (error) {
       console.error("Error during session timeout sign out:", error);
@@ -599,16 +601,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearInactivityTimeout();
       clearAllAuthPending();
       sessionStorage.removeItem("admin_auth_portal");
-      if (user?.id && profile?.role === "user" && profile?.is_lister) {
-        const { error } = await supabase
-          .from("profiles")
-          .update({ is_lister: false })
-          .eq("id", user.id);
-
-        if (error) {
-          console.warn("Could not reset lister mode before sign out:", error.message);
-        }
-      }
+      await resetToRenterMode(user?.id);
       await supabase.auth.signOut();
     } catch (error) {
       console.error("Error signing out:", error);
