@@ -919,12 +919,19 @@ export default function CarDetailPage() {
                 })()}
                 <p className="text-sm text-muted-foreground">
                   Renters see your price, photos, reviews, and the rental agreement
-                  exactly as shown on this page. Use My Vehicles to edit details,
-                  set availability, or pause the listing.
+                  exactly as shown on this page.
                 </p>
                 <Button className="w-full h-11" onClick={() => navigate("/my-vehicles")}>
                   <CarFront className="mr-2 h-4 w-4" />
                   Manage this listing
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full h-11"
+                  onClick={() => navigate("/vehicle-availability")}
+                >
+                  <Calendar className="mr-2 h-4 w-4" />
+                  View bookings &amp; availability
                 </Button>
               </CardContent>
             </Card>
