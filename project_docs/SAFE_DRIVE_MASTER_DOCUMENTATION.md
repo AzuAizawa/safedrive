@@ -1275,6 +1275,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `src/lib/supportTickets.ts` | attachment helpers, tag parse/serialize/filter, draft/no-show paths, notification methods | Shared support workflow behavior |
 | `src/lib/uploadUtils.ts` | `uploadFile`, `uploadMultipleFiles` | Validated Supabase Storage upload operations |
 | `src/lib/vehicleOcr.ts` | `runVehicleOcrVerification` | OCR-assisted plate/owner/brand/model comparison for admin review |
+| `src/lib/licenseQr.ts` | `decodeLicenseQr` | Decodes the uploaded LTO digital-licence QR screenshot (jsqr, in-browser, no third party) and cross-checks its contents + the linked host against the submitted name and license number. Assist only, folded into `runKycOcrReview` |
 | `src/lib/utils.ts` | `cn` | Tailwind/class-name merge helper |
 
 ### G.5 Classes, components, and types

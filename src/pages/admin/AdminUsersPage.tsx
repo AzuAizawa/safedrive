@@ -70,6 +70,13 @@ const kycCheckClassName = (status: KycOcrReview["checks"][number]["status"]) => 
   return "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200";
 };
 
+const qrCheckClassName = (status: string) => {
+  if (status === "match") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  if (status === "mismatch") return "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300";
+  if (status === "unreadable") return "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200";
+  return "border-border/60 bg-muted/40 text-muted-foreground";
+};
+
 export default function AdminUsersPage() {
   const minimumBlockReasonLength = 10;
   const { user: adminUser, profile: adminProfile, can } = useAuth();
@@ -311,6 +318,17 @@ export default function AdminUsersPage() {
         id: check.id,
         status: check.status,
       })),
+      qr: kycOcrReview.qr
+        ? {
+            decoded: kycOcrReview.qr.decoded,
+            link_host: kycOcrReview.qr.linkHost,
+            official_lto_host: kycOcrReview.qr.isOfficialLtoHost,
+            checks: kycOcrReview.qr.checks.map((check) => ({
+              label: check.label,
+              status: check.status,
+            })),
+          }
+        : null,
     };
   };
 
@@ -325,7 +343,14 @@ export default function AdminUsersPage() {
       }))
       .filter((image) => Boolean(image.url));
 
-    if (documents.length === 0) {
+    const qrImage = selectedUser.verification_images.find(
+      (image) => image.image_type === "license_qr",
+    );
+    const qrImageUrl = qrImage
+      ? getImageUrl(qrImage.storage_path, qrImage.created_at)
+      : null;
+
+    if (documents.length === 0 && !qrImageUrl) {
       toast.error("No readable ID documents are available for OCR");
       return;
     }
@@ -337,14 +362,15 @@ export default function AdminUsersPage() {
     setKycOcrReview(null);
     setKycOcrError("");
     setKycOcrProgress({
-      documentType: documents[0].type,
-      status: "starting OCR engine",
+      documentType: documents[0]?.type ?? "license_qr",
+      status: documents.length > 0 ? "starting OCR engine" : "reading QR code",
       progress: 0,
     });
 
     try {
       const result = await runKycOcrReview({
         documents,
+        qrImageUrl,
         expected: {
           fullName: selectedUser.full_name,
           driverLicense: decryptedPii.driver_license || storedLicense,
@@ -1097,9 +1123,9 @@ export default function AdminUsersPage() {
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold">KYC OCR comparison</p>
+                        <p className="text-sm font-semibold">KYC OCR &amp; QR check</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Reads uploaded ID documents and compares text with the submitted name and license number. It does not verify document authenticity or faces, and it never approves or rejects automatically.
+                          Reads the uploaded ID documents and decodes the LTO digital-license QR screenshot, then compares both with the submitted name and license number. Runs in your browser - nothing is sent anywhere. It does not verify faces and never approves or rejects automatically.
                         </p>
                       </div>
                       <Button
@@ -1111,7 +1137,7 @@ export default function AdminUsersPage() {
                         disabled={kycOcrRunning || piiLoading || selectedUser.verification_images.length === 0}
                       >
                         {kycOcrRunning && <Loader2 className="h-4 w-4 animate-spin" />}
-                        {kycOcrRunning ? "Reading documents…" : "Run KYC OCR"}
+                        {kycOcrRunning ? "Checking…" : "Run OCR & QR check"}
                       </Button>
                     </div>
 
@@ -1137,6 +1163,26 @@ export default function AdminUsersPage() {
                             </div>
                           ))}
                         </div>
+                        {kycOcrReview.qr && (
+                          <div className="space-y-2 rounded border border-border/60 bg-background/40 p-2">
+                            <p className="text-xs font-semibold text-muted-foreground">
+                              LTO digital-licence QR
+                            </p>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {kycOcrReview.qr.checks.map((check, index) => (
+                                <div
+                                  key={`${check.label}-${index}`}
+                                  className={`rounded border p-2 text-xs ${qrCheckClassName(check.status)}`}
+                                >
+                                  <p className="font-semibold">
+                                    {check.label}: {check.status}
+                                  </p>
+                                  <p className="mt-1 leading-snug">{check.summary}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         <p className="text-xs text-muted-foreground">
                           {kycOcrReview.documents.map((document) => `${document.type.replace(/_/g, " ")}: ${document.status === "read" ? `${Math.round(document.confidence ?? 0)}% confidence` : "could not be read"}`).join(" · ")}
                         </p>

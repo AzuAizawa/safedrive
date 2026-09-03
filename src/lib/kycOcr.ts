@@ -1,3 +1,5 @@
+import { decodeLicenseQr, type LicenseQrResult } from "@/lib/licenseQr";
+
 export type KycOcrDocument = {
   type: string;
   url: string;
@@ -30,6 +32,7 @@ export type KycOcrReview = {
   checkedAt: string;
   documents: KycOcrDocumentResult[];
   checks: KycFieldCheck[];
+  qr?: LicenseQrResult;
 };
 
 type TesseractWorker = Awaited<
@@ -169,17 +172,25 @@ export const buildKycFieldChecks = (
 export const runKycOcrReview = async ({
   documents,
   expected,
+  qrImageUrl,
   onProgress,
 }: {
   documents: KycOcrDocument[];
   expected: KycExpectedFields;
+  /** URL of the uploaded "LTO Digital License (QR Code)" screenshot, if any. */
+  qrImageUrl?: string | null;
   onProgress?: (progress: KycOcrProgress) => void;
 }): Promise<KycOcrReview> => {
+  const qr = qrImageUrl
+    ? await decodeLicenseQr({ imageUrl: qrImageUrl, expected }).catch(() => undefined)
+    : undefined;
+
   if (documents.length === 0) {
     return {
       checkedAt: new Date().toISOString(),
       documents: [],
       checks: buildKycFieldChecks("", expected, []),
+      qr,
     };
   }
 
@@ -220,6 +231,7 @@ export const runKycOcrReview = async ({
         checkedAt: new Date().toISOString(),
         documents: results,
         checks: buildKycFieldChecks(rawText, expected, results),
+        qr,
       };
     } finally {
       activeProgressListener = undefined;

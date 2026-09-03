@@ -97,7 +97,7 @@ export default function PrivacyPolicyPage() {
             <h2 className="text-xl font-bold text-foreground mb-3">4. Purpose of Data Processing</h2>
             <p>Depending on the data and activity, processing must rely on an applicable lawful basis, such as steps necessary to provide the requested service, compliance with a legal obligation, a properly assessed legitimate interest, or consent where consent is required. Current purposes include:</p>
             <ul className="list-disc pl-6 space-y-1 mt-2">
-              <li>To verify your identity, driving eligibility, and legal age to contract.</li>
+              <li>To verify your identity, driving eligibility, and legal age to contract. A reviewer's browser may run on-device text recognition on the ID images you upload and decode the digital-licence QR code screenshot to help cross-check the details you submitted. This processing happens locally in the reviewer's browser and is not sent to any third party; a human reviewer always makes the final decision.</li>
               <li>To preserve the approved lister agreement version and the renter's recorded acceptance for later evidentiary review.</li>
               <li>To create hosted payments, confirm provider events, process refunds and payouts, and reconcile transaction records through PayMongo. SafeDrive does not describe this arrangement as regulated escrow.</li>
               <li>To monitor platform integrity and resolve disputes using timestamped check-in evidence, including optional location data only when you choose the location-backed arrival button.</li>
