@@ -1882,37 +1882,6 @@ export default function MyBookingsPage() {
                         </div>
                       )}
 
-                      {showTripProgress && (
-                        <div className="mt-3 max-w-xl rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed">
-                          <div className="mb-2 flex items-center justify-between gap-2">
-                            <p className="font-semibold text-foreground">Trip progress</p>
-                            <span className="text-[10px] text-muted-foreground">
-                              {apparentState === "completed" ? "Complete" : "In handoff"}
-                            </span>
-                          </div>
-                          <div className="grid gap-1.5">
-                            {[
-                              { label: "You arrived", done: Boolean(booking.renter_arrived_at) },
-                              { label: "Lister arrived", done: Boolean(booking.lister_arrived_at) },
-                              { label: "You finished", done: booking.renter_completed },
-                              { label: "Lister finished", done: booking.owner_completed },
-                              { label: "Your rating", done: Boolean(reviewedByRenter) },
-                            ].map((step) => (
-                              <div key={step.label} className="flex items-center gap-2">
-                                {step.done ? (
-                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-600" />
-                                ) : (
-                                  <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                )}
-                                <span className={step.done ? "text-foreground" : "text-muted-foreground"}>
-                                  {step.label}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
                       {apparentState === "cancelled" ? (
                         <div
                           className={`mt-3 rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${
@@ -2247,6 +2216,37 @@ export default function MyBookingsPage() {
                           ) : null}
                         </div>
                       ) : null}
+
+                      {showTripProgress && (
+                        <div className="mt-3 max-w-xl rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <p className="font-semibold text-foreground">Trip progress</p>
+                            <span className="text-[10px] text-muted-foreground">
+                              {apparentState === "completed" ? "Complete" : "In handoff"}
+                            </span>
+                          </div>
+                          <div className="grid gap-1.5">
+                            {[
+                              { label: "You arrived", done: Boolean(booking.renter_arrived_at) },
+                              { label: "Lister arrived", done: Boolean(booking.lister_arrived_at) },
+                              { label: "You finished", done: booking.renter_completed },
+                              { label: "Lister finished", done: booking.owner_completed },
+                              { label: "Your rating", done: Boolean(reviewedByRenter) },
+                            ].map((step) => (
+                              <div key={step.label} className="flex items-center gap-2">
+                                {step.done ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-600" />
+                                ) : (
+                                  <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                )}
+                                <span className={step.done ? "text-foreground" : "text-muted-foreground"}>
+                                  {step.label}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       {[
                         "fully_paid",
