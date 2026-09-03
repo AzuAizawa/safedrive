@@ -6516,4 +6516,143 @@ drop policy if exists "Listers see own renewals" on public.car_renewals;
 create policy "Listers see own renewals" on public.car_renewals
   for select using (auth.uid() = lister_id or public.admin_can('vehicles.review'));
 
+-- ============================================================================
+-- CHAPTER 24 - Server-side login throttle (Password Verification Auth Hook)
+-- SOURCE: project_docs/RBAC_DESIGN.md - authentication hardening
+-- ============================================================================
+-- src/lib/authLockout.ts is a browser-side (localStorage) progressive lockout:
+-- helpful UX feedback, but a scripted attacker hitting Supabase /token directly
+-- bypasses it entirely and is never even logged. This chapter moves the same
+-- progressive rule to the SERVER, enforced by Supabase itself on every password
+-- attempt, keyed to the account (not the browser).
+--
+-- ACTIVATION (not automatic): after running this chapter, go to
+--   Supabase Dashboard - Authentication - Hooks - "Password Verification
+--   Attempt" - and select the Postgres function public.password_verification_
+--   hook. Test immediately with a spare account and keep a second admin session
+--   open. INSTANT ROLLBACK: unregister the hook in the same screen.
+--
+-- Fail-safe: any unexpected error inside the function returns "continue" so a
+-- bug here can never lock everyone out.
+
+create table if not exists public.auth_failed_attempts (
+  user_id           uuid primary key references auth.users(id) on delete cascade,
+  attempts          int  not null default 0,
+  window_started_at timestamptz not null default now(),
+  locked_until      timestamptz
+);
+
+alter table public.auth_failed_attempts enable row level security;
+-- No policies on purpose: only the SECURITY DEFINER hook and service_role touch it.
+
+create or replace function public.password_verification_hook(event jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid          uuid;
+  pw_valid     boolean;
+  rec          public.auth_failed_attempts%rowtype;
+  now_ts       timestamptz := now();
+  threshold    constant int := 5;   -- attempts per lock step
+  step_minutes constant int := 5;   -- lock 5 min at 5 fails, 10 at 10, ...
+  window_hours constant int := 24;  -- failure counter resets after this
+  new_attempts int;
+begin
+  uid := nullif(event->>'user_id', '')::uuid;
+  pw_valid := coalesce((event->>'valid')::boolean, true);
+
+  if uid is null then
+    return jsonb_build_object('decision', 'continue');
+  end if;
+
+  select * into rec from public.auth_failed_attempts where user_id = uid;
+
+  -- Currently locked - reject even a correct password until it expires.
+  if rec.user_id is not null
+     and rec.locked_until is not null
+     and rec.locked_until > now_ts then
+    return jsonb_build_object(
+      'decision', 'reject',
+      'message', 'Too many failed sign-in attempts. Please wait a few minutes and try again.'
+    );
+  end if;
+
+  if pw_valid then
+    delete from public.auth_failed_attempts where user_id = uid;
+    return jsonb_build_object('decision', 'continue');
+  end if;
+
+  -- A failed attempt. Start a fresh 24h window if this is the first failure or
+  -- the previous window has lapsed.
+  if rec.user_id is null
+     or now_ts - rec.window_started_at > make_interval(hours => window_hours) then
+    new_attempts := 1;
+    insert into public.auth_failed_attempts (user_id, attempts, window_started_at, locked_until)
+      values (uid, 1, now_ts, null)
+    on conflict (user_id) do update
+      set attempts = 1, window_started_at = now_ts, locked_until = null;
+  else
+    new_attempts := rec.attempts + 1;
+    update public.auth_failed_attempts
+      set attempts = new_attempts,
+          locked_until = case
+            when new_attempts % threshold = 0
+            then now_ts + make_interval(mins => (new_attempts / threshold) * step_minutes)
+            else locked_until
+          end
+      where user_id = uid;
+  end if;
+
+  if new_attempts % threshold = 0 then
+    -- Best-effort server-side log so scripted attacks become visible.
+    begin
+      insert into public.security_logs (event_type, status, auth_method, user_id, failure_reason, details)
+      values ('lockout_started', 'failed', 'password', uid,
+        format('%s failed attempts - locked %s minutes (server hook)',
+          new_attempts, (new_attempts / threshold) * step_minutes),
+        jsonb_build_object('source', 'password_verification_hook'));
+    exception when others then null;
+    end;
+
+    return jsonb_build_object(
+      'decision', 'reject',
+      'message', format('Too many failed sign-in attempts. Locked for %s minutes.',
+        (new_attempts / threshold) * step_minutes)
+    );
+  end if;
+
+  return jsonb_build_object('decision', 'continue');
+exception
+  when others then
+    -- A bug here must never block sign-in.
+    return jsonb_build_object('decision', 'continue');
+end;
+$$;
+
+grant usage on schema public to supabase_auth_admin;
+grant execute on function public.password_verification_hook(jsonb) to supabase_auth_admin;
+grant all on public.auth_failed_attempts to supabase_auth_admin;
+revoke all on function public.password_verification_hook(jsonb) from anon, authenticated, public;
+
+-- Optional housekeeping - call from a scheduler if you like, harmless if not.
+create or replace function public.purge_auth_failed_attempts()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  removed int;
+begin
+  delete from public.auth_failed_attempts
+  where window_started_at < now() - interval '48 hours'
+    and (locked_until is null or locked_until < now());
+  get diagnostics removed = row_count;
+  return removed;
+end;
+$$;
+
 -- End of SafeDrive chaptered database master.

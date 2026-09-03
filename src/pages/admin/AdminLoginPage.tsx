@@ -17,6 +17,7 @@ import {
 import { recordSecurityEvent } from "@/lib/securityLog";
 import { qrCodeSrc } from "@/lib/qrCode";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import TurnstileWidget, { captchaConfigured } from "@/components/TurnstileWidget";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -78,6 +79,14 @@ export default function AdminLoginPage() {
   const [showAuthenticatorSetup, setShowAuthenticatorSetup] = useState(false);
   const [offerReenroll, setOfferReenroll] = useState(false);
   const [, setLockoutTick] = useState(() => Date.now());
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaResetSignal, setCaptchaResetSignal] = useState(0);
+  const consumeCaptcha = () => {
+    const token = captchaToken ?? undefined;
+    setCaptchaResetSignal((value) => value + 1);
+    setCaptchaToken(null);
+    return token;
+  };
   const {
     signIn,
     signOut,
@@ -178,7 +187,11 @@ export default function AdminLoginPage() {
   const startEmailCode = async () => {
     await signOut();
     clearAdminAuthPending();
-    const { error } = await sendOtp(normalizedEmail, "/auth/confirm?next=admin");
+    const { error } = await sendOtp(
+      normalizedEmail,
+      "/auth/confirm?next=admin",
+      consumeCaptcha(),
+    );
     if (error) {
       toast.error("Failed to dispatch security code", {
         description: error.message,
@@ -204,10 +217,14 @@ export default function AdminLoginPage() {
       });
       return;
     }
+    if (captchaConfigured && !captchaToken) {
+      toast.error("Please wait for the security check to finish");
+      return;
+    }
     setIsLoading(true);
 
     try {
-      const { error } = await signIn(normalizedEmail, password);
+      const { error } = await signIn(normalizedEmail, password, consumeCaptcha());
 
       if (error) {
         const failureState = registerAuthFailure("admin", normalizedEmail);
@@ -626,7 +643,11 @@ export default function AdminLoginPage() {
       return;
     }
 
-    const { error } = await sendOtp(normalizedEmail, "/auth/confirm?next=admin");
+    const { error } = await sendOtp(
+      normalizedEmail,
+      "/auth/confirm?next=admin",
+      consumeCaptcha(),
+    );
     if (error) {
       toast.error("Failed to resend security code", {
         description: error.message,
@@ -1027,6 +1048,14 @@ export default function AdminLoginPage() {
               </CardFooter>
             </form>
           )}
+          {captchaConfigured ? (
+            <div className="flex justify-center px-6 pb-6">
+              <TurnstileWidget
+                onToken={setCaptchaToken}
+                resetSignal={captchaResetSignal}
+              />
+            </div>
+          ) : null}
         </Card>
       </div>
 

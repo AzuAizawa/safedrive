@@ -151,7 +151,9 @@ const buildSummary = (log: SecurityLog) => {
   }
 
   if (log.event_type === "session_timeout") {
-    return `${portal === "admin" ? "Admin" : "User"} was signed out after 10 minutes without activity.`;
+    return portal === "admin"
+      ? "Admin was signed out after 10 minutes without activity."
+      : "User was signed out after 25 minutes without activity.";
   }
 
   if (action === "user_mfa_enrolled" || action === "admin_mfa_enrolled") {

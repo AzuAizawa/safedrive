@@ -18,6 +18,7 @@ import {
 import { recordSecurityEvent } from "@/lib/securityLog";
 import { resetToRenterMode } from "@/lib/listerMode";
 import { qrCodeSrc } from "@/lib/qrCode";
+import TurnstileWidget, { captchaConfigured } from "@/components/TurnstileWidget";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,6 +105,14 @@ export default function LoginPage() {
   const [offerReenroll, setOfferReenroll] = useState(false);
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaResetSignal, setCaptchaResetSignal] = useState(0);
+  const consumeCaptcha = () => {
+    const token = captchaToken ?? undefined;
+    setCaptchaResetSignal((value) => value + 1);
+    setCaptchaToken(null);
+    return token;
+  };
   const [, setLockoutTick] = useState(() => Date.now());
   const {
     signIn,
@@ -154,7 +163,7 @@ export default function LoginPage() {
       if (parsed.reason === "inactivity" && parsed.portal === "user") {
         toast.info("Session expired", {
           description:
-            "You were signed out after 10 minutes of inactivity. Please sign in again.",
+            "You were signed out after 25 minutes of inactivity. Please sign in again.",
         });
       }
     } catch {
@@ -225,7 +234,11 @@ export default function LoginPage() {
   const startEmailCode = async () => {
     await signOut();
     clearUserAuthPending();
-    const { error } = await sendOtp(normalizedEmail, "/auth/confirm?next=user");
+    const { error } = await sendOtp(
+      normalizedEmail,
+      "/auth/confirm?next=user",
+      consumeCaptcha(),
+    );
     if (error) {
       toast.error("Failed to send verification code", {
         description: error.message,
@@ -251,8 +264,12 @@ export default function LoginPage() {
       });
       return;
     }
+    if (captchaConfigured && !captchaToken) {
+      toast.error("Please wait for the security check to finish");
+      return;
+    }
     setIsLoading(true);
-    const { error } = await signIn(normalizedEmail, password);
+    const { error } = await signIn(normalizedEmail, password, consumeCaptcha());
     if (error) {
       const failureState = registerAuthFailure("user", normalizedEmail);
       await recordSecurityEvent("user_login_failed", {
@@ -680,7 +697,11 @@ export default function LoginPage() {
       return;
     }
 
-    const { error } = await sendOtp(normalizedEmail, "/auth/confirm?next=user");
+    const { error } = await sendOtp(
+      normalizedEmail,
+      "/auth/confirm?next=user",
+      consumeCaptcha(),
+    );
     if (error) {
       toast.error("Failed to resend verification code", {
         description: error.message,
@@ -1027,6 +1048,14 @@ export default function LoginPage() {
               </CardFooter>
             </form>
           )}
+          {captchaConfigured ? (
+            <div className="flex justify-center px-6 pb-6">
+              <TurnstileWidget
+                onToken={setCaptchaToken}
+                resetSignal={captchaResetSignal}
+              />
+            </div>
+          ) : null}
         </Card>
       </div>
       </div>
@@ -1058,8 +1087,10 @@ export default function LoginPage() {
                e.preventDefault();
                setIsLoading(true);
                const normalizedForgotEmail = forgotEmail.trim().toLowerCase();
+               const captcha = consumeCaptcha();
                const { error } = await supabase.auth.resetPasswordForEmail(normalizedForgotEmail, {
                  redirectTo: `${window.location.origin}/update-password`,
+                 ...(captcha ? { captchaToken: captcha } : {}),
                });
                if (error) {
                  toast.error(error.message);

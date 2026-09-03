@@ -16,6 +16,7 @@ import {
 import { Car, Eye, EyeOff, Loader2, CheckCircle2, Circle, X } from "lucide-react";
 import { toast } from "sonner";
 import { usePlatformContactEmail } from "@/lib/platformSettings";
+import TurnstileWidget, { captchaConfigured } from "@/components/TurnstileWidget";
 
 export default function SignUpPage() {
   const [email, setEmail] = useState("");
@@ -27,6 +28,8 @@ export default function SignUpPage() {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [termsScrolled, setTermsScrolled] = useState(false);
   const [termsModalChecked, setTermsModalChecked] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaResetSignal, setCaptchaResetSignal] = useState(0);
 
   const rules = [
     { id: "length", text: "At least 8 characters", regex: /.{8,}/ },
@@ -72,8 +75,14 @@ export default function SignUpPage() {
       toast.error("Password must contain at least one special character");
       return;
     }
+    if (captchaConfigured && !captchaToken) {
+      toast.error("Please wait for the security check to finish");
+      return;
+    }
     setIsLoading(true);
-    const { error } = await signUp(email, password);
+    const { error } = await signUp(email, password, captchaToken ?? undefined);
+    setCaptchaResetSignal((value) => value + 1);
+    setCaptchaToken(null);
     if (error) {
       if (error.message.includes("Error sending confirmation email")) {
         toast.error("Invalid email address", { description: "We couldn't deliver the confirmation email. Please check for typos (e.g., @gmail.com instead of @gmail.co)." });
@@ -212,6 +221,10 @@ export default function SignUpPage() {
               </div>
             </CardContent>
             <CardFooter className="flex-col gap-4 border-none bg-transparent pt-2">
+              <TurnstileWidget
+                onToken={setCaptchaToken}
+                resetSignal={captchaResetSignal}
+              />
               <Button
                 type="submit"
                 className="w-full h-10 shadow-lg shadow-primary/20"

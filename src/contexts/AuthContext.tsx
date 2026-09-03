@@ -40,13 +40,22 @@ interface AuthContextType {
   can: (key: AdminPermissionKey) => boolean;
   /** False until the permission set has been resolved for a signed-in admin. */
   permissionsReady: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signUp: (
+    email: string,
+    password: string,
+    captchaToken?: string,
+  ) => Promise<{ error: Error | null }>;
+  signIn: (
+    email: string,
+    password: string,
+    captchaToken?: string,
+  ) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   sendOtp: (
     email: string,
     redirectPath?: string,
+    captchaToken?: string,
   ) => Promise<{ error: Error | null }>;
   verifyOtpCode: (
     email: string,
@@ -76,7 +85,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const PROFILE_LOAD_TIMEOUT_MS = 8000;
-const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+// Idle sign-out. Admin work (KYC, money) stays tight; a renter reading a listing
+// gets a longer window (NIST 800-63B AAL2 baseline is 30 min of inactivity).
+// The server-side session settings in Supabase are the authoritative backstop.
+const ADMIN_SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+const USER_SESSION_TIMEOUT_MS = 25 * 60 * 1000;
 const SESSION_TIMEOUT_NOTICE_KEY = "session_timeout_notice";
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
@@ -330,7 +343,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: session?.user.email,
           method: "system",
           portal: isAdminSession ? "admin" : "user",
-          reason: "Signed out after 10 minutes without activity.",
+          reason: isAdminSession
+            ? "Signed out after 10 minutes without activity."
+            : "Signed out after 25 minutes without activity.",
         },
         session?.user.id ?? user?.id ?? null,
       );
@@ -411,15 +426,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const isAdmin =
+      profile?.role === "admin" || profile?.role === "super_admin";
+    const timeoutMs = isAdmin
+      ? ADMIN_SESSION_TIMEOUT_MS
+      : USER_SESSION_TIMEOUT_MS;
+    const timeoutMinutes = Math.round(timeoutMs / 60000);
+
     const resetInactivityTimeout = () => {
       clearInactivityTimeout();
       inactivityTimeoutRef.current = window.setTimeout(() => {
         toast.info("Session expired", {
-          description:
-            "You were signed out after 10 minutes of inactivity for security.",
+          description: `You were signed out after ${timeoutMinutes} minutes of inactivity for security.`,
         });
         void handleSessionTimeout();
-      }, SESSION_TIMEOUT_MS);
+      }, timeoutMs);
     };
 
     const activityEvents: Array<keyof WindowEventMap> = [
@@ -444,9 +465,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.removeEventListener(eventName, resetInactivityTimeout),
       );
     };
-  }, [clearInactivityTimeout, handleSessionTimeout, session?.user]);
+  }, [
+    clearInactivityTimeout,
+    handleSessionTimeout,
+    session?.user,
+    profile?.role,
+  ]);
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    captchaToken?: string,
+  ) => {
     const normalizedEmail = email.trim().toLowerCase();
     const { data: existingProfile, error: profileLookupError } = await supabase
       .from("profiles")
@@ -475,6 +505,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/confirm?next=user`,
+        ...(captchaToken ? { captchaToken } : {}),
       },
     });
 
@@ -489,7 +520,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error as Error | null };
   };
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (
+    email: string,
+    password: string,
+    captchaToken?: string,
+  ) => {
     const normalizedEmail = email.trim().toLowerCase();
     // Supabase can briefly reject a newly issued token when two auth nodes are
     // a fraction of a second out of sync. One bounded retry prevents the first
@@ -498,6 +533,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password,
+        ...(captchaToken ? { options: { captchaToken } } : {}),
       }),
     );
 
@@ -507,6 +543,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const sendOtp = async (
     email: string,
     redirectPath = "/auth/confirm?next=user",
+    captchaToken?: string,
   ) => {
     const normalizedEmail = email.trim().toLowerCase();
     const redirectTo = `${window.location.origin}${redirectPath}`;
@@ -515,6 +552,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       options: {
         shouldCreateUser: false,
         emailRedirectTo: redirectTo,
+        ...(captchaToken ? { captchaToken } : {}),
       },
     });
     return { error: error as Error | null };
