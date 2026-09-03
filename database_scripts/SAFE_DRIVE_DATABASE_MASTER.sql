@@ -6422,4 +6422,98 @@ begin
 end;
 $$;
 
+-- ============================================================================
+-- CHAPTER 23 - Vehicle renewal review wiring
+-- SOURCE: project_docs/RBAC_DESIGN.md review pass
+-- ============================================================================
+-- Before this chapter the renewal flow was half-built: a lister could submit
+-- car_renewals rows from /car-renewals, but nothing set a car to
+-- 'renewal_required' and no admin screen reviewed the submissions. This wires
+-- both ends.
+
+-- 23.1  Notify admins when a lister submits renewal documents.
+create or replace function public.notify_car_renewal_submitted()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.notifications (user_id, title, message, type, link)
+  select p.id,
+    'Vehicle renewal submitted',
+    'A lister submitted updated compliance documents for review.',
+    'vehicle',
+    '/admin/vehicle-renewals'
+  from public.profiles p
+  where p.role in ('admin', 'super_admin') and p.deleted_at is null;
+  return new;
+end;
+$$;
+
+drop trigger if exists notify_car_renewal_submitted on public.car_renewals;
+create trigger notify_car_renewal_submitted
+  after insert on public.car_renewals
+  for each row execute function public.notify_car_renewal_submitted();
+
+-- 23.2  Auto-flag vehicles whose compliance documents have expired. Meant to be
+-- called once a day from the scheduler (api/flag-expired-vehicle-documents.ts).
+-- Idempotent: a car already 'renewal_required' is skipped. Returns the count.
+create or replace function public.flag_vehicles_needing_renewal()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  flagged int := 0;
+  car_row record;
+begin
+  for car_row in
+    select c.id, c.owner_id, c.plate_number
+    from public.cars c
+    where c.status in ('approved', 'active')
+      and (
+        c.registration_expiry < current_date
+        or c.ctpl_expiry < current_date
+        or c.comprehensive_insurance_expiry < current_date
+      )
+  loop
+    update public.cars
+      set status = 'renewal_required', updated_at = now()
+      where id = car_row.id;
+
+    insert into public.notifications (user_id, title, message, type, link)
+      values (
+        car_row.owner_id,
+        'Vehicle renewal required',
+        'A compliance document for ' || car_row.plate_number ||
+          ' has expired. Submit updated documents to relist the vehicle.',
+        'vehicle',
+        '/car-renewals'
+      );
+
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+      values (
+        car_row.owner_id, 'vehicle_renewal_required', 'car', car_row.id,
+        jsonb_build_object('reason', 'document_expiry', 'auto', true)
+      );
+
+    flagged := flagged + 1;
+  end loop;
+  return flagged;
+end;
+$$;
+
+revoke all on function public.flag_vehicles_needing_renewal() from public, anon, authenticated;
+grant execute on function public.flag_vehicles_needing_renewal() to service_role;
+
+-- 23.3  Read access to a submitted renewal for the reviewing admin. Listers
+-- already have "Listers see own renewals"; add the admin side keyed to the
+-- vehicles.review permission (Chapter 20 changed the UPDATE policy to the same
+-- key but left SELECT on is_admin()).
+drop policy if exists "Listers see own renewals" on public.car_renewals;
+create policy "Listers see own renewals" on public.car_renewals
+  for select using (auth.uid() = lister_id or public.admin_can('vehicles.review'));
+
 -- End of SafeDrive chaptered database master.

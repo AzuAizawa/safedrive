@@ -406,3 +406,22 @@ Known, accepted, not fixed:
 - Dashboard queue counts and the notification bell under-report for a restricted admin (RLS returns an empty set, not an error) — this is arguably correct (you only see work you can do).
 - `audit_log` / `notifications` INSERT stay `is_admin()` (any privileged actor should be able to log/notify).
 - `check:live-roles` not yet extended for the 9 keys.
+
+---
+
+## 8. System audit fixes (beyond RBAC)
+
+A read-through of the whole product surfaced six unrelated gaps. All fixed.
+
+| # | Problem | Fix | SQL |
+|---|---|---|---|
+| 1 | "Ask the lister" on a car page opened a `support_tickets` row, mixing renter↔lister chat into the SafeDrive support queue | `SupportTicketsPage` splits **SafeDrive Support** vs **Lister Messages** tabs; `AdminSupportTicketsPage` has a **Support requests / Member conversations** filter (defaults to support) + a monitoring banner. Data stays in one table (`participant_user_id` distinguishes them). | Ch 22 |
+| 2 | Every non-self message in a thread was labelled "SafeDrive Support" — a lister's reply looked like it came from the platform | New `resolveTicketSender()` in `lib/supportTickets.ts`; both pages now show You / Renter / Lister / SafeDrive Support correctly | — |
+| 3 | Admin thread showed both renter and lister as "User" | Same helper — admin now sees the real role | — |
+| 4 | `/admin/audit-logs` (`AdminAuditLogsPage`) was an orphan route with no link | Redirects to `/admin/audit-trail`; page deleted (Audit Trail is a superset) | — |
+| 5 | Vehicle renewal was half-built: nothing set `renewal_required`, no admin review, but the lister was told "our team will review" | New `/admin/vehicle-renewals` (`AdminVehicleRenewalsPage`, `vehicles.review`): manual "flag for renewal" + review queue (approve with fresh expiry dates → car back to `approved`; reject with a note). New `api/flag-expired-vehicle-documents.ts` cron does it automatically. Admin notified on submission; lister notified on flag + decision. | Ch 23 |
+| 6 | Fragmented inquiry channels (`guest_inquiries` widget/contact vs `support_tickets`) | Largely resolved by #1/#3 — `guest_inquiries` (general questions → `/inquiries`) vs `support_tickets` (specific issues → `/support`) is the documented split; the widget already labels itself. No further change. | — |
+
+Chapter 22 replaces `notify_support_message_created` so an admin reply in a conversation notifies **both** members. Chapter 23 adds `notify_car_renewal_submitted`, `flag_vehicles_needing_renewal()`, and re-keys the `car_renewals` SELECT policy to `vehicles.review`.
+
+Scheduler: point the existing cron (the one running `expire-booking-deadlines` / `send-return-reminders`) at `GET /api/flag-expired-vehicle-documents` ~once a day, `Authorization: Bearer <CRON_SECRET>`. Not required for the demo — the manual flag works without it.

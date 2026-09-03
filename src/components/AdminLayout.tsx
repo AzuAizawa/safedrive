@@ -27,6 +27,7 @@ import {
   CheckCheck,
   Clock3,
   UserCheck,
+  FileWarning,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
@@ -48,6 +49,7 @@ const allNavItems: AdminNavItem[] = [
   { to: "/admin/users", label: "Users", icon: Users, keys: ["users.verify", "users.moderate"] },
   { to: "/admin/car-catalog", label: "Car Catalog", icon: CarFront, keys: ["catalog.manage"] },
   { to: "/admin/vehicle-approval", label: "Vehicle Approval", icon: Car, keys: ["vehicles.review", "vehicles.delete"] },
+  { to: "/admin/vehicle-renewals", label: "Vehicle Renewals", icon: FileWarning, keys: ["vehicles.review"] },
   { to: "/admin/support", label: "Support Tickets", icon: Headset, keys: ["support.handle"] },
   { to: "/admin/guest-inquiries", label: "User Inquiries", icon: MessageSquare, keys: ["inquiries.handle"] },
   { to: "/admin/audit-trail", label: "Audit Trail", icon: ClipboardList, keys: ["audit.view"] },

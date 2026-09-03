@@ -1555,6 +1555,10 @@ export interface Database {
         Args: { p_uid: string; p_key: string };
         Returns: boolean;
       };
+      flag_vehicles_needing_renewal: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

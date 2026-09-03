@@ -1181,6 +1181,7 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | Admin | `/admin/notifications` | `AdminNotificationsPage`; actionable work queues and wait time |
 | Admin | `/admin/car-catalog` | `AdminCarCatalogPage`; approved make/model catalogue |
 | Admin | `/admin/vehicle-approval` | `AdminVehicleApprovalPage`; listing, ownership, insurance, and agreement review |
+| Admin | `/admin/vehicle-renewals` | `AdminVehicleRenewalsPage`; flag expired vehicles and review resubmitted compliance documents (`vehicles.review`) |
 | Admin | `/admin/audit-trail` | `AdminAuditTrailPage`; business action history |
 | Admin | `/admin/audit-logs` | Legacy path; redirects to `/admin/audit-trail` |
 | Admin | `/admin/security-logs` | `AdminSecurityLogsPage`; authentication/security events |
@@ -1218,6 +1219,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/create-subscription-checkout.ts` | POST; user | Create hosted subscription checkout |
 | `api/data-request.ts` | GET/POST; user | List own privacy requests or submit a new request and notify super-admins |
 | `api/expire-booking-deadlines.ts` | GET/POST; cron secret | Expire ignored owner/payment deadlines without browser dependence |
+| `api/flag-expired-vehicle-documents.ts` | GET/POST; cron secret | Daily: move vehicles with an expired registration/CTPL/insurance date to `renewal_required` and notify the lister |
 | `api/get-approved-rental-agreement.ts` | GET; participant | Return only the agreement version approved/snapshotted for the booking |
 | `api/mark-manual-refund.ts` | POST; super-admin | Record an actually completed manual refund with method/reference |
 | `api/process-payout.ts` | POST; super-admin | Run payout eligibility and PayMongo/simulator automation |
