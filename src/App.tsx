@@ -70,6 +70,7 @@ const AdminNotificationsPage = lazyWithReload(() => import("@/pages/admin/AdminN
 const AdminFinancialLedgerPage = lazyWithReload(() => import("@/pages/admin/AdminFinancialLedgerPage"));
 const AdminReconciliationPage = lazyWithReload(() => import("@/pages/admin/AdminReconciliationPage"));
 const AdminRetentionRequestsPage = lazyWithReload(() => import("@/pages/admin/AdminRetentionRequestsPage"));
+const AdminAdminsPage = lazyWithReload(() => import("@/pages/admin/AdminAdminsPage"));
 
 function RouteLoader() {
   return (
@@ -181,6 +182,7 @@ function App() {
 
                       {/* Super-admin-only routes */}
                       <Route element={<SuperAdminRoute />}>
+                        <Route path="/admin/admins" element={<AdminAdminsPage />} />
                         <Route path="/admin/platform-settings" element={<AdminPlatformSettingsPage />} />
                         <Route path="/admin/financial-reviews" element={<AdminFinancialReviewsPage />} />
                         <Route path="/admin/payouts" element={<Navigate to="/admin/financial-reviews?view=payouts" replace />} />

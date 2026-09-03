@@ -124,11 +124,11 @@ One account may act as a renter or lister when eligible. Registered users can co
 
 ### 2.3 Administrator
 
-An administrator sees normal operational work: dashboard, users/profile verification, car catalog, vehicle approval, Support Tickets, User Inquiries, the notification work center, audit trail, security logs, and platform settings in read-only mode.
+An administrator's access is a per-account checklist of nine operational permissions (`users.verify`, `users.moderate`, `vehicles.review`, `vehicles.delete`, `catalog.manage`, `support.handle`, `inquiries.handle`, `audit.view`, `security.view`) held in `public.admin_permissions` and toggled by a super admin in `/admin/admins`. The dashboard and the notification work center are always available; every other operational page (users/profile verification, car catalog, vehicle approval, Support Tickets, User Inquiries, audit trail, security logs) appears only when the matching key is granted. The database gate is `public.admin_can(<key>)`, enforced by RLS and the `/api` handlers; the navigation filter is cosmetic. An administrator never sees finance, platform settings, retention requests, or admin management. See `project_docs/RBAC_DESIGN.md`.
 
 ### 2.4 Super administrator
 
-A super administrator sees all administrator work plus payouts, refunds, security-deposit decisions, financial ledger, reconciliation, retention/deletion requests, and editable platform settings. These routes use a server-checked super-admin guard; hiding a menu item is never treated as authorization.
+A super administrator implicitly holds every permission and cannot be restricted. In addition to all operational work they have payouts, refunds, security-deposit decisions, financial ledger, reconciliation, retention/deletion requests, platform settings, and admin management (`/admin/admins`: create admin accounts, toggle each admin's checklist, disable accounts). These routes use a server-checked super-admin guard; hiding a menu item is never treated as authorization. A super admin is created only by direct SQL against `public.profiles` (there is no in-app path).
 
 ## 3. Architecture and Connections
 
@@ -1184,7 +1184,8 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | Admin | `/admin/audit-trail` | `AdminAuditTrailPage`; business action history |
 | Admin | `/admin/audit-logs` | `AdminAuditLogsPage`; detailed audit view |
 | Admin | `/admin/security-logs` | `AdminSecurityLogsPage`; authentication/security events |
-| Admin | `/admin/platform-settings` | `AdminPlatformSettingsPage`; all admins can view; only super-admin can edit |
+| Super-admin | `/admin/admins` | `AdminAdminsPage`; create admin accounts, toggle each admin's permission checklist, disable/re-enable accounts |
+| Super-admin | `/admin/platform-settings` | `AdminPlatformSettingsPage`; super-admin only (view and edit) |
 | Super-admin | `/admin/payouts` | Legacy redirect to the payout tab in `/admin/financial-reviews` |
 | Super-admin | `/admin/refunds` | Legacy redirect to the refund tab in `/admin/financial-reviews` |
 | Super-admin | `/admin/financial-reviews` | `AdminFinancialReviewsPage`; combined lister payout, renter refund, and security-deposit review workspace |
@@ -1200,6 +1201,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 
 | Handler | Method and caller | Main responsibility |
 |---|---|---|
+| `api/admin-create.ts` | POST; super-admin | Invite a new `role='admin'` account by email and assign its permission checklist; the creator never sets a password |
 | `api/admin-reset-authenticator.ts` | POST; super-admin | Clear a standard user's enrolled authenticator so they can re-scan a QR, and audit it |
 | `api/admin-reset-password.ts` | POST; super-admin | Reset a non-admin user's password and audit the action |
 | `api/booking-action.ts` | POST; booking participant | Accept/reject/cancel/arrive/finish/no-show booking actions with state gates |

@@ -55,6 +55,13 @@ export default async function handler(req: Request) {
     if (!actorProfile || !["admin", "super_admin"].includes(actorProfile.role)) {
       return respond({ error: "Administrator access required" }, 403);
     }
+    const { data: canVerify } = await supabase.rpc("admin_can_for", {
+      p_uid: actor.id,
+      p_key: "users.verify",
+    });
+    if (canVerify !== true) {
+      return respond({ error: "Missing permission: users.verify" }, 403);
+    }
     if (targetError || !targetProfile) return respond({ error: "User not found" }, 404);
     if (targetProfile.verified_status !== status) {
       return respond({ error: "Verification status changed; refresh before sending email" }, 409);

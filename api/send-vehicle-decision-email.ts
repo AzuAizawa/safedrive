@@ -50,6 +50,13 @@ export default async function handler(req: Request) {
     if (!actorProfile || !["admin", "super_admin"].includes(actorProfile.role)) {
       return respond({ error: "Administrator access required" }, 403);
     }
+    const { data: canReview } = await supabase.rpc("admin_can_for", {
+      p_uid: actor.id,
+      p_key: "vehicles.review",
+    });
+    if (canReview !== true) {
+      return respond({ error: "Missing permission: vehicles.review" }, 403);
+    }
     if (carError || !car) return respond({ error: "Vehicle not found" }, 404);
     if (car.status !== status) {
       return respond({ error: "Vehicle review status changed; refresh before sending email" }, 409);

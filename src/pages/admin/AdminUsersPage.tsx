@@ -72,8 +72,10 @@ const kycCheckClassName = (status: KycOcrReview["checks"][number]["status"]) => 
 
 export default function AdminUsersPage() {
   const minimumBlockReasonLength = 10;
-  const { user: adminUser, profile: adminProfile } = useAuth();
+  const { user: adminUser, profile: adminProfile, can } = useAuth();
   const isSuperAdmin = adminProfile?.role === "super_admin";
+  const canVerify = can("users.verify");
+  const canModerate = can("users.moderate");
   const [users, setUsers] = useState<UserWithImages[]>([]);
   const [verificationImageUrls, setVerificationImageUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -1225,7 +1227,7 @@ export default function AdminUsersPage() {
                 )}
 
                 {/* Actions */}
-                {selectedUser.verified_status === "pending" && (
+                {selectedUser.verified_status === "pending" && canVerify && (
                   <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap">
                     <Button
                       onClick={handleApprove}
@@ -1270,14 +1272,18 @@ export default function AdminUsersPage() {
                 )}
 
                 {!Object.values(checklist).every(Boolean) &&
-                  selectedUser.verified_status === "pending" && (
+                  selectedUser.verified_status === "pending" &&
+                  canVerify && (
                     <p className="text-[10px] text-center text-muted-foreground flex items-center justify-center gap-1">
                       <AlertCircle className="w-2.5 h-2.5" />
                       Complete all checklist items to enable approval
                     </p>
                   )}
 
-                <div className="rounded-lg border border-border/70 bg-muted/20 p-4 space-y-3">
+                <div
+                  className="rounded-lg border border-border/70 bg-muted/20 p-4 space-y-3"
+                  hidden={!canModerate}
+                >
                   <div>
                     <p className="text-sm font-semibold">Sign-in Access Control</p>
                     <p className="text-xs text-muted-foreground mt-1">

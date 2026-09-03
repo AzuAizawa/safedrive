@@ -167,7 +167,9 @@ const getLatestRentalAgreement = (documents: PendingCar["car_documents"]) =>
     )[0];
 
 export default function AdminVehicleApprovalPage() {
-  const { user: adminUser } = useAuth();
+  const { user: adminUser, can } = useAuth();
+  const canReview = can("vehicles.review");
+  const canDelete = can("vehicles.delete");
   const [cars, setCars] = useState<PendingCar[]>([]);
   const [documentUrls, setDocumentUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -1248,7 +1250,7 @@ export default function AdminVehicleApprovalPage() {
               )}
 
               {/* Actions */}
-              {activeTab === "pending" && (
+              {activeTab === "pending" && canReview && (
                 <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap">
                   <Button
                     onClick={handleApprove}
@@ -1297,9 +1299,9 @@ export default function AdminVehicleApprovalPage() {
                   OCR warning detected. You can still approve after manual review by enabling the override above.
                 </p>
               )}
-              {activeTab === "active" && (
+              {activeTab === "active" && (canReview || canDelete) && (
                 <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap">
-                  {!showRevoke ? (
+                  {canReview && !showRevoke ? (
                     <Button
                       variant="outline"
                       onClick={() => setShowRevoke(true)}
@@ -1309,7 +1311,8 @@ export default function AdminVehicleApprovalPage() {
                       <XCircle className="w-4 h-4" />
                       Revoke
                     </Button>
-                  ) : (
+                  ) : null}
+                  {canReview && showRevoke ? (
                     <Button
                       variant="outline"
                       onClick={handleRevokeApproval}
@@ -1323,20 +1326,22 @@ export default function AdminVehicleApprovalPage() {
                       )}
                       Confirm Revoke
                     </Button>
-                  )}
-                  <Button
-                    variant="destructive"
-                    onClick={() => setShowDeleteConfirm(true)}
-                    disabled={actionLoading}
-                    className="gap-2"
-                  >
-                    {actionLoading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <X className="w-4 h-4" />
-                    )}
-                    Delete
-                  </Button>
+                  ) : null}
+                  {canDelete ? (
+                    <Button
+                      variant="destructive"
+                      onClick={() => setShowDeleteConfirm(true)}
+                      disabled={actionLoading}
+                      className="gap-2"
+                    >
+                      {actionLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <X className="w-4 h-4" />
+                      )}
+                      Delete
+                    </Button>
+                  ) : null}
                 </div>
               )}
             </div>

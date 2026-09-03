@@ -60,6 +60,13 @@ export default async function handler(req: Request) {
     if (!actorProfile || !["admin", "super_admin"].includes(actorProfile.role)) {
       return respond({ error: "Administrator access required" }, 403);
     }
+    const { data: canHandleSupport } = await supabase.rpc("admin_can_for", {
+      p_uid: actor.id,
+      p_key: "support.handle",
+    });
+    if (canHandleSupport !== true) {
+      return respond({ error: "Missing permission: support.handle" }, 403);
+    }
     if (messageError || !message || message.sender_id !== actor.id) {
       return respond({ error: "Support reply was not found for this administrator" }, 404);
     }

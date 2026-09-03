@@ -371,7 +371,10 @@ Not an app feature. A super admin is added by running the SQL in `SAFE_DRIVE_DAT
    - `src/types/database.ts`: new tables + functions + `ADMIN_PERMISSION_KEYS` typed.
    - **To activate: run Chapter 19's SQL in the Supabase SQL editor** (safe + re-runnable). `npm run build` passes.
 2. **Move platform-settings to super-admin.** Route inside `SuperAdminRoute`, drop from `operationalNavItems`. (Small, do it early.)
-3. **Swap enforcement.** — ⏳ NEXT (risky; needs Phase 1 live + tested). Migrate the Domain A–F RLS policies + API handlers from `is_admin()` to `admin_can('...')`, plus per-button `can()` guards on `AdminUsersPage` (verify vs moderate) and `AdminVehicleApprovalPage` (review vs delete). Behaviour identical on day 1 thanks to the backfill.
+3. **Swap enforcement.** — ✅ DONE (code written; SQL Chapter 20 must be run on the DB).
+   - `SAFE_DRIVE_DATABASE_MASTER.sql` Chapter 20: RLS on `car_brands`, `car_models`, `cars`, `car_documents`, `car_renewals`, `profiles`, `verification_images`, `support_tickets`, `ticket_messages`, `guest_inquiries`, `audit_log`, `security_logs` moved to `admin_can(<key>)`; new trigger `enforce_admin_profile_permission` splits `users.verify` vs `users.moderate` at column level; adds the missing `car_documents` admin UPDATE policy.
+   - `api/*`: `send-verification-decision-email`, `send-vehicle-decision-email`, `send-support-ticket-reply-email`, `reply-guest-inquiry` now also check `admin_can_for(uid, key)`.
+   - `AdminUsersPage` guards approve/reject with `users.verify` and the sign-in block panel with `users.moderate`; `AdminVehicleApprovalPage` guards approve/reject/revoke with `vehicles.review` and delete with `vehicles.delete`.
 4. **Front-end plumbing.** — ✅ DONE (needs deploy + test).
    - `src/contexts/AuthContext.tsx`: `permissions` + `can(key)`, loaded from `admin_permissions` with a realtime subscription (a super_admin toggling a grant takes effect in seconds).
    - `src/components/PermissionRoute.tsx`: gates route groups by `anyOf` keys.
@@ -379,7 +382,9 @@ Not an app feature. A super admin is added by running the SQL in `SAFE_DRIVE_DAT
    - `src/App.tsx`: the 9 operational routes wrapped in `PermissionRoute`; **`/admin/platform-settings` moved under `SuperAdminRoute`**.
    - `src/components/AdminLayout.tsx`: nav built from one table, filtered by `can()` / super-admin.
    - `src/types/database.ts`: new tables/functions typed. `npm run build` + `lint` pass.
-5. **Admin governance module.** `/admin/admins` list + create + edit + disable, `/api/admin-create`, audit logging.
-6. **Docs + tests.** Extend `npm run check:live-roles` to assert each of the 9 keys gates its endpoints; update master documentation §2.
+5. **Admin governance module.** — ✅ DONE (needs DB Chapters 19 + 20 live).
+   - `src/pages/admin/AdminAdminsPage.tsx` at `/admin/admins` (super-admin only): roster, "New admin" form (email + name + template + checkboxes), per-admin checklist toggles, disable/re-enable. Grant/revoke and disable write `admin_permissions` / `profiles` directly (super admin has RLS) + an `audit_log` row each.
+   - `api/admin-create.ts`: super-admin only, `inviteUserByEmail` (redirect `/auth/confirm?next=recovery` → `/update-password`), inserts the `profiles` row + grants, audit-logs `admin_account_created`. Creator never sets a password; new admin sets their own then is forced to enrol MFA on first admin login.
+6. **Docs + tests.** — partial: master documentation §2.3/2.4 + route/API catalogue updated. Still TODO: extend `npm run check:live-roles` to assert each of the 9 keys gates its endpoints.
 
 Phases 1–3 are the risky part (touch every Domain A–F policy); 4–6 are additive.

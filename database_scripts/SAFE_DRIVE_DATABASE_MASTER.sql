@@ -6117,4 +6117,191 @@ on conflict (admin_id, permission_key) do nothing;
 -- As an admin or super-admin session:  select public.admin_can('vehicles.review');
 -- As a super-admin session:            select public.admin_can('finance.payouts'); -- true (super admin = all)
 
+-- ============================================================================
+-- CHAPTER 20 - RBAC enforcement (Phase 3): is_admin() -> admin_can(<key>)
+-- SOURCE: project_docs/RBAC_DESIGN.md section 5
+-- ============================================================================
+-- Replaces the coarse "any admin" gate on the operational tables with the
+-- per-admin checklist from Chapter 19. A super_admin still passes every check
+-- (admin_can() returns true for them unconditionally), so super-admin workflows
+-- are unaffected. Every backfilled admin holds all 9 keys, so on the day this
+-- runs a plain admin also sees no change - the difference only appears once a
+-- super admin removes a key from someone in /admin/admins.
+--
+-- NOT touched (kept as-is): profiles SELECT and bookings SELECT stay is_admin()
+-- (the admin shell needs them); all finance / ledger / reconciliation /
+-- retention / platform_settings policies stay is_super_admin(); audit_log and
+-- notifications INSERT stay is_admin() (any privileged action writes them).
+--
+-- ROLLBACK: re-run Chapter 7 / Chapter 9 blocks (they recreate the is_admin()
+-- versions of these same named policies), then drop trigger
+-- enforce_admin_profile_permission.
+
+-- 20.1  Catalog: catalog.manage -----------------------------------------
+drop policy if exists "Catalog write access brands" on public.car_brands;
+create policy "Catalog write access brands" on public.car_brands
+  for all using (public.admin_can('catalog.manage'))
+  with check (public.admin_can('catalog.manage'));
+
+drop policy if exists "Catalog write access models" on public.car_models;
+create policy "Catalog write access models" on public.car_models
+  for all using (public.admin_can('catalog.manage'))
+  with check (public.admin_can('catalog.manage'));
+
+-- 20.2  Vehicles: vehicles.review (approve/reject/revoke/re-review) +
+--       vehicles.delete (delete a car record) -----------------------------
+drop policy if exists "Owners can update own cars" on public.cars;
+create policy "Owners can update own cars" on public.cars
+  for update using (auth.uid() = owner_id or public.admin_can('vehicles.review'))
+  with check (auth.uid() = owner_id or public.admin_can('vehicles.review'));
+
+drop policy if exists "Admins can delete cars" on public.cars;
+create policy "Admins can delete cars" on public.cars
+  for delete using (public.admin_can('vehicles.delete'));
+
+drop policy if exists "Owners and admins see car documents" on public.car_documents;
+create policy "Owners and admins see car documents" on public.car_documents
+  for select using (
+    exists (
+      select 1 from public.cars
+      where id = car_documents.car_id and owner_id = auth.uid()
+    )
+    or public.admin_can('vehicles.review')
+  );
+
+-- car_documents had no admin UPDATE policy before, so the vehicle-approval page
+-- silently updated 0 rows when stamping review_flag. Add the correct one.
+drop policy if exists "Vehicle reviewers update car documents" on public.car_documents;
+create policy "Vehicle reviewers update car documents" on public.car_documents
+  for update using (public.admin_can('vehicles.review'))
+  with check (public.admin_can('vehicles.review'));
+
+drop policy if exists "Admins can update renewals" on public.car_renewals;
+create policy "Admins can update renewals" on public.car_renewals
+  for update using (public.admin_can('vehicles.review'));
+
+-- 20.3  Users / KYC: users.verify + users.moderate --------------------------
+-- One UPDATE policy admits either kind of user-admin; the column-level split
+-- (verification fields vs login-block fields) is enforced by the trigger below.
+drop policy if exists "Admins can update any profile" on public.profiles;
+create policy "Admins can update any profile" on public.profiles
+  for update
+  using (public.admin_can('users.verify') or public.admin_can('users.moderate'))
+  with check (public.admin_can('users.verify') or public.admin_can('users.moderate'));
+
+create or replace function public.enforce_admin_profile_permission()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- Server code (service_role) and a user editing their own row are handled by
+  -- protect_profile_sensitive_fields(); this trigger only constrains an
+  -- authenticated *admin* to the checklist key that matches their edit.
+  if current_user in ('postgres', 'service_role', 'supabase_admin') then
+    return new;
+  end if;
+  if not public.is_admin() or public.is_super_admin() then
+    return new;
+  end if;
+
+  if (new.verified_status  is distinct from old.verified_status
+      or new.rejection_reason is distinct from old.rejection_reason)
+     and not public.admin_can('users.verify') then
+    raise exception 'Changing verification status requires the users.verify permission';
+  end if;
+
+  if (new.login_blocked_until is distinct from old.login_blocked_until
+      or new.login_block_reason is distinct from old.login_block_reason)
+     and not public.admin_can('users.moderate') then
+    raise exception 'Changing a login block requires the users.moderate permission';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_admin_profile_permission on public.profiles;
+create trigger enforce_admin_profile_permission
+  before update on public.profiles
+  for each row execute function public.enforce_admin_profile_permission();
+
+drop policy if exists "Users can manage own verification images" on public.verification_images;
+create policy "Users can manage own verification images" on public.verification_images
+  for all
+  using (auth.uid() = user_id or public.admin_can('users.verify'))
+  with check (auth.uid() = user_id or public.admin_can('users.verify'));
+
+-- 20.4  Support tickets: support.handle -----------------------------------
+drop policy if exists "Admins can create tickets for users" on public.support_tickets;
+create policy "Admins can create tickets for users" on public.support_tickets
+  for insert with check (public.admin_can('support.handle'));
+
+drop policy if exists "Admins can update tickets" on public.support_tickets;
+create policy "Admins can update tickets" on public.support_tickets
+  for update using (public.admin_can('support.handle'));
+
+drop policy if exists "Users and admins can read tickets" on public.support_tickets;
+create policy "Users and admins can read tickets" on public.support_tickets
+  for select using (
+    auth.uid() = user_id
+    or auth.uid() = participant_user_id
+    or public.admin_can('support.handle')
+  );
+
+drop policy if exists "Users and admins can read ticket messages" on public.ticket_messages;
+create policy "Users and admins can read ticket messages" on public.ticket_messages
+  for select using (
+    exists (
+      select 1 from public.support_tickets t
+      where t.id = ticket_messages.ticket_id
+        and (
+          t.user_id = auth.uid()
+          or t.participant_user_id = auth.uid()
+          or public.admin_can('support.handle')
+        )
+    )
+  );
+
+drop policy if exists "Users and admins can create ticket messages" on public.ticket_messages;
+create policy "Users and admins can create ticket messages" on public.ticket_messages
+  for insert with check (
+    auth.uid() = sender_id
+    and exists (
+      select 1 from public.support_tickets t
+      where t.id = ticket_messages.ticket_id
+        and (
+          t.user_id = auth.uid()
+          or t.participant_user_id = auth.uid()
+          or public.admin_can('support.handle')
+        )
+    )
+  );
+
+-- 20.5  User / guest inquiries: inquiries.handle -------------------------
+drop policy if exists "Admins can read guest inquiries" on public.guest_inquiries;
+create policy "Admins can read guest inquiries" on public.guest_inquiries
+  for select using (public.admin_can('inquiries.handle'));
+
+drop policy if exists "Admins can update guest inquiries" on public.guest_inquiries;
+create policy "Admins can update guest inquiries" on public.guest_inquiries
+  for update using (public.admin_can('inquiries.handle'))
+  with check (public.admin_can('inquiries.handle'));
+
+-- 20.6  Logs: audit.view / security.view --------------------------------
+drop policy if exists "Admin read audit log" on public.audit_log;
+create policy "Admin read audit log" on public.audit_log
+  for select using (public.admin_can('audit.view'));
+
+drop policy if exists "Admin read security logs" on public.security_logs;
+create policy "Admin read security logs" on public.security_logs
+  for select using (public.admin_can('security.view'));
+
+-- 20.7  Verification ----------------------------------------------------
+-- As a plain admin missing 'catalog.manage':
+--   insert into public.car_brands (name) values ('x');   -- must fail (RLS)
+-- As the same admin with the key granted: the insert succeeds.
+-- select public.admin_can('audit.view');  -- reflects the current checklist
+
 -- End of SafeDrive chaptered database master.

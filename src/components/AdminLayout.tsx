@@ -52,6 +52,7 @@ const allNavItems: AdminNavItem[] = [
   { to: "/admin/guest-inquiries", label: "User Inquiries", icon: MessageSquare, keys: ["inquiries.handle"] },
   { to: "/admin/audit-trail", label: "Audit Trail", icon: ClipboardList, keys: ["audit.view"] },
   { to: "/admin/security-logs", label: "Security Logs", icon: ShieldCheck, keys: ["security.view"] },
+  { to: "/admin/admins", label: "Admin Accounts", icon: UserCheck, superAdminOnly: true },
   { to: "/admin/platform-settings", label: "Platform Settings", icon: Settings2, superAdminOnly: true },
   { to: "/admin/financial-reviews", label: "Financial Reviews", icon: CreditCard, superAdminOnly: true },
   { to: "/admin/financial-ledger", label: "Financial Ledger", icon: ClipboardList, superAdminOnly: true },

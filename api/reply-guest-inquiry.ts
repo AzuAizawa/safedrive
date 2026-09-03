@@ -112,6 +112,13 @@ export default async function handler(req: Request) {
     if (!profile || !["admin", "super_admin"].includes(profile.role)) {
       return jsonResponse({ error: "Administrator access required" }, 403);
     }
+    const { data: canHandleInquiries } = await supabase.rpc("admin_can_for", {
+      p_uid: user.id,
+      p_key: "inquiries.handle",
+    });
+    if (canHandleInquiries !== true) {
+      return jsonResponse({ error: "Missing permission: inquiries.handle" }, 403);
+    }
 
     const payload = (await req.json()) as ReplyPayload;
     const inquiryId = payload.inquiryId?.trim();
