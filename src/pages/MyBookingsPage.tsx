@@ -47,6 +47,7 @@ import {
 import { toast } from "sonner";
 import { format } from "date-fns";
 import type { Payment } from "@/types/database";
+import { fetchCarRatingSummaries, fetchRenterReputation } from "@/lib/ratings";
 
 interface BookingRow {
   id: string;
@@ -240,6 +241,9 @@ export default function MyBookingsPage() {
   const [paymentLogsLoading, setPaymentLogsLoading] = useState(false);
   const [cancelTargetBooking, setCancelTargetBooking] = useState<BookingRow | null>(null);
   const [carRatingSummaries, setCarRatingSummaries] = useState<Record<string, RatingSummary>>({});
+  const [renterReputation, setRenterReputation] = useState<
+    Awaited<ReturnType<typeof fetchRenterReputation>> | null
+  >(null);
   const [bookingExtensionsByBooking, setBookingExtensionsByBooking] = useState<
     Record<string, BookingExtensionRow[]>
   >({});
@@ -373,41 +377,16 @@ export default function MyBookingsPage() {
   }, [bookings, user]);
 
   useEffect(() => {
-    const fetchCarRatingSummaries = async () => {
-      const carIds = [...new Set(bookings.map((booking) => booking.car_id).filter(Boolean))];
-      if (carIds.length === 0) {
-        setCarRatingSummaries({});
-        return;
-      }
+    // Published renter->trip ratings only, grouped by car - via the shared RPC
+    // so the double-blind rule and the reviewer_role filter are applied server
+    // side (a plain select here had been counting owner->renter reviews too).
+    void fetchCarRatingSummaries().then(setCarRatingSummaries);
+  }, []);
 
-      const { data, error } = await supabase
-        .from("booking_reviews")
-        .select("car_id, rating")
-        .in("car_id", carIds);
-
-      if (error) {
-        console.error("Error fetching car rating summaries:", error);
-        return;
-      }
-
-      const summaryMap: Record<string, RatingSummary> = {};
-      for (const row of (data ?? []) as Array<{ car_id: string; rating: number }>) {
-        if (!summaryMap[row.car_id]) {
-          summaryMap[row.car_id] = { average: 0, count: 0 };
-        }
-        summaryMap[row.car_id].average += Number(row.rating) || 0;
-        summaryMap[row.car_id].count += 1;
-      }
-
-      Object.values(summaryMap).forEach((summary) => {
-        summary.average = Number((summary.average / summary.count).toFixed(1));
-      });
-
-      setCarRatingSummaries(summaryMap);
-    };
-
-    void fetchCarRatingSummaries();
-  }, [bookings]);
+  useEffect(() => {
+    if (!user?.id) return;
+    void fetchRenterReputation(user.id).then(setRenterReputation);
+  }, [user?.id]);
 
   useEffect(() => {
     const fetchPaymentLogs = async () => {
@@ -1408,11 +1387,27 @@ export default function MyBookingsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">My Bookings</h1>
-        <p className="text-muted-foreground mt-1">
-          Track your rental requests and active bookings
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">My Bookings</h1>
+          <p className="text-muted-foreground mt-1">
+            Track your rental requests and active bookings
+          </p>
+        </div>
+        {renterReputation && renterReputation.reviewCount > 0 && (
+          <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-right">
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              Your renter rating
+            </p>
+            <p className="flex items-center justify-end gap-1 text-sm font-semibold">
+              <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+              {renterReputation.average?.toFixed(1)}
+              <span className="font-normal text-muted-foreground">
+                ({renterReputation.reviewCount})
+              </span>
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -2711,9 +2706,11 @@ export default function MyBookingsPage() {
             >
               <div className="p-5 border-b border-border flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-bold">Rate This Booking</h2>
+                  <h2 className="text-lg font-bold">Rate your trip</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Share your rating for the car and lister.
+                    One rating for the whole experience - the car and how the
+                    lister hosted it. Visible once the lister also rates, or
+                    after 14 days.
                   </p>
                 </div>
                 <Button

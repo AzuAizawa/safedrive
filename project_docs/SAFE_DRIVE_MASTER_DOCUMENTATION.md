@@ -286,6 +286,17 @@ The trip lifecycle is gated against the clock so it cannot be completed before i
 
 `arrival_checkin_lead_hours` is one of three configurable lifecycle timings in `platform_settings` (`arrival_checkin_lead_hours`, `deposit_claim_window_hours`, `lister_completion_timeout_hours`). Unlike the financial terms they are read **live**, not snapshotted per booking, and are changed through the same multi-super-admin consensus flow (`/admin/platform-settings`).
 
+### 8.2 Ratings and reviews (Airbnb / Turo style)
+
+After a booking reaches `completed`, both sides get one prompt on that booking card:
+
+- **Renter -> the trip:** one 1-5 star + optional text. The single rating is aggregated two ways from the same `booking_reviews` row: by `car_id` (the **car's rating**, shown on `/browse` cards and the car page) and by `reviewee_id`/`owner_id` (the **lister's rating**, shown as "Hosted by X - ★ 4.9 - N trips" on the car page). There is no separate "rate the lister" star; the trip review already covers both, so the lister rating is a re-grouping, not a duplicate.
+- **Lister -> the renter:** one 1-5 star + optional text. Shown to a future lister on the incoming booking request card and inside the renter-info modal ("Recent feedback from other listers"), plus the renter's own "Your renter rating" chip on `/my-bookings`.
+
+**Double-blind:** a review is only counted in an aggregate and only shown once BOTH parties have rated that booking, or 14 days have passed since the trip completed - this prevents retaliation and "rate me and I'll rate you" trades. It is computed at read time; no cron.
+
+Reads for public / logged-out display go through SECURITY DEFINER functions that return only aggregates plus review text with a reviewer first name/avatar (no other PII): `get_car_rating_summaries()`, `get_lister_rating_summaries()`, `get_public_car_reviews(car_id)` (all `anon` + `authenticated`), and `get_renter_reputation(renter_id)` (`authenticated`). Writes still go straight to `booking_reviews` under its participant RLS. Client helpers are in `src/lib/ratings.ts`.
+
 ## 9. Security Deposit: Option B
 
 SafeDrive uses a **separate refundable deposit**, not a hidden deduction from rental income. This is simpler to explain and reconcile than mixing the deposit with rental revenue.

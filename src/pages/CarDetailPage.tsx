@@ -41,15 +41,19 @@ import { toast } from "sonner";
 import { differenceInDays, format, addDays } from "date-fns";
 import { DayPicker, DateRange } from "react-day-picker";
 import "react-day-picker/dist/style.css";
-import type { BookingReview, CarWithDetails } from "@/types/database";
+import type { CarWithDetails } from "@/types/database";
 import { formatDayCount } from "@/lib/formatCount";
+import {
+  fetchCarRatingSummaries,
+  fetchListerRatingSummaries,
+  fetchPublicCarReviews,
+  formatAverage,
+  type ListerRating,
+  type PublicCarReview,
+  type RatingSummary,
+} from "@/lib/ratings";
 
 const MAX_BOOKING_TOTAL = 100000;
-
-type PublicBookingReview = Pick<
-  BookingReview,
-  "id" | "car_id" | "reviewee_id" | "reviewer_role" | "rating" | "feedback" | "created_at"
->;
 
 type AgreementAccess = {
   agreementVersionId: string;
@@ -99,7 +103,9 @@ export default function CarDetailPage() {
   const [agreementIntent, setAgreementIntent] = useState<"review" | "booking">(
     "review",
   );
-  const [publicReviews, setPublicReviews] = useState<PublicBookingReview[]>([]);
+  const [publicReviews, setPublicReviews] = useState<PublicCarReview[]>([]);
+  const [carRating, setCarRating] = useState<RatingSummary | null>(null);
+  const [listerRating, setListerRating] = useState<ListerRating | null>(null);
   const [showInquiry, setShowInquiry] = useState(false);
   const [inquiryMessage, setInquiryMessage] = useState("");
   const [sendingInquiry, setSendingInquiry] = useState(false);
@@ -165,18 +171,16 @@ export default function CarDetailPage() {
         );
       }
 
-      const { data: reviews, error: reviewsError } = await supabase
-        .from("booking_reviews")
-        .select("id, car_id, reviewee_id, reviewer_role, rating, feedback, created_at")
-        .eq("car_id", id)
-        .eq("reviewer_role", "renter")
-        .order("created_at", { ascending: false });
-
-      if (reviewsError) {
-        console.warn("Unable to load public booking reviews:", reviewsError.message);
-      } else {
-        setPublicReviews(reviews ?? []);
-      }
+      const [reviews, carRatingMap, listerRatingMap] = await Promise.all([
+        fetchPublicCarReviews(id),
+        fetchCarRatingSummaries(),
+        fetchListerRatingSummaries(),
+      ]);
+      setPublicReviews(reviews);
+      setCarRating(carRatingMap[id] ?? null);
+      setListerRating(
+        carRow.owner_id ? listerRatingMap[carRow.owner_id] ?? null : null,
+      );
     }
     setLoading(false);
   }, [id]);
@@ -567,11 +571,17 @@ export default function CarDetailPage() {
 
   const agreementUrl = agreementAccess?.url ?? null;
 
+  const reviewCount = carRating?.count ?? publicReviews.length;
   const averageReviewRating =
-    publicReviews.length > 0
+    carRating?.average ??
+    (publicReviews.length > 0
       ? publicReviews.reduce((total, review) => total + Number(review.rating), 0) /
         publicReviews.length
-      : 0;
+      : 0);
+  const ratingBuckets = [5, 4, 3, 2, 1].map((stars) => ({
+    stars,
+    count: publicReviews.filter((review) => review.rating === stars).length,
+  }));
 
   const bookedDayRanges = bookedDates.map((b) => ({
     from: new Date(b.start),
@@ -672,6 +682,18 @@ export default function CarDetailPage() {
                   <p className="font-semibold text-foreground text-sm">
                     {car.profiles?.full_name || "Owner"}
                   </p>
+                  {listerRating && listerRating.count > 0 ? (
+                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                      <span className="font-medium text-foreground">
+                        {formatAverage(listerRating.average)}
+                      </span>
+                      · {listerRating.tripCount}{" "}
+                      {listerRating.tripCount === 1 ? "trip" : "trips"} hosted
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">New lister</p>
+                  )}
                   {(car.contact_number || car.profiles?.phone) && (
                     <p className="text-xs text-muted-foreground flex items-center gap-1">
                       📞 <span className="text-foreground font-medium">{car.contact_number || car.profiles?.phone}</span>
@@ -750,57 +772,104 @@ export default function CarDetailPage() {
           </div>
 
           <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="font-semibold">Reviews from renters</h3>
-                <p className="text-xs text-muted-foreground">
-                  Feedback from completed SafeDrive bookings for this vehicle.
-                </p>
-              </div>
-              {publicReviews.length > 0 && (
-                <div className="flex items-center gap-1 rounded-full bg-amber-500/10 px-3 py-1 text-sm font-semibold text-amber-600">
-                  <Star className="h-4 w-4 fill-current" />
-                  {averageReviewRating.toFixed(1)}
-                  <span className="text-xs font-normal text-muted-foreground">
-                    ({publicReviews.length})
-                  </span>
-                </div>
-              )}
-            </div>
-            {publicReviews.length === 0 ? (
+            <h3 className="font-semibold">Reviews from renters</h3>
+            <p className="text-xs text-muted-foreground">
+              Feedback from completed SafeDrive bookings for this vehicle.
+            </p>
+
+            {reviewCount === 0 ? (
               <p className="mt-3 text-sm text-muted-foreground">
-                No renter reviews yet. Completed trips will appear here after renters leave feedback.
+                No renter reviews yet. A review appears here once both the renter
+                and the lister have rated the trip, or 14 days after it ends.
               </p>
             ) : (
-              <div className="mt-4 space-y-3">
-                {publicReviews.slice(0, 4).map((review) => (
-                  <div
-                    key={review.id}
-                    className="rounded-lg border border-border/50 bg-background/70 p-3"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-1 text-amber-500">
+              <>
+                <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+                  <div className="flex flex-col items-center sm:w-32">
+                    <span className="text-4xl font-bold text-foreground">
+                      {formatAverage(averageReviewRating)}
+                    </span>
+                    <div className="mt-1 flex items-center gap-0.5 text-amber-500">
+                      {Array.from({ length: 5 }).map((_, index) => (
+                        <Star
+                          key={index}
+                          className={`h-3.5 w-3.5 ${
+                            index < Math.round(averageReviewRating) ? "fill-current" : ""
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <span className="mt-1 text-xs text-muted-foreground">
+                      {reviewCount} {reviewCount === 1 ? "review" : "reviews"}
+                    </span>
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    {ratingBuckets.map((bucket) => {
+                      const shown = publicReviews.length || 1;
+                      return (
+                        <div key={bucket.stars} className="flex items-center gap-2 text-xs">
+                          <span className="w-3 text-muted-foreground">{bucket.stars}</span>
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-amber-400"
+                              style={{ width: `${(bucket.count / shown) * 100}%` }}
+                            />
+                          </div>
+                          <span className="w-6 text-right text-muted-foreground">
+                            {bucket.count}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {publicReviews.slice(0, 6).map((review) => (
+                    <div
+                      key={review.id}
+                      className="rounded-lg border border-border/50 bg-background/70 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/15 text-xs font-bold text-primary">
+                            {review.reviewer_avatar ? (
+                              <img
+                                src={review.reviewer_avatar}
+                                alt={review.reviewer_name}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              review.reviewer_name.charAt(0).toUpperCase()
+                            )}
+                          </div>
+                          <span className="text-sm font-medium text-foreground">
+                            {review.reviewer_name}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground">
+                          {review.created_at
+                            ? format(new Date(review.created_at), "MMM d, yyyy")
+                            : "Recently"}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-0.5 text-amber-500">
                         {Array.from({ length: 5 }).map((_, index) => (
                           <Star
                             key={index}
-                            className={`h-3.5 w-3.5 ${
-                              index < review.rating ? "fill-current" : ""
-                            }`}
+                            className={`h-3 w-3 ${index < review.rating ? "fill-current" : ""}`}
                           />
                         ))}
                       </div>
-                      <span className="text-[11px] text-muted-foreground">
-                        {review.created_at
-                          ? format(new Date(review.created_at), "MMM d, yyyy")
-                          : "Recently"}
-                      </span>
+                      {review.feedback?.trim() && (
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          {review.feedback.trim()}
+                        </p>
+                      )}
                     </div>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {review.feedback?.trim() || "No written feedback provided."}
-                    </p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 

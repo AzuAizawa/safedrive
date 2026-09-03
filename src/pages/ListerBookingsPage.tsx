@@ -55,6 +55,7 @@ import {
 import { toast } from "sonner";
 import { format } from "date-fns";
 import type { Payment } from "@/types/database";
+import { fetchRenterReputation, type RenterReputation } from "@/lib/ratings";
 import {
   DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
   fetchPlatformPolicyTimings,
@@ -247,7 +248,9 @@ export default function ListerBookingsPage() {
   const [recentNotifications, setRecentNotifications] = useState<ListerNotificationItem[]>([]);
   const [payoutLogs, setPayoutLogs] = useState<Payment[]>([]);
   const [payoutLogsLoading, setPayoutLogsLoading] = useState(false);
-  const [renterRatingSummaries, setRenterRatingSummaries] = useState<Record<string, RatingSummary>>({});
+  const [renterReputations, setRenterReputations] = useState<
+    Record<string, RenterReputation>
+  >({});
   const [bookingExtensionsByBooking, setBookingExtensionsByBooking] = useState<
     Record<string, BookingExtensionRow[]>
   >({});
@@ -418,41 +421,25 @@ export default function ListerBookingsPage() {
   }, [bookings, getApparentStatus, user]);
 
   useEffect(() => {
-    const fetchRenterRatingSummaries = async () => {
-      const renterIds = [...new Set(bookings.map((booking) => booking.renter_id).filter(Boolean))];
+    const loadRenterReputations = async () => {
+      const renterIds = [
+        ...new Set(bookings.map((booking) => booking.renter_id).filter(Boolean)),
+      ];
       if (renterIds.length === 0) {
-        setRenterRatingSummaries({});
+        setRenterReputations({});
         return;
       }
-
-      const { data, error } = await supabase
-        .from("booking_reviews")
-        .select("reviewee_id, reviewer_role, rating")
-        .eq("reviewer_role", "owner")
-        .in("reviewee_id", renterIds);
-
-      if (error) {
-        console.error("Error fetching renter rating summaries:", error);
-        return;
-      }
-
-      const summaryMap: Record<string, RatingSummary> = {};
-      for (const row of (data ?? []) as Array<{ reviewee_id: string; reviewer_role: string; rating: number }>) {
-        if (!summaryMap[row.reviewee_id]) {
-          summaryMap[row.reviewee_id] = { average: 0, count: 0 };
-        }
-        summaryMap[row.reviewee_id].average += Number(row.rating) || 0;
-        summaryMap[row.reviewee_id].count += 1;
-      }
-
-      Object.values(summaryMap).forEach((summary) => {
-        summary.average = Number((summary.average / summary.count).toFixed(1));
-      });
-
-      setRenterRatingSummaries(summaryMap);
+      // Per-renter so the server applies the double-blind rule (only counts a
+      // review once both parties rated that booking, or 14 days passed).
+      const entries = await Promise.all(
+        renterIds.map(
+          async (rid) => [rid, await fetchRenterReputation(rid)] as const,
+        ),
+      );
+      setRenterReputations(Object.fromEntries(entries));
     };
 
-    void fetchRenterRatingSummaries();
+    void loadRenterReputations();
   }, [bookings]);
 
   useEffect(() => {
@@ -2319,7 +2306,7 @@ export default function ListerBookingsPage() {
             const apparentState = getApparentStatus(b);
             const badge = statusBadge(apparentState);
             const renterDisplay = getRenterDisplay(b);
-            const renterRatingSummary = renterRatingSummaries[b.renter_id];
+            const renterRep = renterReputations[b.renter_id];
             const latestExtension = getLatestExtension(b.id);
             const processGuidance = getProcessGuidance(b, apparentState);
             const payoutStatus = getBookingPayoutStatus(b);
@@ -2498,7 +2485,22 @@ export default function ListerBookingsPage() {
                               <Star className="w-3 h-3 text-amber-500 fill-current" />
                               <span>
                                 Renter rating:{" "}
-                                {renderRatingSummary(renterRatingSummary, "No ratings yet")}
+                                {renderRatingSummary(
+                                  renterRep && renterRep.reviewCount > 0
+                                    ? {
+                                        average: renterRep.average ?? 0,
+                                        count: renterRep.reviewCount,
+                                      }
+                                    : undefined,
+                                  "No ratings yet",
+                                )}
+                                {renterRep && renterRep.tripCount > 0 ? (
+                                  <span className="text-muted-foreground">
+                                    {" "}
+                                    · {renterRep.tripCount}{" "}
+                                    {renterRep.tripCount === 1 ? "trip" : "trips"}
+                                  </span>
+                                ) : null}
                               </span>
                             </p>
                           </div>
@@ -3077,8 +3079,64 @@ export default function ListerBookingsPage() {
                 <div>
                   <h3 className="font-bold text-lg">{selectedRenterDisplay.fullName}</h3>
                   <p className="text-sm text-muted-foreground">{selectedRenterDisplay.email}</p>
+                  {(() => {
+                    const rep = renterReputations[selectedRenter.renter_id];
+                    if (rep && rep.reviewCount > 0) {
+                      return (
+                        <p className="mt-1 flex items-center gap-1 text-sm">
+                          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                          <span className="font-semibold">
+                            {rep.average?.toFixed(1)}
+                          </span>
+                          <span className="text-muted-foreground">
+                            ({rep.reviewCount} review{rep.reviewCount === 1 ? "" : "s"}
+                            {rep.tripCount > 0 ? ` · ${rep.tripCount} trip${rep.tripCount === 1 ? "" : "s"}` : ""})
+                          </span>
+                        </p>
+                      );
+                    }
+                    return (
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        No renter reviews yet
+                      </p>
+                    );
+                  })()}
                 </div>
               </div>
+
+              {(() => {
+                const rep = renterReputations[selectedRenter.renter_id];
+                if (!rep || rep.recent.length === 0) return null;
+                return (
+                  <div>
+                    <h4 className="font-semibold text-sm mb-2">
+                      Recent feedback from other listers
+                    </h4>
+                    <div className="space-y-2">
+                      {rep.recent.map((item, i) => (
+                        <div
+                          key={i}
+                          className="rounded-lg border border-border/50 bg-muted/20 p-3 text-sm"
+                        >
+                          <div className="flex items-center gap-0.5 text-amber-500">
+                            {Array.from({ length: 5 }).map((_, s) => (
+                              <Star
+                                key={s}
+                                className={`h-3 w-3 ${s < item.rating ? "fill-current" : ""}`}
+                              />
+                            ))}
+                          </div>
+                          {item.feedback?.trim() && (
+                            <p className="mt-1 text-muted-foreground">
+                              {item.feedback.trim()}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-2 gap-4 text-sm bg-muted/30 p-4 rounded-xl border border-border/50">
                 <div>
@@ -3159,9 +3217,11 @@ export default function ListerBookingsPage() {
             >
               <div className="p-5 border-b border-border flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-bold">Rate This Renter</h2>
+                  <h2 className="text-lg font-bold">Rate this renter</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Share a quick rating for this rental experience.
+                    How did they care for the car, keep to the schedule, and
+                    communicate? Visible once the renter also rates, or after
+                    14 days.
                   </p>
                 </div>
                 <Button

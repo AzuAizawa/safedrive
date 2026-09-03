@@ -5756,6 +5756,132 @@ create index if not exists idx_security_logs_session_id
   on public.security_logs(session_id)
   where session_id is not null;
 
+-- ============================================================================
+-- PHASE 10 - Public rating aggregates (Airbnb / Turo style)
+-- SOURCE: scratchpad phase10_rating_functions.sql
+-- ============================================================================
+-- One rating per direction per booking (renter -> trip, lister -> renter). The
+-- renter's single rating is aggregated two ways from the same rows: by car_id
+-- (the car's rating) and by reviewee_id/owner (the lister's rating). No schema
+-- change. These SECURITY DEFINER functions expose only aggregates + public
+-- review text (no PII beyond a first name/avatar) so logged-out visitors can
+-- see ratings on Browse and the car page.
+--
+-- Double-blind: a review is only counted / shown once BOTH parties reviewed the
+-- booking, or 14 days have passed since the trip completed - prevents
+-- retaliation and "rate me and I'll rate you" trades.
+
+create or replace function public._review_is_published(
+  p_booking_id uuid, p_reviewer_id uuid
+) returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.booking_reviews rr
+    where rr.booking_id = p_booking_id and rr.reviewer_id <> p_reviewer_id
+  )
+  or exists (
+    select 1 from public.bookings b
+    where b.id = p_booking_id
+      and coalesce(greatest(b.owner_completed_at, b.renter_completed_at), b.updated_at)
+          < now() - interval '14 days'
+  );
+$$;
+
+create or replace function public.get_car_rating_summaries()
+returns table(car_id uuid, average numeric, review_count integer)
+language sql stable security definer set search_path = public
+as $$
+  select r.car_id,
+         round(avg(r.rating)::numeric, 2) as average,
+         count(*)::int as review_count
+  from public.booking_reviews r
+  join public.bookings b on b.id = r.booking_id
+  where r.reviewer_role = 'renter'
+    and b.status = 'completed'
+    and public._review_is_published(r.booking_id, r.reviewer_id)
+  group by r.car_id;
+$$;
+grant execute on function public.get_car_rating_summaries() to anon, authenticated;
+
+create or replace function public.get_lister_rating_summaries()
+returns table(lister_id uuid, average numeric, review_count integer, trip_count integer)
+language sql stable security definer set search_path = public
+as $$
+  select r.reviewee_id as lister_id,
+         round(avg(r.rating)::numeric, 2) as average,
+         count(*)::int as review_count,
+         (select count(distinct b2.id)::int
+            from public.bookings b2
+            where b2.owner_id = r.reviewee_id and b2.status = 'completed') as trip_count
+  from public.booking_reviews r
+  join public.bookings b on b.id = r.booking_id
+  where r.reviewer_role = 'renter'
+    and b.status = 'completed'
+    and public._review_is_published(r.booking_id, r.reviewer_id)
+  group by r.reviewee_id;
+$$;
+grant execute on function public.get_lister_rating_summaries() to anon, authenticated;
+
+create or replace function public.get_public_car_reviews(p_car_id uuid)
+returns table(
+  id uuid, rating integer, feedback text, created_at timestamptz,
+  reviewer_name text, reviewer_avatar text
+)
+language sql stable security definer set search_path = public
+as $$
+  select r.id, r.rating, r.feedback, r.created_at,
+         coalesce(nullif(split_part(coalesce(p.full_name, ''), ' ', 1), ''), 'Renter'),
+         p.avatar_url
+  from public.booking_reviews r
+  join public.bookings b on b.id = r.booking_id
+  left join public.profiles p on p.id = r.reviewer_id
+  where r.car_id = p_car_id
+    and r.reviewer_role = 'renter'
+    and b.status = 'completed'
+    and public._review_is_published(r.booking_id, r.reviewer_id)
+  order by r.created_at desc
+  limit 50;
+$$;
+grant execute on function public.get_public_car_reviews(uuid) to anon, authenticated;
+
+-- Renter reputation for a lister deciding on a booking request. Authenticated
+-- only. Same double-blind rule; returns aggregates + a few recent comments.
+create or replace function public.get_renter_reputation(p_renter_id uuid)
+returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  with published as (
+    select r.rating, r.feedback, r.created_at
+    from public.booking_reviews r
+    join public.bookings b on b.id = r.booking_id
+    where r.reviewer_role = 'owner'
+      and r.reviewee_id = p_renter_id
+      and b.status = 'completed'
+      and public._review_is_published(r.booking_id, r.reviewer_id)
+  )
+  select jsonb_build_object(
+    'average', (select round(avg(rating)::numeric, 2) from published),
+    'review_count', (select count(*)::int from published),
+    'trip_count', (
+      select count(distinct b3.id)::int
+      from public.bookings b3
+      where b3.renter_id = p_renter_id and b3.status = 'completed'
+    ),
+    'recent', coalesce((
+      select jsonb_agg(x)
+      from (
+        select rating, feedback, created_at
+        from published
+        where coalesce(nullif(trim(feedback), ''), '') <> ''
+        order by created_at desc
+        limit 3
+      ) x
+    ), '[]'::jsonb)
+  );
+$$;
+grant execute on function public.get_renter_reputation(uuid) to authenticated;
+
 -- ----------------------------------------------------------------------------
 -- CHAPTER 17 verification (read-only). Expected results noted inline.
 -- ----------------------------------------------------------------------------

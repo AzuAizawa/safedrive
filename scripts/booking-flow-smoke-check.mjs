@@ -195,6 +195,9 @@ const checks = [
       "Skip for now",
       "booking_reviews",
       "maybeSingle",
+      "fetchCarRatingSummaries",
+      "fetchRenterReputation",
+      "Your renter rating",
     ],
     absentMarkers: [
       "booking_reviews exists in the live schema but is not part of the generated types yet",
@@ -212,6 +215,10 @@ const checks = [
       "/api/create-car-inquiry",
       "getSession",
       "awaiting_payment",
+      "fetchPublicCarReviews",
+      "fetchListerRatingSummaries",
+      "setListerRating",
+      "ratingBuckets",
     ],
     absentMarkers: [
       '.from("bookings").insert',
@@ -444,6 +451,9 @@ const checks = [
       "Skip for now",
       "booking_reviews",
       "maybeSingle",
+      "fetchRenterReputation",
+      "renterReputations",
+      "Recent feedback from other listers",
     ],
     absentMarkers: [
       "booking_reviews exists in the live schema but is not part of the generated types yet",
@@ -453,6 +463,20 @@ const checks = [
     absentRegex: [
       "\\.from\\(\"booking_extensions\"\\)\\s*\\.\\s*(insert|update|delete)\\s*\\(",
     ],
+  },
+  {
+    file: "src/lib/ratings.ts",
+    markers: [
+      "get_car_rating_summaries",
+      "get_lister_rating_summaries",
+      "get_public_car_reviews",
+      "get_renter_reputation",
+      "RenterReputation",
+    ],
+  },
+  {
+    file: "src/pages/BrowseCarsPage.tsx",
+    markers: ["fetchCarRatingSummaries", "carRatings", "formatAverage"],
   },
   {
     file: "src/types/database.ts",

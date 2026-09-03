@@ -1428,6 +1428,34 @@ export interface Database {
         Args: Record<string, never>;
         Returns: string;
       };
+      get_car_rating_summaries: {
+        Args: Record<string, never>;
+        Returns: { car_id: string; average: number; review_count: number }[];
+      };
+      get_lister_rating_summaries: {
+        Args: Record<string, never>;
+        Returns: {
+          lister_id: string;
+          average: number;
+          review_count: number;
+          trip_count: number;
+        }[];
+      };
+      get_public_car_reviews: {
+        Args: { p_car_id: string };
+        Returns: {
+          id: string;
+          rating: number;
+          feedback: string | null;
+          created_at: string;
+          reviewer_name: string;
+          reviewer_avatar: string | null;
+        }[];
+      };
+      get_renter_reputation: {
+        Args: { p_renter_id: string };
+        Returns: Json;
+      };
       set_platform_contact_email: {
         Args: { p_email: string };
         Returns: string;

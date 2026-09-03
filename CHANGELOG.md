@@ -9,6 +9,43 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Ratings & reviews: standard marketplace model
+
+The rating flow existed but was incomplete: Browse showed no ratings,
+the car page's rating on `/my-bookings` was computed from ALL reviews
+(owner-of-renter reviews polluted the car number), there was no lister
+rating anywhere, and the renter's rating never reached a future lister's
+request modal.
+
+- **Model:** renter gives ONE trip rating -> aggregated by car (car
+  rating) and by owner (lister rating), same rows. Lister gives ONE
+  renter rating. No separate "rate the lister" star - no redundancy.
+- **Double-blind:** a review counts / shows only once both parties rated
+  the booking or 14 days passed. Computed at read time.
+- **New SQL (`phase10_rating_functions.sql`):** `get_car_rating_summaries`,
+  `get_lister_rating_summaries`, `get_public_car_reviews`,
+  `get_renter_reputation` (SECURITY DEFINER, aggregates + first-name-only
+  review text, so logged-out visitors see ratings). `_review_is_published`
+  helper. No schema change.
+- `src/lib/ratings.ts` (new) — shared fetchers + `formatAverage`.
+- Browse cards: `★ 4.8 (12)` / "New".
+- Car page: rating summary + star distribution (Google-Play style),
+  reviewer name/avatar, and "Hosted by X · ★ 4.9 · N trips" on the
+  Listed-by card. Reads now work logged-out via the RPCs.
+- `/my-bookings`: fixed the car-rating source; "Your renter rating"
+  chip; rating modal reworded ("Rate your trip", double-blind note).
+- Lister bookings: renter reputation (with double-blind) on the request
+  card and a "Recent feedback from other listers" block in the
+  renter-info modal.
+- Files: db master + phase10.sql, `src/types/database.ts`,
+  `src/lib/ratings.ts`, `BrowseCarsPage`, `CarDetailPage`,
+  `MyBookingsPage`, `ListerBookingsPage`,
+  `scripts/booking-flow-smoke-check.mjs`,
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md` (8.2).
+- Follow-up: apply `phase10_rating_functions.sql` in Supabase.
+
+---
+
 ## 2026-09-03 — One trip per renter at a time
 
 A renter could book car A and car B for the same overlapping dates - the

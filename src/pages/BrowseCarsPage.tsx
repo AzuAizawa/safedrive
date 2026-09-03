@@ -20,9 +20,15 @@ import {
   Calendar,
   CarFront,
   Filter,
+  Star,
   X,
 } from "lucide-react";
 import type { CarWithDetails } from "@/types/database";
+import {
+  fetchCarRatingSummaries,
+  formatAverage,
+  type RatingSummary,
+} from "@/lib/ratings";
 
 const MAX_PAYMENT_AMOUNT = 100000;
 const CARS_PER_PAGE = 12;
@@ -37,6 +43,7 @@ const titleCase = (value: string) =>
 export default function BrowseCarsPage() {
   const { profile } = useAuth();
   const [cars, setCars] = useState<CarWithDetails[]>([]);
+  const [carRatings, setCarRatings] = useState<Record<string, RatingSummary>>({});
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [bodyTypeFilter, setBodyTypeFilter] = useState("all");
@@ -167,6 +174,10 @@ export default function BrowseCarsPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void fetchCarRatingSummaries().then(setCarRatings);
+  }, []);
 
   const filteredCars = cars.filter((car) => {
     const matchesSearch =
@@ -545,9 +556,24 @@ export default function BrowseCarsPage() {
                 </div>
 
                 <CardContent className="p-4">
-                  <h3 className="font-semibold text-base group-hover:text-primary transition-colors">
-                    {car.car_models.car_brands.name} {car.car_models.name}
-                  </h3>
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-semibold text-base group-hover:text-primary transition-colors">
+                      {car.car_models.car_brands.name} {car.car_models.name}
+                    </h3>
+                    {carRatings[car.id]?.count ? (
+                      <span className="mt-0.5 flex shrink-0 items-center gap-1 text-xs font-medium text-foreground">
+                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                        {formatAverage(carRatings[car.id].average)}
+                        <span className="text-muted-foreground">
+                          ({carRatings[car.id].count})
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">
+                        New
+                      </span>
+                    )}
+                  </div>
                   <div className="mt-2 inline-flex max-w-full items-center rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
                     <span className="mr-1">Plate</span>
                     <span className="truncate font-mono font-medium text-foreground">
