@@ -1182,7 +1182,7 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | Admin | `/admin/car-catalog` | `AdminCarCatalogPage`; approved make/model catalogue |
 | Admin | `/admin/vehicle-approval` | `AdminVehicleApprovalPage`; listing, ownership, insurance, and agreement review |
 | Admin | `/admin/audit-trail` | `AdminAuditTrailPage`; business action history |
-| Admin | `/admin/audit-logs` | `AdminAuditLogsPage`; detailed audit view |
+| Admin | `/admin/audit-logs` | Legacy path; redirects to `/admin/audit-trail` |
 | Admin | `/admin/security-logs` | `AdminSecurityLogsPage`; authentication/security events |
 | Super-admin | `/admin/admins` | `AdminAdminsPage`; create admin accounts, toggle each admin's permission checklist, disable/re-enable accounts |
 | Super-admin | `/admin/platform-settings` | `AdminPlatformSettingsPage`; super-admin only (view and edit) |

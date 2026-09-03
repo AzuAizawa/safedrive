@@ -27,7 +27,9 @@ import {
   createNotification,
   getTicketAttachmentUrl,
   getTicketTagLabels,
+  isConversationTicket,
   isTicketAttachmentImage,
+  resolveTicketSender,
   ticketAttachmentAccept,
   ticketAttachmentBucket,
   ticketTags,
@@ -80,12 +82,18 @@ export default function AdminSupportTicketsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "open" | "closed">("all");
   const [tagFilter, setTagFilter] = useState("all");
+  const [kindFilter, setKindFilter] = useState<"all" | "support" | "conversation">(
+    "support",
+  );
 
   const [activeTicket, setActiveTicket] = useState<AdminTicket | null>(null);
   const [activeBookingEvidence, setActiveBookingEvidence] =
     useState<BookingArrivalEvidence | null>(null);
   const [bookingEvidenceLoading, setBookingEvidenceLoading] = useState(false);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
+  const [senderProfiles, setSenderProfiles] = useState<
+    Record<string, { full_name: string | null; role: string }>
+  >({});
   const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({});
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [newMessage, setNewMessage] = useState("");
@@ -220,7 +228,13 @@ export default function AdminSupportTicketsPage() {
       [...tickets].filter((ticket) => {
         const matchesStatus = filter === "all" ? true : ticket.status === filter;
         const matchesTag = ticketMatchesTagFilter(ticket.tag, tagFilter);
-        return matchesStatus && matchesTag;
+        const matchesKind =
+          kindFilter === "all"
+            ? true
+            : kindFilter === "conversation"
+              ? isConversationTicket(ticket)
+              : !isConversationTicket(ticket);
+        return matchesStatus && matchesTag && matchesKind;
       }).sort((left, right) => {
         const leftOpenScore = left.status === "open" ? 1 : 0;
         const rightOpenScore = right.status === "open" ? 1 : 0;
@@ -232,7 +246,15 @@ export default function AdminSupportTicketsPage() {
 
         return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
       }),
-    [tickets, filter, tagFilter],
+    [tickets, filter, tagFilter, kindFilter],
+  );
+
+  const conversationCount = useMemo(
+    () =>
+      tickets.filter(
+        (ticket) => ticket.status === "open" && isConversationTicket(ticket),
+      ).length,
+    [tickets],
   );
 
   const fetchMessages = async (ticketId: string) => {
@@ -245,6 +267,27 @@ export default function AdminSupportTicketsPage() {
 
     if (!error && data) {
       setMessages(data as TicketMessage[]);
+
+      const senderIds = [
+        ...new Set((data as TicketMessage[]).map((message) => message.sender_id)),
+      ];
+      if (senderIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, full_name, role")
+          .in("id", senderIds);
+        setSenderProfiles(
+          Object.fromEntries(
+            (profiles ?? []).map((profile) => [
+              profile.id,
+              { full_name: profile.full_name, role: profile.role },
+            ]),
+          ),
+        );
+      } else {
+        setSenderProfiles({});
+      }
+
       const entries = await Promise.all(
         (data as TicketMessage[])
           .filter((message) => Boolean(message.attachment_storage_path))
@@ -258,6 +301,7 @@ export default function AdminSupportTicketsPage() {
       );
     } else {
       setAttachmentUrls({});
+      setSenderProfiles({});
     }
     setMessagesLoading(false);
   };
@@ -677,13 +721,38 @@ export default function AdminSupportTicketsPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         <AdminSectionTabs
+          value={kindFilter}
+          onChange={setKindFilter}
+          ariaLabel="Ticket type"
+          tabs={[
+            { value: "support", label: "Support requests" },
+            {
+              value: "conversation",
+              label: "Member conversations",
+              count: conversationCount || undefined,
+            },
+            { value: "all", label: "All" },
+          ]}
+        />
+      </div>
+
+      {kindFilter === "conversation" ? (
+        <p className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          These are renter &harr; lister conversations started from a car listing.
+          SafeDrive monitors them for safety and disputes - reply only if you need
+          to step in.
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <AdminSectionTabs
           value={filter}
           onChange={setFilter}
           ariaLabel="Support ticket status"
           tabs={[
-            { value: "all", label: "All tickets" },
-            { value: "open", label: "Open tickets", count: queueStats.open },
-            { value: "closed", label: "Closed tickets" },
+            { value: "all", label: "All statuses" },
+            { value: "open", label: "Open", count: queueStats.open },
+            { value: "closed", label: "Closed" },
           ]}
         />
         <select
@@ -856,6 +925,20 @@ export default function AdminSupportTicketsPage() {
                 )}
               </div>
 
+              {isConversationTicket(activeTicket) ? (
+                <div className="border-b border-border/40 bg-muted/30 px-4 py-3">
+                  <div className="flex items-start gap-3 text-sm">
+                    <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                    <p className="text-muted-foreground">
+                      This is a <strong>renter &harr; lister conversation</strong>{" "}
+                      about a listing, not a support request. SafeDrive monitors it
+                      for safety and disputes - a reply here is posted as SafeDrive
+                      Support and seen by both members, so only step in when needed.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
               {ticketMatchesTagFilter(activeTicket.tag, "no_show") ? (
                 <div className="border-b border-red-500/20 bg-red-500/5 px-4 py-3">
                   <div className="flex items-start gap-3 text-sm">
@@ -944,10 +1027,19 @@ export default function AdminSupportTicketsPage() {
                   messages.map((message) => {
                     const isAdmin = message.sender_id === user?.id;
                     const attachmentUrl = attachmentUrls[message.id] ?? null;
+                    const senderProfile = senderProfiles[message.sender_id];
+                    const sender = resolveTicketSender({
+                      ticket: activeTicket ?? { user_id: "", participant_user_id: null },
+                      senderId: message.sender_id,
+                      currentUserId: user?.id,
+                      senderRole: senderProfile?.role,
+                      senderName: senderProfile?.full_name,
+                    });
+                    const senderLabel = sender.kind === "you" ? "You (Admin)" : sender.label;
                     return (
                       <div key={message.id} className={`flex flex-col ${isAdmin ? "items-end" : "items-start"}`}>
                         <span className="text-[10px] text-muted-foreground mb-1 ml-1">
-                          {isAdmin ? "You (Admin)" : "User"} | {format(new Date(message.created_at), "h:mm a")}
+                          {senderLabel} | {format(new Date(message.created_at), "h:mm a")}
                         </span>
                         <div
                           className={`px-4 py-3 rounded-2xl max-w-[80%] text-sm shadow-sm space-y-3 ${

@@ -62,7 +62,6 @@ const AdminVehicleApprovalPage = lazyWithReload(() => import("@/pages/admin/Admi
 const AdminAuditTrailPage = lazyWithReload(() => import("@/pages/admin/AdminAuditTrailPage"));
 const AdminFinancialReviewsPage = lazyWithReload(() => import("@/pages/admin/AdminFinancialReviewsPage"));
 const AdminPlatformSettingsPage = lazyWithReload(() => import("@/pages/admin/AdminPlatformSettingsPage"));
-const AdminAuditLogsPage = lazyWithReload(() => import("@/pages/admin/AdminAuditLogsPage"));
 const AdminSupportTicketsPage = lazyWithReload(() => import("@/pages/admin/AdminSupportTicketsPage"));
 const AdminGuestInquiriesPage = lazyWithReload(() => import("@/pages/admin/AdminGuestInquiriesPage"));
 const AdminSecurityLogsPage = lazyWithReload(() => import("@/pages/admin/AdminSecurityLogsPage"));
@@ -174,7 +173,8 @@ function App() {
                       </Route>
                       <Route element={<PermissionRoute anyOf={["audit.view"]} />}>
                         <Route path="/admin/audit-trail" element={<AdminAuditTrailPage />} />
-                        <Route path="/admin/audit-logs" element={<AdminAuditLogsPage />} />
+                        {/* Legacy path - the audit view was consolidated into Audit Trail */}
+                        <Route path="/admin/audit-logs" element={<Navigate to="/admin/audit-trail" replace />} />
                       </Route>
                       <Route element={<PermissionRoute anyOf={["security.view"]} />}>
                         <Route path="/admin/security-logs" element={<AdminSecurityLogsPage />} />

@@ -25,7 +25,9 @@ import { uploadFile } from "@/lib/uploadUtils";
 import {
   getTicketAttachmentUrl,
   getTicketTagLabels,
+  isConversationTicket,
   isTicketAttachmentImage,
+  resolveTicketSender,
   serializeTicketTags,
   ticketAttachmentAccept,
   ticketAttachmentBucket,
@@ -60,6 +62,9 @@ export default function SupportTicketsPage() {
   const [loading, setLoading] = useState(true);
   const [activeTicket, setActiveTicket] = useState<SupportTicket | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
+  const [senderProfiles, setSenderProfiles] = useState<
+    Record<string, { full_name: string | null; role: string }>
+  >({});
   const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({});
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [newMessage, setNewMessage] = useState("");
@@ -68,6 +73,7 @@ export default function SupportTicketsPage() {
 
   const [isCreating, setIsCreating] = useState(false);
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
+  const [ticketView, setTicketView] = useState<"support" | "messages">("support");
   const [newSubject, setNewSubject] = useState("");
   const [newTags, setNewTags] = useState<string[]>(["general"]);
   const [newBookingId, setNewBookingId] = useState("");
@@ -187,6 +193,25 @@ export default function SupportTicketsPage() {
 
     if (!error && data) {
       setMessages(data);
+
+      const senderIds = [...new Set(data.map((message) => message.sender_id))];
+      if (senderIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, full_name, role")
+          .in("id", senderIds);
+        setSenderProfiles(
+          Object.fromEntries(
+            (profiles ?? []).map((profile) => [
+              profile.id,
+              { full_name: profile.full_name, role: profile.role },
+            ]),
+          ),
+        );
+      } else {
+        setSenderProfiles({});
+      }
+
       const entries = await Promise.all(
         data
           .filter((message) => Boolean(message.attachment_storage_path))
@@ -200,6 +225,7 @@ export default function SupportTicketsPage() {
       );
     } else {
       setAttachmentUrls({});
+      setSenderProfiles({});
     }
     setMessagesLoading(false);
   };
@@ -464,6 +490,17 @@ export default function SupportTicketsPage() {
   );
   const isActiveTicketClosed = activeTicket ? activeTicket.status !== "open" : false;
 
+  const supportTickets = useMemo(
+    () => tickets.filter((ticket) => !isConversationTicket(ticket)),
+    [tickets],
+  );
+  const conversationTickets = useMemo(
+    () => tickets.filter((ticket) => isConversationTicket(ticket)),
+    [tickets],
+  );
+  const visibleTickets =
+    ticketView === "messages" ? conversationTickets : supportTickets;
+
   return (
     <div className="max-w-5xl mx-auto flex flex-col gap-6 animate-fade-in">
       <div className="order-1 flex items-center justify-between">
@@ -564,23 +601,57 @@ export default function SupportTicketsPage() {
 
       <div className="order-2 grid min-h-[600px] gap-6 md:h-[600px] md:grid-cols-3">
         <div className="border border-border/50 rounded-xl bg-card overflow-hidden flex flex-col">
-          <div className="p-4 border-b border-border/30 bg-muted/20">
-            <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">
-              Your Tickets
-            </h3>
+          <div className="border-b border-border/30 bg-muted/20">
+            <div className="grid grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setTicketView("support")}
+                className={`px-3 py-3 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                  ticketView === "support"
+                    ? "border-b-2 border-primary text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                SafeDrive Support
+                {supportTickets.length > 0 ? ` (${supportTickets.length})` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => setTicketView("messages")}
+                className={`px-3 py-3 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                  ticketView === "messages"
+                    ? "border-b-2 border-primary text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Lister Messages
+                {conversationTickets.length > 0
+                  ? ` (${conversationTickets.length})`
+                  : ""}
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {loading ? (
               Array.from({ length: 4 }).map((_, index) => (
                 <Skeleton key={index} className="h-16 w-full rounded-lg" />
               ))
-            ) : tickets.length === 0 ? (
+            ) : visibleTickets.length === 0 ? (
               <div className="text-center py-10 opacity-60">
                 <Ticket className="w-8 h-8 mx-auto mb-2" />
-                <p className="text-sm">No tickets found</p>
+                <p className="text-sm">
+                  {ticketView === "messages"
+                    ? "No lister conversations yet"
+                    : "No support tickets yet"}
+                </p>
+                {ticketView === "messages" ? (
+                  <p className="mt-1 text-xs">
+                    Start one from a car page with &ldquo;Ask the lister&rdquo;.
+                  </p>
+                ) : null}
               </div>
             ) : (
-              tickets.map((ticket) => (
+              visibleTickets.map((ticket) => (
                 <div
                   key={ticket.id}
                   onClick={() => handleOpenTicket(ticket)}
@@ -662,10 +733,20 @@ export default function SupportTicketsPage() {
                   messages.map((message) => {
                     const isMe = message.sender_id === user?.id;
                     const attachmentUrl = attachmentUrls[message.id] ?? null;
+                    const senderProfile = senderProfiles[message.sender_id];
+                    const sender = activeTicket
+                      ? resolveTicketSender({
+                          ticket: activeTicket,
+                          senderId: message.sender_id,
+                          currentUserId: user?.id,
+                          senderRole: senderProfile?.role,
+                          senderName: senderProfile?.full_name,
+                        })
+                      : { label: isMe ? "You" : "SafeDrive Support" };
                     return (
                       <div key={message.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
                         <span className="text-[10px] text-muted-foreground mb-1 ml-1">
-                          {isMe ? "You" : "SafeDrive Support"} | {format(new Date(message.created_at), "h:mm a")}
+                          {sender.label} | {format(new Date(message.created_at), "h:mm a")}
                         </span>
                         <div
                           className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm space-y-3 ${

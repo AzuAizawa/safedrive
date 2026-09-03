@@ -6336,4 +6336,90 @@ begin
   end if;
 end $$;
 
+-- ============================================================================
+-- CHAPTER 22 - Renter<->lister conversation fixes
+-- SOURCE: project_docs/RBAC_DESIGN.md review pass
+-- ============================================================================
+-- A car listing's "Ask the lister" opens a support_tickets row with
+-- participant_user_id set - a renter<->lister conversation that SafeDrive only
+-- monitors. Two fixes:
+--  * when an admin replies to such a conversation, BOTH members must be
+--    notified (the old trigger notified only the ticket opener / renter).
+--  * the message-sender trigger already routes member<->member replies to the
+--    other party; keep that, just also cover the admin case.
+
+create or replace function public.notify_support_message_created()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  ticket_record public.support_tickets%rowtype;
+  sender_is_admin boolean;
+begin
+  if not exists (
+    select 1 from public.ticket_messages m
+    where m.ticket_id = new.ticket_id and m.id <> new.id
+  ) then
+    return new;
+  end if;
+
+  select * into ticket_record
+  from public.support_tickets
+  where id = new.ticket_id;
+
+  select exists (
+    select 1 from public.profiles p
+    where p.id = new.sender_id and p.role in ('admin', 'super_admin')
+  ) into sender_is_admin;
+
+  if sender_is_admin then
+    if ticket_record.participant_user_id is not null then
+      -- Conversation ticket: notify both members that SafeDrive stepped in.
+      insert into public.notifications (user_id, title, message, type, link)
+      select uid,
+        'SafeDrive replied in your conversation',
+        ticket_record.subject || ' has a new message from SafeDrive Support.',
+        'support', '/support'
+      from (values (ticket_record.user_id), (ticket_record.participant_user_id)) as t(uid)
+      where uid is not null;
+    else
+      insert into public.notifications (user_id, title, message, type, link)
+      values (
+        ticket_record.user_id,
+        'Support replied to your ticket',
+        ticket_record.subject || ' has a new response from SafeDrive Support.',
+        'support',
+        '/support'
+      );
+    end if;
+  elsif ticket_record.participant_user_id is not null then
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      case
+        when new.sender_id = ticket_record.user_id then ticket_record.participant_user_id
+        else ticket_record.user_id
+      end,
+      'New inquiry reply',
+      ticket_record.subject || ' has a new reply.',
+      'support',
+      '/support'
+    );
+  else
+    insert into public.notifications (user_id, title, message, type, link)
+    select
+      p.id,
+      'Support ticket reply received',
+      ticket_record.subject || ' has a new customer reply.',
+      'support',
+      '/admin/support'
+    from public.profiles p
+    where p.role in ('admin', 'super_admin') and p.deleted_at is null;
+  end if;
+
+  return new;
+end;
+$$;
+
 -- End of SafeDrive chaptered database master.

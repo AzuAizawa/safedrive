@@ -62,6 +62,58 @@ export const ticketMatchesTagFilter = (
   return parseTicketTags(value).includes(filter);
 };
 
+/**
+ * A ticket with a `participant_user_id` is a renter <-> lister conversation
+ * (opened from a car listing's "Ask the lister"), not a SafeDrive support
+ * request. The two share the `support_tickets` table but are presented
+ * separately - a support request is answered by SafeDrive; a conversation is
+ * between the two members and SafeDrive only monitors it.
+ */
+export const isConversationTicket = (ticket: {
+  participant_user_id?: string | null;
+}) => Boolean(ticket.participant_user_id);
+
+export type TicketSenderKind =
+  | "you"
+  | "support"
+  | "renter"
+  | "lister"
+  | "customer";
+
+/**
+ * Work out who actually sent a ticket message so the thread never mislabels a
+ * lister's reply as "SafeDrive Support" (or vice versa).
+ *
+ * `senderRole` is the sender's `profiles.role` ('user' | 'admin' |
+ * 'super_admin'); pass it from a lookup of the message senders.
+ */
+export function resolveTicketSender(params: {
+  ticket: { user_id: string; participant_user_id?: string | null };
+  senderId: string;
+  currentUserId?: string | null;
+  senderRole?: string | null;
+  senderName?: string | null;
+}): { label: string; kind: TicketSenderKind } {
+  const { ticket, senderId, currentUserId, senderRole, senderName } = params;
+  const name = senderName?.trim() || null;
+
+  if (currentUserId && senderId === currentUserId) {
+    return { label: "You", kind: "you" };
+  }
+  if (senderRole === "admin" || senderRole === "super_admin") {
+    return { label: "SafeDrive Support", kind: "support" };
+  }
+  if (ticket.participant_user_id) {
+    if (senderId === ticket.user_id) {
+      return { label: name ? `${name} (Renter)` : "Renter", kind: "renter" };
+    }
+    if (senderId === ticket.participant_user_id) {
+      return { label: name ? `${name} (Lister)` : "Lister", kind: "lister" };
+    }
+  }
+  return { label: name ?? "Customer", kind: "customer" };
+}
+
 type SupportDraftOptions = {
   bookingId?: string;
   tag?: string | string[];
