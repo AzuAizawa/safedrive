@@ -5920,4 +5920,201 @@ order by p.proname, grantee;
 --   select public.encrypt_pii('test');
 -- must RAISE, not return a 'pgp:' value.
 
+-- ============================================================================
+-- CHAPTER 19 - Granular admin permissions (RBAC checklist)   [Phase 1 of 6]
+-- SOURCE: project_docs/RBAC_DESIGN.md
+-- ============================================================================
+-- Adds a per-admin permission checklist on top of the existing role column.
+--
+--   profiles.role stays: 'user' | 'admin' | 'super_admin'
+--     super_admin  -> implicitly holds EVERY permission, always. Created only by
+--                     direct SQL (see chapter header lines 98-112). No UI path.
+--     admin        -> holds only the keys granted in public.admin_permissions.
+--     user         -> no admin surface.
+--
+-- This chapter is ADDITIVE and SAFE TO RE-RUN. It creates tables + helpers +
+-- seeds + backfills every existing admin with the full default operational set,
+-- so nothing changes on deploy. Swapping the RLS policies and /api role checks
+-- to public.admin_can(...) is Phase 3 - a separate change.
+
+-- 19.1  Catalog of the 9 operational permission keys ------------------------
+
+create table if not exists public.admin_permission_catalog (
+  key         text primary key,
+  job_label   text not null,
+  description text,
+  sort_order  int  not null default 0,
+  created_at  timestamptz not null default now()
+);
+
+alter table public.admin_permission_catalog enable row level security;
+
+drop policy if exists "Staff read permission catalog" on public.admin_permission_catalog;
+create policy "Staff read permission catalog"
+  on public.admin_permission_catalog for select
+  using (public.is_admin());
+
+insert into public.admin_permission_catalog (key, job_label, description, sort_order) values
+  ('users.verify',     'Verify users',       'Approve, reject, and re-review user identity (KYC); send verification decision emails.', 10),
+  ('users.moderate',   'Moderate users',     'Block and unblock a user''s ability to sign in.', 20),
+  ('vehicles.review',  'Verify cars',        'Approve, reject, revoke, and re-review vehicles and renewals; send vehicle decision emails.', 30),
+  ('vehicles.delete',  'Delete cars',        'Permanently delete a vehicle record.', 40),
+  ('catalog.manage',   'Manage catalog',     'Add and remove car brands and models.', 50),
+  ('support.handle',   'Handle tickets',     'Reply to, close, reopen, and open support tickets on behalf of users.', 60),
+  ('inquiries.handle', 'Handle inquiries',   'Claim, reply to, and resolve user and guest inquiries.', 70),
+  ('audit.view',       'View audit trail',   'Read the accountable business/admin action audit trail.', 80),
+  ('security.view',    'View security logs', 'Read the authentication and security event log.', 90)
+on conflict (key) do update
+  set job_label = excluded.job_label,
+      description = excluded.description,
+      sort_order = excluded.sort_order;
+
+-- 19.2  Per-admin grants (the checklist itself) ----------------------------
+
+create table if not exists public.admin_permissions (
+  admin_id       uuid not null references public.profiles(id) on delete cascade,
+  permission_key text not null references public.admin_permission_catalog(key) on delete cascade,
+  granted_by     uuid references public.profiles(id) on delete set null,
+  granted_at     timestamptz not null default now(),
+  primary key (admin_id, permission_key)
+);
+
+create index if not exists admin_permissions_admin_idx
+  on public.admin_permissions (admin_id);
+
+alter table public.admin_permissions enable row level security;
+
+-- An admin may read their own grants; a super admin reads everyone's.
+drop policy if exists "Read own grants, super admin reads all" on public.admin_permissions;
+create policy "Read own grants, super admin reads all"
+  on public.admin_permissions for select
+  using (admin_id = auth.uid() or public.is_super_admin());
+
+-- Only a super admin may change grants. The /admin/admins module normally
+-- writes with the service-role key; this policy keeps the table safe even for a
+-- direct PostgREST call.
+drop policy if exists "Super admins write grants" on public.admin_permissions;
+create policy "Super admins write grants"
+  on public.admin_permissions for all
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
+
+-- 19.3  Templates (presets that just pre-tick the checklist) ---------------
+
+create table if not exists public.admin_permission_templates (
+  id              text primary key,
+  label           text not null,
+  permission_keys text[] not null default '{}',
+  sort_order      int  not null default 0
+);
+
+alter table public.admin_permission_templates enable row level security;
+
+drop policy if exists "Staff read permission templates" on public.admin_permission_templates;
+create policy "Staff read permission templates"
+  on public.admin_permission_templates for select
+  using (public.is_admin());
+
+insert into public.admin_permission_templates (id, label, permission_keys, sort_order) values
+  ('verification_officer', 'Verification Officer',
+     array['users.verify','users.moderate','vehicles.review','catalog.manage','audit.view'], 10),
+  ('support_agent', 'Support Agent',
+     array['support.handle','inquiries.handle','users.verify','audit.view'], 20),
+  ('fleet_admin', 'Catalog / Fleet Admin',
+     array['vehicles.review','vehicles.delete','catalog.manage','audit.view'], 30),
+  ('compliance_viewer', 'Compliance Viewer',
+     array['audit.view','security.view'], 40),
+  ('general_admin', 'General Admin',
+     array['users.verify','users.moderate','vehicles.review','catalog.manage',
+           'support.handle','inquiries.handle','audit.view','security.view'], 50)
+on conflict (id) do update
+  set label = excluded.label,
+      permission_keys = excluded.permission_keys,
+      sort_order = excluded.sort_order;
+
+-- 19.4  Admin account lifecycle columns -----------------------------------
+
+alter table public.profiles
+  add column if not exists admin_disabled_at timestamptz,
+  add column if not exists admin_created_by  uuid references public.profiles(id) on delete set null;
+
+-- 19.5  The gate helpers -------------------------------------------------
+
+-- Browser callers: reads auth.uid() from the JWT. SECURITY DEFINER so it can
+-- see profiles/grants regardless of the caller's own RLS. STABLE = evaluated
+-- once per statement.
+create or replace function public.admin_can(p_key text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    public.is_super_admin()
+    or exists (
+      select 1
+      from public.admin_permissions ap
+      join public.profiles p on p.id = ap.admin_id
+      where ap.admin_id = auth.uid()
+        and ap.permission_key = p_key
+        and p.role = 'admin'
+        and p.deleted_at is null
+        and p.admin_disabled_at is null
+    );
+$$;
+
+revoke all on function public.admin_can(text) from public, anon;
+grant execute on function public.admin_can(text) to authenticated;
+
+-- Server callers: /api handlers that already resolved the user id from the
+-- bearer token with the service-role client pass it explicitly.
+create or replace function public.admin_can_for(p_uid uuid, p_key text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    exists (
+      select 1 from public.profiles p
+      where p.id = p_uid and p.role = 'super_admin' and p.deleted_at is null
+    )
+    or exists (
+      select 1
+      from public.admin_permissions ap
+      join public.profiles p on p.id = ap.admin_id
+      where ap.admin_id = p_uid
+        and ap.permission_key = p_key
+        and p.role = 'admin'
+        and p.deleted_at is null
+        and p.admin_disabled_at is null
+    );
+$$;
+
+revoke all on function public.admin_can_for(uuid, text) from public, anon, authenticated;
+grant execute on function public.admin_can_for(uuid, text) to service_role;
+
+-- 19.6  Backfill: every current admin keeps the full default operational set
+-- so behaviour is identical until Phase 3. Re-runnable.
+insert into public.admin_permissions (admin_id, permission_key, granted_by)
+select p.id, c.key, null
+from public.profiles p
+cross join public.admin_permission_catalog c
+where p.role = 'admin'
+  and p.deleted_at is null
+on conflict (admin_id, permission_key) do nothing;
+
+-- 19.7  Audit-log action names the /admin/admins module will write (reference):
+--   admin_account_created, admin_permission_granted, admin_permission_revoked,
+--   admin_account_disabled, admin_account_enabled
+
+-- 19.8  Verification -----------------------------------------------------
+-- select key, job_label from public.admin_permission_catalog order by sort_order;
+-- select admin_id, array_agg(permission_key order by permission_key) as keys
+--   from public.admin_permissions group by admin_id;
+-- As an admin or super-admin session:  select public.admin_can('vehicles.review');
+-- As a super-admin session:            select public.admin_can('finance.payouts'); -- true (super admin = all)
+
 -- End of SafeDrive chaptered database master.

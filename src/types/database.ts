@@ -39,6 +39,8 @@ export interface Database {
           emergency_contact_number: string | null;
           login_blocked_until: string | null;
           login_block_reason: string | null;
+          admin_disabled_at: string | null;
+          admin_created_by: string | null;
           deleted_at: string | null;
           created_at: string;
           updated_at: string;
@@ -69,6 +71,8 @@ export interface Database {
           emergency_contact_number?: string | null;
           login_blocked_until?: string | null;
           login_block_reason?: string | null;
+          admin_disabled_at?: string | null;
+          admin_created_by?: string | null;
           deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -99,9 +103,92 @@ export interface Database {
           emergency_contact_number?: string | null;
           login_blocked_until?: string | null;
           login_block_reason?: string | null;
+          admin_disabled_at?: string | null;
+          admin_created_by?: string | null;
           deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      admin_permission_catalog: {
+        Row: {
+          key: string;
+          job_label: string;
+          description: string | null;
+          sort_order: number;
+          created_at: string;
+        };
+        Insert: {
+          key: string;
+          job_label: string;
+          description?: string | null;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Update: {
+          key?: string;
+          job_label?: string;
+          description?: string | null;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      admin_permissions: {
+        Row: {
+          admin_id: string;
+          permission_key: string;
+          granted_by: string | null;
+          granted_at: string;
+        };
+        Insert: {
+          admin_id: string;
+          permission_key: string;
+          granted_by?: string | null;
+          granted_at?: string;
+        };
+        Update: {
+          admin_id?: string;
+          permission_key?: string;
+          granted_by?: string | null;
+          granted_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "admin_permissions_admin_id_fkey";
+            columns: ["admin_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "admin_permissions_permission_key_fkey";
+            columns: ["permission_key"];
+            isOneToOne: false;
+            referencedRelation: "admin_permission_catalog";
+            referencedColumns: ["key"];
+          },
+        ];
+      };
+      admin_permission_templates: {
+        Row: {
+          id: string;
+          label: string;
+          permission_keys: string[];
+          sort_order: number;
+        };
+        Insert: {
+          id: string;
+          label: string;
+          permission_keys?: string[];
+          sort_order?: number;
+        };
+        Update: {
+          id?: string;
+          label?: string;
+          permission_keys?: string[];
+          sort_order?: number;
         };
         Relationships: [];
       };
@@ -1460,6 +1547,14 @@ export interface Database {
         Args: { p_email: string };
         Returns: string;
       };
+      admin_can: {
+        Args: { p_key: string };
+        Returns: boolean;
+      };
+      admin_can_for: {
+        Args: { p_uid: string; p_key: string };
+        Returns: boolean;
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };
@@ -1493,6 +1588,31 @@ export type SupportTicketRow =
   Database["public"]["Tables"]["support_tickets"]["Row"];
 export type TicketMessageRow =
   Database["public"]["Tables"]["ticket_messages"]["Row"];
+export type AdminPermissionCatalogRow =
+  Database["public"]["Tables"]["admin_permission_catalog"]["Row"];
+export type AdminPermissionRow =
+  Database["public"]["Tables"]["admin_permissions"]["Row"];
+export type AdminPermissionTemplateRow =
+  Database["public"]["Tables"]["admin_permission_templates"]["Row"];
+
+/**
+ * The 9 operational permission keys an admin's checklist can hold.
+ * super_admin implicitly holds all of them plus the super-admin-only domains
+ * (finance, platform settings, privacy, admin governance) that are NOT keys.
+ * See project_docs/RBAC_DESIGN.md.
+ */
+export const ADMIN_PERMISSION_KEYS = [
+  "users.verify",
+  "users.moderate",
+  "vehicles.review",
+  "vehicles.delete",
+  "catalog.manage",
+  "support.handle",
+  "inquiries.handle",
+  "audit.view",
+  "security.view",
+] as const;
+export type AdminPermissionKey = (typeof ADMIN_PERMISSION_KEYS)[number];
 
 // Extended types with joins
 export interface CarWithDetails extends Car {

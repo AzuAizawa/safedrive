@@ -7,6 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 
 import AdminRoute from "@/components/AdminRoute";
 import SuperAdminRoute from "@/components/SuperAdminRoute";
+import PermissionRoute from "@/components/PermissionRoute";
 import UserRoute from "@/components/UserRoute";
 import DashboardLayout from "@/components/DashboardLayout";
 import AdminLayout from "@/components/AdminLayout";
@@ -150,32 +151,37 @@ function App() {
                   {/* Admin Routes */}
                   <Route element={<AdminRoute />}>
                     <Route element={<AdminLayout />}>
+                      {/* Any staff member */}
                       <Route path="/admin" element={<AdminDashboard />} />
-                      <Route path="/admin/users" element={<AdminUsersPage />} />
-                      <Route path="/admin/support" element={<AdminSupportTicketsPage />} />
-                      <Route path="/admin/guest-inquiries" element={<AdminGuestInquiriesPage />} />
                       <Route path="/admin/notifications" element={<AdminNotificationsPage />} />
-                      <Route
-                        path="/admin/car-catalog"
-                        element={<AdminCarCatalogPage />}
-                      />
-                      <Route
-                        path="/admin/vehicle-approval"
-                        element={<AdminVehicleApprovalPage />}
-                      />
-                      <Route
-                        path="/admin/audit-trail"
-                        element={<AdminAuditTrailPage />}
-                      />
-                      <Route
-                        path="/admin/audit-logs"
-                        element={<AdminAuditLogsPage />}
-                      />
-                      <Route
-                        path="/admin/security-logs"
-                        element={<AdminSecurityLogsPage />}
-                      />
+
+                      {/* Operational routes - gated by the admin checklist */}
+                      <Route element={<PermissionRoute anyOf={["users.verify", "users.moderate"]} />}>
+                        <Route path="/admin/users" element={<AdminUsersPage />} />
+                      </Route>
+                      <Route element={<PermissionRoute anyOf={["support.handle"]} />}>
+                        <Route path="/admin/support" element={<AdminSupportTicketsPage />} />
+                      </Route>
+                      <Route element={<PermissionRoute anyOf={["inquiries.handle"]} />}>
+                        <Route path="/admin/guest-inquiries" element={<AdminGuestInquiriesPage />} />
+                      </Route>
+                      <Route element={<PermissionRoute anyOf={["catalog.manage"]} />}>
+                        <Route path="/admin/car-catalog" element={<AdminCarCatalogPage />} />
+                      </Route>
+                      <Route element={<PermissionRoute anyOf={["vehicles.review", "vehicles.delete"]} />}>
+                        <Route path="/admin/vehicle-approval" element={<AdminVehicleApprovalPage />} />
+                      </Route>
+                      <Route element={<PermissionRoute anyOf={["audit.view"]} />}>
+                        <Route path="/admin/audit-trail" element={<AdminAuditTrailPage />} />
+                        <Route path="/admin/audit-logs" element={<AdminAuditLogsPage />} />
+                      </Route>
+                      <Route element={<PermissionRoute anyOf={["security.view"]} />}>
+                        <Route path="/admin/security-logs" element={<AdminSecurityLogsPage />} />
+                      </Route>
+
+                      {/* Super-admin-only routes */}
                       <Route element={<SuperAdminRoute />}>
+                        <Route path="/admin/platform-settings" element={<AdminPlatformSettingsPage />} />
                         <Route path="/admin/financial-reviews" element={<AdminFinancialReviewsPage />} />
                         <Route path="/admin/payouts" element={<Navigate to="/admin/financial-reviews?view=payouts" replace />} />
                         <Route path="/admin/refunds" element={<Navigate to="/admin/financial-reviews?view=refunds" replace />} />
@@ -184,10 +190,6 @@ function App() {
                         <Route path="/admin/reconciliation" element={<AdminReconciliationPage />} />
                         <Route path="/admin/retention-requests" element={<AdminRetentionRequestsPage />} />
                       </Route>
-                      <Route
-                        path="/admin/platform-settings"
-                        element={<AdminPlatformSettingsPage />}
-                      />
                     </Route>
                   </Route>
 

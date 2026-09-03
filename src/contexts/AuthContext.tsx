@@ -11,8 +11,10 @@ import { supabase } from "@/lib/supabase";
 import { clearAllAuthPending } from "@/lib/authPending";
 import { signInWithTransientJwtRetry } from "@/lib/authRetry";
 import { recordSecurityEvent } from "@/lib/securityLog";
+import { hasPermission } from "@/lib/permissions";
 import type { User, Session, AuthResponse } from "@supabase/supabase-js";
-import type { Profile } from "@/types/database";
+import type { Profile, AdminPermissionKey } from "@/types/database";
+import { ADMIN_PERMISSION_KEYS } from "@/types/database";
 import { toast } from "sonner";
 
 interface AuthenticatorEnrollment {
@@ -28,6 +30,13 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   profileError: string | null;
+  /**
+   * Granted admin permission keys for the signed-in staff member. A
+   * `super_admin` is reported as holding every key; a non-staff user gets `[]`.
+   */
+  permissions: string[];
+  /** True if the current staff member may perform `key` (super_admin => always). */
+  can: (key: AdminPermissionKey) => boolean;
   signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -93,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const inactivityTimeoutRef = useRef<number | null>(null);
   const sessionTimeoutInFlightRef = useRef(false);
 
@@ -193,6 +203,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await fetchProfile(user.id, user.email);
     }
   }, [user, fetchProfile]);
+
+  // Load (and keep live) the admin permission checklist. The database is
+  // authoritative for every action; this only feeds nav/route/button visibility.
+  const profileId = profile?.id ?? null;
+  const profileRole = profile?.role ?? null;
+  useEffect(() => {
+    if (!profileId || (profileRole !== "admin" && profileRole !== "super_admin")) {
+      setPermissions([]);
+      return;
+    }
+    if (profileRole === "super_admin") {
+      setPermissions([...ADMIN_PERMISSION_KEYS]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadGrants = async () => {
+      const { data, error } = await supabase
+        .from("admin_permissions")
+        .select("permission_key")
+        .eq("admin_id", profileId);
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load admin permissions:", error.message);
+        setPermissions([]);
+        return;
+      }
+      setPermissions((data ?? []).map((row) => row.permission_key));
+    };
+
+    void loadGrants();
+    const channel = supabase
+      .channel(`admin-permissions-${profileId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "admin_permissions",
+          filter: `admin_id=eq.${profileId}`,
+        },
+        () => void loadGrants(),
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [profileId, profileRole]);
+
+  const can = useCallback(
+    (key: AdminPermissionKey) => hasPermission(profileRole, permissions, key),
+    [profileRole, permissions],
+  );
 
   const clearInactivityTimeout = useCallback(() => {
     if (inactivityTimeoutRef.current !== null) {
@@ -527,6 +592,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         loading,
         profileError,
+        permissions,
+        can,
         signUp,
         signIn,
         signOut,

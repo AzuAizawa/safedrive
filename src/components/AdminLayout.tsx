@@ -30,40 +30,43 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
-import type { Notification } from "@/types/database";
+import type { AdminPermissionKey, Notification } from "@/types/database";
 
 type AdminNavItem = {
   to: string;
   label: string;
   icon: typeof LayoutDashboard;
   end?: boolean;
+  /** Checklist keys that reveal this item. Empty/omitted => any staff member. */
+  keys?: AdminPermissionKey[];
+  /** Item is only ever shown to a super_admin (finance, settings, privacy). */
+  superAdminOnly?: boolean;
 };
 
-const operationalNavItems: AdminNavItem[] = [
+const allNavItems: AdminNavItem[] = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/admin/users", label: "Users", icon: Users },
-  { to: "/admin/car-catalog", label: "Car Catalog", icon: CarFront },
-  { to: "/admin/vehicle-approval", label: "Vehicle Approval", icon: Car },
-  { to: "/admin/support", label: "Support Tickets", icon: Headset },
-  { to: "/admin/guest-inquiries", label: "User Inquiries", icon: MessageSquare },
-  { to: "/admin/audit-trail", label: "Audit Trail", icon: ClipboardList },
-  { to: "/admin/security-logs", label: "Security Logs", icon: ShieldCheck },
-  { to: "/admin/platform-settings", label: "Platform Settings", icon: Settings2 },
-];
-
-const superAdminNavItems: AdminNavItem[] = [
-  { to: "/admin/financial-reviews", label: "Financial Reviews", icon: CreditCard },
-  { to: "/admin/financial-ledger", label: "Financial Ledger", icon: ClipboardList },
-  { to: "/admin/reconciliation", label: "Reconciliation", icon: ShieldCheck },
-  { to: "/admin/retention-requests", label: "Retention Requests", icon: Settings2 },
+  { to: "/admin/users", label: "Users", icon: Users, keys: ["users.verify", "users.moderate"] },
+  { to: "/admin/car-catalog", label: "Car Catalog", icon: CarFront, keys: ["catalog.manage"] },
+  { to: "/admin/vehicle-approval", label: "Vehicle Approval", icon: Car, keys: ["vehicles.review", "vehicles.delete"] },
+  { to: "/admin/support", label: "Support Tickets", icon: Headset, keys: ["support.handle"] },
+  { to: "/admin/guest-inquiries", label: "User Inquiries", icon: MessageSquare, keys: ["inquiries.handle"] },
+  { to: "/admin/audit-trail", label: "Audit Trail", icon: ClipboardList, keys: ["audit.view"] },
+  { to: "/admin/security-logs", label: "Security Logs", icon: ShieldCheck, keys: ["security.view"] },
+  { to: "/admin/platform-settings", label: "Platform Settings", icon: Settings2, superAdminOnly: true },
+  { to: "/admin/financial-reviews", label: "Financial Reviews", icon: CreditCard, superAdminOnly: true },
+  { to: "/admin/financial-ledger", label: "Financial Ledger", icon: ClipboardList, superAdminOnly: true },
+  { to: "/admin/reconciliation", label: "Reconciliation", icon: ShieldCheck, superAdminOnly: true },
+  { to: "/admin/retention-requests", label: "Retention Requests", icon: Settings2, superAdminOnly: true },
 ];
 
 export default function AdminLayout() {
-  const { user, signOut, profile } = useAuth();
+  const { user, signOut, profile, can } = useAuth();
   const isSuperAdmin = profile?.role === "super_admin";
-  const navItems = isSuperAdmin
-    ? [...operationalNavItems, ...superAdminNavItems]
-    : operationalNavItems;
+  const navItems = allNavItems.filter((item) => {
+    if (item.superAdminOnly) return isSuperAdmin;
+    if (!item.keys || item.keys.length === 0) return true;
+    return item.keys.some((key) => can(key));
+  });
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const [attentionCount, setAttentionCount] = useState(0);
