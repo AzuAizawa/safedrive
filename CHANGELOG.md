@@ -9,6 +9,31 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Recover from stale chunks after a deploy (no more "React App Crashed")
+
+After a new build, an already-open tab still holds the previous
+build's hashed chunk URLs. The first navigation to a not-yet-loaded
+lazy route 404s ("Failed to fetch dynamically imported module") and
+the error boundary showed a red "React App Crashed" stack trace. A
+manual refresh fixed it because the fresh index.html has the new
+chunk names.
+
+- New `src/lib/lazyWithReload.ts`: `isChunkLoadError`,
+  `reloadForStaleChunk` (one rate-limited full reload, guarded by a
+  sessionStorage timestamp so a genuinely broken module still surfaces),
+  and `lazyWithReload` - a `React.lazy` wrapper that reloads instead of
+  throwing on a stale-chunk import failure.
+- `src/App.tsx`: every route `lazy(() => import(...))` is now
+  `lazyWithReload(...)`.
+- `src/main.tsx`: listens for Vite's `vite:preloadError` and reloads.
+- `src/components/ErrorBoundary.tsx`: a chunk-load error now reloads and
+  shows a short "Updating SafeDrive" card instead of the crash stack.
+
+Note: an already-open stale tab needs one manual refresh to get this
+code; deploys after that self-heal.
+
+---
+
 ## 2026-09-03 — Security logs: role, IP, device, session, failure reason (Tier 1)
 
 The security log stored `ip_address` and `user_agent` all along; the

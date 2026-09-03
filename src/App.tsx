@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
@@ -13,6 +13,7 @@ import AdminLayout from "@/components/AdminLayout";
 import ScrollToTop from "@/components/ScrollToTop";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InquiryWidget from "@/components/InquiryWidget";
+import { lazyWithReload } from "@/lib/lazyWithReload";
 
 // Deployment marker: refund review now uses admin-side release details.
 
@@ -26,48 +27,48 @@ const queryClient = new QueryClient({
   },
 });
 
-const LandingPage = lazy(() => import("@/pages/LandingPage"));
-const GuestInquiryPage = lazy(() => import("@/pages/GuestInquiryPage"));
-const LoginPage = lazy(() => import("@/pages/LoginPage"));
-const AuthConfirmPage = lazy(() => import("@/pages/AuthConfirmPage"));
-const SignUpPage = lazy(() => import("@/pages/SignUpPage"));
-const BrowseCarsPage = lazy(() => import("@/pages/BrowseCarsPage"));
-const CarDetailPage = lazy(() => import("@/pages/CarDetailPage"));
-const MyBookingsPage = lazy(() => import("@/pages/MyBookingsPage"));
-const VerificationPage = lazy(() => import("@/pages/VerificationPage"));
-const MyVehiclesPage = lazy(() => import("@/pages/MyVehiclesPage"));
-const ListerBookingsPage = lazy(() => import("@/pages/ListerBookingsPage"));
-const NotificationsPage = lazy(() => import("@/pages/NotificationsPage"));
-const ListerCarRenewalPage = lazy(() => import("@/pages/ListerCarRenewalPage"));
-const PrivacyPolicyPage = lazy(() => import("@/pages/PrivacyPolicyPage"));
-const TermsPage = lazy(() => import("@/pages/TermsPage"));
-const PlatformAgreementPage = lazy(() => import("@/pages/PlatformAgreementPage"));
-const SupportTicketsPage = lazy(() => import("@/pages/SupportTicketsPage"));
-const InquiriesPage = lazy(() => import("@/pages/InquiriesPage"));
-const PaymentSuccessPage = lazy(() => import("@/pages/PaymentSuccessPage"));
-const UpdatePasswordPage = lazy(() => import("@/pages/UpdatePasswordPage"));
-const SubscriptionPlansPage = lazy(() => import("@/pages/SubscriptionPlansPage"));
-const VehicleAvailabilityPage = lazy(() => import("@/pages/VehicleAvailabilityPage"));
-const TripConditionReportPage = lazy(() => import("@/pages/TripConditionReportPage"));
-const SecurityDepositPage = lazy(() => import("@/pages/SecurityDepositPage"));
-const PrivacyRequestPage = lazy(() => import("@/pages/PrivacyRequestPage"));
+const LandingPage = lazyWithReload(() => import("@/pages/LandingPage"));
+const GuestInquiryPage = lazyWithReload(() => import("@/pages/GuestInquiryPage"));
+const LoginPage = lazyWithReload(() => import("@/pages/LoginPage"));
+const AuthConfirmPage = lazyWithReload(() => import("@/pages/AuthConfirmPage"));
+const SignUpPage = lazyWithReload(() => import("@/pages/SignUpPage"));
+const BrowseCarsPage = lazyWithReload(() => import("@/pages/BrowseCarsPage"));
+const CarDetailPage = lazyWithReload(() => import("@/pages/CarDetailPage"));
+const MyBookingsPage = lazyWithReload(() => import("@/pages/MyBookingsPage"));
+const VerificationPage = lazyWithReload(() => import("@/pages/VerificationPage"));
+const MyVehiclesPage = lazyWithReload(() => import("@/pages/MyVehiclesPage"));
+const ListerBookingsPage = lazyWithReload(() => import("@/pages/ListerBookingsPage"));
+const NotificationsPage = lazyWithReload(() => import("@/pages/NotificationsPage"));
+const ListerCarRenewalPage = lazyWithReload(() => import("@/pages/ListerCarRenewalPage"));
+const PrivacyPolicyPage = lazyWithReload(() => import("@/pages/PrivacyPolicyPage"));
+const TermsPage = lazyWithReload(() => import("@/pages/TermsPage"));
+const PlatformAgreementPage = lazyWithReload(() => import("@/pages/PlatformAgreementPage"));
+const SupportTicketsPage = lazyWithReload(() => import("@/pages/SupportTicketsPage"));
+const InquiriesPage = lazyWithReload(() => import("@/pages/InquiriesPage"));
+const PaymentSuccessPage = lazyWithReload(() => import("@/pages/PaymentSuccessPage"));
+const UpdatePasswordPage = lazyWithReload(() => import("@/pages/UpdatePasswordPage"));
+const SubscriptionPlansPage = lazyWithReload(() => import("@/pages/SubscriptionPlansPage"));
+const VehicleAvailabilityPage = lazyWithReload(() => import("@/pages/VehicleAvailabilityPage"));
+const TripConditionReportPage = lazyWithReload(() => import("@/pages/TripConditionReportPage"));
+const SecurityDepositPage = lazyWithReload(() => import("@/pages/SecurityDepositPage"));
+const PrivacyRequestPage = lazyWithReload(() => import("@/pages/PrivacyRequestPage"));
 
-const AdminDashboard = lazy(() => import("@/pages/admin/AdminDashboard"));
-const AdminLoginPage = lazy(() => import("@/pages/admin/AdminLoginPage"));
-const AdminUsersPage = lazy(() => import("@/pages/admin/AdminUsersPage"));
-const AdminCarCatalogPage = lazy(() => import("@/pages/admin/AdminCarCatalogPage"));
-const AdminVehicleApprovalPage = lazy(() => import("@/pages/admin/AdminVehicleApprovalPage"));
-const AdminAuditTrailPage = lazy(() => import("@/pages/admin/AdminAuditTrailPage"));
-const AdminFinancialReviewsPage = lazy(() => import("@/pages/admin/AdminFinancialReviewsPage"));
-const AdminPlatformSettingsPage = lazy(() => import("@/pages/admin/AdminPlatformSettingsPage"));
-const AdminAuditLogsPage = lazy(() => import("@/pages/admin/AdminAuditLogsPage"));
-const AdminSupportTicketsPage = lazy(() => import("@/pages/admin/AdminSupportTicketsPage"));
-const AdminGuestInquiriesPage = lazy(() => import("@/pages/admin/AdminGuestInquiriesPage"));
-const AdminSecurityLogsPage = lazy(() => import("@/pages/admin/AdminSecurityLogsPage"));
-const AdminNotificationsPage = lazy(() => import("@/pages/admin/AdminNotificationsPage"));
-const AdminFinancialLedgerPage = lazy(() => import("@/pages/admin/AdminFinancialLedgerPage"));
-const AdminReconciliationPage = lazy(() => import("@/pages/admin/AdminReconciliationPage"));
-const AdminRetentionRequestsPage = lazy(() => import("@/pages/admin/AdminRetentionRequestsPage"));
+const AdminDashboard = lazyWithReload(() => import("@/pages/admin/AdminDashboard"));
+const AdminLoginPage = lazyWithReload(() => import("@/pages/admin/AdminLoginPage"));
+const AdminUsersPage = lazyWithReload(() => import("@/pages/admin/AdminUsersPage"));
+const AdminCarCatalogPage = lazyWithReload(() => import("@/pages/admin/AdminCarCatalogPage"));
+const AdminVehicleApprovalPage = lazyWithReload(() => import("@/pages/admin/AdminVehicleApprovalPage"));
+const AdminAuditTrailPage = lazyWithReload(() => import("@/pages/admin/AdminAuditTrailPage"));
+const AdminFinancialReviewsPage = lazyWithReload(() => import("@/pages/admin/AdminFinancialReviewsPage"));
+const AdminPlatformSettingsPage = lazyWithReload(() => import("@/pages/admin/AdminPlatformSettingsPage"));
+const AdminAuditLogsPage = lazyWithReload(() => import("@/pages/admin/AdminAuditLogsPage"));
+const AdminSupportTicketsPage = lazyWithReload(() => import("@/pages/admin/AdminSupportTicketsPage"));
+const AdminGuestInquiriesPage = lazyWithReload(() => import("@/pages/admin/AdminGuestInquiriesPage"));
+const AdminSecurityLogsPage = lazyWithReload(() => import("@/pages/admin/AdminSecurityLogsPage"));
+const AdminNotificationsPage = lazyWithReload(() => import("@/pages/admin/AdminNotificationsPage"));
+const AdminFinancialLedgerPage = lazyWithReload(() => import("@/pages/admin/AdminFinancialLedgerPage"));
+const AdminReconciliationPage = lazyWithReload(() => import("@/pages/admin/AdminReconciliationPage"));
+const AdminRetentionRequestsPage = lazyWithReload(() => import("@/pages/admin/AdminRetentionRequestsPage"));
 
 function RouteLoader() {
   return (
