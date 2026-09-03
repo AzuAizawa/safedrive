@@ -3,9 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 export const config = { runtime: "edge" };
 const respond = (body: Record<string, unknown>, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 const allowedTypes = new Set(["access", "correction", "deletion", "anonymization", "restriction"]);
+const withdrawableStatuses = ["submitted", "identity_check", "under_review"];
 
 export default async function handler(req: Request) {
-  if (!['GET', 'POST'].includes(req.method)) return respond({ error: "Method not allowed" }, 405);
+  if (!['GET', 'POST', 'PATCH'].includes(req.method)) return respond({ error: "Method not allowed" }, 405);
   try {
     const url = process.env.VITE_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
@@ -27,6 +28,68 @@ export default async function handler(req: Request) {
       if (error) throw error;
       return respond({ requests: data ?? [] });
     }
+    if (req.method === 'PATCH') {
+      const body = (await req.json().catch(() => ({}))) as { requestId?: string; action?: string };
+      const requestId = String(body.requestId || "").trim();
+      if (body.action !== "withdraw" || !requestId) {
+        return respond({ error: "Provide a requestId and action: 'withdraw'" }, 400);
+      }
+      if (!serviceKey) {
+        const { data, error } = await supabase.rpc("withdraw_data_retention_request", {
+          p_request_id: requestId,
+        });
+        if (error) throw error;
+        const row = Array.isArray(data) ? data[0] : data;
+        return respond({ success: true, request: row });
+      }
+      const { data: existing, error: findError } = await supabase
+        .from("data_retention_requests")
+        .select("id, status, request_type, requester_email, subject_user_id")
+        .eq("id", requestId)
+        .maybeSingle();
+      if (findError) throw findError;
+      if (!existing || existing.subject_user_id !== user.id) {
+        return respond({ error: "Request not found" }, 404);
+      }
+      if (!withdrawableStatuses.includes(existing.status)) {
+        return respond({ error: `This request can no longer be withdrawn (status: ${existing.status})` }, 409);
+      }
+      const { error: updateError } = await supabase
+        .from("data_retention_requests")
+        .update({
+          status: "cancelled",
+          decision_reason: `Withdrawn by the requester on ${new Date().toISOString().slice(0, 16).replace("T", " ")}.`,
+        })
+        .eq("id", requestId)
+        .eq("subject_user_id", user.id)
+        .in("status", withdrawableStatuses);
+      if (updateError) throw updateError;
+      const { data: superAdmins } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("role", "super_admin")
+        .is("deleted_at", null);
+      if (superAdmins?.length) {
+        await supabase.from("notifications").insert(
+          superAdmins.map((admin) => ({
+            user_id: admin.id,
+            title: "Privacy Request Withdrawn",
+            message: `${existing.requester_email} withdrew their ${existing.request_type} request.`,
+            type: "info",
+            link: `/admin/retention-requests?request=${requestId}`,
+          })),
+        );
+      }
+      await supabase.from("audit_log").insert({
+        user_id: user.id,
+        action: "data_retention_request_withdrawn",
+        entity_type: "data_retention_request",
+        entity_id: requestId,
+        details: { request_type: existing.request_type, previous_status: existing.status },
+      });
+      return respond({ success: true, request: { id: requestId, status: "cancelled" } });
+    }
+
     const payload = (await req.json()) as { requestType?: string; details?: string };
     const requestType = String(payload.requestType || "").trim();
     const details = String(payload.details || "").trim();

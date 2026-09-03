@@ -1484,6 +1484,14 @@ export interface Database {
         Args: { p_request_type: string; p_details: string };
         Returns: { id: string; status: string; due_at: string }[];
       };
+      withdraw_data_retention_request: {
+        Args: { p_request_id: string };
+        Returns: { id: string; status: string }[];
+      };
+      anonymize_user: {
+        Args: { p_user_id: string; p_request_id?: string | null };
+        Returns: Json;
+      };
       submit_guest_inquiry: {
         Args: {
           p_name: string;

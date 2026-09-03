@@ -46,6 +46,9 @@ export default function PrivacyRequestPage() {
   const [details, setDetails] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+
+  const WITHDRAWABLE = ["submitted", "identity_check", "under_review"];
 
   useEffect(() => {
     if (isRequestType(requestedType)) setRequestType(requestedType);
@@ -112,6 +115,33 @@ export default function PrivacyRequestPage() {
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const withdraw = async (requestId: string) => {
+    if (!session?.access_token || withdrawingId) return;
+    setWithdrawingId(requestId);
+    try {
+      const response = await fetch("/api/data-request", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ requestId, action: "withdraw" }),
+      });
+      const result = await readResponse<{ error?: string }>(response);
+      if (!response.ok) {
+        throw new Error(result.error || "The request could not be withdrawn.");
+      }
+      toast.success("Request withdrawn");
+      await load();
+    } catch (error) {
+      toast.error("Withdrawal failed", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setWithdrawingId(null);
     }
   };
 
@@ -192,6 +222,20 @@ export default function PrivacyRequestPage() {
                   <p className="mt-2 text-sm">
                     Decision: {item.decision_reason || item.legal_hold_reason}
                   </p>
+                )}
+                {WITHDRAWABLE.includes(item.status) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    disabled={withdrawingId === item.id}
+                    onClick={() => void withdraw(item.id)}
+                  >
+                    {withdrawingId === item.id && (
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    )}
+                    Withdraw request
+                  </Button>
                 )}
               </article>
             ))}

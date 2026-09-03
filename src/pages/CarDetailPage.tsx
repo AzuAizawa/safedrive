@@ -125,13 +125,18 @@ export default function CarDetailPage() {
           car_brands!inner (*)
         ),
         car_images (*),
-        profiles!cars_owner_id_fkey (full_name, phone, email)
+        profiles!cars_owner_id_fkey (full_name, phone, email, deleted_at)
       `,
       )
       .eq("id", id)
       .single();
 
-    if (!error && data) {
+    if (
+      !error &&
+      data &&
+      !(data as unknown as { profiles?: { deleted_at?: string | null } }).profiles
+        ?.deleted_at
+    ) {
       const carRow = data as unknown as CarWithDetails;
       setCar(carRow);
       // Fetch active bookings to block dates

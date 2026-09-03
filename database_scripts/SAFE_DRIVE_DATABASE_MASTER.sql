@@ -6688,4 +6688,232 @@ begin
     foreign key (user_id) references public.profiles(id) on delete set null;
 end $$;
 
+-- ============================================================================
+-- CHAPTER 26 - Data-subject request execution: scripted anonymization +
+--              self-service withdrawal
+-- ============================================================================
+-- Real-world DPA / GDPR practice: a "delete my account" request is reviewed,
+-- and an approved deletion is almost always satisfied by ANONYMIZATION when
+-- financial / contract / dispute records must be retained. Before this chapter
+-- an admin did that by hand in the SQL editor - easy to miss a column or a
+-- storage object. anonymize_user() does the whole scrub in one transaction and
+-- returns a report of what it cleared plus what still needs a human review.
+--
+-- Also: let a user withdraw their own pending request (the 'cancelled' status
+-- already exists in the CHECK constraint - no schema change needed).
+
+-- ----------------------------------------------------------------------------
+-- 26.1  Self-service withdrawal of an open data-retention request
+-- ----------------------------------------------------------------------------
+create or replace function public.withdraw_data_retention_request(p_request_id uuid)
+returns table (id uuid, status text)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_request public.data_retention_requests%rowtype;
+begin
+  if v_user_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  select * into v_request
+  from public.data_retention_requests
+  where data_retention_requests.id = p_request_id;
+
+  if not found then
+    raise exception 'Request not found';
+  end if;
+  if v_request.subject_user_id is distinct from v_user_id then
+    raise exception 'You can only withdraw your own request';
+  end if;
+  if v_request.status not in ('submitted', 'identity_check', 'under_review') then
+    raise exception 'This request can no longer be withdrawn (status: %)', v_request.status;
+  end if;
+
+  update public.data_retention_requests
+  set status = 'cancelled',
+      decision_reason = coalesce(decision_reason, '') ||
+        case when decision_reason is null or decision_reason = '' then '' else ' ' end ||
+        'Withdrawn by the requester on ' || to_char(now(), 'YYYY-MM-DD HH24:MI') || '.',
+      updated_at = now()
+  where data_retention_requests.id = p_request_id;
+
+  insert into public.notifications (user_id, title, message, type, link)
+  select profile.id, 'Privacy Request Withdrawn',
+    v_request.requester_email || ' withdrew their ' || v_request.request_type || ' request.',
+    'info', '/admin/retention-requests?request=' || p_request_id::text
+  from public.profiles profile
+  where profile.role = 'super_admin' and profile.deleted_at is null;
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (
+    v_user_id, 'data_retention_request_withdrawn', 'data_retention_request', p_request_id,
+    jsonb_build_object('request_type', v_request.request_type, 'previous_status', v_request.status)
+  );
+
+  return query select p_request_id, 'cancelled'::text;
+end;
+$$;
+
+revoke all on function public.withdraw_data_retention_request(uuid) from public, anon;
+grant execute on function public.withdraw_data_retention_request(uuid) to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 26.2  Scripted anonymization of a regular user account
+-- ----------------------------------------------------------------------------
+create or replace function public.anonymize_user(p_user_id uuid, p_request_id uuid default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor uuid := auth.uid();
+  v_target public.profiles%rowtype;
+  v_open_bookings integer;
+  v_cars integer := 0;
+  v_vimages integer := 0;
+  v_notifs integer := 0;
+  v_audit integer := 0;
+  v_manual jsonb;
+  v_report jsonb;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can anonymize a user';
+  end if;
+
+  select * into v_target from public.profiles where profiles.id = p_user_id;
+  if not found then
+    raise exception 'User % not found', p_user_id;
+  end if;
+  if v_target.role in ('admin', 'super_admin') then
+    raise exception 'Demote this staff account to a regular user before anonymizing it';
+  end if;
+  if v_target.deleted_at is not null then
+    raise exception 'This account is already anonymized / deleted';
+  end if;
+
+  -- A live rental must finish (payout, deposit return, dispute window) before
+  -- identity data is scrubbed.
+  select count(*) into v_open_bookings
+  from public.bookings b
+  where (b.renter_id = p_user_id or b.owner_id = p_user_id)
+    and b.status in ('confirmed', 'awaiting_payment', 'downpayment_paid', 'fully_paid', 'active');
+  if v_open_bookings > 0 then
+    raise exception 'User still has % booking(s) in progress. Complete or resolve them before anonymizing.', v_open_bookings;
+  end if;
+
+  -- 1. Structured profile PII -> blanked; account soft-deleted.
+  update public.profiles set
+    email = 'deleted+' || left(p_user_id::text, 8) || '@safedrive.invalid',
+    full_name = 'Deleted user',
+    first_name = null, middle_name = null, last_name = null,
+    phone = null, secondary_phone = null, address = null, birthday = null,
+    driver_license = null, national_id = null, secondary_id_type = null,
+    avatar_url = null, gender = null,
+    payout_method = null, payout_account_name = null, payout_account_number = null,
+    emergency_contact_number = null, login_block_reason = null,
+    is_lister = false,
+    deleted_at = coalesce(deleted_at, now()),
+    updated_at = now()
+  where profiles.id = p_user_id;
+
+  -- 2. Verification images: storage objects + rows.
+  delete from storage.objects
+  where bucket_id = 'user-verification'
+    and (storage.foldername(name))[1] = p_user_id::text;
+  get diagnostics v_vimages = row_count;
+  delete from public.verification_images where user_id = p_user_id;
+
+  -- 3. Car listings pulled offline, free-text contact fields cleared.
+  update public.cars set
+    status = 'inactive',
+    contact_number = null,
+    additional_info = null,
+    updated_at = now()
+  where owner_id = p_user_id;
+  get diagnostics v_cars = row_count;
+
+  -- 4. Booking arrival geolocation + photos (both roles).
+  update public.bookings set
+    renter_arrival_latitude = null, renter_arrival_longitude = null,
+    renter_arrival_accuracy_meters = null, renter_arrival_location_captured_at = null,
+    renter_arrival_photo_url = null
+  where renter_id = p_user_id;
+  update public.bookings set
+    lister_arrival_latitude = null, lister_arrival_longitude = null,
+    lister_arrival_accuracy_meters = null, lister_arrival_location_captured_at = null,
+    lister_arrival_photo_url = null
+  where owner_id = p_user_id;
+
+  -- 5. Trip-condition report geolocation for this reporter.
+  update public.trip_condition_reports set
+    latitude = null, longitude = null, location_accuracy_meters = null
+  where reporter_id = p_user_id;
+
+  -- 6. Notifications addressed to this user (text may embed a name).
+  delete from public.notifications where user_id = p_user_id;
+  get diagnostics v_notifs = row_count;
+
+  -- 7. Redact known PII keys from this user's own audit rows.
+  update public.audit_log set
+    details = details
+      - 'email' - 'admin_email' - 'renter_email' - 'owner_email'
+      - 'full_name' - 'admin_name' - 'name' - 'phone'
+  where user_id = p_user_id
+    and details ?| array['email','admin_email','renter_email','owner_email',
+                         'full_name','admin_name','name','phone'];
+  get diagnostics v_audit = row_count;
+
+  -- 8. Retention-request contact email.
+  update public.data_retention_requests
+  set requester_email = 'redacted@safedrive.invalid'
+  where subject_user_id = p_user_id;
+
+  -- Free-text records a human still has to review (cannot auto-scrub without
+  -- destroying dispute / safety evidence).
+  select jsonb_build_object(
+    'review_feedback', (
+      select count(*) from public.booking_reviews r
+      where (r.reviewer_id = p_user_id or r.reviewee_id = p_user_id)
+        and coalesce(r.feedback, '') <> ''
+    ),
+    'support_messages', (
+      select count(*) from public.ticket_messages m where m.sender_id = p_user_id
+    ),
+    'trip_condition_notes', (
+      select count(*) from public.trip_condition_reports t
+      where t.reporter_id = p_user_id and coalesce(t.damage_notes, '') <> ''
+    ),
+    'guest_inquiries', (
+      select count(*) from public.guest_inquiries g where g.submitted_by_user_id = p_user_id
+    )
+  ) into v_manual;
+
+  v_report := jsonb_build_object(
+    'user_id', p_user_id,
+    'anonymized_at', now(),
+    'actor_id', v_actor,
+    'request_id', p_request_id,
+    'profile_pii_cleared', true,
+    'verification_objects_deleted', v_vimages,
+    'cars_deactivated', v_cars,
+    'notifications_deleted', v_notifs,
+    'audit_rows_redacted', v_audit,
+    'needs_manual_review', v_manual
+  );
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (v_actor, 'user_anonymized', 'profile', p_user_id, v_report);
+
+  return v_report;
+end;
+$$;
+
+revoke all on function public.anonymize_user(uuid, uuid) from public, anon;
+grant execute on function public.anonymize_user(uuid, uuid) to authenticated;
+
 -- End of SafeDrive chaptered database master.

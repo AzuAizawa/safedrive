@@ -12,6 +12,8 @@
 
 **End-to-end flow reference:** `project_docs/SYSTEM_FLOWS.md`
 
+**Data retention & account deletion:** `project_docs/DATA_RETENTION_AND_DELETION.md`
+
 **Recent (31 August 2026):** next-day booking rule (a trip can start as early as
 tomorrow; accept/pay deadlines capped at pickup; auto-cancel otherwise);
 CHAPTER 17 security & integrity hardening SQL added (payments write lockdown, PII
