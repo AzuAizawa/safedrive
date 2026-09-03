@@ -39,6 +39,7 @@ import {
   PowerOff,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { CarBrand, CarModel } from "@/types/database";
@@ -1765,12 +1766,21 @@ export default function MyVehiclesPage() {
                 className="my-4 flex w-full max-w-4xl flex-col overflow-hidden border-border/70 bg-card shadow-2xl sm:my-8"
                 onClick={(e) => e.stopPropagation()}
               >
-                <CardHeader className="shrink-0 border-b border-border/60 pb-4">
+                <CardHeader className="relative shrink-0 border-b border-border/60 pb-4 pr-12">
                   <CardTitle>Edit Listing: {editVehicle.plate_number}</CardTitle>
                   <CardDescription>
                     Update dynamic values like price. Sensitive values require
                     contacting support.
                   </CardDescription>
+                  <button
+                    type="button"
+                    onClick={() => setEditVehicle(null)}
+                    disabled={editing}
+                    aria-label="Close editor"
+                    className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
                 </CardHeader>
                 <CardContent className="max-h-[calc(100vh-11rem)] space-y-4 overflow-y-auto px-6 py-5">
                   <div className="space-y-2">
