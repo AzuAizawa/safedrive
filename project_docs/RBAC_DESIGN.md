@@ -388,3 +388,21 @@ Not an app feature. A super admin is added by running the SQL in `SAFE_DRIVE_DAT
 6. **Docs + tests.** — partial: master documentation §2.3/2.4 + route/API catalogue updated. Still TODO: extend `npm run check:live-roles` to assert each of the 9 keys gates its endpoints.
 
 Phases 1–3 are the risky part (touch every Domain A–F policy); 4–6 are additive.
+
+### 7b. Gap closure (Phase 3b — after a review pass)
+
+SQL **Chapter 21** (run after Chapter 20):
+- `bookings` UPDATE moved from `is_admin()` to `is_super_admin()` — no browser admin screen writes bookings (all via `api/booking-action.ts` service-role) and a status change moves money.
+- `public.admin_permissions` added to the `supabase_realtime` publication so a checklist change reaches the affected admin's open session.
+
+Front-end:
+- `AuthContext` exposes `permissionsReady`; `PermissionRoute` shows a loader until it is true, so a permitted admin is never bounced on a cold refresh before grants load.
+- `AuthContext` now also polls grants every 45s (realtime fallback) and, in the same poll, signs out an admin who was disabled or deleted mid-session.
+- `fetchProfile` signs out on `role='admin' && admin_disabled_at` at login.
+- `AdminAdminsPage` gains a "Resend invite" action (`resetPasswordForEmail` → `/update-password`).
+- `AdminUsersPage` hides the KYC checklist + OCR panel entirely when the admin lacks `users.verify` (previously only the buttons were hidden).
+
+Known, accepted, not fixed:
+- Dashboard queue counts and the notification bell under-report for a restricted admin (RLS returns an empty set, not an error) — this is arguably correct (you only see work you can do).
+- `audit_log` / `notifications` INSERT stay `is_admin()` (any privileged actor should be able to log/notify).
+- `check:live-roles` not yet extended for the 9 keys.

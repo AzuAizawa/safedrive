@@ -177,6 +177,26 @@ export default function AdminAdminsPage() {
     }
   };
 
+  const resendInvite = async (admin: AdminRow) => {
+    if (busyAdminId) return;
+    setBusyAdminId(admin.id);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(admin.email, {
+        redirectTo: `${window.location.origin}/update-password`,
+      });
+      if (error) throw error;
+      toast.success("Set-password email sent", {
+        description: `${admin.email} can use it to set a password and enrol MFA.`,
+      });
+    } catch (error) {
+      toast.error("Email was not sent", {
+        description: error instanceof Error ? error.message : "Please try again",
+      });
+    } finally {
+      setBusyAdminId(null);
+    }
+  };
+
   const toggleDisabled = async (admin: AdminRow) => {
     if (!user?.id || busyAdminId) return;
     const disabling = !admin.admin_disabled_at;
@@ -326,14 +346,24 @@ export default function AdminAdminsPage() {
                     {new Date(admin.created_at).toLocaleDateString()}
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  variant={admin.admin_disabled_at ? "default" : "outline"}
-                  disabled={busyAdminId === admin.id}
-                  onClick={() => void toggleDisabled(admin)}
-                >
-                  {admin.admin_disabled_at ? "Re-enable" : "Disable"}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busyAdminId === admin.id}
+                    onClick={() => void resendInvite(admin)}
+                  >
+                    Resend invite
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={admin.admin_disabled_at ? "default" : "outline"}
+                    disabled={busyAdminId === admin.id}
+                    onClick={() => void toggleDisabled(admin)}
+                  >
+                    {admin.admin_disabled_at ? "Re-enable" : "Disable"}
+                  </Button>
+                </div>
               </div>
 
               <div className="mt-3 grid gap-2 sm:grid-cols-2">

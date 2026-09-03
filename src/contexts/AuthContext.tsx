@@ -37,6 +37,8 @@ interface AuthContextType {
   permissions: string[];
   /** True if the current staff member may perform `key` (super_admin => always). */
   can: (key: AdminPermissionKey) => boolean;
+  /** False until the permission set has been resolved for a signed-in admin. */
+  permissionsReady: boolean;
   signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -103,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
+  const [permissionsReady, setPermissionsReady] = useState(false);
   const inactivityTimeoutRef = useRef<number | null>(null);
   const sessionTimeoutInFlightRef = useRef(false);
 
@@ -182,6 +185,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("Account has been deactivated.");
       }
 
+      if (data && data.role === "admin" && data.admin_disabled_at) {
+        await supabase.auth.signOut();
+        setProfile(null);
+        setUser(null);
+        setSession(null);
+        throw new Error(
+          "This admin account has been disabled by a super administrator.",
+        );
+      }
+
       setProfile((prev) => {
         if (!prev || JSON.stringify(prev) !== JSON.stringify(data)) {
           return data;
@@ -211,29 +224,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!profileId || (profileRole !== "admin" && profileRole !== "super_admin")) {
       setPermissions([]);
+      setPermissionsReady(true);
       return;
     }
     if (profileRole === "super_admin") {
       setPermissions([...ADMIN_PERMISSION_KEYS]);
+      setPermissionsReady(true);
       return;
     }
 
     let cancelled = false;
+    setPermissionsReady(false);
     const loadGrants = async () => {
-      const { data, error } = await supabase
-        .from("admin_permissions")
-        .select("permission_key")
-        .eq("admin_id", profileId);
+      const [grantResult, statusResult] = await Promise.all([
+        supabase
+          .from("admin_permissions")
+          .select("permission_key")
+          .eq("admin_id", profileId),
+        supabase
+          .from("profiles")
+          .select("admin_disabled_at, deleted_at")
+          .eq("id", profileId)
+          .maybeSingle(),
+      ]);
       if (cancelled) return;
-      if (error) {
-        console.error("Failed to load admin permissions:", error.message);
-        setPermissions([]);
+      // Caught a mid-session disable / deletion - drop the session.
+      if (statusResult.data?.admin_disabled_at || statusResult.data?.deleted_at) {
+        void supabase.auth.signOut();
         return;
       }
-      setPermissions((data ?? []).map((row) => row.permission_key));
+      if (grantResult.error) {
+        console.error(
+          "Failed to load admin permissions:",
+          grantResult.error.message,
+        );
+        setPermissions([]);
+      } else {
+        setPermissions((grantResult.data ?? []).map((row) => row.permission_key));
+      }
+      setPermissionsReady(true);
     };
 
     void loadGrants();
+    // Realtime is the fast path; the 45s poll is the guaranteed one in case the
+    // admin_permissions table is not in the realtime publication.
+    const pollId = window.setInterval(() => void loadGrants(), 45_000);
     const channel = supabase
       .channel(`admin-permissions-${profileId}`)
       .on(
@@ -250,6 +285,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
+      window.clearInterval(pollId);
       void supabase.removeChannel(channel);
     };
   }, [profileId, profileRole]);
@@ -594,6 +630,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profileError,
         permissions,
         can,
+        permissionsReady,
         signUp,
         signIn,
         signOut,

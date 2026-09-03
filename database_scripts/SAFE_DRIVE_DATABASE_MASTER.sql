@@ -6304,4 +6304,36 @@ create policy "Admin read security logs" on public.security_logs
 -- As the same admin with the key granted: the insert succeeds.
 -- select public.admin_can('audit.view');  -- reflects the current checklist
 
+-- ============================================================================
+-- CHAPTER 21 - RBAC gap closure (Phase 3b)
+-- SOURCE: project_docs/RBAC_DESIGN.md
+-- ============================================================================
+-- Small follow-ups found while reviewing Chapter 20:
+--  * bookings UPDATE was still is_admin(). No browser admin screen writes
+--    bookings (every change goes through api/booking-action.ts with the
+--    service-role key), and a booking status change moves money, so a plain
+--    admin should not be able to raw-update one. Tighten to super admin.
+--  * put public.admin_permissions in the realtime publication so a checklist
+--    change reaches the affected admin's open session within seconds (the
+--    client also polls every 45s as a fallback).
+
+drop policy if exists "Admins can update bookings" on public.bookings;
+create policy "Admins can update bookings" on public.bookings
+  for update using (public.is_super_admin())
+  with check (public.is_super_admin());
+
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (
+       select 1 from pg_publication_tables
+       where pubname = 'supabase_realtime'
+         and schemaname = 'public'
+         and tablename = 'admin_permissions'
+     )
+  then
+    execute 'alter publication supabase_realtime add table public.admin_permissions';
+  end if;
+end $$;
+
 -- End of SafeDrive chaptered database master.

@@ -1091,7 +1091,10 @@ export default function AdminUsersPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-3 rounded-lg border border-primary/15 bg-background/50 p-3">
+                  <div
+                    className="space-y-3 rounded-lg border border-primary/15 bg-background/50 p-3"
+                    hidden={!canVerify}
+                  >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold">KYC OCR comparison</p>
@@ -1142,7 +1145,7 @@ export default function AdminUsersPage() {
                   </div>
 
                   {/* Mandatory Review Checklist */}
-                  {selectedUser.verified_status === "pending" && (
+                  {selectedUser.verified_status === "pending" && canVerify && (
                     <div className="space-y-3 pt-4 border-t border-primary/10 mt-4">
                       <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">
                         Manual Review Checklist
