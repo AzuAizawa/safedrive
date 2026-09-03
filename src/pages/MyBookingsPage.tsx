@@ -71,6 +71,7 @@ interface BookingRow {
   pickup_time: string | null;
   dropoff_time: string | null;
   created_at: string;
+  agreement_storage_path_snapshot: string | null;
   cars: {
     plate_number: string;
     location: string | null;
@@ -310,11 +311,15 @@ export default function MyBookingsPage() {
         setDocumentUrls(
           await createPrivateStorageUrlMap(
             "vehicle-private-documents",
-            typedBookings.flatMap((booking) =>
-              (booking.cars.car_documents ?? [])
+            typedBookings.flatMap((booking) => [
+              ...(booking.cars.car_documents ?? [])
                 .map((document) => document.storage_path)
                 .filter((path) => !path.startsWith("http")),
-            ),
+              ...(booking.agreement_storage_path_snapshot &&
+              !booking.agreement_storage_path_snapshot.startsWith("http")
+                ? [booking.agreement_storage_path_snapshot]
+                : []),
+            ]),
             "vehicle-documents",
           ),
         );
@@ -1595,6 +1600,10 @@ export default function MyBookingsPage() {
             const rentalAgreement = booking.cars.car_documents?.find(
               (d) => d.document_type === "rental_agreement",
             );
+            const agreementDocPath =
+              booking.agreement_storage_path_snapshot ||
+              rentalAgreement?.storage_path ||
+              null;
             const carRatingSummary = carRatingSummaries[booking.car_id];
             const reviewedByRenter = booking.booking_reviews?.some(
               (review) =>
@@ -1806,21 +1815,30 @@ export default function MyBookingsPage() {
                         </button>
                       </div>
 
-                      {/* Rental Agreement Download */}
-                      {rentalAgreement &&
+                      {/* Rental Agreement */}
+                      {agreementDocPath &&
                         (apparentState === "downpayment_paid" ||
                           apparentState === "active" ||
                           apparentState === "fully_paid" ||
-                          apparentState === "completed") && (
-                          <a
-                            href={getDocUrl(rentalAgreement.storage_path)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline mt-1"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            Download Rental Agreement
-                          </a>
+                          apparentState === "completed") &&
+                        getDocUrl(agreementDocPath) && (
+                          <div className="mt-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-left">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Rental agreement
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              The lister&apos;s terms you accepted for this rental. Review them anytime during the trip.
+                            </p>
+                            <a
+                              href={getDocUrl(agreementDocPath)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              View rental agreement
+                            </a>
+                          </div>
                         )}
                     </div>
 

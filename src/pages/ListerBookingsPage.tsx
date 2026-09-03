@@ -98,6 +98,7 @@ interface ListerBooking {
   pickup_time: string | null;
   dropoff_time: string | null;
   created_at: string;
+  agreement_storage_path_snapshot: string | null;
   renter_arrived_at: string | null;
   renter_arrival_photo_url: string | null;
   renter_arrival_latitude: number | null;
@@ -221,6 +222,7 @@ export default function ListerBookingsPage() {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState<ListerBooking[]>([]);
   const [verificationImageUrls, setVerificationImageUrls] = useState<Record<string, string>>({});
+  const [agreementUrls, setAgreementUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [arrivalLeadHours, setArrivalLeadHours] = useState(
@@ -359,6 +361,20 @@ export default function ListerBookingsPage() {
           Object.values(verificationImagesByUser).flatMap((images) =>
             images.map((image) => image.storage_path),
           ),
+        ),
+      );
+      setAgreementUrls(
+        await createPrivateStorageUrlMap(
+          "vehicle-private-documents",
+          bookingRows
+            .map((booking) => booking.agreement_storage_path_snapshot)
+            .filter(
+              (path): path is string =>
+                typeof path === "string" &&
+                path.length > 0 &&
+                !path.startsWith("http"),
+            ),
+          "vehicle-documents",
         ),
       );
     } catch (err) {
@@ -631,6 +647,12 @@ export default function ListerBookingsPage() {
   };
 
   const getImageUrl = (path: string) => verificationImageUrls[path] ?? "";
+
+  const getAgreementUrl = (path: string | null) => {
+    if (!path) return "";
+    if (path.startsWith("http")) return path;
+    return agreementUrls[path] ?? "";
+  };
 
   const handleAccept = async (bookingId: string) => {
     setActionLoading(bookingId);
@@ -2523,6 +2545,28 @@ export default function ListerBookingsPage() {
                           <MapPin className="w-3.5 h-3.5" /> {b.cars.location}
                         </p>
                       )}
+                      {getAgreementUrl(b.agreement_storage_path_snapshot) &&
+                        ["downpayment_paid", "active", "fully_paid", "completed"].includes(
+                          apparentState,
+                        ) && (
+                          <div className="mt-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-left">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Rental agreement
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              The version the renter accepted for this booking.
+                            </p>
+                            <a
+                              href={getAgreementUrl(b.agreement_storage_path_snapshot)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              View rental agreement
+                            </a>
+                          </div>
+                        )}
                     </div>
 
                     <div className="mt-5 space-y-3 border-t border-border/50 pt-5">
