@@ -85,7 +85,7 @@ export default function SupportTicketsPage() {
 
   const messageComposerRef = useRef<HTMLDivElement | null>(null);
   const createMessageComposerRef = useRef<HTMLDivElement | null>(null);
-  const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const replyAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const createAttachmentInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -160,7 +160,10 @@ export default function SupportTicketsPage() {
   }, [isCreating, prefillCreateMessage]);
 
   useEffect(() => {
-    endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // Keep the thread pinned to the latest message without moving the page
+    // itself (scrollIntoView would also scroll the surrounding layout).
+    const el = messagesScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const fetchTickets = useCallback(async () => {
@@ -724,7 +727,10 @@ export default function SupportTicketsPage() {
                 )}
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div
+                ref={messagesScrollRef}
+                className="flex-1 overflow-y-auto p-4 space-y-4"
+              >
                 {messagesLoading ? (
                   <div className="flex justify-center py-10">
                     <Clock className="w-6 h-6 animate-pulse opacity-50" />
@@ -797,7 +803,6 @@ export default function SupportTicketsPage() {
                     );
                   })
                 )}
-                <div ref={endOfMessagesRef} />
               </div>
 
               {!isActiveTicketClosed ? (

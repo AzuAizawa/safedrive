@@ -108,7 +108,7 @@ export default function AdminSupportTicketsPage() {
   const [createMessage, setCreateMessage] = useState("");
   const [isCreatingTicket, setIsCreatingTicket] = useState(false);
   const messageComposerRef = useRef<HTMLDivElement | null>(null);
-  const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const replyAttachmentInputRef = useRef<HTMLInputElement | null>(null);
 
   const logSupportAdminAction = useCallback(
@@ -211,7 +211,10 @@ export default function AdminSupportTicketsPage() {
   }, []);
 
   useEffect(() => {
-    endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // Scroll the message list to the bottom WITHOUT touching the page scroll
+    // position (scrollIntoView would also scroll the surrounding <main>).
+    const el = messagesScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const queueStats = useMemo(() => {
@@ -1018,7 +1021,10 @@ export default function AdminSupportTicketsPage() {
                 </div>
               ) : null}
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/5">
+              <div
+                ref={messagesScrollRef}
+                className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/5"
+              >
                 {messagesLoading ? (
                   <div className="flex justify-center py-10">
                     <Clock className="w-6 h-6 animate-pulse opacity-50" />
@@ -1090,7 +1096,6 @@ export default function AdminSupportTicketsPage() {
                     );
                   })
                 )}
-                <div ref={endOfMessagesRef} />
               </div>
 
               {activeTicket.status === "open" ? (

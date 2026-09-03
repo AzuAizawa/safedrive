@@ -381,6 +381,7 @@ export default function AdminVehicleRenewalsPage() {
           />
         </label>
         <Button
+          type="submit"
           className="md:col-span-2"
           disabled={flagging || !selectedFlagCar}
         >

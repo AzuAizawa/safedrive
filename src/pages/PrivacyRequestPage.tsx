@@ -157,7 +157,7 @@ export default function PrivacyRequestPage() {
           />
         </label>
 
-        <Button disabled={saving || details.trim().length < 10}>
+        <Button type="submit" disabled={saving || details.trim().length < 10}>
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Submit request
         </Button>

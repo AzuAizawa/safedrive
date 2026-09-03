@@ -33,6 +33,10 @@ export default function AdminAdminsPage() {
     template: "general_admin",
     keys: [] as string[],
   });
+  const [invalidFields, setInvalidFields] = useState<{
+    email?: boolean;
+    fullName?: boolean;
+  }>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,13 +94,36 @@ export default function AdminAdminsPage() {
     void load();
   }, [load]);
 
+  const templateKeys = useCallback(
+    (templateId: string) =>
+      templates.find((item) => item.id === templateId)?.permission_keys ?? [],
+    [templates],
+  );
+
+  // Pre-fill the checklist from the default template once the templates load,
+  // but only while the form is still untouched (so a reload after creating an
+  // admin re-applies it, and a manual edit is never overwritten).
+  useEffect(() => {
+    if (templates.length === 0) return;
+    setForm((current) =>
+      current.email === "" &&
+      current.fullName === "" &&
+      current.keys.length === 0 &&
+      current.template !== "custom"
+        ? { ...current, keys: [...templateKeys(current.template)] }
+        : current,
+    );
+  }, [templates, templateKeys]);
+
   // Keep the create-form checklist in sync when a template is picked.
   const applyTemplate = (templateId: string) => {
-    const template = templates.find((item) => item.id === templateId);
     setForm((current) => ({
       ...current,
       template: templateId,
-      keys: template ? [...template.permission_keys] : current.keys,
+      keys:
+        templateId === "custom"
+          ? current.keys
+          : [...templateKeys(templateId)],
     }));
   };
 
@@ -111,7 +138,19 @@ export default function AdminAdminsPage() {
 
   const createAdmin = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!session?.access_token || creating) return;
+    if (creating) return;
+    if (!session?.access_token) {
+      toast.error("Your session expired", {
+        description: "Sign in again, then create the admin.",
+      });
+      return;
+    }
+    if (form.keys.length === 0) {
+      toast.error("Pick at least one permission", {
+        description: "An admin with no permissions cannot do anything.",
+      });
+      return;
+    }
     setCreating(true);
     try {
       const response = await fetch("/api/admin-create", {
@@ -132,6 +171,7 @@ export default function AdminAdminsPage() {
         description: `${form.email.trim()} can now set a password and enrol MFA.`,
       });
       setForm({ email: "", fullName: "", template: "general_admin", keys: [] });
+      setInvalidFields({});
       await load();
     } catch (error) {
       toast.error("Admin was not created", {
@@ -255,19 +295,41 @@ export default function AdminAdminsPage() {
           <Input
             type="email"
             value={form.email}
-            onChange={(event) => setForm({ ...form, email: event.target.value })}
+            onChange={(event) => {
+              setForm({ ...form, email: event.target.value });
+              setInvalidFields((current) => ({ ...current, email: false }));
+            }}
+            onInvalid={() =>
+              setInvalidFields((current) => ({ ...current, email: true }))
+            }
+            aria-invalid={invalidFields.email || undefined}
             required
           />
+          {invalidFields.email ? (
+            <p className="text-xs font-medium text-destructive">
+              Enter the admin&apos;s email address.
+            </p>
+          ) : null}
         </label>
         <label className="space-y-2">
           <Label>Full name</Label>
           <Input
             value={form.fullName}
-            onChange={(event) =>
-              setForm({ ...form, fullName: event.target.value })
+            onChange={(event) => {
+              setForm({ ...form, fullName: event.target.value });
+              setInvalidFields((current) => ({ ...current, fullName: false }));
+            }}
+            onInvalid={() =>
+              setInvalidFields((current) => ({ ...current, fullName: true }))
             }
+            aria-invalid={invalidFields.fullName || undefined}
             required
           />
+          {invalidFields.fullName ? (
+            <p className="text-xs font-medium text-destructive">
+              Enter the admin&apos;s full name.
+            </p>
+          ) : null}
         </label>
         <label className="space-y-2 md:col-span-2">
           <Label>Start from a template</Label>
@@ -310,7 +372,7 @@ export default function AdminAdminsPage() {
             ))}
           </div>
         </fieldset>
-        <Button className="md:col-span-2" disabled={creating}>
+        <Button type="submit" className="md:col-span-2" disabled={creating}>
           {creating ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
