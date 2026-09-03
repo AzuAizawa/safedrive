@@ -10,6 +10,7 @@ on:
   schedule:
     - cron: "*/15 * * * *" # booking-deadline expiry
     - cron: "7 * * * *" # return reminders, once per hour
+    - cron: "23 3 * * *" # flag vehicles with expired compliance documents, daily
   workflow_dispatch: {}
 
 env:
@@ -43,5 +44,20 @@ jobs:
           echo "HTTP $code"; cat /tmp/out; echo
           if [ "$code" != "200" ]; then
             echo "::error::send-return-reminders returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
+            exit 1
+          fi
+
+  flag-expired-vehicle-documents:
+    if: github.event.schedule == '23 3 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call flag-expired-vehicle-documents
+        run: |
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${SITE_URL}/api/flag-expired-vehicle-documents")
+          echo "HTTP $code"; cat /tmp/out; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::flag-expired-vehicle-documents returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
             exit 1
           fi
