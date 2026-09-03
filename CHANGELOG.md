@@ -9,6 +9,40 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — Security logs: role, IP, device, session, failure reason (Tier 1)
+
+The security log stored `ip_address` and `user_agent` all along; the
+admin page just never showed them, and there was no role or reason.
+
+- Migration (`phase9_security_log_fields.sql`): `security_logs` gains
+  `actor_role`, `actor_is_lister` (snapshot at event time),
+  `session_id` (Supabase session, from the JWT `session_id` claim),
+  `failure_reason`, `target_email` (address entered on a failed login).
+  Two indexes (`created_at desc`, partial `session_id`). No backfill.
+- `api/record-security-event.ts`: looks up the actor's role/lister flag
+  from `profiles`, decodes the JWT for `session_id`, and promotes
+  `details.reason` / `details.email` to the new columns. Client login
+  flows already send reason + email, so no client change was needed.
+- `AdminSecurityLogsPage`: new Role / IP address / Device columns
+  (device is a dependency-free user-agent parse, raw string on hover),
+  a role filter (All / Super admin / Admin / Lister / Renter), failure
+  reason shown inline instead of "reason recorded", session-id chip,
+  and IP / device / session / target-email added to search. Older rows
+  fall back to `details.portal` / `details.reason` / `details.email`.
+- Append-only RLS unchanged (admin SELECT, validated-server INSERT,
+  no UPDATE/DELETE).
+
+- Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql`,
+  `api/record-security-event.ts`, `src/types/database.ts`,
+  `src/pages/admin/AdminSecurityLogsPage.tsx`,
+  `scripts/booking-flow-smoke-check.mjs`,
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+- Follow-up: apply `phase9_security_log_fields.sql` in Supabase.
+- Deferred (Tier 2/3): session table + "sign out all devices",
+  time-based retention purge, geo/country + impossible-travel alerts.
+
+---
+
 ## 2026-09-03 — Extension in payout, itemized payout receipt, admin exception alerts
 
 Follow-up to the lister email work. Four related gaps around trip

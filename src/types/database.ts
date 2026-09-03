@@ -1056,6 +1056,11 @@ export interface Database {
           status: string;
           ip_address: string | null;
           user_agent: string | null;
+          actor_role: string | null;
+          actor_is_lister: boolean | null;
+          session_id: string | null;
+          failure_reason: string | null;
+          target_email: string | null;
           details: Json | null;
           created_at: string;
         };
@@ -1067,6 +1072,11 @@ export interface Database {
           status?: string;
           ip_address?: string | null;
           user_agent?: string | null;
+          actor_role?: string | null;
+          actor_is_lister?: boolean | null;
+          session_id?: string | null;
+          failure_reason?: string | null;
+          target_email?: string | null;
           details?: Json | null;
           created_at?: string;
         };
@@ -1078,6 +1088,11 @@ export interface Database {
           status?: string;
           ip_address?: string | null;
           user_agent?: string | null;
+          actor_role?: string | null;
+          actor_is_lister?: boolean | null;
+          session_id?: string | null;
+          failure_reason?: string | null;
+          target_email?: string | null;
           details?: Json | null;
           created_at?: string;
         };

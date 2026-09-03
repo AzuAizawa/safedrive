@@ -19,6 +19,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -60,6 +67,64 @@ const methodLabels: Record<string, string> = {
   support_recovery: "Support recovery",
 };
 
+// Best-effort user-agent -> "Browser on OS (device)" for the table. The raw
+// string is still stored and shown on hover.
+const parseUserAgent = (ua: string | null | undefined) => {
+  if (!ua) return { label: "Unknown device", raw: "" };
+  const raw = ua;
+  let browser = "Unknown browser";
+  if (/edg\//i.test(ua)) browser = "Edge";
+  else if (/opr\/|opera/i.test(ua)) browser = "Opera";
+  else if (/chrome\//i.test(ua) && !/chromium/i.test(ua)) browser = "Chrome";
+  else if (/firefox\//i.test(ua)) browser = "Firefox";
+  else if (/safari\//i.test(ua) && /version\//i.test(ua)) browser = "Safari";
+
+  let os = "Unknown OS";
+  if (/windows nt 10/i.test(ua)) os = "Windows";
+  else if (/windows/i.test(ua)) os = "Windows";
+  else if (/android/i.test(ua)) os = "Android";
+  else if (/iphone|ipad|ipod/i.test(ua)) os = "iOS";
+  else if (/mac os x/i.test(ua)) os = "macOS";
+  else if (/linux/i.test(ua)) os = "Linux";
+
+  const isMobile = /mobile|android|iphone|ipad|ipod/i.test(ua);
+  return {
+    label: `${browser} on ${os} · ${isMobile ? "Mobile" : "Desktop"}`,
+    raw,
+  };
+};
+
+const getRoleLabel = (log: {
+  actor_role: string | null;
+  actor_is_lister: boolean | null;
+  details: unknown;
+}) => {
+  const details = (log.details ?? {}) as Record<string, unknown>;
+  const role = log.actor_role ?? null;
+  if (role === "super_admin") return { label: "Super admin", tone: "admin" as const };
+  if (role === "admin") return { label: "Admin", tone: "admin" as const };
+  if (role === "user") {
+    return {
+      label: log.actor_is_lister ? "Lister" : "Renter",
+      tone: "user" as const,
+    };
+  }
+  // Older rows (before Phase 9) only have the portal hint, and failed logins
+  // never had a role at all.
+  const portal = String(details.portal ?? "");
+  if (portal === "admin") return { label: "Admin portal", tone: "muted" as const };
+  if (portal === "user") return { label: "User portal", tone: "muted" as const };
+  return { label: "—", tone: "muted" as const };
+};
+
+const ROLE_FILTERS = [
+  { value: "all", label: "All roles" },
+  { value: "super_admin", label: "Super admin" },
+  { value: "admin", label: "Admin" },
+  { value: "lister", label: "Lister" },
+  { value: "renter", label: "Renter" },
+] as const;
+
 const toLocalDateTimeValue = (value: Date) => {
   const offset = value.getTimezoneOffset();
   const local = new Date(value.getTime() - offset * 60_000);
@@ -70,7 +135,7 @@ const buildSummary = (log: SecurityLog) => {
   const details = (log.details ?? {}) as Record<string, unknown>;
   const action = String(details.action ?? "");
   const portal = String(details.portal ?? "");
-  const reason = String(details.reason ?? "");
+  const reason = String(log.failure_reason ?? details.reason ?? "");
   const method = String(log.auth_method ?? details.method ?? "").replace(/_/g, " ");
 
   if (log.event_type === "login_success") {
@@ -118,13 +183,18 @@ const getActorName = (log: SecurityLog) => {
 
 const getActorEmail = (log: SecurityLog) => {
   const details = (log.details ?? {}) as Record<string, unknown>;
-  return log.profiles?.email || String(details.email ?? "No user email");
+  return (
+    log.profiles?.email ||
+    log.target_email ||
+    String(details.email ?? "No user email")
+  );
 };
 
 export default function AdminSecurityLogsPage() {
   const [logs, setLogs] = useState<SecurityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [roleFilter, setRoleFilter] = useState<(typeof ROLE_FILTERS)[number]["value"]>("all");
   const [fromDateTime, setFromDateTime] = useState(
     toLocalDateTimeValue(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
   );
@@ -196,6 +266,21 @@ export default function AdminSecurityLogsPage() {
         return false;
       }
 
+      if (roleFilter !== "all") {
+        if (roleFilter === "lister" && !(log.actor_role === "user" && log.actor_is_lister)) {
+          return false;
+        }
+        if (roleFilter === "renter" && !(log.actor_role === "user" && !log.actor_is_lister)) {
+          return false;
+        }
+        if (
+          (roleFilter === "admin" || roleFilter === "super_admin") &&
+          log.actor_role !== roleFilter
+        ) {
+          return false;
+        }
+      }
+
       if (!search) return true;
 
       const details = (log.details ?? {}) as Record<string, unknown>;
@@ -208,18 +293,23 @@ export default function AdminSecurityLogsPage() {
         (methodLabels[log.auth_method ?? ""] ?? log.auth_method ?? "").toLowerCase().includes(search) ||
         (log.profiles?.email ?? "").toLowerCase().includes(search) ||
         (log.profiles?.full_name ?? "").toLowerCase().includes(search) ||
+        (log.target_email ?? "").toLowerCase().includes(search) ||
+        (log.ip_address ?? "").toLowerCase().includes(search) ||
+        (log.session_id ?? "").toLowerCase().includes(search) ||
+        getRoleLabel(log).label.toLowerCase().includes(search) ||
+        parseUserAgent(log.user_agent).label.toLowerCase().includes(search) ||
         String(details.email ?? "").toLowerCase().includes(search) ||
         String(details.portal ?? "").toLowerCase().includes(search) ||
-        String(details.reason ?? "").toLowerCase().includes(search) ||
+        String(log.failure_reason ?? details.reason ?? "").toLowerCase().includes(search) ||
         summary.includes(search) ||
         formattedTime.includes(search)
       );
     });
-  }, [fromDateTime, logs, searchTerm, toDateTime]);
+  }, [fromDateTime, logs, roleFilter, searchTerm, toDateTime]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [filteredLogs.length, fromDateTime, toDateTime, searchTerm]);
+  }, [filteredLogs.length, fromDateTime, roleFilter, toDateTime, searchTerm]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLogs.length / LOGS_PER_PAGE));
   const pageStart = (currentPage - 1) * LOGS_PER_PAGE;
@@ -227,6 +317,7 @@ export default function AdminSecurityLogsPage() {
 
   const clearFilters = () => {
     setSearchTerm("");
+    setRoleFilter("all");
     setFromDateTime(toLocalDateTimeValue(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)));
     setToDateTime(toLocalDateTimeValue(new Date()));
   };
@@ -236,7 +327,9 @@ export default function AdminSecurityLogsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Security Logs</h1>
         <p className="text-muted-foreground mt-1">
-          Authentication activity, password recovery, and MFA-related events.
+          Authentication activity, password recovery, and MFA events - with the
+          actor's role, source IP, device, and failure reason. Append-only;
+          admin-readable.
         </p>
       </div>
 
@@ -247,13 +340,14 @@ export default function AdminSecurityLogsPage() {
               <div>
                 <CardTitle>Authentication Activity</CardTitle>
                 <CardDescription>
-                  Latest 500 security events with admin-friendly filtering.
+                  Latest 500 security events. Filter by role, date, or search
+                  event / user / IP / device / reason.
                 </CardDescription>
               </div>
               <div className="relative w-full lg:w-[320px]">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search event, user, method, reason, date..."
+                  placeholder="Search event, user, IP, device, reason..."
                   className="pl-8"
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
@@ -261,7 +355,29 @@ export default function AdminSecurityLogsPage() {
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+            <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Role
+                </label>
+                <Select
+                  value={roleFilter}
+                  onValueChange={(value) =>
+                    setRoleFilter(value as (typeof ROLE_FILTERS)[number]["value"])
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ROLE_FILTERS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">
                   From
@@ -318,16 +434,22 @@ export default function AdminSecurityLogsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="min-w-[160px]">Time</TableHead>
-                      <TableHead className="min-w-[220px]">User</TableHead>
-                      <TableHead className="min-w-[130px]">Event</TableHead>
-                      <TableHead className="min-w-[120px]">Method</TableHead>
-                      <TableHead className="min-w-[320px]">Summary</TableHead>
+                      <TableHead className="min-w-[210px]">User</TableHead>
+                      <TableHead className="min-w-[110px]">Role</TableHead>
+                      <TableHead className="min-w-[120px]">Event</TableHead>
+                      <TableHead className="min-w-[110px]">Method</TableHead>
+                      <TableHead className="min-w-[130px]">IP address</TableHead>
+                      <TableHead className="min-w-[200px]">Device</TableHead>
+                      <TableHead className="min-w-[280px]">Summary</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {pagedLogs.map((log) => {
                       const details = (log.details ?? {}) as Record<string, unknown>;
                       const isFailure = log.status === "failed";
+                      const role = getRoleLabel(log);
+                      const device = parseUserAgent(log.user_agent);
+                      const reasonText = String(log.failure_reason ?? details.reason ?? "");
 
                       return (
                         <TableRow key={log.id}>
@@ -347,6 +469,19 @@ export default function AdminSecurityLogsPage() {
                           <TableCell>
                             <span
                               className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${
+                                role.tone === "admin"
+                                  ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                  : role.tone === "user"
+                                    ? "border-primary/20 bg-primary/10 text-primary"
+                                    : "border-border bg-muted text-muted-foreground"
+                              }`}
+                            >
+                              {role.label}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span
+                              className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold ${
                                 isFailure
                                   ? "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400"
                                   : "border-primary/20 bg-primary/10 text-primary"
@@ -359,6 +494,15 @@ export default function AdminSecurityLogsPage() {
                             {methodLabels[log.auth_method ?? ""] ??
                               String(log.auth_method ?? details.method ?? "System")}
                           </TableCell>
+                          <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+                            {log.ip_address ?? "—"}
+                          </TableCell>
+                          <TableCell
+                            className="text-xs text-muted-foreground"
+                            title={device.raw || undefined}
+                          >
+                            {device.label}
+                          </TableCell>
                           <TableCell>
                             <div className="space-y-1">
                               <p className="text-sm">{buildSummary(log)}</p>
@@ -369,10 +513,15 @@ export default function AdminSecurityLogsPage() {
                                     {String(details.portal) === "admin" ? "Admin portal" : "User portal"}
                                   </span>
                                 )}
-                                {Boolean(details.reason) && isFailure && (
+                                {isFailure && reasonText && (
                                   <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-red-600 dark:text-red-400">
                                     <TriangleAlert className="h-3 w-3" />
-                                    Failure reason recorded
+                                    {reasonText}
+                                  </span>
+                                )}
+                                {log.session_id && (
+                                  <span className="rounded-full bg-muted px-2 py-0.5 font-mono">
+                                    session {log.session_id.slice(0, 8)}
                                   </span>
                                 )}
                               </div>

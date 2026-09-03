@@ -5730,6 +5730,32 @@ REVOKE EXECUTE ON FUNCTION public.handle_pii_encryption() FROM anon, authenticat
 
 commit;
 
+-- ============================================================================
+-- PHASE 9 - Forensic fields on security_logs
+-- SOURCE: scratchpad phase9_security_log_fields.sql
+-- ============================================================================
+-- The security log already captured ip_address and user_agent; the admin UI
+-- just never showed them. These columns add the pieces a real auth log needs
+-- but SafeDrive lacked: the actor's role/lister flag at the moment of the
+-- event (roles change - snapshot them), the Supabase session id so a login can
+-- be tied to its later logout, and the failure reason / attempted email as
+-- first-class columns (previously only inside details JSON, and only for some
+-- events). No backfill: older rows keep NULLs and the UI falls back to
+-- details->>'portal' / details->>'reason' / details->>'email'.
+alter table public.security_logs
+  add column if not exists actor_role text
+    check (actor_role is null or actor_role in ('user', 'admin', 'super_admin')),
+  add column if not exists actor_is_lister boolean,
+  add column if not exists session_id text,
+  add column if not exists failure_reason text,
+  add column if not exists target_email text;
+
+create index if not exists idx_security_logs_created_at
+  on public.security_logs(created_at desc);
+create index if not exists idx_security_logs_session_id
+  on public.security_logs(session_id)
+  where session_id is not null;
+
 -- ----------------------------------------------------------------------------
 -- CHAPTER 17 verification (read-only). Expected results noted inline.
 -- ----------------------------------------------------------------------------

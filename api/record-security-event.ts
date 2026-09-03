@@ -42,6 +42,32 @@ const getBearerToken = (req: Request) => {
     : null;
 };
 
+// Read one claim from a JWT payload without verifying the signature - the token
+// is already verified by supabase.auth.getUser() below; this only pulls the
+// Supabase `session_id` so a login row can be tied to its later logout row.
+const readJwtClaim = (token: string | null, claim: string): string | null => {
+  if (!token) return null;
+  try {
+    const segment = token.split(".")[1];
+    if (!segment) return null;
+    const b64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const parsed = JSON.parse(atob(padded)) as Record<string, unknown>;
+    const value = parsed[claim];
+    return typeof value === "string" && value.length <= 200 ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const cleanEmail = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed) && trimmed.length <= 320
+    ? trimmed
+    : null;
+};
+
 const sanitizeDetails = (details: Record<string, unknown>) => {
   const blockedKey = /password|passcode|otp|token|secret|authorization|cookie/i;
   const safeEntries = Object.entries(details)
@@ -80,7 +106,30 @@ export default async function handler(req: Request) {
       return jsonResponse({ error: "Authentication required for this security event" }, 401);
     }
 
+    // Snapshot the actor's role / lister flag at event time - roles change, and a
+    // forensic log must record what they were when the event happened.
+    let actorRole: string | null = null;
+    let actorIsLister: boolean | null = null;
+    if (authenticatedUser) {
+      const { data: actorProfile } = await supabase
+        .from("profiles")
+        .select("role, is_lister")
+        .eq("id", authenticatedUser.id)
+        .maybeSingle();
+      actorRole =
+        actorProfile?.role &&
+        ["user", "admin", "super_admin"].includes(actorProfile.role)
+          ? actorProfile.role
+          : null;
+      actorIsLister =
+        typeof actorProfile?.is_lister === "boolean" ? actorProfile.is_lister : null;
+    }
+    const sessionId = readJwtClaim(token, "session_id");
+
     const details = sanitizeDetails(payload.details ?? {});
+    const failureReason =
+      typeof details.reason === "string" ? details.reason.slice(0, 500) : null;
+    const targetEmail = cleanEmail(details.email);
     const authMethod = ["password", "email_otp", "authenticator", "recovery_code", "support_recovery"]
       .includes(String(details.method))
       ? String(details.method)
@@ -109,6 +158,11 @@ export default async function handler(req: Request) {
       status: eventType === "login_failed" ? "failed" : "success",
       ip_address: ipAddress,
       user_agent: req.headers.get("user-agent")?.slice(0, 1000) ?? null,
+      actor_role: actorRole,
+      actor_is_lister: actorIsLister,
+      session_id: sessionId,
+      failure_reason: failureReason,
+      target_email: targetEmail,
       details: {
         ...details,
         action,

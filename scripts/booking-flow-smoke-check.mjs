@@ -386,6 +386,30 @@ const checks = [
     ],
   },
   {
+    file: "api/record-security-event.ts",
+    markers: [
+      "actor_role",
+      "actor_is_lister",
+      "session_id",
+      "failure_reason",
+      "target_email",
+      "readJwtClaim",
+      "Snapshot the actor's role",
+    ],
+  },
+  {
+    file: "src/pages/admin/AdminSecurityLogsPage.tsx",
+    markers: [
+      "parseUserAgent",
+      "getRoleLabel",
+      "roleFilter",
+      "IP address",
+      "actor_is_lister",
+      "Best-effort user-agent",
+      "ROLE_FILTERS",
+    ],
+  },
+  {
     file: "api/lib/securityDeposit.ts",
     markers: [
       "runSecurityDepositRelease",
