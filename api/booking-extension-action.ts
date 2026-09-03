@@ -20,6 +20,7 @@ type ExtensionActionPayload = {
 
 type BookingRecord = {
   id: string;
+  car_id: string;
   renter_id: string;
   owner_id: string;
   status: string;
@@ -135,6 +136,7 @@ export default async function handler(req: Request) {
         .select(
           `
           id,
+          car_id,
           renter_id,
           owner_id,
           status,
@@ -201,6 +203,51 @@ export default async function handler(req: Request) {
           { error: "An extension request is already pending or awaiting payment." },
           409,
         );
+      }
+
+      // The extra days must not collide with another active booking: another
+      // renter's trip on this same car, or another trip of this renter on any
+      // car (one trip at a time - the account holder is the driver).
+      const extWindowStart = parseDateOnly(bookingRecord.end_date);
+      const extWindowEnd = parseDateOnly(payload.requestedEndDate);
+      if (extWindowStart && extWindowEnd) {
+        const { data: activeBookings, error: activeBookingError } = await supabase
+          .from("bookings")
+          .select("id, car_id, renter_id, start_date, end_date")
+          .in("status", [
+            "pending",
+            "confirmed",
+            "awaiting_payment",
+            "downpayment_paid",
+            "fully_paid",
+            "active",
+          ])
+          .neq("id", bookingRecord.id);
+        if (activeBookingError) throw activeBookingError;
+
+        const collides = (activeBookings ?? []).some((other) => {
+          const otherStart = parseDateOnly(other.start_date);
+          const otherEnd = parseDateOnly(other.end_date);
+          if (!otherStart || !otherEnd) return false;
+          const datesOverlap =
+            extWindowStart.getTime() <= otherEnd.getTime() &&
+            extWindowEnd.getTime() >= otherStart.getTime();
+          if (!datesOverlap) return false;
+          return (
+            other.car_id === bookingRecord.car_id ||
+            other.renter_id === bookingRecord.renter_id
+          );
+        });
+
+        if (collides) {
+          return jsonResponse(
+            {
+              error:
+                "The new return date overlaps another booking - this car is reserved by someone else then, or you already have a trip on those dates.",
+            },
+            409,
+          );
+        }
       }
 
       const requestedTotalDays = bookingRecord.total_days + extensionDays;

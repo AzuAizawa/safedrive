@@ -9,6 +9,27 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-03 — One trip per renter at a time
+
+A renter could book car A and car B for the same overlapping dates - the
+overlap check (API + the DB exclusion constraint) was per-car only. In a
+peer-to-peer rental the verified account holder is the driver the lister
+meets; a second overlapping booking means someone else drives one car,
+breaking the identity / liability / insurance model.
+
+- `api/create-booking.ts`: after the per-car conflict check, also checks
+  the renter's own active bookings across every car and rejects an
+  overlap with a clear message ("account holder has to be the driver...
+  book it from their own account").
+- `api/booking-extension-action.ts`: the extended date window must not
+  collide with another active booking on the same car or another trip of
+  the same renter.
+- Files: those two + `scripts/booking-flow-smoke-check.mjs`,
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md` (E.8.1). No schema
+  change - the DB constraint stays per-car; this is an API rule.
+
+---
+
 ## 2026-09-03 — Recover from stale chunks after a deploy (no more "React App Crashed")
 
 After a new build, an already-open tab still holds the previous

@@ -245,6 +245,8 @@ const checks = [
       "ACTIVE_BOOKING_STATUSES",
       "Booking dates must stay within the next 30 days",
       "Selected dates overlap with an existing booking",
+      "renterHasOverlap",
+      "You can only be on one trip at a time",
     ],
   },
   {
@@ -257,6 +259,7 @@ const checks = [
       "booking_extension_approved",
       "extensionStateChanged",
       "This extension request changed state before",
+      "The new return date overlaps another booking",
     ],
   },
   {

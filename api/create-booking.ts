@@ -427,6 +427,31 @@ export default async function handler(req: Request) {
       );
     }
 
+    // A renter can only be on one trip at a time - in a peer-to-peer rental the
+    // verified account holder is the person who meets the lister and drives the
+    // car. Block a second booking that overlaps these dates on ANY car, not just
+    // this one; a car for someone else must be booked from that person's own
+    // account.
+    const { data: renterBookings, error: renterBookingError } = await supabase
+      .from("bookings")
+      .select("id, start_date, end_date, status")
+      .eq("renter_id", user.id)
+      .in("status", ACTIVE_BOOKING_STATUSES);
+    if (renterBookingError) throw renterBookingError;
+
+    const renterHasOverlap = ((renterBookings ?? []) as ExistingBookingRecord[]).some(
+      (booking) => isOverlapping(startDate, endDate, booking),
+    );
+    if (renterHasOverlap) {
+      return jsonResponse(
+        {
+          error:
+            "You already have a booking for these dates. You can only be on one trip at a time - the account holder has to be the driver. If this car is for someone else, they need to book it from their own account.",
+        },
+        409,
+      );
+    }
+
     const { data: bookingData, error: createError } = await supabase
       .from("bookings")
       .insert({

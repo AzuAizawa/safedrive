@@ -864,6 +864,12 @@ Use this answer pattern during a defense: state the problem, name the control, e
 - **Defense answer:** "Availability is enforced as data, not as a note. The system rejects a booking if it conflicts with another active booking or a maintenance blackout."
 - **Proof and limitation:** Attempt conflicting inserts and capture the rejection. This control cannot prove mechanical roadworthiness; inspection and maintenance procedures remain operational responsibilities.
 
+### E.8.1 One trip per renter at a time
+
+- **Decision:** A renter cannot hold two overlapping active bookings, even on different cars. `api/create-booking.ts` checks the renter's own active bookings across every car (not just the car being booked) and rejects an overlap; `api/booking-extension-action.ts` applies the same rule to the extended date range. The database exclusion constraint stays per-car (`bookings_no_active_date_overlap`); this renter-scope rule is enforced in the API.
+- **Why:** SafeDrive is peer-to-peer. The lister meets and hands the car to the verified account holder, who is the driver and the person accountable under the agreement and CTPL. Two overlapping bookings would mean someone other than the account holder drives one of the cars, breaking identity, liability, and insurance assumptions. A car for another person must be booked from that person's own verified account.
+- **Defense answer:** "The account holder is the driver. The system will not let one renter reserve two cars for the same dates - a car for someone else has to be booked from their own account."
+
 ### E.9 Rental agreements are versioned and accepted with server evidence
 
 - **Decision:** The lister supplies vehicle-specific rules; SafeDrive snapshots the approved version and hash, and records the renter's acceptance with a server timestamp.
