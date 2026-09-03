@@ -448,7 +448,15 @@ export default function AdminAuditTrailPage() {
           {filtered.map((entry) => {
             const detailEntries = formatDetailEntries(entry.action, entry.details);
             const actionCategory = getActionCategory(entry.action);
-            const actor = entry.profiles?.full_name || entry.profiles?.email || "SafeDrive system";
+            // A null actor is either genuine automation or a staff member who
+            // has since been deleted (audit_log.user_id -> NULL). Use the action
+            // to guess which so a person's past work is not mislabelled "system".
+            const actor =
+              entry.profiles?.full_name ||
+              entry.profiles?.email ||
+              (actionCategory === "system" || isRoutineAutomationEntry(entry)
+                ? "SafeDrive system"
+                : "Former staff");
             return (
               <article key={entry.id} className="p-4 transition-colors hover:bg-muted/20 sm:p-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

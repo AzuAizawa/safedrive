@@ -13,6 +13,17 @@ import { usePlatformContactEmail } from "@/lib/platformSettings";
 const getErrorMessage = (error: unknown, fallback = "Please try again.") =>
   error instanceof Error ? error.message : fallback;
 
+const PASSWORD_RULES = [
+  { id: "length", text: "At least 8 characters", test: (v: string) => v.length >= 8 },
+  { id: "uppercase", text: "At least one uppercase letter (A-Z)", test: (v: string) => /[A-Z]/.test(v) },
+  { id: "number", text: "At least one number (0-9)", test: (v: string) => /[0-9]/.test(v) },
+  {
+    id: "special",
+    text: 'At least one special character (!@#... etc)',
+    test: (v: string) => /[!@#$%^&*(),.?":{}|<>]/.test(v),
+  },
+];
+
 const SUPPORT_SUBJECT = "SafeDrive MFA Recovery Request";
 const buildSupportGmailUrl = (email: string) =>
   `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
@@ -205,10 +216,14 @@ export default function UpdatePasswordPage() {
     );
   }
 
+  const failedRule = PASSWORD_RULES.find((rule) => !rule.test(newPassword));
+
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPassword.length < 6) {
-      toast.error("Password must be at least 6 characters.");
+    if (failedRule) {
+      toast.error("Password does not meet the requirements", {
+        description: failedRule.text,
+      });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -245,9 +260,34 @@ export default function UpdatePasswordPage() {
 
       if (error) throw error;
 
-      toast.success("Password updated successfully!", { description: "You can now log in securely." });
+      // Where the person signs in next depends on their role. Look it up while
+      // the recovery/invite session is still valid.
+      let loginPath = "/login";
+      const {
+        data: { user: currentUser },
+      } = await supabase.auth.getUser();
+      if (currentUser) {
+        const { data: profileRow } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", currentUser.id)
+          .maybeSingle();
+        if (
+          profileRow?.role === "admin" ||
+          profileRow?.role === "super_admin"
+        ) {
+          loginPath = "/admin/login";
+        }
+      }
+
+      toast.success("Password updated successfully!", {
+        description: "You can now sign in.",
+      });
       await supabase.auth.signOut();
-      navigate("/login");
+      // Hard navigation so the auth state is fully reset before the login page
+      // loads - avoids the brief "access denied" flash from a stale session.
+      window.location.href = loginPath;
+      return;
     } catch (error) {
       toast.error("Failed to update password", {
         description: getErrorMessage(error),
@@ -275,7 +315,7 @@ export default function UpdatePasswordPage() {
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
-                  placeholder="Minimum 6 characters"
+                  placeholder="At least 8 characters"
                   className="pr-10"
                 />
                 <button
@@ -287,6 +327,24 @@ export default function UpdatePasswordPage() {
                   {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              {newPassword.length > 0 ? (
+                <ul className="space-y-1 pt-1">
+                  {PASSWORD_RULES.map((rule) => {
+                    const ok = rule.test(newPassword);
+                    return (
+                      <li
+                        key={rule.id}
+                        className={`flex items-center gap-1.5 text-xs ${
+                          ok ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+                        }`}
+                      >
+                        <span aria-hidden="true">{ok ? "✓" : "○"}</span>
+                        {rule.text}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirmPassword">Confirm Password</Label>
@@ -370,7 +428,7 @@ export default function UpdatePasswordPage() {
                className="w-full mt-4"
                disabled={
                  isSubmitting ||
-                 newPassword.length < 6 ||
+                 Boolean(failedRule) ||
                  newPassword !== confirmPassword ||
                  (requiresMfaStep && mfaCode.length !== 6)
                }

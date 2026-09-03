@@ -1209,6 +1209,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | Handler | Method and caller | Main responsibility |
 |---|---|---|
 | `api/admin-create.ts` | POST; super-admin | Invite a new `role='admin'` account by email and assign its permission checklist; the creator never sets a password |
+| `api/admin-delete.ts` | POST; super-admin | Permanently delete a plain admin account (records an `admin_account_deleted` audit row first; refused if the account also has cars or bookings - disable it instead) |
 | `api/admin-reset-authenticator.ts` | POST; super-admin | Clear a standard user's enrolled authenticator so they can re-scan a QR, and audit it |
 | `api/admin-reset-password.ts` | POST; super-admin | Reset a non-admin user's password and audit the action |
 | `api/booking-action.ts` | POST; booking participant | Accept/reject/cancel/arrive/finish/no-show booking actions with state gates |

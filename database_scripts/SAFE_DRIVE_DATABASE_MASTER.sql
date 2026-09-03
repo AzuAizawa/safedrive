@@ -6655,4 +6655,37 @@ begin
 end;
 $$;
 
+-- ============================================================================
+-- CHAPTER 25 - Allow deleting a staff account without losing the audit trail
+-- SOURCE: project_docs/RBAC_DESIGN.md - admin governance
+-- ============================================================================
+-- audit_log.user_id pointed at profiles(id) with NO on-delete action, so a
+-- profile that had ever acted could not be removed at all (only disabled).
+-- Switch it to ON DELETE SET NULL: deleting a departed admin now succeeds, and
+-- their past audit rows survive with user_id = NULL. entity_id (text, not a FK)
+-- still carries the affected account's id, and /api/admin-delete records an
+-- 'admin_account_deleted' row naming the person + who removed them before the
+-- delete, and permission-change rows snapshot the admin name/email in details,
+-- so accountability is preserved. The UI shows "Former staff" for a NULL actor.
+
+do $$
+declare
+  fk_name text;
+begin
+  select conname into fk_name
+  from pg_constraint
+  where conrelid = 'public.audit_log'::regclass
+    and contype = 'f'
+    and conkey = array[
+      (select attnum from pg_attribute
+       where attrelid = 'public.audit_log'::regclass and attname = 'user_id')
+    ];
+  if fk_name is not null then
+    execute format('alter table public.audit_log drop constraint %I', fk_name);
+  end if;
+  alter table public.audit_log
+    add constraint audit_log_user_id_fkey
+    foreign key (user_id) references public.profiles(id) on delete set null;
+end $$;
+
 -- End of SafeDrive chaptered database master.
