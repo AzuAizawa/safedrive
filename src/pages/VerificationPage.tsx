@@ -480,6 +480,7 @@ export default function VerificationPage() {
     barangays: false,
   });
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [addressTouched, setAddressTouched] = useState(false);
   const regionOptions = useMemo(
     () => (Array.isArray(regions) ? regions : []),
     [regions],
@@ -941,6 +942,7 @@ export default function VerificationPage() {
       regionCode: matchingRegion?.code || "",
       regionName: matchingRegion?.name || parsedAddress.regionName,
     });
+    setAddressTouched(false);
     setIsEditingProfile(true);
   };
 
@@ -992,40 +994,50 @@ export default function VerificationPage() {
       emailChanged = true;
     }
 
-    const exactAddress = editAddressDetails.exactAddress.trim();
-    const resolvedBarangayName = (
-      editAddressDetails.barangayName ||
-      editAddressDetails.manualBarangayName ||
-      ""
-    ).trim();
-    if (
-      !editAddressDetails.regionCode ||
-      !editAddressDetails.cityCode ||
-      (!allowManualEditBarangay && !editAddressDetails.barangayCode) ||
-      !resolvedBarangayName ||
-      !exactAddress
-    ) {
-      toast.error("Complete the full address", {
-        description:
-          "Please select your region and city, then choose or type your barangay, and enter your house/street address before saving.",
-      });
-      setIsSavingProfile(false);
-      return;
-    }
+    const updatePayload: { phone: string; address?: string } = {
+      phone: cleanPhone,
+    };
 
-    const fullAddress = [
-      exactAddress,
-      resolvedBarangayName,
-      editAddressDetails.cityName,
-      editAddressDetails.regionName,
-    ]
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .join(", ");
+    // Only re-validate and rebuild the structured address when the user
+    // actually edited an address field. A phone-only edit must not be blocked
+    // just because the saved address string cannot be perfectly re-matched
+    // against the external PSGC list.
+    if (addressTouched) {
+      const exactAddress = editAddressDetails.exactAddress.trim();
+      const resolvedBarangayName = (
+        editAddressDetails.barangayName ||
+        editAddressDetails.manualBarangayName ||
+        ""
+      ).trim();
+      if (
+        !editAddressDetails.regionCode ||
+        !editAddressDetails.cityCode ||
+        (!allowManualEditBarangay && !editAddressDetails.barangayCode) ||
+        !resolvedBarangayName ||
+        !exactAddress
+      ) {
+        toast.error("Complete the full address", {
+          description:
+            "Please select your region and city, then choose or type your barangay, and enter your house/street address before saving.",
+        });
+        setIsSavingProfile(false);
+        return;
+      }
+
+      updatePayload.address = [
+        exactAddress,
+        resolvedBarangayName,
+        editAddressDetails.cityName,
+        editAddressDetails.regionName,
+      ]
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join(", ");
+    }
 
     const { error } = await supabase
       .from("profiles")
-      .update({ phone: cleanPhone, address: fullAddress })
+      .update(updatePayload)
       .eq("id", user.id);
     if (error) {
       toast.error("Failed to update profile", { description: error.message });
@@ -1163,6 +1175,7 @@ export default function VerificationPage() {
                         addressLoading.regions ? "Loading regions..." : "Type or select a region"
                       }
                       onValueChange={(rawValue, region) => {
+                        setAddressTouched(true);
                         setEditAddressDetails((prev) => ({
                           ...prev,
                           regionCode: region?.code || "",
@@ -1201,6 +1214,7 @@ export default function VerificationPage() {
                             : "Type or select a city or municipality"
                       }
                       onValueChange={(rawValue, city) => {
+                        setAddressTouched(true);
                         setEditAddressDetails((prev) => ({
                           ...prev,
                           cityCode: city?.code || "",
@@ -1223,14 +1237,15 @@ export default function VerificationPage() {
                     {allowManualEditBarangay ? (
                       <Input
                         value={editAddressDetails.manualBarangayName || ""}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          setAddressTouched(true);
                           setEditAddressDetails((prev) => ({
                             ...prev,
                             barangayCode: "",
                             barangayName: "",
                             manualBarangayName: e.target.value,
-                          }))
-                        }
+                          }));
+                        }}
                         className="h-9 mt-2"
                         placeholder="Type barangay manually if it is not listed"
                       />
@@ -1252,6 +1267,7 @@ export default function VerificationPage() {
                         }
                         emptyMessage="No matching barangays found. You can clear and type manually if the list fails to load."
                         onValueChange={(rawValue, barangay) => {
+                          setAddressTouched(true);
                           setEditAddressDetails((prev) => ({
                             ...prev,
                             barangayCode: barangay?.code || "",
@@ -1277,12 +1293,13 @@ export default function VerificationPage() {
                     <Input
                       id="edit_exact_address"
                       value={editAddressDetails.exactAddress}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        setAddressTouched(true);
                         setEditAddressDetails((prev) => ({
                           ...prev,
                           exactAddress: e.target.value,
-                        }))
-                      }
+                        }));
+                      }}
                       className="h-9"
                       placeholder="House no., street, building, unit"
                     />
