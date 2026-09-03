@@ -507,6 +507,7 @@ export default function CarDetailPage() {
   const showDailyPricingClarifier =
     totalDays === 1 && actualDurationMinutes > 0 && actualDurationMinutes < 24 * 60;
   const pricePerDay = car ? Number(car.price_per_day) : 0;
+  const isOwnListing = Boolean(user && car && car.owner_id === user.id);
   const basePrice = pricePerDay * totalDays;
   const commissionAmount = calculateCommissionAmount(basePrice, commissionRate);
   const processingFee = calculateProcessingFee(basePrice + commissionAmount, processingFeeRate, processingFixedCentavos);
@@ -885,6 +886,49 @@ export default function CarDetailPage() {
 
         {/* Right: Booking Card */}
         <div className="lg:col-span-2">
+          {isOwnListing ? (
+            <Card className="sticky top-24 shadow-lg border-border/50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CarFront className="h-5 w-5 text-primary" />
+                  Your listing
+                </CardTitle>
+                <CardDescription>
+                  This is the page renters see. You cannot book your own car.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(() => {
+                  const statusLabel: Record<string, { label: string; tone: string }> = {
+                    approved: { label: "Live on the marketplace", tone: "text-green-600 dark:text-green-400" },
+                    active: { label: "Live on the marketplace", tone: "text-green-600 dark:text-green-400" },
+                    inactive: { label: "Paused - hidden from browse", tone: "text-muted-foreground" },
+                    pending: { label: "Pending admin review", tone: "text-amber-600 dark:text-amber-400" },
+                    rejected: { label: "Rejected - see My Vehicles for the reason", tone: "text-red-600 dark:text-red-400" },
+                    renewal_required: { label: "Renewal required - submit updated documents", tone: "text-amber-600 dark:text-amber-400" },
+                  };
+                  const info = statusLabel[car.status] ?? { label: car.status, tone: "text-muted-foreground" };
+                  return (
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Status
+                      </p>
+                      <p className={`mt-1 text-sm font-medium ${info.tone}`}>{info.label}</p>
+                    </div>
+                  );
+                })()}
+                <p className="text-sm text-muted-foreground">
+                  Renters see your price, photos, reviews, and the rental agreement
+                  exactly as shown on this page. Use My Vehicles to edit details,
+                  set availability, or pause the listing.
+                </p>
+                <Button className="w-full h-11" onClick={() => navigate("/my-vehicles")}>
+                  <CarFront className="mr-2 h-4 w-4" />
+                  Manage this listing
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
           <Card className="sticky top-24 shadow-lg border-border/50">
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
@@ -1232,6 +1276,7 @@ export default function CarDetailPage() {
               )}
             </CardContent>
           </Card>
+          )}
         </div>
       </div>
 

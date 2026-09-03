@@ -553,6 +553,11 @@ export default function BrowseCarsPage() {
                   <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full bg-background/90 backdrop-blur-sm text-xs font-semibold shadow-sm">
                     ₱{Number(car.price_per_day).toLocaleString()}/day
                   </div>
+                  {profile?.id === car.owner_id ? (
+                    <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-primary text-primary-foreground text-xs font-semibold shadow-sm">
+                      Your listing
+                    </div>
+                  ) : null}
                 </div>
 
                 <CardContent className="p-4">
