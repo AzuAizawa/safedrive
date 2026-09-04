@@ -9,6 +9,52 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Process-planning Phase 3: sequential return handover (CHAPTER 39)
+
+Completion at return was fully symmetric - either party could tap "Finish
+Trip" first, in either order. The arrival/handover process planning session
+asked for a specific sequence instead: renter announces the return, the
+lister confirms receiving the car, and only then does the renter's own
+final confirmation unlock - so the renter has their own record that the
+lister acknowledged the return, not just the lister's word alone.
+
+- New renter-only action `return_arrive` (`api/booking-action.ts`): a
+  lightweight "I've Returned the Car" announcement
+  (`bookings.renter_return_arrived_at`, CHAPTER 39), no evidence requirement
+  of its own - it just unlocks the lister's side below and notifies them.
+- The lister's completion (`owner_completed`, relabeled "Confirm - Car
+  Received") now additionally requires `renter_return_arrived_at` to be set.
+- The renter's completion (`renter_completed`, relabeled "Car Confirm") now
+  additionally requires `owner_completed` to already be `true` - the button
+  is hidden/replaced with a waiting message until then, and a "Car Delivered"
+  badge appears once the lister has confirmed.
+- **Grandfathered:** a booking that already reached `renter_completed=true`
+  under the old symmetric rule (in flight when this deployed) is not stuck -
+  the lister's new gate also accepts a pre-existing `renter_completed` in
+  place of `renter_return_arrived_at`.
+- **Found and fixed a real gap while implementing this:** the existing
+  "lister-absent auto-completion" safety valve in
+  `api/expire-booking-deadlines.ts` only fired on `renter_completed=true,
+  owner_completed=false` - a state the new sequential rule makes almost
+  unreachable going forward, which would have left a renter permanently
+  stuck if the lister simply never confirmed receipt. Added a mirrored
+  auto-confirmation path keyed off `renter_return_arrived_at` timing out
+  instead: it auto-sets only `owner_completed` (not straight to
+  `completed`, since the renter still needs to tap their own final
+  confirm) and notifies both sides.
+- Updated the "next step" reminder card text on both dashboards
+  (`MyBookingsPage.tsx`, `ListerBookingsPage.tsx`) for all three new
+  sub-states, and the smoke-check markers that referenced the retired
+  "Finish Trip" label.
+- Verified clean: `tsc -b`, lint, `check:api`, `check:alignment`,
+  `check:booking-flow`, and a full production build all pass.
+- **Files:** `api/booking-action.ts`, `api/expire-booking-deadlines.ts`,
+  `src/pages/MyBookingsPage.tsx`, `src/pages/ListerBookingsPage.tsx`,
+  `src/types/database.ts`, `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql`
+  (CHAPTER 39), `scripts/booking-flow-smoke-check.mjs`,
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`,
+  `project_docs/SYSTEM_FLOWS.md`.
+
 ## 2026-09-05 — Process-planning Phase 1: liability notice, structured non-return reason, early-return notice hint (CHAPTER 37-38)
 
 Three smaller, independent items from the arrival/handover process planning

@@ -609,6 +609,7 @@ export interface Database {
           pickup_time: string | null;
           dropoff_time: string | null;
           lister_arrived_at: string | null;
+          renter_return_arrived_at: string | null;
           renter_arrived_at: string | null;
           lister_arrival_photo_url: string | null;
           renter_arrival_photo_url: string | null;
@@ -654,6 +655,7 @@ export interface Database {
           pickup_time?: string | null;
           dropoff_time?: string | null;
           lister_arrived_at?: string | null;
+          renter_return_arrived_at?: string | null;
           renter_arrived_at?: string | null;
           lister_arrival_photo_url?: string | null;
           renter_arrival_photo_url?: string | null;
@@ -699,6 +701,7 @@ export interface Database {
           pickup_time?: string | null;
           dropoff_time?: string | null;
           lister_arrived_at?: string | null;
+          renter_return_arrived_at?: string | null;
           renter_arrived_at?: string | null;
           lister_arrival_photo_url?: string | null;
           renter_arrival_photo_url?: string | null;

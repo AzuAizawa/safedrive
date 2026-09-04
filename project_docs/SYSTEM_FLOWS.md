@@ -185,13 +185,27 @@ database. Number kept so sections 11-20 don't shift.
   `booking-extension:<extensionId>`); the webhook confirms payment and updates
   the booking dates. Emails/notifies at each step.
 
-## 14. Finish Trip / completion — `POST /api/booking-action` (`complete`)
+## 14. Return handover / completion — `POST /api/booking-action`
 
-- Each party marks done; requires their own required condition report present
-  (the renter's return report, 4 of 7 categories; the lister's pickup report,
-  re-checked here too, 1-4 live photos). When `owner_completed` **and**
-  `renter_completed` → `completed`. This is the payout-eligibility trigger
-  point.
+- **`return_arrive`** (renter only): lightweight "I've returned the car"
+  announcement (`renter_return_arrived_at`) - no evidence requirement of its
+  own, just gates the lister's completion below.
+- **`complete`** (sequential, CHAPTER 39 - no longer symmetric): each party's
+  own required condition report must be present (the renter's return report,
+  4 of 7 categories; the lister's pickup report, re-checked here too, 1-4
+  live photos). The **lister** additionally needs `renter_return_arrived_at`
+  set (or a pre-existing `renter_completed`, grandfathering pre-CHAPTER-39
+  bookings) before `owner_completed` can be set. The **renter** additionally
+  needs `owner_completed` already `true` before `renter_completed` can be
+  set - so the renter's own final confirmation only unlocks after the lister
+  has acknowledged receiving the car. When both are true → `completed`, the
+  payout-eligibility trigger point.
+- If the lister never confirms, `api/expire-booking-deadlines.ts` auto-sets
+  `owner_completed` after `lister_completion_timeout_hours` from
+  `renter_return_arrived_at` (the renter still taps their own final confirm
+  afterward) - or, for a pre-CHAPTER-39 booking already at
+  `renter_completed=true`, auto-completes straight to `completed` from
+  `renter_completed_at` as before.
 
 ## 15. Security-deposit claim window (Removed)
 

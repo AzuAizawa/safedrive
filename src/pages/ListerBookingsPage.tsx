@@ -121,6 +121,7 @@ interface ListerBooking {
   created_at: string;
   agreement_storage_path_snapshot: string | null;
   renter_arrived_at: string | null;
+  renter_return_arrived_at: string | null;
   renter_arrival_photo_url: string | null;
   renter_arrival_latitude: number | null;
   renter_arrival_longitude: number | null;
@@ -1180,10 +1181,17 @@ export default function ListerBookingsPage() {
       }
 
       if (!booking.owner_completed) {
+        if (!booking.renter_return_arrived_at && !booking.renter_completed) {
+          return {
+            tone,
+            title: "Waiting for the renter to return the car",
+            body: "You'll be notified once the renter confirms they've returned it - then inspect the car and confirm receipt.",
+          };
+        }
         return {
           tone,
-          title: "Finish trip after return",
-          body: "Tap Finish Trip once return checks and handoff are done.",
+          title: "Confirm the car was received",
+          body: 'The renter reported returning the car. Inspect it, then tap "Confirm - Car Received".',
         };
       }
 
@@ -3168,19 +3176,28 @@ export default function ListerBookingsPage() {
                               <div className="flex flex-wrap justify-end gap-2">
                                 <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>Pickup report (required)</Button>
                                 <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/trip-report/${b.id}/return`)}>Return photos (optional)</Button>
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleComplete(b)}
-                                  disabled={actionLoading === b.id}
-                                  className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  Finish Trip
-                                </Button>
+                                {(b.renter_return_arrived_at || b.renter_completed) && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleComplete(b)}
+                                    disabled={actionLoading === b.id}
+                                    className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    Confirm - Car Received
+                                  </Button>
+                                )}
                               </div>
-                              <p className="text-[10px] text-muted-foreground text-right leading-tight">
-                                As the lister you must have filed the pickup ("before") report before finishing the trip.
-                              </p>
+                              {b.renter_return_arrived_at || b.renter_completed ? (
+                                <p className="text-[10px] text-muted-foreground text-right leading-tight">
+                                  As the lister you must have filed the pickup ("before") report before finishing the trip.
+                                  Inspect the car, then tap "Confirm - Car Received".
+                                </p>
+                              ) : (
+                                <p className="text-[10px] text-amber-600 text-right font-medium leading-tight">
+                                  Waiting for the renter to confirm they've returned the car before you can confirm receipt.
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>

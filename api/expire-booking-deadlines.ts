@@ -260,11 +260,77 @@ export default async function handler(req: Request) {
       listerCompletionAuto += 1;
     }
 
+    // --- Sequential return handover (CHAPTER 39): the renter announced
+    // returning the car, but the renter's own final completion stays blocked
+    // until the lister confirms receipt - so if the lister never confirms,
+    // the renter would otherwise be stuck forever with no path forward
+    // (unlike the pre-CHAPTER-39 case above, where the renter had already
+    // completed and only the lister's side was pending). Auto-confirm
+    // receipt on the lister's behalf after the same timeout; this does NOT
+    // set status to 'completed' by itself - the renter still taps their own
+    // "Car Confirm" afterward, now unblocked.
+    const { data: staleReturnConfirmations, error: staleReturnError } =
+      await supabase
+        .from("bookings")
+        .select("id, owner_id, renter_id")
+        .in("status", ["fully_paid", "active"])
+        .eq("renter_completed", false)
+        .eq("owner_completed", false)
+        .not("renter_return_arrived_at", "is", null)
+        .lte("renter_return_arrived_at", timeoutCutoff)
+        .limit(100);
+    if (staleReturnError) throw staleReturnError;
+
+    let ownerReturnConfirmationAuto = 0;
+    for (const booking of staleReturnConfirmations ?? []) {
+      const { data: updated, error } = await supabase
+        .from("bookings")
+        .update({
+          owner_completed: true,
+          owner_completed_at: new Date().toISOString(),
+        })
+        .eq("id", booking.id)
+        .in("status", ["fully_paid", "active"])
+        .eq("renter_completed", false)
+        .eq("owner_completed", false)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!updated) continue;
+
+      await supabase.from("audit_log").insert({
+        user_id: null,
+        action: "owner_return_confirmation_auto_after_timeout",
+        entity_type: "booking",
+        entity_id: booking.id,
+        details: { timeout_hours: timeoutHours, automated: true },
+      });
+      await supabase.from("notifications").insert([
+        {
+          user_id: booking.owner_id,
+          title: "Car receipt auto-confirmed",
+          message: `The renter returned the car over ${timeoutHours} hours ago and you did not confirm receipt in time, so SafeDrive confirmed it automatically. Contact support if there is a dispute.`,
+          type: "warning",
+          link: "/lister-bookings",
+        },
+        {
+          user_id: booking.renter_id,
+          title: "Car receipt confirmed - finish your side",
+          message:
+            'The lister did not confirm receipt in time, so SafeDrive confirmed it automatically. Tap "Car Confirm" to finish the trip.',
+          type: "info",
+          link: "/my-bookings",
+        },
+      ]);
+      ownerReturnConfirmationAuto += 1;
+    }
+
     return jsonResponse({
       success: true,
       ownerResponseExpired,
       paymentExpired,
       listerCompletionAuto,
+      ownerReturnConfirmationAuto,
     });
   } catch (error) {
     return jsonResponse(

@@ -97,6 +97,7 @@ interface BookingRow {
     avatar_url: string | null;
   } | null;
   renter_arrived_at: string | null;
+  renter_return_arrived_at: string | null;
   renter_arrival_photo_url: string | null;
   renter_arrival_latitude: number | null;
   renter_arrival_longitude: number | null;
@@ -570,7 +571,7 @@ export default function MyBookingsPage() {
 
   const runBookingAction = async (
     bookingId: string,
-    action: "arrive" | "complete" | "cancel",
+    action: "arrive" | "return_arrive" | "complete" | "cancel",
     arrivalPhotoUrl?: string | null,
     arrivalLocation?: ArrivalLocationEvidence | null,
     note?: string | null,
@@ -722,6 +723,21 @@ export default function MyBookingsPage() {
       toast.error("Failed to record arrival", {
         id: toastId,
         description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setPayingFor(null);
+    }
+  };
+
+  const handleReturnArrive = async (booking: BookingRow) => {
+    setPayingFor(booking.id);
+    try {
+      await runBookingAction(booking.id, "return_arrive");
+      toast.success("Return recorded. Waiting for the lister to confirm receipt.");
+      fetchBookings();
+    } catch (error) {
+      toast.error("Could not record the return", {
+        description: error instanceof Error ? error.message : "Please try again.",
       });
     } finally {
       setPayingFor(null);
@@ -1327,10 +1343,24 @@ export default function MyBookingsPage() {
       }
 
       if (!booking.renter_completed) {
+        if (!booking.renter_return_arrived_at) {
+          return {
+            tone,
+            title: "Confirm you've returned the car",
+            body: 'Submit your return report, then tap "I\'ve Returned the Car" once you\'re back with the lister.',
+          };
+        }
+        if (!booking.owner_completed) {
+          return {
+            tone,
+            title: "Waiting for the lister to confirm receipt",
+            body: "Your return is recorded. The lister needs to inspect the car and confirm receipt before you can finish.",
+          };
+        }
         return {
           tone,
-          title: "Finish trip after handoff",
-          body: "Tap Finish Trip once the vehicle return or handoff is done.",
+          title: "Confirm the car was delivered",
+          body: 'The lister confirmed receipt. Tap "Car Confirm" to finish the trip.',
         };
       }
 
@@ -2533,23 +2563,55 @@ export default function MyBookingsPage() {
                               <div className="flex flex-wrap justify-end gap-2">
                                 <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/return`)}>Return report (required)</Button>
                                 <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>Pickup photos (optional)</Button>
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleComplete(booking)}
-                                  disabled={payingFor === booking.id}
-                                  className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
-                                >
-                                  {payingFor === booking.id ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <CheckCircle2 className="w-3.5 h-3.5" />
-                                  )}
-                                  Finish Trip
-                                </Button>
+                                {!booking.renter_return_arrived_at ? (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleReturnArrive(booking)}
+                                    disabled={payingFor === booking.id}
+                                    className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
+                                  >
+                                    {payingFor === booking.id ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                    )}
+                                    I've Returned the Car
+                                  </Button>
+                                ) : booking.owner_completed ? (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleComplete(booking)}
+                                    disabled={payingFor === booking.id}
+                                    className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
+                                  >
+                                    {payingFor === booking.id ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                    )}
+                                    Car Confirm
+                                  </Button>
+                                ) : null}
                               </div>
-                              <p className="text-[10px] text-muted-foreground text-right leading-tight">
-                                As the renter you must submit the return ("after") report with photos. Your pickup photos are optional.
-                              </p>
+                              {!booking.renter_return_arrived_at ? (
+                                <p className="text-[10px] text-muted-foreground text-right leading-tight">
+                                  As the renter you must submit the return ("after") report with photos, then tap
+                                  "I've Returned the Car" once you're back with the lister. Your pickup photos are optional.
+                                </p>
+                              ) : booking.owner_completed ? (
+                                <div className="flex flex-col items-end gap-1">
+                                  <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                                    Car Delivered - lister confirmed receipt
+                                  </span>
+                                  <p className="text-[10px] text-muted-foreground text-right leading-tight">
+                                    Tap "Car Confirm" to put your own record on file and finish the trip.
+                                  </p>
+                                </div>
+                              ) : (
+                                <p className="text-[10px] text-amber-500 text-right font-medium leading-tight">
+                                  Return recorded - waiting for the lister to confirm they received the car.
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>

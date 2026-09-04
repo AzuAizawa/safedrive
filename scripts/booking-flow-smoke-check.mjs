@@ -112,6 +112,7 @@ const checks = [
     file: "api/expire-booking-deadlines.ts",
     markers: [
       "owner_completion_auto_after_timeout",
+      "owner_return_confirmation_auto_after_timeout",
       "lister_completion_timeout_hours",
       "runBookingCompletionSideEffects",
     ],
@@ -160,6 +161,8 @@ const checks = [
       "The lister owns the \"before\" evidence",
       "Asymmetric evidence: the lister must have filed the pickup",
       'const requiredReportPhase = renter ? "return" : "pickup"',
+      "return_arrive",
+      "renter_return_arrived_at",
     ],
   },
   {
@@ -167,7 +170,9 @@ const checks = [
     markers: [
       "Next step",
       "Trip progress",
-      "Finish Trip",
+      "I've Returned the Car",
+      "Car Confirm",
+      "handleReturnArrive",
       "Skip for now",
       "booking_reviews",
       "maybeSingle",
@@ -414,7 +419,7 @@ const checks = [
     markers: [
       "Next step",
       "Trip progress",
-      "Finish Trip",
+      "Confirm - Car Received",
       "Skip for now",
       "booking_reviews",
       "maybeSingle",

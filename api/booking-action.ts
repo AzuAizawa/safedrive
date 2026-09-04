@@ -13,6 +13,7 @@ type BookingAction =
   | "reject"
   | "cancel"
   | "arrive"
+  | "return_arrive"
   | "complete";
 
 type BookingActionPayload = {
@@ -49,6 +50,7 @@ type BookingRecord = {
   owner_completed: boolean;
   renter_arrived_at: string | null;
   lister_arrived_at: string | null;
+  renter_return_arrived_at: string | null;
   payments: Array<{
     id: string;
     payment_type: string;
@@ -461,6 +463,7 @@ export default async function handler(req: Request) {
         owner_completed,
         renter_arrived_at,
         lister_arrived_at,
+        renter_return_arrived_at,
         payments (
           id,
           payment_type,
@@ -1265,6 +1268,74 @@ export default async function handler(req: Request) {
       });
     }
 
+    // The renter's lightweight "I've returned the car" announcement at the
+    // return point. Distinct from "complete": this just signals the lister to
+    // inspect the car, and gates the lister's own completion below (CHAPTER
+    // 39) so the lister can't confirm receipt of a car that hasn't shown up.
+    if (payload.action === "return_arrive") {
+      if (!renter) {
+        return jsonResponse(
+          { error: "Only the renter can confirm returning the car" },
+          403,
+        );
+      }
+      if (bookingRecord.status !== "active") {
+        return jsonResponse(
+          { error: "This booking is not at the return stage." },
+          409,
+        );
+      }
+      if (bookingRecord.renter_return_arrived_at) {
+        return jsonResponse(
+          { error: "You already confirmed the car has been returned" },
+          409,
+        );
+      }
+
+      const returnArrivalTime = new Date().toISOString();
+      const { data: returnArrivalChanged, error: returnArrivalError } =
+        await supabase
+          .from("bookings")
+          .update({ renter_return_arrived_at: returnArrivalTime })
+          .eq("id", bookingRecord.id)
+          .eq("status", "active")
+          .is("renter_return_arrived_at", null)
+          .select("id")
+          .maybeSingle();
+      if (returnArrivalError) throw returnArrivalError;
+      if (!returnArrivalChanged) {
+        return jsonResponse(
+          {
+            error:
+              "This booking changed state before the return could be recorded. Please refresh and try again.",
+          },
+          409,
+        );
+      }
+
+      await supabase.from("audit_log").insert({
+        user_id: user.id,
+        action: "renter_return_arrived",
+        entity_type: "booking",
+        entity_id: bookingRecord.id,
+        details: { return_arrival_time: returnArrivalTime },
+      });
+
+      await supabase.from("notifications").insert({
+        user_id: bookingRecord.owner_id,
+        title: "Renter returned the car",
+        message: `The renter has returned ${getVehicleLabel(bookingRecord)}. Inspect the vehicle, then tap "Confirm - Car Received" to finish your side.`,
+        type: "info",
+        link: "/lister-bookings",
+      });
+
+      return jsonResponse({
+        success: true,
+        bookingId: bookingRecord.id,
+        state: "return_arrived",
+      });
+    }
+
     if (payload.action === "complete") {
       if (
         bookingRecord.status !== "fully_paid" &&
@@ -1359,12 +1430,23 @@ export default async function handler(req: Request) {
             409,
           );
         }
+        // Sequential handover (CHAPTER 39): the renter's final confirmation
+        // only unlocks after the lister has confirmed receiving the car back
+        // - this is the renter's own record that the lister acknowledged the
+        // return, not just the lister's word alone.
+        if (!bookingRecord.owner_completed) {
+          return jsonResponse(
+            {
+              error:
+                'Wait for the lister to confirm they received the car ("Confirm - Car Received") before finishing your side.',
+            },
+            409,
+          );
+        }
         updatePayload.renter_completed = true;
         updatePayload.renter_completed_at = completionStamp;
-        if (bookingRecord.owner_completed) {
-          nextStatus = "completed";
-          updatePayload.status = nextStatus;
-        }
+        nextStatus = "completed";
+        updatePayload.status = nextStatus;
       } else if (owner) {
         if (!bookingRecord.lister_arrived_at) {
           return jsonResponse(
@@ -1375,6 +1457,20 @@ export default async function handler(req: Request) {
         if (bookingRecord.owner_completed) {
           return jsonResponse(
             { error: "You have already confirmed completion" },
+            409,
+          );
+        }
+        // Sequential handover (CHAPTER 39): the lister can't confirm
+        // receiving a car that hasn't shown up yet. renter_completed is an
+        // OR-fallback for bookings that reached renter_completed under the
+        // pre-CHAPTER-39 symmetric rule (no renter_return_arrived_at exists
+        // on those rows) so an in-flight booking never gets stuck.
+        if (!bookingRecord.renter_return_arrived_at && !bookingRecord.renter_completed) {
+          return jsonResponse(
+            {
+              error:
+                'Wait for the renter to confirm they\'ve returned the car before confirming receipt.',
+            },
             409,
           );
         }

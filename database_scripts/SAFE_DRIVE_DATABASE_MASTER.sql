@@ -7941,4 +7941,23 @@ alter table public.cars
   add constraint cars_min_early_return_notice_hours_check
   check (min_early_return_notice_hours is null or min_early_return_notice_hours between 0 and 72);
 
+-- ============================================================================
+-- CHAPTER 39 - Sequential return handover: renter announces, lister confirms
+-- receipt, then the renter's final confirmation unlocks
+-- ============================================================================
+-- Completion at return used to be fully symmetric - either the renter or the
+-- lister could tap complete first, with no ordering between them. This adds a
+-- lightweight renter-only "I've returned the car" announcement
+-- (renter_return_arrived_at, api/booking-action.ts action "return_arrive"),
+-- then requires the LISTER to confirm receiving the car back before the
+-- RENTER's own final completion unlocks - so the renter has their own record
+-- that the lister acknowledged the return, not just the lister's word alone.
+-- A booking already mid-flight with renter_completed=true from before this
+-- chapter (the old symmetric rule) is grandfathered - the lister's gate
+-- accepts either renter_return_arrived_at or a pre-existing renter_completed,
+-- so no in-flight booking gets stuck.
+
+alter table public.bookings
+  add column if not exists renter_return_arrived_at timestamptz;
+
 -- End of SafeDrive chaptered database master.
