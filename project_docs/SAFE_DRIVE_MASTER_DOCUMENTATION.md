@@ -122,7 +122,7 @@ A guest can read public pages and ask a question without creating an account. Th
 
 ### 2.2 Registered renter or lister
 
-One account may act as a renter or lister when eligible. Registered users can complete identity verification, browse approved vehicles, request bookings, pay through hosted checkout, submit their own trip reports, view the agreement accepted for a booking, manage vehicle availability, submit deposit claims or responses when they are a booking participant, and open authenticated support cases.
+One account may act as a renter or lister when eligible. Registered users can complete identity verification, browse approved vehicles, request bookings, pay through hosted checkout, submit their own trip reports, view the agreement accepted for a booking, manage vehicle availability, and open authenticated support cases.
 
 Lister mode is a deliberate in-session choice made with the "Switch to Lister" control (`profiles.is_lister`). It is a UI-context flag, not a permission - every privileged action is authorised server-side by ownership. It does not persist across a session boundary: every sign-out (explicit or the 10-minute inactivity timeout) and every fresh sign-in resets the account to renter mode, so logging in always lands in the renter UI. A plain page reload resumes the existing session and keeps the current mode.
 
@@ -290,16 +290,18 @@ An electronic timestamp is the trusted server date/time of the acceptance or sub
 
 ## 8. Pickup and Return Condition Reports
 
-Each condition report requires **four** photographs: front, back, odometer, and fuel/battery gauge (left, right, and interior are optional). The typed odometer and fuel/battery readings are optional - the odometer and fuel photos carry the evidence. Condition notes and a server timestamp are always recorded.
+Most condition reports require **four** photographs: front, back, odometer, and fuel/battery gauge (left, right, and interior are optional), uploaded from a file picker. The typed odometer and fuel/battery readings are optional - the odometer and fuel photos carry the evidence. Condition notes and a server timestamp are always recorded.
+
+**The lister's required pickup report is the one exception (CHAPTER 36).** Instead of the four fixed categories, the lister captures **1 to 4 free-form photos live through the device camera** (`getUserMedia`, no gallery/file picker at all) - the strongest client-side proof available that the evidence was taken at the car, not picked from a library. The renter's optional pickup report and both parties' return reports are unaffected and keep the fixed-category file-upload flow.
 
 **Asymmetric requirement.** The party that owns the evidence at each phase must file the report; the other side's report is optional:
 
-- **Pickup**: the **lister** files the required "before" report; the renter's pickup report is optional.
-- **Return**: the **renter** files the required "after" report; the lister's return report is optional.
+- **Pickup**: the **lister** files the required "before" report (live camera, 1-4 photos); the renter's pickup report is optional (fixed categories, file upload).
+- **Return**: the **renter** files the required "after" report (fixed categories, file upload); the lister's return report is optional.
 
-Comparing the lister's before against the renter's after is the dispute evidence. To raise a **deposit claim**, the lister must have their own complete pickup **and** return reports (all four photos, not waived) - the return report is otherwise optional but it is the price of claiming.
+Comparing the lister's before against the renter's after is the main dispute evidence now that the security-deposit feature is gone (CHAPTER 34).
 
-A required report can be submitted with an incomplete photo set only through an explicit **"submit without photos" waiver** (`evidence_waived`). A waived report keeps the trip moving but is flagged for the super admin in any dispute, and a deposit claim cannot be filed on a waived or incomplete report.
+A required report can be submitted with no photos only through an explicit **"submit without photos" waiver** (`evidence_waived`) - meant for a lister whose device genuinely has no working camera. A waived report keeps the trip moving but is flagged for the super admin in any dispute.
 
 **Handover confirmation.** At pickup the **lister** confirms the handover (after filing the pickup report); the **renter** then taps a single "Confirm - I have the car". Both marks are recorded, but it is a two-tap handshake, not two independent multi-step flows. The booking becomes `active` once both have confirmed.
 
@@ -620,12 +622,10 @@ Do not reverse the local Vite adapter, canonical admin route, database guards, R
 - [ ] Chapter 14 and Chapter 16 proof is complete.
 - [ ] Test renter, lister, admin, and super-admin accounts are available.
 - [ ] Test booking dates do not overlap or conflict with maintenance.
-- [ ] Seven-photo pickup/return reports can upload to the private bucket.
-- [ ] Deposit test uses test mode and is labeled refundable.
+- [ ] Live-camera pickup/return reports can upload to the private bucket (lister pickup: 1-4 live photos; return and the renter's optional pickup: 4 required + 3 optional fixed categories).
 - [ ] Ledger entries balance and start only after activation.
 - [ ] Reconciliation can detect a controlled mismatch without moving money.
 - [ ] Simulator is labeled as no-wallet movement.
-- [ ] Any PHP 100 deposit demonstration is labeled a local/test workflow, not a real PayMongo refund or wallet transfer.
 
 ### Before public hosting/live money
 
@@ -837,7 +837,7 @@ Use sanitized screenshots or exported command output. Never expose environment v
 - [ ] Guest multi-topic intake, Start review, Gmail reply, failure retry, and resolution are proven.
 - [ ] Bell counts match open work and show exact elapsed waiting time.
 - [ ] Normal admin cannot open super-admin finance/retention routes.
-- [ ] Renter and lister independently submit pickup and return reports with seven required photos.
+- [ ] Renter and lister independently submit pickup and return reports (lister pickup: 1-4 live camera photos; everything else: fixed categories, up to 7 slots).
 - [ ] Denying optional location does not block a report.
 - [ ] Agreement hash/version is snapshotted and renter acceptance receives a server timestamp.
 - [ ] Deposit payment, claim window, response, decision, release/refund, failure, and audit trails are proven in test mode.
@@ -942,7 +942,7 @@ Use this answer pattern during a defense: state the problem, name the control, e
 - **Why:** Independent before-and-after records make damage, cleanliness, fuel, and handover discussions less dependent on one party's account.
 - **Support:** The records support contract performance, dispute handling, and ordinary diligence. Data Privacy Act principles require evidence to be relevant, protected, and retained only as justified.
 - **Defense answer:** "We ask both parties for the same structured evidence at both handover points. The reports do not decide fault automatically; they create a reviewable record."
-- **Proof and limitation:** Demonstrate seven required photos per report, participant-only access, immutable submission time, and independent submissions. Photos can be incomplete or misleading, so a human dispute process is still required.
+- **Proof and limitation:** Demonstrate the lister's live-camera pickup capture and the fixed-category return report, participant-only access, immutable submission time, and independent submissions. Photos can be incomplete or misleading, so a human dispute process is still required.
 
 ### E.11 Location evidence is optional, consented, and secondary
 

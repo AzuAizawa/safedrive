@@ -7838,4 +7838,67 @@ create trigger notify_admins_of_license_update
 after update of license_update_pending on public.profiles
 for each row execute function public.notify_admins_of_license_update();
 
+-- ============================================================================
+-- CHAPTER 36 - Free-form live-camera pickup photos for the lister
+-- ============================================================================
+-- The lister's required pickup condition-report photo (the "before" evidence
+-- that gates arrival and completion) moves from 4 fixed categories uploaded
+-- through a plain file picker to 1-4 free-form photos captured live through
+-- the device camera in-app (no gallery/file picker at all). Now that the
+-- security-deposit feature is gone (CHAPTER 34), this is the main anti-fraud
+-- evidence left at handover, so proving the photo was actually taken live -
+-- not picked from a library - matters more than before. The return phase
+-- (either party) and the renter's own optional pickup report are unaffected
+-- and keep the original 4-required/3-optional fixed-category system.
+--
+-- Two additive pieces: widen trip_condition_photos.category to also accept 4
+-- generic "slot" values for the new flow, and add the same upload-provenance
+-- review columns already carried by verification_images and car_documents so
+-- the new photos get the same AI/C2PA defense-in-depth scan on submission.
+
+-- The category check was an inline, unnamed check inside the original
+-- `create table if not exists` - now a no-op since the table already exists -
+-- so Postgres's auto-generated name (<table>_<column>_check) is targeted here.
+alter table public.trip_condition_photos
+  drop constraint if exists trip_condition_photos_category_check,
+  add constraint trip_condition_photos_category_check check (
+    category in (
+      'front', 'back', 'left', 'right', 'interior', 'odometer', 'fuel_or_battery', 'damage',
+      'live_photo_1', 'live_photo_2', 'live_photo_3', 'live_photo_4'
+    )
+  );
+
+alter table public.trip_condition_photos
+  add column if not exists provenance_status text not null default 'unknown',
+  add column if not exists provenance_source text,
+  add column if not exists provenance_summary text,
+  add column if not exists ai_suspicion_score numeric,
+  add column if not exists ai_detector_name text,
+  add column if not exists ai_detector_version text,
+  add column if not exists review_flag text not null default 'none',
+  add column if not exists review_reason text,
+  add column if not exists reviewed_by uuid references public.profiles(id) on delete set null,
+  add column if not exists reviewed_at timestamptz;
+
+alter table public.trip_condition_photos
+  drop constraint if exists trip_condition_photos_provenance_status_check,
+  add constraint trip_condition_photos_provenance_status_check
+  check (provenance_status in ('unknown', 'credential_present', 'credential_missing', 'credential_invalid'));
+
+alter table public.trip_condition_photos
+  drop constraint if exists trip_condition_photos_ai_suspicion_score_check,
+  add constraint trip_condition_photos_ai_suspicion_score_check
+  check (ai_suspicion_score is null or (ai_suspicion_score >= 0 and ai_suspicion_score <= 1));
+
+alter table public.trip_condition_photos
+  drop constraint if exists trip_condition_photos_review_flag_check,
+  add constraint trip_condition_photos_review_flag_check
+  check (review_flag in ('none', 'needs_admin_review', 'approved_after_review', 'rejected_after_review'));
+
+create index if not exists trip_condition_photos_provenance_status_idx
+  on public.trip_condition_photos (provenance_status);
+
+create index if not exists trip_condition_photos_review_flag_idx
+  on public.trip_condition_photos (review_flag);
+
 -- End of SafeDrive chaptered database master.

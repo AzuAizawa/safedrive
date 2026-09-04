@@ -168,11 +168,15 @@ database. Number kept so sections 11-20 don't shift.
 ## 12. Condition reports — `POST /api/submit-trip-condition-report`
 
 - `phase: pickup | return`; participant; odometer int ≥0; fuel/battery 0–100;
-  **all 7 photo categories** (front, back, left, right, interior, odometer,
-  fuel_or_battery) in the private `trip-condition-evidence` bucket at
-  `<booking>/<user>/<report>/…`; optional consented location. One report per
-  participant per phase — no silent overwrite. Renter and lister submit
-  independently.
+  optional consented location. One report per participant per phase — no
+  silent overwrite. Renter and lister submit independently, in the private
+  `trip-condition-evidence` bucket at `<booking>/<user>/<report>/…`.
+- **Return (either party) and the renter's optional pickup report:** the
+  fixed 7-category system (front, back, left, right, interior, odometer,
+  fuel_or_battery — 4 required, 3 optional), file upload.
+- **The lister's required pickup report (CHAPTER 36):** 1-4 free-form photos
+  captured live through the device camera (`getUserMedia`, no file picker) -
+  stored as `live_photo_1`..`live_photo_4`. At least 1 is required.
 
 ## 13. Booking extensions — `POST /api/booking-extension-action`
 
@@ -183,9 +187,11 @@ database. Number kept so sections 11-20 don't shift.
 
 ## 14. Finish Trip / completion — `POST /api/booking-action` (`complete`)
 
-- Each party marks done; requires the return condition reports present (7
-  categories). When `owner_completed` **and** `renter_completed` → `completed`.
-  This is the payout-eligibility trigger point.
+- Each party marks done; requires their own required condition report present
+  (the renter's return report, 4 of 7 categories; the lister's pickup report,
+  re-checked here too, 1-4 live photos). When `owner_completed` **and**
+  `renter_completed` → `completed`. This is the payout-eligibility trigger
+  point.
 
 ## 15. Security-deposit claim window (Removed)
 

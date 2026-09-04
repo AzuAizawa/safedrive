@@ -13,12 +13,59 @@ type Payload = {
   longitude?: number | null;
   locationAccuracyMeters?: number | null;
   locationConsent?: boolean;
-  photos?: Array<{ category?: string; storagePath?: string }>;
+  photos?: Array<{ category?: string; storagePath?: string; provenance?: unknown }>;
 };
 
 const requiredCategories = ["front", "back", "odometer", "fuel_or_battery"];
 const optionalCategories = ["left", "right", "interior", "damage"];
 const allowedCategories = new Set([...requiredCategories, ...optionalCategories]);
+
+// The lister's required pickup report uses free-form live-camera photos
+// instead of the fixed categories above (see CHAPTER 36). At most 4 rows can
+// ever pass this filter since only 4 category values exist here - no
+// separate max-count check is needed. Return reports and the renter's
+// optional pickup report are unaffected and keep the categories above.
+const LIVE_PICKUP_CATEGORIES = ["live_photo_1", "live_photo_2", "live_photo_3", "live_photo_4"];
+const livePickupCategorySet = new Set(LIVE_PICKUP_CATEGORIES);
+
+const PROVENANCE_STATUS_VALUES = new Set(["unknown", "credential_present", "credential_missing", "credential_invalid"]);
+const REVIEW_FLAG_VALUES = new Set(["none", "needs_admin_review", "approved_after_review", "rejected_after_review"]);
+
+// Only pick known, validated fields off a client-supplied provenance object -
+// never trust its shape wholesale. Returns {} for anything unrecognizable.
+const sanitizeProvenance = (raw: unknown): Record<string, unknown> => {
+  if (!raw || typeof raw !== "object") return {};
+  const value = raw as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  if (typeof value.provenance_status === "string" && PROVENANCE_STATUS_VALUES.has(value.provenance_status)) {
+    result.provenance_status = value.provenance_status;
+  }
+  if (typeof value.provenance_source === "string") result.provenance_source = value.provenance_source.slice(0, 500);
+  if (typeof value.provenance_summary === "string") result.provenance_summary = value.provenance_summary.slice(0, 2000);
+  if (
+    typeof value.ai_suspicion_score === "number" &&
+    Number.isFinite(value.ai_suspicion_score) &&
+    value.ai_suspicion_score >= 0 &&
+    value.ai_suspicion_score <= 1
+  ) {
+    result.ai_suspicion_score = value.ai_suspicion_score;
+  }
+  if (typeof value.ai_detector_name === "string") result.ai_detector_name = value.ai_detector_name.slice(0, 200);
+  if (typeof value.ai_detector_version === "string") result.ai_detector_version = value.ai_detector_version.slice(0, 100);
+  if (typeof value.review_flag === "string" && REVIEW_FLAG_VALUES.has(value.review_flag)) {
+    result.review_flag = value.review_flag;
+  }
+  if (typeof value.review_reason === "string") result.review_reason = value.review_reason.slice(0, 1000);
+  return result;
+};
+
+// trip_condition_photos' provenance columns are added by CHAPTER 36 - until an
+// operator runs that SQL, an insert carrying them fails and this lets the
+// submission retry without provenance rather than hard-failing.
+const isMissingProvenanceColumnError = (message: string) => {
+  const lower = message.toLowerCase();
+  return lower.includes("provenance") || lower.includes("review_flag") || lower.includes("ai_suspicion") || lower.includes("ai_detector") || lower.includes("reviewed_by") || lower.includes("reviewed_at");
+};
 
 // Accept a typed reading only when the user actually entered one.
 const optionalReading = (value: unknown, max?: number) => {
@@ -70,6 +117,10 @@ export default async function handler(req: Request) {
     const photosRequiredForRole =
       (payload.phase === "pickup" && reporterRole === "lister") ||
       (payload.phase === "return" && reporterRole === "renter");
+    // Only the lister's required pickup report uses free-form live-camera
+    // photos - return (either role) and the renter's optional pickup report
+    // keep the fixed-category system below unchanged.
+    const isLiveLisPickup = payload.phase === "pickup" && reporterRole === "lister";
 
     if (payload.phase === "return") {
       const { data: pickupReport, error: pickupReportError } = await supabase
@@ -93,11 +144,21 @@ export default async function handler(req: Request) {
       }
     }
 
-    const photos = (payload.photos ?? []).filter((photo): photo is { category: string; storagePath: string } => Boolean(photo.category && photo.storagePath && allowedCategories.has(photo.category)));
+    const activeAllowedCategories = isLiveLisPickup ? livePickupCategorySet : allowedCategories;
+    const photos = (payload.photos ?? []).filter((photo): photo is { category: string; storagePath: string; provenance?: unknown } => Boolean(photo.category && photo.storagePath && activeAllowedCategories.has(photo.category)));
     const categories = new Set(photos.map((photo) => photo.category));
-    const missingRequired = requiredCategories.filter((category) => !categories.has(category));
+    const missingRequired = isLiveLisPickup
+      ? (categories.size === 0 ? ["live_photo"] : [])
+      : requiredCategories.filter((category) => !categories.has(category));
     if (missingRequired.length > 0 && photosRequiredForRole && !evidenceWaived) {
-      return respond({ error: "Front, back, odometer, and fuel/battery photos are required (or submit with an explicit waiver)." }, 400);
+      return respond(
+        {
+          error: isLiveLisPickup
+            ? "At least one live-captured vehicle photo is required (or submit with an explicit waiver)."
+            : "Front, back, odometer, and fuel/battery photos are required (or submit with an explicit waiver).",
+        },
+        400,
+      );
     }
     const waivedThisReport = photosRequiredForRole && missingRequired.length > 0 && evidenceWaived;
     if (photos.some((photo) => !photo.storagePath.startsWith(`${booking.id}/${user.id}/`))) return respond({ error: "Invalid evidence path" }, 400);
@@ -149,10 +210,26 @@ export default async function handler(req: Request) {
     }
     if (reportError || !report) throw reportError || new Error("Report was not saved");
 
-    const { error: photoError } = await supabase.from("trip_condition_photos").insert(photos.map((photo) => ({ report_id: report.id, category: photo.category, storage_path: photo.storagePath })));
+    const photoRows = photos.map((photo) => ({
+      report_id: report.id,
+      category: photo.category,
+      storage_path: photo.storagePath,
+      ...sanitizeProvenance(photo.provenance),
+    }));
+    const { error: photoError } = await supabase.from("trip_condition_photos").insert(photoRows);
     if (photoError) {
-      await supabase.from("trip_condition_reports").delete().eq("id", report.id);
-      throw photoError;
+      if (isMissingProvenanceColumnError(photoError.message)) {
+        const { error: fallbackPhotoError } = await supabase
+          .from("trip_condition_photos")
+          .insert(photos.map((photo) => ({ report_id: report.id, category: photo.category, storage_path: photo.storagePath })));
+        if (fallbackPhotoError) {
+          await supabase.from("trip_condition_reports").delete().eq("id", report.id);
+          throw fallbackPhotoError;
+        }
+      } else {
+        await supabase.from("trip_condition_reports").delete().eq("id", report.id);
+        throw photoError;
+      }
     }
     await supabase.from("audit_log").insert({ user_id: user.id, action: "trip_condition_report_submitted", entity_type: "booking", entity_id: booking.id, details: { report_id: report.id, phase: payload.phase, reporter_role: reporterRole, photo_categories: [...categories], photos_required: photosRequiredForRole, evidence_waived: waivedThisReport, missing_photo_categories: missingRequired, location_supplied: Boolean(payload.locationConsent) } });
     return respond({ success: true, reportId: report.id, submittedAt: report.submitted_at }, 201);

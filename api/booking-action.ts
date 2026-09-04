@@ -113,14 +113,34 @@ const REQUIRED_TRIP_PHOTO_CATEGORIES = [
   "fuel_or_battery",
 ] as const;
 
-const hasRequiredTripPhotos = (report: {
-  trip_condition_photos?: Array<{ category: string }> | null;
-  evidence_waived?: boolean | null;
-}) => {
+// The lister's required pickup report uses free-form live-camera photos
+// (CHAPTER 36) instead of the fixed categories above - at least one of these
+// 4 generic slots satisfies it. Return reports keep the fixed-category rule.
+const LIVE_PICKUP_PHOTO_CATEGORIES = [
+  "live_photo_1",
+  "live_photo_2",
+  "live_photo_3",
+  "live_photo_4",
+] as const;
+
+// `phase` must only ever be "pickup" when checking the LISTER's own report -
+// never the renter's optional pickup report - since the live-camera rule only
+// applies to the lister's required submission. Both current call sites honor
+// this; keep it true if a third call site is ever added.
+const hasRequiredTripPhotos = (
+  report: {
+    trip_condition_photos?: Array<{ category: string }> | null;
+    evidence_waived?: boolean | null;
+  },
+  phase: "pickup" | "return",
+) => {
   if (report.evidence_waived) return true;
   const categories = new Set(
     (report.trip_condition_photos ?? []).map((photo) => photo.category),
   );
+  if (phase === "pickup") {
+    return LIVE_PICKUP_PHOTO_CATEGORIES.some((category) => categories.has(category));
+  }
   return REQUIRED_TRIP_PHOTO_CATEGORIES.every((category) => categories.has(category));
 };
 const REFUNDABLE_BOOKING_PAYMENT_TYPES = ["downpayment", "balance"];
@@ -1054,7 +1074,7 @@ export default async function handler(req: Request) {
           .eq("phase", "pickup")
           .maybeSingle();
         if (pickupReportError) throw pickupReportError;
-        if (!pickupReport || !hasRequiredTripPhotos(pickupReport)) {
+        if (!pickupReport || !hasRequiredTripPhotos(pickupReport, "pickup")) {
           return jsonResponse(
             { error: "Submit your pickup condition report and photos before confirming the handover" },
             409,
@@ -1311,7 +1331,7 @@ export default async function handler(req: Request) {
       const requiredReport = (conditionReports ?? []).find(
         (report) => report.phase === requiredReportPhase,
       );
-      if (!requiredReport || !hasRequiredTripPhotos(requiredReport)) {
+      if (!requiredReport || !hasRequiredTripPhotos(requiredReport, requiredReportPhase)) {
         return jsonResponse(
           {
             error: renter

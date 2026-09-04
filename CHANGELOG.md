@@ -9,6 +9,58 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Free-form live-camera pickup photos for the lister (CHAPTER 36)
+
+From the arrival/handover process planning session: the lister's required
+pickup condition-report photo (the "before" evidence that gates arrival and
+completion) accepted a plain file upload - a gallery pick, not proof the
+photo was taken live at the car. Now that the security-deposit feature is
+gone (CHAPTER 34), this photo is the main anti-fraud signal left at
+handover, so this mattered more than before.
+
+- The lister's pickup report now captures **1 to 4 free-form photos live
+  through the device camera** (`getUserMedia` → live preview → capture →
+  canvas → file - no `<input type="file">` at all, so there is no OS
+  gallery/file picker to route around, not even on desktop where the
+  `capture` attribute trick doesn't work). Reused the live-camera pattern
+  already shipped for selfie capture in `VerificationPage.tsx`, adapted to a
+  rear (`environment`) camera with no mirror flip. Known, accepted ceiling:
+  a spoofed virtual-camera driver is unavoidable for any browser-based
+  check - this is the strongest achievable client-side measure, not a
+  cryptographic guarantee.
+- **Return reports (either party) and the renter's own optional pickup
+  report are completely unchanged** - still the fixed 4-required/3-optional
+  categories, still plain file upload. The fixed-category system was
+  duplicated in three independent places
+  (`TripConditionReportPage.tsx`, `api/submit-trip-condition-report.ts`,
+  `api/booking-action.ts`'s `hasRequiredTripPhotos`) with no shared code, so
+  all three got an additive `phase === "pickup" && role === "lister"` branch
+  rather than a restructure, to keep the untouched paths provably untouched.
+  `hasRequiredTripPhotos` is now phase-aware (pickup: at least one live
+  photo; return: the original all-4-fixed-categories check).
+- Added the same upload-provenance/AI-suspicion scan (`inspectContentProvenance`,
+  already used on verification images and vehicle documents) to each
+  captured photo as defense-in-depth, with a schema-missing-column fallback
+  so submissions don't hard-fail before CHAPTER 36's SQL is run.
+- **Database (CHAPTER 36):** widens `trip_condition_photos.category` to
+  additionally accept 4 generic `live_photo_1`..`live_photo_4` slots, and
+  adds the same provenance-review columns already carried by
+  `verification_images`/`car_documents`.
+- Found and fixed two more leftover mentions of the removed security-deposit
+  feature in `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md` (a capability
+  list and a demo checklist) missed during CHAPTER 34 - the doc still has
+  many more scattered narrative mentions in Appendix E/K that were a
+  deliberate scope decision at the time and remain out of scope here.
+- Verified clean: `tsc -b`, lint, `check:api`, `check:alignment`,
+  `check:booking-flow` (with new markers covering the added code path), and
+  a full production build all pass.
+- **Files:** `src/pages/TripConditionReportPage.tsx`,
+  `api/submit-trip-condition-report.ts`, `api/booking-action.ts`,
+  `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 36),
+  `scripts/booking-flow-smoke-check.mjs`,
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`,
+  `project_docs/SYSTEM_FLOWS.md`.
+
 ## 2026-09-05 — Make the renter no-show refund share admin-configurable
 
 Decision from the arrival/handover process planning session: the renter

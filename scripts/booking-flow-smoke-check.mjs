@@ -125,6 +125,8 @@ const checks = [
       "missing_photo_categories",
       "photosRequiredForRole",
       'payload.phase === "pickup" && reporterRole === "lister"',
+      "LIVE_PICKUP_CATEGORIES",
+      "sanitizeProvenance",
     ],
     absentMarkers: [
       '"front", "back", "left", "right", "interior", "odometer", "fuel_or_battery"',
@@ -135,6 +137,7 @@ const checks = [
     markers: [
       "if (report.evidence_waived) return true;",
       "id, evidence_waived, trip_condition_photos(category)",
+      "LIVE_PICKUP_PHOTO_CATEGORIES",
     ],
   },
   {
@@ -145,6 +148,9 @@ const checks = [
       "evidenceWaived",
       "photosRequired",
       "This report is optional for you",
+      "getUserMedia",
+      "live_photo_",
+      "isLiveLisPickup",
     ],
   },
   {
