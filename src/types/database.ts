@@ -318,7 +318,6 @@ export interface Database {
           plate_number: string;
           mileage: number | null;
           price_per_day: number;
-          security_deposit_amount: number;
           location: string | null;
           fuel_category: string | null;
           fuel_subtype: string | null;
@@ -344,7 +343,6 @@ export interface Database {
           plate_number: string;
           mileage?: number | null;
           price_per_day: number;
-          security_deposit_amount?: number;
           location?: string | null;
           fuel_category?: string | null;
           fuel_subtype?: string | null;
@@ -370,7 +368,6 @@ export interface Database {
           plate_number?: string;
           mileage?: number | null;
           price_per_day?: number;
-          security_deposit_amount?: number;
           location?: string | null;
           fuel_category?: string | null;
           fuel_subtype?: string | null;
@@ -1212,18 +1209,6 @@ export interface Database {
         Update: { id?: string; report_id?: string; category?: string; storage_path?: string; captured_at?: string };
         Relationships: [];
       };
-      security_deposits: {
-        Row: { id: string; booking_id: string; renter_id: string; owner_id: string; amount_centavos: number; status: string; provider_payment_id: string | null; provider_checkout_id: string | null; provider_refund_id: string | null; claim_deadline: string | null; paid_at: string | null; released_at: string | null; created_at: string; updated_at: string };
-        Insert: { id?: string; booking_id: string; renter_id: string; owner_id: string; amount_centavos: number; status?: string; provider_payment_id?: string | null; provider_checkout_id?: string | null; provider_refund_id?: string | null; claim_deadline?: string | null; paid_at?: string | null; released_at?: string | null; created_at?: string; updated_at?: string };
-        Update: { id?: string; booking_id?: string; renter_id?: string; owner_id?: string; amount_centavos?: number; status?: string; provider_payment_id?: string | null; provider_checkout_id?: string | null; provider_refund_id?: string | null; claim_deadline?: string | null; paid_at?: string | null; released_at?: string | null; created_at?: string; updated_at?: string };
-        Relationships: [];
-      };
-      security_deposit_claims: {
-        Row: { id: string; security_deposit_id: string; requested_by: string; amount_centavos: number; reason: string; evidence: Json; renter_response: string | null; status: string; approved_amount_centavos: number | null; reviewed_by: string | null; reviewed_at: string | null; created_at: string };
-        Insert: { id?: string; security_deposit_id: string; requested_by: string; amount_centavos: number; reason: string; evidence?: Json; renter_response?: string | null; status?: string; approved_amount_centavos?: number | null; reviewed_by?: string | null; reviewed_at?: string | null; created_at?: string };
-        Update: { id?: string; security_deposit_id?: string; requested_by?: string; amount_centavos?: number; reason?: string; evidence?: Json; renter_response?: string | null; status?: string; approved_amount_centavos?: number | null; reviewed_by?: string | null; reviewed_at?: string | null; created_at?: string };
-        Relationships: [];
-      };
       data_retention_requests: {
         Row: { id: string; subject_user_id: string | null; requester_email: string; request_type: string; status: string; request_details: string; decision_reason: string | null; legal_hold_reason: string | null; assigned_to: string | null; due_at: string | null; completed_at: string | null; created_at: string; updated_at: string };
         Insert: { id?: string; subject_user_id?: string | null; requester_email: string; request_type: string; status?: string; request_details: string; decision_reason?: string | null; legal_hold_reason?: string | null; assigned_to?: string | null; due_at?: string | null; completed_at?: string | null; created_at?: string; updated_at?: string };
@@ -1336,7 +1321,6 @@ export interface Database {
           refund_full_hours: number;
           refund_late_renter_percent: number;
           arrival_checkin_lead_hours: number;
-          deposit_claim_window_hours: number;
           lister_completion_timeout_hours: number;
           contact_email: string;
           user_verification_eta_message: string;
@@ -1354,7 +1338,6 @@ export interface Database {
           refund_full_hours?: number;
           refund_late_renter_percent?: number;
           arrival_checkin_lead_hours?: number;
-          deposit_claim_window_hours?: number;
           lister_completion_timeout_hours?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
@@ -1372,7 +1355,6 @@ export interface Database {
           refund_full_hours?: number;
           refund_late_renter_percent?: number;
           arrival_checkin_lead_hours?: number;
-          deposit_claim_window_hours?: number;
           lister_completion_timeout_hours?: number;
           contact_email?: string;
           user_verification_eta_message?: string;

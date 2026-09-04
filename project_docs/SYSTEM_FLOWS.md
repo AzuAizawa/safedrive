@@ -60,7 +60,7 @@ server-side. Route guards in `src/components/*Route.tsx` are cosmetic.
 
 - `/my-vehicles`: vehicle + registration + CTPL/insurer details + policy dates +
   comprehensive-cover declaration + rental-use confirmation + photos + private
-  documents + pickup location + price/day + refundable deposit amount. Uploads
+  documents + pickup location + price/day. Uploads
   the vehicle-specific rental agreement PDF → `car_agreement_versions` (numbered
   version, storage path, SHA-256, status `pending`). Car → `pending`; trigger
   notifies admins.
@@ -70,7 +70,7 @@ server-side. Route guards in `src/components/*Route.tsx` are cosmetic.
   approval without required insurance fields.
   `POST /api/send-vehicle-decision-email` emails the lister (re-checks status).
 - Re-approval: trigger `return_materially_changed_car_to_review` drops the car
-  back to `pending` on a material edit (price, deposit, ownership, insurance,
+  back to `pending` on a material edit (price, ownership, insurance,
   location, agreement). The prior approved agreement version is preserved and
   superseded.
 - Extra vehicle slots: `/subscriptions` → `POST /api/create-subscription-checkout`
@@ -110,8 +110,7 @@ Server recalculates everything:
 - Inserts `bookings` (status `pending`), snapshots agreement version + path +
   SHA-256, sets `owner_response_deadline = min(now + 24h, pickup datetime)`.
 - Inserts `booking_agreement_acceptances` (renter id + server timestamp); rolls
-  back the booking on failure. If the car has a deposit, inserts
-  `security_deposits` (status `required`).
+  back the booking on failure.
 - Audit-logs `booking_created` (`pricing_source: server_authoritative`);
   notifies the lister.
 
@@ -140,7 +139,7 @@ Server recalculates everything:
     Every attempt → `security_logs`.
   - On `checkout_session.payment.paid`, routes by `reference_number` prefix
     (bare id = downpayment, `booking-full:`, `booking-balance:`,
-    `booking-extension:`, `security-deposit:`, `subscription:`).
+    `booking-extension:`, `subscription:`).
   - Re-checks stored checkout id + **exact amount** + payable state; inserts an
     idempotent `payments` row (DB uniqueness index on the event); advances
     booking status (`downpayment_paid` / `fully_paid` / `active`).
@@ -151,11 +150,11 @@ Server recalculates everything:
     records `delivery_state`.
 - `/payment/success` is a waiting screen only — never the authority.
 
-## 10. Security deposit
+## 10. Security deposit (Removed)
 
-- `POST /api/create-security-deposit-checkout`: reference `security-deposit:<bookingId>`;
-  deposit status `required` → `awaiting_payment` → (webhook) `paid`.
-- Ledger records it as a **liability** (`2020`), never commission revenue.
+The separate refundable-deposit checkout/claim/release flow was removed end
+to end (CHAPTER 34) before any deposit was ever collected in the live
+database. Number kept so sections 11-20 don't shift.
 
 ## 11. Trip start / arrival — `POST /api/booking-action` (`arrive`)
 
@@ -188,35 +187,22 @@ Server recalculates everything:
   categories). When `owner_completed` **and** `renter_completed` → `completed`.
   This is the payout-eligibility trigger point.
 
-## 15. Security-deposit claim window
+## 15. Security-deposit claim window (Removed)
 
-- After return: 48-hour window (`claim_deadline`), deposit `return_review`.
-- No claim → moves toward refund/release.
-- Lister claim (`POST /api/security-deposit-action` `claim`): amount + detailed
-  reason; one open claim per deposit; never auto-deducts. → `claim_open`.
-- Renter response (`renter_response`).
-- Super-admin decision (`POST /api/process-security-deposit-release`): approve /
-  partly approve / reject after reviewing agreement + evidence; approved ≤ claim
-  ≤ deposit. `api/lib/securityDeposit.ts`:
-  `calculateSecurityDepositDisposition` → approved vs refundable centavos +
-  terminal status; `finalizeSecurityDepositRelease` → refund journal `2020→1010`
-  for the renter remainder and/or deduction journal `2020→2010` adding the
-  approved amount to the lister payable; PayMongo refund for the remainder;
-  deposit status update; notify; **refund receipt** to the renter via Resend;
-  then triggers `processAutomaticPayoutForBooking`. Idempotent. All audit-logged.
+Removed with the rest of the deposit feature - see §10. Number kept so
+sections 16-20 don't shift.
 
 ## 16. Payout — lister gets paid
 
-- `POST /api/process-payout` (super-admin) or auto-triggered on completion /
-  deposit finalization → `api/lib/payoutAutomation.ts`
+- `POST /api/process-payout` (super-admin) or auto-triggered on completion →
+  `api/lib/payoutAutomation.ts`
   `processAutomaticPayoutForBooking`. **Eligibility gates:**
   1. booking `completed` and both parties completed
-  2. security deposit terminal (`released` / `partially_released` / `claimed`)
-  3. no open/in-progress support ticket on the booking
-  4. lister payout details present (`payout_method` GCash/Maya, account name,
+  2. no open/in-progress support ticket on the booking
+  3. lister payout details present (`payout_method` GCash/Maya, account name,
      account number)
-  5. no existing completed payout and no pending payout with a transaction id
-  - amount = `base_price` + approved-claim deductions, added **once** (retry-safe).
+  4. no existing completed payout and no pending payout with a transaction id
+  - amount = `base_price` (plus any fuel top-up), added **once** (retry-safe).
 - Demo mode (`PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true`, `sk_test_` key or
   no key; a live key auto-disables it): writes a `sandbox_payout_*` row, notifies,
   audits, posts the ledger journal `2010→1010` (event key `payout:<txn>`), sends a
@@ -255,7 +241,7 @@ Server recalculates everything:
   `POST /api/sync-paymongo-refund` (poll PayMongo, reconcile the matching local
   row + ledger + audit only — never creates a new refund).
 - `payment.refunded` / `payment.refund.updated` webhook events complete/fail the
-  local refund rows or finalize a deposit release.
+  local refund rows.
 
 ## 18. Ledger
 
@@ -264,22 +250,22 @@ Server recalculates everything:
   `prevent_finalized_entry_change`). `event_key` = idempotency key. Corrections:
   `create_ledger_correction` RPC posts an exact reversal + a new corrected
   journal with a reason, and audit-logs it. Starts fresh from `ledger_activated_at`.
-- Accounts: `1010` cash/PayMongo clearing, `2010` lister payable, `2020`
-  refundable-deposit liability, `2040` deferred platform fee, `4020` fee
-  recovery, plus commission revenue / payment-processing expense.
+- Accounts: `1010` cash/PayMongo clearing, `2010` lister payable, `2040`
+  deferred platform fee, `4020` fee recovery, plus commission revenue /
+  payment-processing expense.
 - Super-admin only in the browser (`/admin/financial-ledger`).
 
 ## 19. Reconciliation — `POST /api/run-reconciliation` (super-admin)
 
-- Compares local paid `payments` / balanced journals / deposit + payout + refund
-  states against PayMongo checkout/payment status, amounts, references. Lists up
+- Compares local paid `payments` / balanced journals / payout + refund states
+  against PayMongo checkout/payment status, amounts, references. Lists up
   to 100 provider payments; records `provider_payment_list_may_be_truncated` if a
   full page returns.
 - Detects: provider-only payment, SafeDrive-only completion, duplicate
   transaction id, amount mismatch, stale/failed payout, refund not
-  provider-confirmed, deposit counted as income, unbalanced journal. Every
-  finding → hold-and-investigate; never silently moves money, marks a payment
-  successful, creates a refund, or edits a finalized journal. `/admin/reconciliation`.
+  provider-confirmed, unbalanced journal. Every finding → hold-and-investigate;
+  never silently moves money, marks a payment successful, creates a refund, or
+  edits a finalized journal. `/admin/reconciliation`.
 
 ## 20. Cross-cutting
 

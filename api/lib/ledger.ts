@@ -80,7 +80,7 @@ export async function postCompletedPaymentToLedger(
   const { data: booking, error: bookingError } = await supabase.from("bookings").select("id, renter_id, owner_id, base_price, commission, total_price, payment_processing_fee").eq("id", payment.bookingId).single();
   if (bookingError || !booking) throw bookingError || new Error("Ledger booking not found");
 
-  const { data: journal, error: journalError } = await supabase.from("ledger_journals").insert({ booking_id: payment.bookingId, event_key: eventKey, event_type: payment.paymentType === "security_deposit" ? "security_deposit_collected" : "renter_payment_collected", provider_reference: payment.transactionId, metadata: { payment_type: payment.paymentType, source: "paymongo_webhook" } }).select("id").single();
+  const { data: journal, error: journalError } = await supabase.from("ledger_journals").insert({ booking_id: payment.bookingId, event_key: eventKey, event_type: "renter_payment_collected", provider_reference: payment.transactionId, metadata: { payment_type: payment.paymentType, source: "paymongo_webhook" } }).select("id").single();
   if (journalError || !journal) {
     if (journalError?.code === "23505") return { posted: false, reason: "already_posted" };
     throw journalError || new Error("Ledger journal was not created");
@@ -89,37 +89,33 @@ export async function postCompletedPaymentToLedger(
   const lines: LedgerEntryDraft[] = [
     { journal_id: journal.id, account_code: "1010", debit_centavos: amountCentavos, party_user_id: booking.renter_id, memo: "Funds confirmed by PayMongo" },
   ];
-  if (payment.paymentType === "security_deposit") {
-    lines.push({ journal_id: journal.id, account_code: "2020", credit_centavos: amountCentavos, party_user_id: booking.renter_id, memo: "Refundable deposit liability" });
-  } else {
-    let ownerShare: number;
-    let commissionShare: number;
-    let feeShare: number;
-    if (payment.allocationOverride) {
-      commissionShare = Math.max(0, Math.round(payment.allocationOverride.commissionPesos * 100));
-      feeShare = Math.max(0, Math.round(payment.allocationOverride.feePesos * 100));
-      // Give the lister the exact remainder so the three lines always sum to the
-      // captured amount even after per-part rounding.
-      ownerShare = amountCentavos - commissionShare - feeShare;
-      if (ownerShare < 0) {
-        throw new Error("Ledger allocation override exceeds the captured amount");
-      }
-    } else {
-      ({
-        ownerShare,
-        commissionShare,
-        processingFeeShare: feeShare,
-      } = calculatePaymentLedgerAllocation({
-        amountCentavos,
-        basePrice: Number(booking.base_price),
-        commission: Number(booking.commission),
-        totalPrice: Number(booking.total_price),
-      }));
+  let ownerShare: number;
+  let commissionShare: number;
+  let feeShare: number;
+  if (payment.allocationOverride) {
+    commissionShare = Math.max(0, Math.round(payment.allocationOverride.commissionPesos * 100));
+    feeShare = Math.max(0, Math.round(payment.allocationOverride.feePesos * 100));
+    // Give the lister the exact remainder so the three lines always sum to the
+    // captured amount even after per-part rounding.
+    ownerShare = amountCentavos - commissionShare - feeShare;
+    if (ownerShare < 0) {
+      throw new Error("Ledger allocation override exceeds the captured amount");
     }
-    if (ownerShare) lines.push({ journal_id: journal.id, account_code: "2010", credit_centavos: ownerShare, party_user_id: booking.owner_id, memo: "Lister payable allocation" });
-    if (commissionShare) lines.push({ journal_id: journal.id, account_code: "2040", credit_centavos: commissionShare, memo: "Platform fee deferred until completion" });
-    if (feeShare) lines.push({ journal_id: journal.id, account_code: "4020", credit_centavos: feeShare, memo: "Disclosed renter processing-fee recovery" });
+  } else {
+    ({
+      ownerShare,
+      commissionShare,
+      processingFeeShare: feeShare,
+    } = calculatePaymentLedgerAllocation({
+      amountCentavos,
+      basePrice: Number(booking.base_price),
+      commission: Number(booking.commission),
+      totalPrice: Number(booking.total_price),
+    }));
   }
+  if (ownerShare) lines.push({ journal_id: journal.id, account_code: "2010", credit_centavos: ownerShare, party_user_id: booking.owner_id, memo: "Lister payable allocation" });
+  if (commissionShare) lines.push({ journal_id: journal.id, account_code: "2040", credit_centavos: commissionShare, memo: "Platform fee deferred until completion" });
+  if (feeShare) lines.push({ journal_id: journal.id, account_code: "4020", credit_centavos: feeShare, memo: "Disclosed renter processing-fee recovery" });
 
   const { error: entryError } = await supabase
     .from("ledger_entries")

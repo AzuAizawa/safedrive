@@ -6796,8 +6796,8 @@ begin
     raise exception 'This account is already anonymized / deleted';
   end if;
 
-  -- A live rental must finish (payout, deposit return, dispute window) before
-  -- identity data is scrubbed.
+  -- A live rental must finish (payout, dispute window) before identity data
+  -- is scrubbed.
   select count(*) into v_open_bookings
   from public.bookings b
   where (b.renter_id = p_user_id or b.owner_id = p_user_id)
@@ -7679,5 +7679,117 @@ alter table public.car_renewals
   add column if not exists comprehensive_insurance_expiry date,
   add column if not exists ctpl_document_path text,
   add column if not exists comprehensive_document_path text;
+
+-- ============================================================================
+-- CHAPTER 34 - Remove the security deposit feature entirely
+-- ============================================================================
+-- The refundable security-deposit flow (separate deposit checkout, claim
+-- review, auto-release, its own ledger liability account, and the payout gate
+-- waiting on it) is removed end to end - tables, columns, constraints, the
+-- dedicated ledger account, and every trigger/function that referenced them.
+-- Diagnostic check first confirmed zero deposits/claims/deposit payments/
+-- finalized deposit ledger journals exist, so this is a clean removal with no
+-- historical data or finalized (append-only) ledger entries to reconcile.
+-- Every process that read from these tables (arrival check-in gate, payout
+-- automation, booking completion, the PayMongo webhook, refund receipts) has
+-- already been updated in the same change to no longer depend on them, so
+-- none of those flows are left half-wired.
+
+drop table if exists public.security_deposit_claims;
+drop table if exists public.security_deposits;
+
+alter table public.cars
+  drop column if exists security_deposit_amount;
+
+alter table public.platform_settings
+  drop column if exists deposit_claim_window_hours;
+
+alter table public.payments
+  drop constraint if exists payments_payment_type_check;
+alter table public.payments
+  add constraint payments_payment_type_check
+  check (payment_type in ('downpayment', 'balance', 'extension', 'refund', 'payout'));
+
+drop index if exists public.payments_one_completed_checkout_event;
+create unique index if not exists payments_one_completed_checkout_event
+on public.payments (booking_id, payment_type, transaction_id)
+where status = 'completed'
+  and payment_type in ('downpayment', 'balance', 'extension')
+  and transaction_id is not null;
+
+delete from public.financial_accounts where code = '2020';
+
+-- Recreated without the security_deposit_amount comparison - the column no
+-- longer exists, so leaving it in would break every future car update.
+create or replace function public.return_materially_changed_car_to_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.status in ('approved', 'active', 'inactive') and (
+    old.model_id is distinct from new.model_id or old.plate_number is distinct from new.plate_number or
+    old.mileage is distinct from new.mileage or old.price_per_day is distinct from new.price_per_day or
+    old.location is distinct from new.location or
+    old.fuel_category is distinct from new.fuel_category or old.fuel_subtype is distinct from new.fuel_subtype or
+    old.gps_available is distinct from new.gps_available or old.contact_number is distinct from new.contact_number or
+    old.additional_info is distinct from new.additional_info or
+    old.transmission is distinct from new.transmission or
+    old.registration_expiry is distinct from new.registration_expiry or old.ctpl_expiry is distinct from new.ctpl_expiry or
+    old.comprehensive_insurance_expiry is distinct from new.comprehensive_insurance_expiry or
+    old.insurer_rental_use_confirmed is distinct from new.insurer_rental_use_confirmed
+  ) then
+    new.status := 'pending';
+    new.last_verified_at := null;
+    new.rejection_reason := null;
+    new.insurance_verification_status := 'pending';
+  end if;
+  return new;
+end;
+$$;
+
+-- Recreated without the deposit_claim_window_hours branch - the column no
+-- longer exists, so a proposal referencing it should be rejected the same
+-- way any other unknown setting key is.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$$;
 
 -- End of SafeDrive chaptered database master.

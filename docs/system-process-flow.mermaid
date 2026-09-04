@@ -27,9 +27,7 @@ flowchart TD
     Checkout --> Webhook[Signed PayMongo webhook]
     Webhook --> Payment[(Payment record and balanced ledger)]
     Payment --> Trip[Independent pickup and return reports]
-    Trip --> Deposit[Separate security-deposit review]
     Trip --> Completion[Completion eligibility]
-    Deposit --> Completion
     Completion --> SuperAdmin[Super-admin finance review]
     SuperAdmin --> Payout[Provider payout or documented manual evidence]
     SuperAdmin --> Reconcile[Ledger and provider reconciliation]
@@ -47,4 +45,4 @@ flowchart TD
     classDef finance fill:#dcfce7,stroke:#16a34a,color:#052e16
     class Visitor,Landing,Inquiry,GuestAPI,Account,KYC,Verified,Browse,Listing,Booking,Agreement,OwnerDecision public
     class AdminOps,VehicleReview,Notifications,Audit,Privacy admin
-    class Checkout,Webhook,Payment,Trip,Deposit,Completion,SuperAdmin,Payout,Reconcile finance
+    class Checkout,Webhook,Payment,Trip,Completion,SuperAdmin,Payout,Reconcile finance

@@ -12,8 +12,8 @@
 - Registered users confirm their email and submit KYC evidence before protected
   renting/listing actions are enabled.
 - Admins review profiles, vehicles, support cases, and guest questions.
-- Super-admins additionally control payouts, refunds, security deposits,
-  financial ledger/reconciliation, retention/deletion decisions, and protected
+- Super-admins additionally control payouts, refunds, financial
+  ledger/reconciliation, retention/deletion decisions, and protected
   platform-setting changes.
 - All roles share one Supabase backend and one React application, but server
   authorization, route guards, RLS, and restricted storage separate access.
@@ -56,20 +56,15 @@
 5. The renter's acceptance identity and server timestamp are recorded before
    the protected rental proceeds.
 
-## 5. Payment, trip, deposit, and payout
+## 5. Payment, trip, and payout
 
 1. PayMongo hosted checkout collects the booking amount; the browser redirect
    is not proof of payment.
 2. A signed webhook confirms provider state and posts an idempotent balanced
    journal.
-3. The separately disclosed test security deposit is recorded as a refundable
-   liability, not platform income.
-4. Renter and lister submit independent pickup/return condition reports with
+3. Renter and lister submit independent pickup/return condition reports with
    required photo categories and optional consented location evidence.
-5. A claim can hold the deposit while the renter responds and a super-admin
-   decides the approved amount. The remainder is returned through confirmed
-   provider/manual evidence.
-6. Lister payout is eligible only after the required terminal trip/agreement
+4. Lister payout is eligible only after the required terminal trip/agreement
    state and checks. PayMongo Money Movement remains provider/account dependent;
    the localhost simulator never represents real money.
 
@@ -78,8 +73,8 @@ legal counsel and the payment provider explicitly approve that representation.
 
 ## 6. Ledger and reconciliation
 
-- Completed payments, refunds, deposits, claims, fees, and payouts create
-  append-only balanced journals using centavos and stable event keys.
+- Completed payments, refunds, fees, and payouts create append-only balanced
+  journals using centavos and stable event keys.
 - Corrections use linked reversal/adjustment entries; finalized finance records
   are never silently edited or deleted.
 - Super-admin reconciliation compares SafeDrive records, PayMongo information,

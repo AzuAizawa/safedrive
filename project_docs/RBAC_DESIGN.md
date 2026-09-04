@@ -135,10 +135,9 @@ Currently a plain admin can *view* this page (`AdminLayout.tsx:51` puts it in `o
 | H2 | Process a refund | `api/process-refund.ts` | `role='super_admin'` |
 | H3 | Sync a PayMongo refund | `api/sync-paymongo-refund.ts` | `role='super_admin'` |
 | H4 | Mark a manual (off-platform) refund | `api/mark-manual-refund.ts` | `role='super_admin'` |
-| H5 | Decide a security-deposit claim (approve / partial / reject) | `api/security-deposit-action.ts`, `api/process-security-deposit-release.ts` | `role='super_admin'` |
-| H6 | View financial ledger | `AdminFinancialLedgerPage.tsx` | super-admin route |
-| H7 | Create a ledger correction (double-entry reversal) | `create_ledger_correction` RPC | super-admin route |
-| H8 | Run reconciliation | `api/run-reconciliation.ts` | `role='super_admin'` |
+| H5 | View financial ledger | `AdminFinancialLedgerPage.tsx` | super-admin route |
+| H6 | Create a ledger correction (double-entry reversal) | `create_ledger_correction` RPC | super-admin route |
+| H7 | Run reconciliation | `api/run-reconciliation.ts` | `role='super_admin'` |
 
 ### Domain I — Privacy / data-retention  (`/admin/retention-requests`) — **SUPER ADMIN ONLY**
 

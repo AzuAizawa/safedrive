@@ -49,7 +49,6 @@ type CarRecord = {
   owner_id: string;
   status: string | null;
   price_per_day: number | string;
-  security_deposit_amount: number | string;
   plate_number: string;
   car_models:
     | {
@@ -362,7 +361,6 @@ export default async function handler(req: Request) {
         owner_id,
         status,
         price_per_day,
-        security_deposit_amount,
         plate_number,
         car_models (
           name,
@@ -590,20 +588,6 @@ export default async function handler(req: Request) {
       throw acceptanceError;
     }
 
-    const depositAmountCentavos = Math.max(0, Math.round(Number(car.security_deposit_amount || 0) * 100));
-    if (depositAmountCentavos > 0) {
-      const { error: depositError } = await supabase.from("security_deposits").insert({
-        booking_id: bookingId,
-        renter_id: user.id,
-        owner_id: car.owner_id,
-        amount_centavos: depositAmountCentavos,
-        status: "required",
-      });
-      if (depositError) {
-        await supabase.from("bookings").delete().eq("id", bookingId);
-        throw depositError;
-      }
-    }
     const vehicleLabel = getVehicleLabel(car);
 
     await supabase.from("audit_log").insert({
@@ -618,7 +602,6 @@ export default async function handler(req: Request) {
         agreement_version_id: agreementVersion.id,
         agreement_version_number: agreementVersion.version_number,
         payment_processing_fee: paymentProcessingFee,
-        security_deposit_amount_centavos: depositAmountCentavos,
         pricing_source: "server_authoritative",
       },
     });

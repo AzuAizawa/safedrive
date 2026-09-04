@@ -521,7 +521,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
               <p className="font-medium text-foreground">How payout release works</p>
               <p className="mt-1">
                 Payouts are released entirely in-app &mdash; no admin ever sends money by hand outside SafeDrive.
-                Most release <span className="font-medium text-foreground">automatically</span> the moment the trip completes and any deposit review closes; this queue only holds the ones that still need a manual Auto Payout nudge (incomplete lister payout details, an open support case, or a failed attempt).
+                Most release <span className="font-medium text-foreground">automatically</span> the moment the trip completes; this queue only holds the ones that still need a manual Auto Payout nudge (incomplete lister payout details, an open support case, or a failed attempt).
                 Every release is announced to all admins and logged; the Statistics tab shows whether each payout was auto-released or released by an admin.
                 The lister is paid their earnings net of the SafeDrive commission, with the payment record and double-entry ledger written and a receipt email sent.
                 In this demo build the transfer is simulated. For a live environment, configure PayMongo Money Movement with a funded wallet and the same flow disburses to the lister's GCash or Maya. If neither the live wallet nor the demo flag is set, a payout skips instead of marking money released.

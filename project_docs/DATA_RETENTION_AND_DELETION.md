@@ -32,16 +32,15 @@ rental is an operational hold the reviewer must clear first.
 ## 3. What blocks a hard delete
 
 `bookings.renter_id` / `bookings.owner_id` reference `profiles(id)` with **no
-`ON DELETE` action** (NO ACTION), and `security_deposits`,
-`booking_agreement_acceptances`, and `trip_condition_reports` use
-`ON DELETE RESTRICT`. Any of these rows makes `DELETE FROM auth.users` (which
-would cascade to `profiles`) fail at the database. This is deliberate — those
-are legal and financial evidence.
+`ON DELETE` action** (NO ACTION), and `booking_agreement_acceptances` and
+`trip_condition_reports` use `ON DELETE RESTRICT`. Any of these rows makes
+`DELETE FROM auth.users` (which would cascade to `profiles`) fail at the
+database. This is deliberate — those are legal and financial evidence.
 
 A true hard delete is therefore only possible for an account with **zero**
-bookings / deposits / agreement acceptances / incident reports, done
-server-side via `supabase.auth.admin.deleteUser` (see `api/admin-delete.ts`
-for the staff-account equivalent). Every other account is **anonymized**.
+bookings / agreement acceptances / incident reports, done server-side via
+`supabase.auth.admin.deleteUser` (see `api/admin-delete.ts` for the
+staff-account equivalent). Every other account is **anonymized**.
 
 ## 4. Scripted anonymization — `public.anonymize_user(p_user_id, p_request_id)`
 
@@ -72,7 +71,7 @@ has a booking in `confirmed` / `awaiting_payment` / `downpayment_paid` /
 
 ### Kept (transactional / evidentiary — now anonymous by association)
 
-`bookings`, `payments`, `security_deposits` + claims, `booking_agreement_acceptances`,
+`bookings`, `payments`, `booking_agreement_acceptances`,
 `booking_reviews` rows and ratings, ledger journals.
 
 ### Flagged for manual review (returned as counts in the report)

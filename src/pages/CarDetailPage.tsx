@@ -1136,12 +1136,6 @@ export default function CarDetailPage() {
                     <span>Total</span>
                     <span>₱{totalPrice.toLocaleString()}</span>
                   </div>
-                  {Number(car.security_deposit_amount) > 0 && (
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Owner-set security deposit</span>
-                      <span>₱{Number(car.security_deposit_amount).toLocaleString()}</span>
-                    </div>
-                  )}
                   {downpaymentRate < 1 ? (
                     <>
                       <div className="flex justify-between text-xs text-muted-foreground">
@@ -1151,7 +1145,7 @@ export default function CarDetailPage() {
                         <span>₱{Math.ceil(totalPrice * downpaymentRate).toLocaleString()}</span>
                       </div>
                       <p className="text-[11px] text-muted-foreground">
-                        The {Math.round(downpaymentRate * 100)}% downpayment reserves the booking and is part of the rental price. It is not the security deposit.
+                        The {Math.round(downpaymentRate * 100)}% downpayment reserves the booking and is part of the rental price.
                       </p>
                     </>
                   ) : (
@@ -1162,11 +1156,6 @@ export default function CarDetailPage() {
                   <p className="text-[11px] text-muted-foreground">
                     The renter pays this separately disclosed processing fee. It is never deducted from the lister's base rental.
                   </p>
-                  {Number(car.security_deposit_amount) > 0 && (
-                    <p className="text-[11px] text-muted-foreground">
-                      The security deposit is a separate owner requirement for possible damage, missing fuel, or return issues. It is shown separately from the PayMongo booking total.
-                    </p>
-                  )}
                   {showDailyPricingClarifier && (
                     <p className="text-[11px] text-muted-foreground">
                       Actual rental window: about {actualDurationMinutes} minute

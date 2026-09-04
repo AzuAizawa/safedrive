@@ -35,7 +35,7 @@ Never place service-role keys, PayMongo secret keys, webhook secrets, Gmail shar
 - [6. Vehicle Approval, Insurance, and Availability](#6-vehicle-approval-insurance-and-availability)
 - [7. Vehicle-Specific Rental Agreement](#7-vehicle-specific-rental-agreement)
 - [8. Pickup and Return Condition Reports](#8-pickup-and-return-condition-reports)
-- [9. Security Deposit](#9-security-deposit-option-b)
+- [9. Security Deposit (Removed)](#9-security-deposit-option-b)
 - [10. Financial Ledger](#10-financial-ledger)
 - [11. Payout Timing](#11-payout-timing)
 - [12. Reconciliation Dashboard and Solutions](#12-reconciliation-dashboard-and-solutions)
@@ -72,7 +72,7 @@ SafeDrive remains unsuitable for a public real-money launch until hosting, live 
 | Trip reports | Implemented; live schema present | Required private bucket and relations exist; full authenticated photo journey remains a presentation/staging test |
 | Vehicle agreement versions | Implemented; live schema present | Disposable booking test proved versioned agreement acceptance |
 | Maintenance blackouts | Implemented; live schema present | Conflict rules exist; include a controlled UI example in the thesis demonstration |
-| Security deposit | Implemented locally | PayMongo test mode cannot prove a real refund; controlled local claim/release simulation remains available |
+| Security deposit | Removed (CHAPTER 34) | Shipped then fully removed before any deposit was ever collected live - see §9 |
 | Ledger and reconciliation | Implemented and logic-tested | Live tables/accounts exist and queried journals balance; no historical journals are invented |
 | Retention/deletion requests | Implemented locally | Schedule is provisional pending Philippine counsel/DPO review |
 | PayMongo checkout/refunds | Test checkout proven | Test credentials/wallet and checkout creation pass; paid webhook/refund remains a controlled staging test |
@@ -85,7 +85,7 @@ SafeDrive remains unsuitable for a public real-money launch until hosting, live 
 ### 1.2 Current system summary
 
 - **Works now on localhost:** public browsing, registration/login/recovery, verification, vehicle listing and approval, guest inquiry and Gmail reply, support cases, role-aware admin work, agreement-backed booking, PayMongo test checkout creation, notifications, audit/security logs, and the production build.
-- **Implemented with automated logic coverage:** overlapping-booking protection, maintenance blackouts, agreement snapshots and acceptance, trip-condition requirements, refundable deposits and claims, refund/payout eligibility, append-only ledger entries, reconciliation findings, and retention requests.
+- **Implemented with automated logic coverage:** overlapping-booking protection, maintenance blackouts, agreement snapshots and acceptance, trip-condition requirements, refund/payout eligibility, append-only ledger entries, reconciliation findings, and retention requests.
 - **Live services verified safely:** Supabase connectivity and schema surfaces, renter/admin/super-admin access boundaries, PayMongo test secret authentication, activated test wallet matching, and an unpaid disposable booking checkout.
 - **Intentionally not performed:** a fabricated successful payment webhook, real refund, real wallet transfer, live payout, or destructive cleanup of historical records. These actions could create permanent provider or append-only financial evidence.
 - **Release position:** suitable for controlled local/thesis demonstrations using test data; not approved for public real-money operation.
@@ -181,7 +181,6 @@ Super-admins additionally see:
 
 - pending or failed refunds;
 - pending or failed payouts;
-- security deposits requiring release, claim, decision, refund, or failure review;
 - privacy/retention requests requiring identity or decision work; and
 - open or investigating reconciliation mismatches.
 
@@ -256,7 +255,7 @@ The "how long does review take" wording (identity and vehicle) is editable live 
 
 ### 6.4 Registration/CTPL/comprehensive live in Renewal, not Edit Listing (CHAPTER 33)
 
-The quick "Edit Listing" editor on `/my-vehicles` only touches booking-facing details (price, security deposit, pickup info, transmission, fuel, contact, GPS, rental agreement) - it can no longer retype `registration_expiry` / `ctpl_expiry` / `comprehensive_insurance_expiry` with no supporting document. Those three values are edited in exactly two places:
+The quick "Edit Listing" editor on `/my-vehicles` only touches booking-facing details (price, pickup info, transmission, fuel, contact, GPS, rental agreement) - it can no longer retype `registration_expiry` / `ctpl_expiry` / `comprehensive_insurance_expiry` with no supporting document. Those three values are edited in exactly two places:
 
 - **Add Vehicle** (`/my-vehicles`, initial listing): registration and CTPL expiry are required; comprehensive is optional. Documents required at this stage are OR/CR front+back only - CTPL and comprehensive proof are not collected here.
 - **Registration & Insurance Renewal** (`/car-renewals`, `ListerCarRenewalPage`): open to any of the lister's live vehicles at any time (not only ones already forced offline with `status = 'renewal_required'`), so a lister can renew ahead of the expiry instead of only after being flagged. A submission bundles the 5 existing physical-inspection documents (OR/CR, LTO receipt, MVIR, emission test, updated photos) with the new registration/CTPL expiry dates, a required CTPL document, and an optional comprehensive expiry + document (the two must be given together or both left blank). `car_renewals` now carries `registration_expiry` / `ctpl_expiry` / `comprehensive_insurance_expiry` / `ctpl_document_path` / `comprehensive_document_path` (CHAPTER 33). `/admin/vehicle-renewals` (`AdminVehicleRenewalsPage`) reads and validates these lister-submitted dates on Approve instead of an admin re-typing them blind through a `window.prompt()`.
@@ -316,7 +315,7 @@ The trip lifecycle is gated against the clock so it cannot be completed before i
 - **Completion** (`Finish Trip`) is rejected before the scheduled pickup datetime - a trip that has not started cannot be finished. Early checkout is allowed any time from pickup onward.
 - **Lister-absent completion:** once the renter has completed (return report submitted, car dropped off), `api/expire-booking-deadlines.ts` auto-completes the lister's side after `lister_completion_timeout_hours` (default 18) so an unreachable lister cannot hold the renter or the deposit indefinitely. The deposit review window and the lister's claim right still apply from the evidence on file.
 
-`arrival_checkin_lead_hours` is one of three configurable lifecycle timings in `platform_settings` (`arrival_checkin_lead_hours`, `deposit_claim_window_hours`, `lister_completion_timeout_hours`). Unlike the financial terms they are read **live**, not snapshotted per booking, and are changed through the same multi-super-admin consensus flow (`/admin/platform-settings`).
+`arrival_checkin_lead_hours` is one of two configurable lifecycle timings in `platform_settings` (`arrival_checkin_lead_hours`, `lister_completion_timeout_hours`). Unlike the financial terms they are read **live**, not snapshotted per booking, and are changed through the same multi-super-admin consensus flow (`/admin/platform-settings`).
 
 ### 8.2 Ratings and reviews (Airbnb / Turo style)
 
@@ -359,24 +358,21 @@ The fairness gap CHAPTER 27 left open: a renter forced to cancel because the car
 - **Take a car offline (`/my-vehicles` "Disable"):** if the car has upcoming `pending` / `confirmed` / paid bookings (excluding `dispute_status='open'` ones), a confirmation modal lists them and asks for a reason. On confirm each is cancelled through `booking-action` `cancel` (paid ones auto-refund); an `active` trip blocks the toggle. Reason **stolen/missing** or **damaged** passes `waiveStrike` so the cancellations are recorded but excluded from the completion rate and the auto-pause count, and opens a `vehicle_offline` support ticket. Reason **other** is a normal lister cancellation.
 - **`booking_cancellations.strike_waived`** (CHAPTER 31): both reliability RPCs and the `booking-action` auto-pause strike count ignore a waived row.
 
-## 9. Security Deposit: Option B
+## 9. Security Deposit: Option B (Removed)
 
-SafeDrive uses a **separate refundable deposit**, not a hidden deduction from rental income. This is simpler to explain and reconcile than mixing the deposit with rental revenue.
-
-### 9.1 Flow
-
-1. The renter pays the stated refundable deposit through a separate test/live checkout.
-2. The ledger records it as a liability, not SafeDrive income.
-3. After both sides complete the trip, a claim window opens for `deposit_claim_window_hours` (default 24, configurable through platform consensus).
-4. During the window the lister either **confirms the return with no issues** (`lister_confirm_return`, releases the deposit to the renter immediately and lets the payout proceed) or files a documented claim. Once they confirm - or the window closes - they can no longer claim, so a lister cannot wait for the renter to leave and then raise a late claim.
-5. With no claim, `api/expire-booking-deadlines.ts` auto-releases the full deposit to the renter after the window.
-6. A lister claim must state an amount and detailed reason; it never deducts automatically.
-7. The renter can respond.
-8. Only a super-admin can approve, partly approve, or reject after reviewing the agreement and evidence.
-9. Approved deduction cannot exceed the claim or deposit.
-10. The remaining amount is refunded; failures enter review and reconciliation.
-
-Only one open claim is allowed per deposit. All actions are audit-logged. A less complicated future alternative is PayMongo authorization/hold-then-capture, but it should be adopted only if the relevant payment methods, hold duration, refund behavior, and SafeDrive merchant account are confirmed to support the complete rental period.
+SafeDrive shipped a separate refundable-deposit workflow (deposit checkout, a
+post-trip claim window, super-admin claim review, and a dedicated `2020`
+ledger liability account) through CHAPTER 33. **CHAPTER 34 removed it end to
+end** - the `security_deposits` / `security_deposit_claims` tables,
+`cars.security_deposit_amount`, `platform_settings.deposit_claim_window_hours`,
+the `2020` ledger account, the `/security-deposit/:bookingId` and
+`/admin/security-deposits` routes, `api/lib/securityDeposit.ts` and its three
+dedicated endpoints, and every gate that referenced any of it (arrival
+check-in, payout automation, booking completion, the PayMongo webhook, refund
+receipts). A pre-removal diagnostic confirmed zero deposits, claims, deposit
+payments, or finalized deposit ledger journals existed, so the removal has no
+historical footprint to reconcile. This section number is kept as a stub so
+every other section's number and anchor link stays correct.
 
 ## 10. Financial Ledger
 
@@ -393,16 +389,15 @@ Payments, refunds, deposits, commission, provider fees, and lister payables are 
 - Finalized journals and lines are append-only.
 - Errors are fixed by an exact reversal plus a new corrected journal with a written reason.
 - Super-admin is the only browser role that can view/correct the ledger.
-- Server handlers post normal payment, refund, deposit, and payout events.
-- Security deposits use a liability account and are never counted as commission revenue.
+- Server handlers post normal payment, refund, and payout events.
 
-Seed accounts include PayMongo clearing, cash/bank, lister payable, refundable deposits, refund payable, deferred platform fees, commission revenue, payment-fee recovery, and payment-processing expense.
+Seed accounts include PayMongo clearing, cash/bank, lister payable, refund payable, deferred platform fees, commission revenue, payment-fee recovery, and payment-processing expense.
 
 ### 10.3 Processing fee policy
 
 SafeDrive currently supports a transparently disclosed renter processing charge calculated from configurable percentage/fixed settings. The checkout total is grossed up so the lister’s base rental amount is not reduced by that charge. This is a SafeDrive pricing decision, not a general rule that consumers always inherit transfer fees.
 
-Before public launch, confirm the chosen surcharge wording and method with PayMongo and Philippine counsel. Show base rental, SafeDrive/platform fee, payment-processing charge, refundable deposit, and final total before acceptance. Do not hide a fee after checkout begins. Use **PHP 100 only as a controlled test amount**, not as a permanent production fee.
+Before public launch, confirm the chosen surcharge wording and method with PayMongo and Philippine counsel. Show base rental, SafeDrive/platform fee, payment-processing charge, and final total before acceptance. Do not hide a fee after checkout begins. Use **PHP 100 only as a controlled test amount**, not as a permanent production fee.
 
 ## 11. Payout Timing
 
@@ -411,18 +406,17 @@ Lister payout becomes eligible only after:
 - the provider has confirmed the relevant renter payment;
 - both parties have completed the trip workflow;
 - required return reports are present;
-- the deposit claim window is closed or a claim is resolved;
 - no open support/dispute hold blocks release;
 - payout details are complete; and
 - no active payout already exists.
 
-SafeDrive deducts its disclosed commission from the agreed base and protects the lister base from the configured renter processing charge. If a super-admin approves a security-deposit claim, only the approved amount is added once to the lister payable/payout and the remainder is handled as refundable to the renter. Rejected claims add nothing to the payout. The payout helpers are idempotent so a retry must not add the same approved claim twice.
+SafeDrive deducts its disclosed commission from the agreed base and protects the lister base from the configured renter processing charge. The payout helpers are idempotent so a retry must not double-post the same payout.
 
 Automatic payout remains disabled for public use until PayMongo Money Movement API access, wallet source, recipient/institution setup, callbacks, retries, and reconciliation are proven. The local simulator changes SafeDrive test records only and must never be described as wallet or bank settlement.
 
 ## 12. Reconciliation Dashboard and Solutions
 
-Reconciliation compares SafeDrive, PayMongo, security deposits, and the ledger. It detects issues but never silently sends money, marks payment successful, creates a refund, or edits a finalized journal.
+Reconciliation compares SafeDrive, PayMongo, and the ledger. It detects issues but never silently sends money, marks payment successful, creates a refund, or edits a finalized journal.
 
 | Detected issue | Safe response |
 |---|---|
@@ -433,10 +427,9 @@ Reconciliation compares SafeDrive, PayMongo, security deposits, and the ledger. 
 | Pending payout too long | Alert super-admin, query provider status, retry only with the same idempotency key or switch to documented manual review |
 | Failed payout | Keep lister payable open, correct recipient data, retry after review; do not mark paid |
 | Refund recorded but not provider-confirmed | Keep refund pending/failed, block duplicate refund, investigate provider window/method restrictions |
-| Deposit counted as income | Reverse incorrect journal and post it to refundable-deposit liability |
 | Ledger does not balance | Do not finalize; correct lines before finalization or reverse a finalized error |
 
-The API compares local paid records with provider checkout/payment status, amounts, references, deposit state, payout/refund state, and balanced journals. It also lists up to the first 100 provider payments when searching for a PayMongo payment missing from SafeDrive. If PayMongo returns a full page, the run records `provider_payment_list_may_be_truncated` instead of pretending the comparison was complete. A dedicated merchant account reduces false findings from unrelated provider payments; if the account is shared, the operator must scope and review provider-only results manually.
+The API compares local paid records with provider checkout/payment status, amounts, references, payout/refund state, and balanced journals. It also lists up to the first 100 provider payments when searching for a PayMongo payment missing from SafeDrive. If PayMongo returns a full page, the run records `provider_payment_list_may_be_truncated` instead of pretending the comparison was complete. A dedicated merchant account reduces false findings from unrelated provider payments; if the account is shared, the operator must scope and review provider-only results manually.
 
 Reconciliation marks failed runs as failed and alerts super-admins about critical mismatches. It never auto-finalizes uncertain money. Current provider pagination/rate limits must be rechecked before production, and a hosted scheduled job is still deferred.
 
@@ -488,11 +481,11 @@ Do not run Chapters 1 or 2 merely to obtain Chapter 14. Chapter 1 contains histo
 ### 15.2 Current live proof
 
 - `npm run check:live-supabase` passed against the intended project.
-- The required operational, agreement, trip, deposit, retention, ledger, and reconciliation relations are readable through the server verifier.
+- The required operational, agreement, trip, retention, ledger, and reconciliation relations are readable through the server verifier.
 - All required private storage buckets exist and remain private.
-- `platform_settings` contains ledger activation, both renter-processing-fee controls, the configurable downpayment/refund terms, the three lifecycle timings (`arrival_checkin_lead_hours`, `deposit_claim_window_hours`, `lister_completion_timeout_hours`), and `contact_email` - the public contact address shown in the Terms of Service, Privacy Policy, sign-up notice, and the sign-in/password-reset help text. Because it is contact information rather than a money or policy value, a single super-admin edits it directly through `set_platform_contact_email(text)` (super-admin only, audited as `platform_contact_email_updated`); every surface reads it live through `get_platform_contact_email()` and falls back to the seeded default if the lookup fails.
-- All nine required financial accounts are seeded.
-- No active booking overlap, duplicate active payout, duplicate completed checkout event, duplicate active subscription, duplicate open deposit claim, or unbalanced queried ledger journal was found.
+- `platform_settings` contains ledger activation, both renter-processing-fee controls, the configurable downpayment/refund terms, the two lifecycle timings (`arrival_checkin_lead_hours`, `lister_completion_timeout_hours`), and `contact_email` - the public contact address shown in the Terms of Service, Privacy Policy, sign-up notice, and the sign-in/password-reset help text. Because it is contact information rather than a money or policy value, a single super-admin edits it directly through `set_platform_contact_email(text)` (super-admin only, audited as `platform_contact_email_updated`); every surface reads it live through `get_platform_contact_email()` and falls back to the seeded default if the lookup fails.
+- All eight required financial accounts are seeded.
+- No active booking overlap, duplicate active payout, duplicate completed checkout event, duplicate active subscription, or unbalanced queried ledger journal was found.
 - `npm run check:live-roles` passed all 12 ordinary-user, admin, and super-admin authorization checks and removed its three temporary identities.
 - `npm run check:live-booking-journey` passed all 13 disposable renter/lister booking checks and removed its temporary Supabase data and identities.
 
@@ -523,11 +516,10 @@ Do not run Chapters 1 or 2 merely to obtain Chapter 14. Chapter 1 contains histo
 
 - `PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true`
 
-With this on (and a `sk_test_` key, or no key - a live key auto-disables it), SafeDrive records **all three money-movement paths** with the full ledger + notification + receipt trail but **without calling PayMongo**:
+With this on (and a `sk_test_` key, or no key - a live key auto-disables it), SafeDrive records **both money-movement paths** with the full ledger + notification + receipt trail but **without calling PayMongo**:
 
 - **Payouts** - `payoutAutomation.ts`, `sandbox_payout_*` reference, journal `2010 -> 1010`.
 - **Cancellation refunds** - `refundAutomation.ts`, `sandbox_refund_*` reference, `payments` row `refund` completed, reversal journal via `postCompletedRefundToLedger`.
-- **Security-deposit releases** - `securityDeposit.ts` `runSecurityDepositRelease`, `sandbox_deposit_refund_*` reference, journal `2020 -> 1010`.
 
 The shared gate is `api/lib/paymongoMode.ts` `isDemoMoneyMovementEnabled`. Set the flag on a thesis/demo deployment; omit it for any launch that moves real money. Never prefix a server secret with `VITE_`.
 
@@ -562,22 +554,15 @@ These automated checks are regression evidence, not a replacement for authentica
 **Simulation A - ordinary payout state machine:**
 
 1. Keep a PayMongo `sk_test_` key and `PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION=true` (demo payout mode).
-2. Use a completed test booking with valid payout details, required return reports, a terminal deposit state, and no dispute/reconciliation hold.
+2. Use a completed test booking with valid payout details, required return reports, and no dispute/reconciliation hold.
 3. As super-admin, run the automatic payout action.
 4. Confirm one `sandbox_payout_*` record, notification, audit entry, and balanced payout journal.
 5. Repeat the action and confirm the same economic payout is not posted twice.
 6. Confirm the PayMongo wallet balance did not change.
 
-**Simulation B - PHP 100 security-deposit disposition:**
+**Simulation B is retired.** It exercised the security-deposit claim/release workflow, which was removed in CHAPTER 34 (see §9) before any deposit was ever collected in the live database.
 
-1. Configure a test vehicle deposit of PHP 100 and create the separate test deposit checkout.
-2. Complete pickup/return reports and the booking workflow.
-3. Submit a full PHP 100 claim with a reason and evidence; let the renter respond.
-4. As super-admin, approve exactly PHP 100.
-5. Confirm the deposit becomes terminal, the approved amount is added to the lister payout once, no renter remainder is recorded, and ledger entries balance.
-6. Repeat/retry the finalization and confirm no duplicate claim payout/journal is created.
-
-PayMongo test mode does not prove a real refund of test funds, and the local payout simulator does not call the wallet. These demonstrations validate SafeDrive eligibility, idempotency, review, audit, and accounting paths only. An actual PHP 100 wallet transfer requires PayMongo-authorized Money Movement wallet/recipient/institution API access. Do not guess a wallet ID or recipient.
+PayMongo test mode does not prove a real refund of test funds, and the local payout simulator does not call the wallet. Simulation A validates SafeDrive eligibility, idempotency, review, audit, and accounting paths only. An actual wallet transfer requires PayMongo-authorized Money Movement wallet/recipient/institution API access. Do not guess a wallet ID or recipient.
 
 ## 18. Accessibility, Mobile, and Browser Checklist
 
@@ -967,13 +952,9 @@ Use this answer pattern during a defense: state the problem, name the control, e
 - **Defense answer:** "Location is optional corroborating context, not automatic proof of fault or presence. The report still works when consent is denied."
 - **Proof and limitation:** Test allow and deny paths and show latitude, longitude, accuracy, and server/capture times only when granted. GPS can be unavailable or spoofed and must be weighed with other evidence.
 
-### E.12 The security deposit is a separate refundable liability
+### E.12 The security deposit feature was removed (CHAPTER 34)
 
-- **Decision:** SafeDrive uses Option B: collect a clearly itemized deposit separately, hold it through the rental, allow a limited claim/response review, then release or refund according to the decision.
-- **Why:** A deposit is not earned rental income. Separating it improves disclosure, accounting, refund handling, and dispute review.
-- **Support:** Consumer transparency principles under the Internet Transactions Act support clear price components and redress. Accounting logic treats amounts owed back to a customer as liabilities until a valid disposition occurs. PayMongo's actual supported payment/refund methods must be confirmed.
-- **Defense answer:** "We separate the deposit because it remains refundable and should not inflate revenue. Any deduction needs evidence, a response opportunity, a reasoned decision, and an audit trail."
-- **Proof and limitation:** Demonstrate deposit payment, no-claim release, claim, response, decision, refund/failure, and ledger treatment. The claim window and policy are SafeDrive choices requiring legal and provider review.
+- **Status:** the separate refundable-deposit workflow (§9) shipped in CHAPTER 33 and was fully removed in CHAPTER 34, before any deposit had ever been collected in the live database. This entry is kept so the E.1-E.N numbering stays stable; see §9 for the removal note.
 
 ### E.13 Financial journals are append-only and double-entry
 
@@ -1234,7 +1215,6 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | User | `/subscriptions` | `SubscriptionPlansPage`; hosted subscription checkout |
 | User | `/vehicle-availability` | `VehicleAvailabilityPage`; maintenance/blackout management |
 | User | `/trip-report/:bookingId/:phase` | `TripConditionReportPage`; pickup or return condition report |
-| User | `/security-deposit/:bookingId` | `SecurityDepositPage`; deposit status, claim, and response |
 | User | `/privacy-request` | `PrivacyRequestPage`; access/correction/deletion/other request |
 | Admin | `/admin` | `AdminDashboard`; role-aware operational summary |
 | Admin | `/admin/users` | `AdminUsersPage`; profile/KYC review |
@@ -1251,11 +1231,10 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | Super-admin | `/admin/platform-settings` | `AdminPlatformSettingsPage`; super-admin only (view and edit) |
 | Super-admin | `/admin/payouts` | Legacy redirect to the payout tab in `/admin/financial-reviews` |
 | Super-admin | `/admin/refunds` | Legacy redirect to the refund tab in `/admin/financial-reviews` |
-| Super-admin | `/admin/financial-reviews` | `AdminFinancialReviewsPage`; combined lister payout, renter refund, and security-deposit review workspace |
+| Super-admin | `/admin/financial-reviews` | `AdminFinancialReviewsPage`; combined lister payout and renter refund review workspace |
 | Super-admin | `/admin/financial-ledger` | `AdminFinancialLedgerPage`; journals and balanced entries |
 | Super-admin | `/admin/reconciliation` | `AdminReconciliationPage`; provider/local mismatch review |
 | Super-admin | `/admin/retention-requests` | `AdminRetentionRequestsPage`; privacy request decision and lawful holds |
-| Super-admin | `/admin/security-deposits` | `AdminSecurityDepositsPage`; deposit claim decisions and release |
 | Fallback | `*` | Unknown paths redirect to `/` |
 
 ### G.3 Server API catalogue
@@ -1280,7 +1259,6 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/create-checkout.ts` | POST; renter | Create hosted downpayment/full checkout from server-calculated records |
 | `api/create-guest-inquiry.ts` | POST; public (optional bearer), rate/duplicate guarded | Validate fields/topics and enqueue an inquiry; a bearer token links it to the account and seeds the first thread message |
 | `api/inquiry-followup.ts` | POST; the inquiry's own account holder | Add a follow-up message to a non-resolved inquiry, re-open it in the queue, notify admins |
-| `api/create-security-deposit-checkout.ts` | POST; renter | Create the separate refundable-deposit checkout idempotently |
 | `api/create-subscription-checkout.ts` | POST; user | Create hosted subscription checkout |
 | `api/data-request.ts` | GET/POST; user | List own privacy requests or submit a new request and notify super-admins |
 | `api/expire-booking-deadlines.ts` | GET/POST; cron secret | Expire ignored owner/payment deadlines without browser dependence |
@@ -1290,19 +1268,17 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/mark-manual-refund.ts` | POST; super-admin | Record an actually completed manual refund with method/reference |
 | `api/process-payout.ts` | POST; super-admin | Run payout eligibility and PayMongo/simulator automation |
 | `api/process-refund.ts` | POST; super-admin | Retry one or a controlled batch of refund automation |
-| `api/process-security-deposit-release.ts` | POST; super-admin | Create/check PayMongo refund for the refundable deposit remainder |
 | `api/record-security-event.ts` | POST; authenticated or allow-listed login event | Sanitize and record security-relevant activity without secrets |
 | `api/reply-guest-inquiry.ts` | POST; admin/super-admin | `action: reply` adds a thread message + emails (Resend, Gmail fallback), sets `in_progress`, notifies a linked account; `action: resolve` closes the inquiry |
 | `api/reset-my-authenticator.ts` | POST; authenticated | Clear the caller's own enrolled authenticator (self-service after an email-code sign-in) so the login flow can offer a fresh QR |
-| `api/run-reconciliation.ts` | POST; super-admin | Compare local payments/journals/deposits with PayMongo and save findings |
+| `api/run-reconciliation.ts` | POST; super-admin | Compare local payments/journals with PayMongo and save findings |
 | `api/sync-paymongo-refund.ts` | POST; super-admin | Read an existing PayMongo refund state and reconcile only the matching local refund, ledger, and audit record; never creates a new refund |
-| `api/security-deposit-action.ts` | POST; participant/super-admin by action | Submit claim, renter response, or final decision with evidence gates |
 | `api/send-return-reminders.ts` | GET/POST; cron secret | Notify both booking parties in-app and through Resend; use the Gmail webhook only when Resend is not configured |
 | `api/send-verification-decision-email.ts` | POST; admin/super-admin | Send the already-recorded verification approval/rejection notification through the server-only Resend integration |
 | `api/send-vehicle-decision-email.ts` | POST; admin/super-admin | Send the already-recorded vehicle approval/rejection/review notification through server-only Resend after rechecking the current vehicle status |
 | `api/send-support-ticket-reply-email.ts` | POST; admin/super-admin and original message author | Email a registered user after their administrator's already-recorded support-ticket reply; does not block the in-app reply |
 | `api/submit-trip-condition-report.ts` | POST; booking participant | Validate phase/categories/optional location and persist report/photos |
-| `api/webhooks/paymongo.ts` | POST; signed PayMongo callback | Idempotently authorize checkout/refund/deposit/subscription state changes and journals |
+| `api/webhooks/paymongo.ts` | POST; signed PayMongo callback | Idempotently authorize checkout/refund/subscription state changes and journals |
 | `api/webhooks/paymongo-payouts.ts` | POST; signed/callback-guarded provider event | Reconcile payout success/failure and notify/audit without duplicate terminal effects |
 
 ### G.4 Exported business methods and helpers
@@ -1313,7 +1289,6 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/lib/reconciliation.ts` | `paymentLedgerEventKey`, `findDuplicateProviderTransactions`, `groupCompletedCheckoutPayments`, `extractPayMongoPaymentIds` | Idempotency keys, duplicate detection, checkout grouping, and provider-reference parsing |
 | `api/lib/payoutAutomation.ts` | `createSupabaseAdmin`, `processAutomaticPayoutForBooking` | Service client plus payout eligibility/idempotency/provider/simulator flow |
 | `api/lib/refundAutomation.ts` | `processAutomaticRefundForBooking` | Refund eligibility, provider attempt, fallback review, audit, and notification |
-| `api/lib/securityDeposit.ts` | `calculateSecurityDepositDisposition`, `finalizeSecurityDepositRelease` | Cap approved claims, calculate renter remainder, and post terminal deposit effects |
 | `api/lib/email.ts` | `sendTransactionalEmail`, receipt (itemized payout), verification, user-notification, and `sendAdminAlertEmail` helpers | Server-only Resend delivery, HTML/text transactional templates, and idempotency keys; admin alerts fire only on money-movement exceptions |
 | `src/contexts/AuthContext.tsx` | `AuthProvider`, `useAuth` | Session/profile/MFA state and auth operations |
 | `src/lib/adminWorkQueue.ts` | `loadSupportTicketsNeedingAdminReply` | Find support cases where the newest participant message needs an admin answer |
@@ -1344,7 +1319,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 - `AdminLayout` and `DashboardLayout` are functional shell components for navigation, role-aware menus, work counts, and nested page output.
 - `ArrivalPhotoCapture` is a functional evidence component. Its exported `ArrivalLocationEvidence` type carries optional latitude, longitude, accuracy, and capture time only after permission/consent.
 - `src/types/database.ts` exports `Json`, the generated-style `Database` interface, row aliases (`Profile`, `Car`, `Booking`, `Payment`, `GuestInquiry`, and others), and composite `CarWithDetails` / `BookingWithDetails` types.
-- The database type surface covers: profiles, verification images, vehicle catalogue/listings/images/documents/renewals, bookings/extensions/reviews, payments, audit logs, guest inquiries, agreement versions/acceptances, vehicle unavailability, trip reports/photos, security deposits/claims, retention requests/rules, financial accounts/journals/entries, reconciliation runs/items, security logs, platform settings, subscriptions, support tickets/messages, notifications, and the `create_ledger_correction` database function.
+- The database type surface covers: profiles, verification images, vehicle catalogue/listings/images/documents/renewals, bookings/extensions/reviews, payments, audit logs, guest inquiries, agreement versions/acceptances, vehicle unavailability, trip reports/photos, retention requests/rules, financial accounts/journals/entries, reconciliation runs/items, security logs, platform settings, subscriptions, support tickets/messages, notifications, and the `create_ledger_correction` database function.
 - `api/lib/supabaseTypes.ts` defines the service-role client type used by server-only finance helpers. It must never be imported into browser code.
 
 ### G.6 Important external and internal calls
@@ -1569,7 +1544,7 @@ This register turns the remaining design questions into defensible product decis
 | 5 | Replace the rigid three-day rule with a shorter processing window | A trip may start as early as the next day. The existing 24-hour owner-response and 24-hour reservation-payment windows still apply, but both are now capped so they never run past the pickup time; a request that is not accepted and paid before pickup auto-cancels and releases the car. Same-day starts stay disabled pending transport/insurance/handover review. | **Implemented 31 August 2026** on team instruction (Moises Bien): `api/create-booking.ts`, `api/booking-action.ts`, `src/pages/CarDetailPage.tsx`, `src/pages/MyBookingsPage.tsx`, plus Terms and Platform Agreement copy. See the change log. |
 | 6 | Preserve the exact lister agreement | The booking must display the owner-uploaded, admin-approved PDF. The renter accepts that exact version before payment; SafeDrive stores version, hash, account, server time, and booking snapshot. | **Implemented in schema/API; live old-path and end-to-end proof still required.** |
 | 7 | Treat trip evidence as evidence, not an automatic verdict | Both parties submit pickup and return condition reports. Time-stamped photos are required; optional location is collected only with consent and stored with accuracy. Disputes still require human review. | **Implemented foundation; full authenticated workflow proof remains.** |
-| 8 | Separate deposits, provider money, and earned revenue | Keep the refundable deposit in a liability state. Hold payout while a claim, refund, failed provider event, or reconciliation issue is unresolved. | **Implemented foundation; PayMongo test and accounting sign-off remain.** |
+| 8 | *(Removed)* Separate deposits, provider money, and earned revenue | The separate refundable-deposit workflow was implemented (CHAPTER 33) then fully removed (CHAPTER 34) before any deposit was ever collected in the live database - see §9. | **Removed 5 September 2026.** |
 | 9 | Reconcile provider truth with application truth | Signed webhooks and idempotency handle normal events; scheduled reconciliation detects missing, duplicated, mismatched, failed, or unbalanced records. Never repair finalized finance by overwriting history. | **Implemented test logic; provider pagination, missed-event recovery, and live wallet capability remain unproven.** |
 | 10 | Keep privacy requests out of daily lister navigation | Put access, correction, deletion/anonymization, and restriction requests under Profile > Privacy. Super-admins review identity, scope, lawful holds, and execution. Do not offer instant destructive deletion. | **Implemented route and review queue; DPO procedure and retention approval remain.** |
 | 11 | Keep the download as a Payment Acknowledgment | It may show transaction and booking evidence, but it must not claim to be a BIR invoice, BIR-accredited document, or input-VAT support. | **Implemented. Accountant/BIR-system work is deferred.** |

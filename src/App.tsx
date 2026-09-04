@@ -52,7 +52,6 @@ const UpdatePasswordPage = lazyWithReload(() => import("@/pages/UpdatePasswordPa
 const SubscriptionPlansPage = lazyWithReload(() => import("@/pages/SubscriptionPlansPage"));
 const VehicleAvailabilityPage = lazyWithReload(() => import("@/pages/VehicleAvailabilityPage"));
 const TripConditionReportPage = lazyWithReload(() => import("@/pages/TripConditionReportPage"));
-const SecurityDepositPage = lazyWithReload(() => import("@/pages/SecurityDepositPage"));
 const PrivacyRequestPage = lazyWithReload(() => import("@/pages/PrivacyRequestPage"));
 
 const AdminDashboard = lazyWithReload(() => import("@/pages/admin/AdminDashboard"));
@@ -121,7 +120,6 @@ function App() {
                       <Route path="/support" element={<SupportTicketsPage />} />
                       <Route path="/payment/success" element={<PaymentSuccessPage />} />
                       <Route path="/trip-report/:bookingId/:phase" element={<TripConditionReportPage />} />
-                      <Route path="/security-deposit/:bookingId" element={<SecurityDepositPage />} />
                       <Route path="/privacy-request" element={<PrivacyRequestPage />} />
 
                       {/* Renter space - a direct entry switches back to renter mode */}
@@ -183,7 +181,6 @@ function App() {
                         <Route path="/admin/financial-reviews" element={<AdminFinancialReviewsPage />} />
                         <Route path="/admin/payouts" element={<Navigate to="/admin/financial-reviews?view=payouts" replace />} />
                         <Route path="/admin/refunds" element={<Navigate to="/admin/financial-reviews?view=refunds" replace />} />
-                        <Route path="/admin/security-deposits" element={<Navigate to="/admin/financial-reviews?view=deposits" replace />} />
                         <Route path="/admin/financial-ledger" element={<AdminFinancialLedgerPage />} />
                         <Route path="/admin/reconciliation" element={<AdminReconciliationPage />} />
                         <Route path="/admin/retention-requests" element={<AdminRetentionRequestsPage />} />

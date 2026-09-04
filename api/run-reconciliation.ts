@@ -46,14 +46,13 @@ export default async function handler(req: Request) {
     failedRun = { supabase, id: run.id };
 
     const issues: Issue[] = [];
-    const [paymentsResult, journalsResult, entriesResult, depositsResult, subscriptionsResult] = await Promise.all([
+    const [paymentsResult, journalsResult, entriesResult, subscriptionsResult] = await Promise.all([
       supabase.from("payments").select("id, booking_id, amount, payment_type, status, transaction_id, notes, created_at").gte("created_at", periodStart).order("created_at", { ascending: false }).limit(500),
       supabase.from("ledger_journals").select("id, booking_id, event_key, provider_reference, status, created_at").gte("created_at", periodStart).limit(1000),
       supabase.from("ledger_entries").select("journal_id, debit_centavos, credit_centavos").gte("created_at", periodStart).limit(5000),
-      supabase.from("security_deposits").select("id, booking_id, amount_centavos, status, provider_payment_id, claim_deadline, created_at").gte("created_at", periodStart).limit(500),
       supabase.from("subscriptions").select("id, provider_checkout_id, provider_payment_id, amount_centavos, paid_at, created_at").gte("created_at", periodStart).limit(500),
     ]);
-    const queryError = paymentsResult.error || journalsResult.error || entriesResult.error || depositsResult.error || subscriptionsResult.error;
+    const queryError = paymentsResult.error || journalsResult.error || entriesResult.error || subscriptionsResult.error;
     if (queryError) throw queryError;
     const payments = paymentsResult.data ?? [];
     const journals = journalsResult.data ?? [];
@@ -108,9 +107,6 @@ export default async function handler(req: Request) {
       for (const subscription of subscriptionsResult.data ?? []) {
         if (subscription.provider_payment_id) localProviderPaymentIds.add(subscription.provider_payment_id);
       }
-      for (const deposit of depositsResult.data ?? []) {
-        if (String(deposit.provider_payment_id || "").startsWith("pay_")) localProviderPaymentIds.add(deposit.provider_payment_id);
-      }
       const providerListUrl = new URL("https://api.paymongo.com/v1/payments");
       providerListUrl.searchParams.set("limit", "100");
       providerListUrl.searchParams.set("status", "paid");
@@ -143,16 +139,12 @@ export default async function handler(req: Request) {
       if (journal.status !== "finalized") issues.push({ booking_id: journal.booking_id, issue_type: "draft_ledger_journal_requires_review", severity: "warning", provider_reference: journal.provider_reference, local_reference: journal.id });
     }
 
-    for (const deposit of depositsResult.data ?? []) {
-      if (deposit.status === "return_review" && deposit.claim_deadline && new Date(deposit.claim_deadline).getTime() < Date.now()) issues.push({ booking_id: deposit.booking_id, issue_type: "security_deposit_claim_window_expired_release_required", severity: "critical", provider_reference: deposit.provider_payment_id, local_reference: deposit.id, local_amount_centavos: Number(deposit.amount_centavos) });
-    }
-
     if (issues.length) {
       const { error: itemError } = await supabase.from("reconciliation_items").insert(issues.map((issue) => ({ ...issue, run_id: run.id, status: "open" })));
       if (itemError) throw itemError;
     }
     const criticalCount = issues.filter((issue) => issue.severity === "critical").length;
-    const { error: completionError } = await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString(), summary: { issues: issues.length, critical: criticalCount, records_checked: { payments: payments.length, journals: journals.length, deposits: depositsResult.data?.length ?? 0, subscriptions: subscriptionsResult.data?.length ?? 0 }, provider_checks_enabled: Boolean(paymongoKey), provider_checkout_groups_checked: paymongoKey ? providerCheckoutGroups.length : 0, provider_payment_records_checked: providerPaymentRecordsChecked, provider_checks_truncated: Boolean(paymongoKey && (allProviderCheckoutGroups.length > providerCheckoutGroups.length || providerPaymentListTruncated)) } }).eq("id", run.id);
+    const { error: completionError } = await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString(), summary: { issues: issues.length, critical: criticalCount, records_checked: { payments: payments.length, journals: journals.length, subscriptions: subscriptionsResult.data?.length ?? 0 }, provider_checks_enabled: Boolean(paymongoKey), provider_checkout_groups_checked: paymongoKey ? providerCheckoutGroups.length : 0, provider_payment_records_checked: providerPaymentRecordsChecked, provider_checks_truncated: Boolean(paymongoKey && (allProviderCheckoutGroups.length > providerCheckoutGroups.length || providerPaymentListTruncated)) } }).eq("id", run.id);
     if (completionError) throw completionError;
     if (criticalCount > 0) {
       const { data: superAdmins } = await supabase.from("profiles").select("id").eq("role", "super_admin").is("deleted_at", null);

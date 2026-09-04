@@ -602,35 +602,6 @@ export const processAutomaticPayoutForBooking = async ({
     return { state: "skipped", bookingId, reason: "Booking is not fully completed yet." };
   }
 
-  const { data: securityDeposit, error: securityDepositError } = await supabase
-    .from("security_deposits")
-    .select("id, status, claim_deadline")
-    .eq("booking_id", bookingId)
-    .maybeSingle();
-  if (securityDepositError) {
-    throw securityDepositError;
-  }
-  if (securityDeposit && !["released", "partially_released", "claimed"].includes(securityDeposit.status)) {
-    return {
-      state: "skipped",
-      bookingId,
-      reason: "The refundable security-deposit review must finish before payout.",
-    };
-  }
-  if (securityDeposit) {
-    const { data: approvedClaims, error: approvedClaimError } = await supabase
-      .from("security_deposit_claims")
-      .select("approved_amount_centavos")
-      .eq("security_deposit_id", securityDeposit.id)
-      .in("status", ["approved", "partially_approved"]);
-    if (approvedClaimError) throw approvedClaimError;
-    const approvedDeductionPesos = (approvedClaims ?? []).reduce(
-      (sum, claim) => sum + Number(claim.approved_amount_centavos || 0),
-      0,
-    ) / 100;
-    payoutAmount += approvedDeductionPesos;
-    payoutBooking.base_price = payoutAmount;
-  }
 
   // Fuel / charge reimbursements from paid trip extensions are owed to the
   // lister on top of the rental. The extension rental days were already folded

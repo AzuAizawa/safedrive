@@ -15,8 +15,8 @@ methods, controls, and defense notes are in
 - KYC and vehicle approval, private evidence, re-review after material listing
   changes, maintenance blackouts, booking overlap protection, and agreement
   version acceptance.
-- PayMongo hosted checkout and signed webhook processing, separate security
-  deposits, payout review, append-only balanced ledger, and reconciliation.
+- PayMongo hosted checkout and signed webhook processing, payout review,
+  append-only balanced ledger, and reconciliation.
 - Independent pickup and return condition reports with required photo classes
   and optional consented location evidence.
 - Privacy-request intake and super-admin review rather than automatic deletion.

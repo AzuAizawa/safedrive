@@ -77,7 +77,7 @@ export default function TripConditionReportPage() {
     if (!user?.id || !session?.access_token || !validPhase || saving) return;
     if (!evidenceWaived && !canSubmitNormally) return;
     if (evidenceWaived && !window.confirm(
-      `Submit without the ${missingRequired.join(", ")} photo${missingRequired.length === 1 ? "" : "s"}? This is recorded on the report, and you will not be able to file a deposit claim on an incomplete return report.`,
+      `Submit without the ${missingRequired.join(", ")} photo${missingRequired.length === 1 ? "" : "s"}? This is recorded on the report and cannot be undone; the missing evidence counts against you in any dispute.`,
     )) return;
     setSaving(true);
     const uploaded: Array<{ category: string; storagePath: string }> = [];
@@ -120,7 +120,7 @@ export default function TripConditionReportPage() {
             </span>
           ) : (
             <span className="text-muted-foreground">
-              This report is optional for you - the other party files the required {validPhase === "pickup" ? '"before"' : '"after"'} report. Add photos if you want your own record{reporterRole === "lister" ? " (you need your own complete pickup AND return reports to file a deposit claim)" : ""}.
+              This report is optional for you - the other party files the required {validPhase === "pickup" ? '"before"' : '"after"'} report. Add photos if you want your own record.
             </span>
           )}
         </p>
@@ -153,9 +153,8 @@ export default function TripConditionReportPage() {
               Submit without the {missingRequired.join(", ")} photo{missingRequired.length === 1 ? "" : "s"}
             </Button>
             <p className="text-xs text-muted-foreground">
-              Submitting with missing photos is recorded on the report. You will not be able to file a deposit
-              claim on an incomplete return report, and the missing evidence counts against the party that
-              skipped it in any dispute.
+              Submitting with missing photos is recorded on the report, and the missing evidence counts
+              against the party that skipped it in any dispute.
             </p>
           </>
         )}

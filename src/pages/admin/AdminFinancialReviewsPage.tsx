@@ -1,14 +1,13 @@
-import { CreditCard, RotateCcw, ShieldCheck } from "lucide-react";
+import { CreditCard, RotateCcw } from "lucide-react";
 import { useSearchParams } from "react-router";
 
 import AdminSectionTabs from "@/components/AdminSectionTabs";
 import AdminPayoutsPage from "@/pages/admin/AdminPayoutsPage";
 import AdminRefundReviewPage from "@/pages/admin/AdminRefundReviewPage";
-import AdminSecurityDepositsPage from "@/pages/admin/AdminSecurityDepositsPage";
 
-type FinancialReviewView = "payouts" | "refunds" | "deposits";
+type FinancialReviewView = "payouts" | "refunds";
 
-const validViews = new Set<FinancialReviewView>(["payouts", "refunds", "deposits"]);
+const validViews = new Set<FinancialReviewView>(["payouts", "refunds"]);
 
 export default function AdminFinancialReviewsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -35,7 +34,6 @@ export default function AdminFinancialReviewsPage() {
         tabs={[
           { value: "payouts", label: "Lister payouts" },
           { value: "refunds", label: "Renter refunds" },
-          { value: "deposits", label: "Security deposits" },
         ]}
       />
 
@@ -44,25 +42,21 @@ export default function AdminFinancialReviewsPage() {
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
             {view === "payouts" ? <CreditCard className="h-5 w-5" /> : null}
             {view === "refunds" ? <RotateCcw className="h-5 w-5" /> : null}
-            {view === "deposits" ? <ShieldCheck className="h-5 w-5" /> : null}
           </span>
           <div>
             <h2 className="font-semibold">
               {view === "payouts" ? "Pay the lister after completion" : null}
               {view === "refunds" ? "Return cancelled-booking money" : null}
-              {view === "deposits" ? "Resolve deposit claims and releases" : null}
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {view === "payouts" ? "Only completed and eligible bookings should reach this queue." : null}
               {view === "refunds" ? "Confirm the provider result before recording a manual fallback." : null}
-              {view === "deposits" ? "Deposits stay liabilities and are never treated as SafeDrive income." : null}
             </p>
           </div>
         </div>
 
         {view === "payouts" ? <AdminPayoutsPage embedded /> : null}
         {view === "refunds" ? <AdminRefundReviewPage embedded /> : null}
-        {view === "deposits" ? <AdminSecurityDepositsPage embedded /> : null}
       </div>
     </div>
   );

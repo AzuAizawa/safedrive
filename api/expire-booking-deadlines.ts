@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import { runBookingCompletionSideEffects } from "./lib/bookingCompletion.js";
-import { runSecurityDepositRelease } from "./lib/securityDeposit.js";
 
 export const config = {
   runtime: "edge",
@@ -236,7 +235,7 @@ export default async function handler(req: Request) {
         {
           user_id: booking.owner_id,
           title: "Trip Auto-Completed",
-          message: `The renter finished this trip and it was auto-completed after ${timeoutHours} hours without your confirmation. Any deposit review still runs.`,
+          message: `The renter finished this trip and it was auto-completed after ${timeoutHours} hours without your confirmation.`,
           type: "warning",
           link: "/lister-bookings",
         },
@@ -261,48 +260,11 @@ export default async function handler(req: Request) {
       listerCompletionAuto += 1;
     }
 
-    // --- Auto-release security deposits whose claim window closed with no claim.
-    const { data: staleDeposits, error: staleDepositError } = await supabase
-      .from("security_deposits")
-      .select("id, booking_id")
-      .eq("status", "return_review")
-      .not("claim_deadline", "is", null)
-      .lte("claim_deadline", now)
-      .limit(100);
-    if (staleDepositError) throw staleDepositError;
-
-    let depositAutoReleased = 0;
-    for (const deposit of staleDeposits ?? []) {
-      const { data: openClaims } = await supabase
-        .from("security_deposit_claims")
-        .select("id")
-        .eq("security_deposit_id", deposit.id)
-        .not("status", "in", "(rejected)");
-      if ((openClaims ?? []).length > 0) continue;
-      try {
-        const result = await runSecurityDepositRelease(supabase, {
-          depositId: deposit.id,
-          actorId: null,
-          baseOrigin: new URL(req.url).origin,
-          enforceClaimWindow: false,
-        });
-        if (result.state === "released" || result.state === "refund_pending") {
-          depositAutoReleased += 1;
-        }
-      } catch (releaseError) {
-        console.error(
-          "Auto deposit release failed",
-          releaseError instanceof Error ? releaseError.message : releaseError,
-        );
-      }
-    }
-
     return jsonResponse({
       success: true,
       ownerResponseExpired,
       paymentExpired,
       listerCompletionAuto,
-      depositAutoReleased,
     });
   } catch (error) {
     return jsonResponse(

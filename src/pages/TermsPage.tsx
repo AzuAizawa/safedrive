@@ -101,7 +101,6 @@ export default function TermsPage() {
             <p className="mt-3"><strong>5.2 Reservation Payment:</strong> Upon an Owner's approval of a request (within a 24-hour response window), the Renter has 24 hours to either pay the required reservation downpayment or settle the full booking amount via our secure payment gateway (PayMongo).</p>
             <p className="mt-2"><strong>5.3 Final Balance:</strong> If the Renter chooses the partial reservation downpayment option (its current percentage is shown on the vehicle page before booking), the remaining balance must be settled through the Platform before the designated rental start time.</p>
             <p className="mt-2"><strong>5.4 Fees:</strong> The server applies the active platform commission to the base rental price and adds the configured payment-processing recovery to the renter's displayed total. SafeDrive deducts its commission before the eligible lister payout.</p>
-            <p className="mt-2"><strong>5.5 Security Deposit:</strong> An owner-set refundable security deposit, if any, is disclosed separately and never counted as rental income or platform commission. It follows the documented return-review and claim process.</p>
           </section>
 
           <section>

@@ -91,8 +91,6 @@ try {
     payments,
     notifications,
     guestInquiries,
-    deposits,
-    claims,
     journals,
     entries,
     settings,
@@ -100,15 +98,13 @@ try {
   ] = await Promise.all([
     readAllAuthUsers(),
     readAll("profiles", "id,email,role,is_lister,verified_status,deleted_at"),
-    readAll("cars", "id,owner_id,status,price_per_day,security_deposit_amount,registration_expiry,ctpl_expiry,insurer_rental_use_confirmed,created_at"),
+    readAll("cars", "id,owner_id,status,price_per_day,registration_expiry,ctpl_expiry,insurer_rental_use_confirmed,created_at"),
     readAll("car_agreement_versions", "id,car_id,status"),
     readAll("bookings", "id,car_id,renter_id,owner_id,start_date,end_date,total_days,base_price,commission,payment_processing_fee,total_price,downpayment_amount,balance_amount,status,renter_completed,owner_completed,agreement_version_id,created_at"),
     readAll("booking_agreement_acceptances", "booking_id,agreement_version_id,renter_id"),
     readAll("payments", "id,booking_id,amount,payment_type,status,transaction_id,created_at"),
     readAll("notifications", "id,user_id,title,message,type,read,link,created_at"),
     readGuestInquiries(),
-    readAll("security_deposits", "id,booking_id,renter_id,owner_id,amount_centavos,status,provider_payment_id,provider_refund_id,claim_deadline,paid_at,released_at"),
-    readAll("security_deposit_claims", "id,security_deposit_id,requested_by,amount_centavos,status,approved_amount_centavos,reviewed_by,reviewed_at"),
     readAll("ledger_journals", "id,booking_id,event_key,status,effective_at"),
     readAll("ledger_entries", "journal_id,debit_centavos,credit_centavos"),
     readAll("platform_settings", "id,ledger_activated_at"),
@@ -121,7 +117,6 @@ try {
   const carById = new Map(cars.map((car) => [car.id, car]));
   const bookingById = new Map(bookings.map((booking) => [booking.id, booking]));
   const agreementById = new Map(agreements.map((agreement) => [agreement.id, agreement]));
-  const depositById = new Map(deposits.map((deposit) => [deposit.id, deposit]));
   const acceptanceByBooking = new Map(acceptances.map((item) => [item.booking_id, item]));
   const journalByEventKey = new Map(journals.map((journal) => [journal.event_key, journal]));
   const validRoles = new Set(["user", "admin", "super_admin"]);
@@ -150,7 +145,6 @@ try {
   );
   fail("cars whose owner profile is missing", cars.filter((car) => !profileById.has(car.owner_id)).length);
   fail("cars outside the permitted price range", cars.filter((car) => Number(car.price_per_day) < 500 || Number(car.price_per_day) > 100000).length);
-  fail("cars with an invalid security deposit amount", cars.filter((car) => Number(car.security_deposit_amount) < 0 || Number(car.security_deposit_amount) > 100000).length);
   fail("approved/active cars without an approved rental agreement", cars.filter((car) => ["approved", "active"].includes(car.status) && !approvedAgreementByCar.has(car.id)).length);
   fail("post-upgrade approved/active cars without rental-use insurer confirmation", cars.filter((car) => ["approved", "active"].includes(car.status) && !car.insurer_rental_use_confirmed && isPostCutover(car.created_at)).length);
   warn("legacy approved/active cars requiring insurance re-review", cars.filter((car) => ["approved", "active"].includes(car.status) && !car.insurer_rental_use_confirmed && !isPostCutover(car.created_at)).length);
@@ -198,7 +192,7 @@ try {
   fail("completed bookings missing either renter or lister completion", completedWithoutBothConfirmations);
   warn("legacy bookings without a versioned rental agreement", legacyMissingAgreement);
 
-  const completedCustomerPayments = payments.filter((payment) => payment.status === "completed" && ["downpayment", "balance", "extension", "security_deposit"].includes(payment.payment_type));
+  const completedCustomerPayments = payments.filter((payment) => payment.status === "completed" && ["downpayment", "balance", "extension"].includes(payment.payment_type));
   fail("completed customer payments without a provider transaction ID", completedCustomerPayments.filter((payment) => !payment.transaction_id).length);
   fail("payouts linked to a missing booking", payments.filter((payment) => payment.payment_type === "payout" && !bookingById.has(payment.booking_id)).length);
   fail("completed payouts for a booking that is not fully completed by both parties", payments.filter((payment) => {
@@ -237,17 +231,6 @@ try {
     fail("guest inquiries missing a selected topic", guestInquiries.filter((item) => !Array.isArray(item.topics) || item.topics.length === 0).length);
   }
 
-  fail("security deposits linked to a missing booking or wrong parties", deposits.filter((deposit) => {
-    const booking = bookingById.get(deposit.booking_id);
-    return !booking || booking.renter_id !== deposit.renter_id || booking.owner_id !== deposit.owner_id;
-  }).length);
-  fail("security-deposit claims linked to a missing deposit", claims.filter((claim) => !depositById.has(claim.security_deposit_id)).length);
-  fail("approved deposit deductions greater than the deposit", claims.filter((claim) => {
-    if (!["approved", "partially_approved"].includes(claim.status)) return false;
-    const deposit = depositById.get(claim.security_deposit_id);
-    return !deposit || Number(claim.approved_amount_centavos || 0) < 0 || Number(claim.approved_amount_centavos || 0) > Number(deposit.amount_centavos);
-  }).length);
-
   const adminCount = activeProfiles.filter((profile) => ["admin", "super_admin"].includes(profile.role)).length;
   const superAdminCount = activeProfiles.filter((profile) => profile.role === "super_admin").length;
   fail("no active admin account exists", adminCount === 0 ? 1 : 0);
@@ -261,7 +244,6 @@ try {
     ["payments", payments.length],
     ["notifications", notifications.length],
     ["guest inquiries", guestInquiries.length],
-    ["security deposits", deposits.length],
     ["ledger journals", journals.length],
     ["open reconciliation issues", reconciliationItems.filter((item) => ["open", "investigating"].includes(item.status)).length],
     ["open guest inquiries", guestInquiries.filter((item) => ["open", "in_progress"].includes(item.status)).length],

@@ -40,11 +40,11 @@ export const helpArticles: HelpArticle[] = [
   {
     id: "booking-downpayment",
     category: "payment",
-    title: "Downpayment versus security deposit",
-    question: "What is the difference between the downpayment and the security deposit?",
+    title: "Downpayment versus balance",
+    question: "What is the difference between the downpayment and the remaining balance?",
     answer:
-      "The reservation downpayment is part of the rental price and reserves the booking; its percentage is shown on the car page before you book. The security deposit is a separate owner-set amount shown for clarity and is not the same as the online booking payment.",
-    relatedTags: ["downpayment", "deposit", "payment", "booking"],
+      "The reservation downpayment is part of the rental price and reserves the booking; its percentage is shown on the car page before you book. The remaining balance covers the rest of the rental price and is settled online before the trip starts.",
+    relatedTags: ["downpayment", "balance", "payment", "booking"],
     suggestedTicketTag: "payment",
   },
   {

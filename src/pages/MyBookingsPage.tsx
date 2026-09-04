@@ -83,7 +83,6 @@ interface BookingRow {
   cars: {
     plate_number: string;
     location: string | null;
-    security_deposit_amount?: number | null;
     car_models: {
       name: string;
       car_brands: { name: string };
@@ -113,15 +112,9 @@ interface BookingRow {
     reviewer_id: string;
     reviewer_role: string;
   }[];
-  security_deposits?: { status: string } | { status: string }[] | null;
   refund_full_hours_snapshot: number | null;
   refund_late_renter_percent_snapshot: number | null;
 }
-
-const getSecurityDepositStatus = (booking: BookingRow) => {
-  const relation = booking.security_deposits;
-  return Array.isArray(relation) ? relation[0]?.status ?? null : relation?.status ?? null;
-};
 
 // Cancellation-refund policy (Terms 6.1/6.2). Values are snapshot per booking.
 const DEFAULT_REFUND_FULL_HOURS = 24;
@@ -316,14 +309,13 @@ export default function MyBookingsPage() {
           `
           *,
           cars (
-            plate_number, location, security_deposit_amount,
+            plate_number, location,
             car_models (name, car_brands (name)),
             car_documents (document_type, storage_path)
           ),
           owner:profiles!bookings_owner_id_fkey (
             full_name, phone, avatar_url, email
           ),
-          security_deposits (status),
           booking_reviews (id, reviewer_id, reviewer_role)
         `,
         )
@@ -1977,14 +1969,6 @@ export default function MyBookingsPage() {
                               PHP {Number(booking.balance_amount).toLocaleString()}
                             </span>
                           </span>
-                          {Number(booking.cars.security_deposit_amount ?? 0) > 0 ? (
-                            <span>
-                              Security deposit:{" "}
-                              <span className="font-medium text-foreground">
-                                PHP {Number(booking.cars.security_deposit_amount).toLocaleString()}
-                              </span>
-                            </span>
-                          ) : null}
                         </div>
                       </div>
 
@@ -2357,15 +2341,6 @@ export default function MyBookingsPage() {
 
                       {(apparentState === "fully_paid" || apparentState === "active") && !booking.renter_arrived_at && arrivalCheckinOpen && (
                         <div className="mt-2 text-right">
-                          {Number(booking.cars.security_deposit_amount ?? 0) > 0 && (
-                            <div className="mb-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-left text-xs">
-                              <p className="font-semibold">Refundable deposit: {getSecurityDepositStatus(booking)?.replace(/_/g, " ") || "required"}</p>
-                              <p className="mt-1 text-muted-foreground">PayMongo must confirm the deposit before either party can check in.</p>
-                              <Button size="sm" variant="outline" className="mt-2" onClick={() => navigate(`/security-deposit/${booking.id}`)}>
-                                {getSecurityDepositStatus(booking) === "paid" ? "Review deposit" : "Pay deposit"}
-                              </Button>
-                            </div>
-                          )}
                           <p className="mb-2 text-xs font-medium text-foreground">
                             {booking.lister_arrived_at
                               ? "The lister confirmed the handover - confirm you have the car"
@@ -2378,7 +2353,7 @@ export default function MyBookingsPage() {
                           )}
                           <ArrivalPhotoCapture
                             loading={payingFor === booking.id}
-                            disabled={payingFor === booking.id || (Number(booking.cars.security_deposit_amount ?? 0) > 0 && getSecurityDepositStatus(booking) !== "paid")}
+                            disabled={payingFor === booking.id}
                             onConfirmArrival={(location) => handleArrive(booking.id, location)}
                           />
                           <div className="mt-2 flex items-center justify-end gap-1.5">
@@ -2557,7 +2532,6 @@ export default function MyBookingsPage() {
                               <div className="flex flex-wrap justify-end gap-2">
                                 <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/return`)}>Return report (required)</Button>
                                 <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>Pickup photos (optional)</Button>
-                                <Button size="sm" variant="outline" onClick={() => navigate(`/security-deposit/${booking.id}`)}>Deposit</Button>
                                 <Button
                                   size="sm"
                                   onClick={() => handleComplete(booking)}

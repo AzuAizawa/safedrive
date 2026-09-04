@@ -130,7 +130,6 @@ interface ListerBooking {
     reviewer_id: string;
     reviewer_role: string;
   }[];
-  security_deposits?: { status: string } | { status: string }[] | null;
   renter: {
     full_name: string | null;
     email: string;
@@ -143,7 +142,6 @@ interface ListerBooking {
   cars: {
     plate_number: string;
     location: string | null;
-    security_deposit_amount?: number | null;
     car_models: { name: string; car_brands: { name: string } };
   };
 }
@@ -210,11 +208,6 @@ interface BookingExtensionRow {
   created_at: string;
   updated_at: string;
 }
-
-const getSecurityDepositStatus = (booking: ListerBooking) => {
-  const relation = booking.security_deposits;
-  return Array.isArray(relation) ? relation[0]?.status ?? null : relation?.status ?? null;
-};
 
 const getListerBookingStatus = (booking: ListerBooking) => {
   if (booking.status === "completed") return "completed";
@@ -337,8 +330,7 @@ export default function ListerBookingsPage() {
           `
           *,
           renter:profiles!bookings_renter_id_fkey(full_name, email, phone, address, birthday, avatar_url),
-          cars(plate_number, location, security_deposit_amount, car_models(name, car_brands(name))),
-          security_deposits(status),
+          cars(plate_number, location, car_models(name, car_brands(name))),
           booking_reviews (id, reviewer_id, reviewer_role)
         `,
         )
@@ -852,33 +844,6 @@ export default function ListerBookingsPage() {
       });
     }
     setActionLoading(null);
-  };
-
-  const handleConfirmReturnNoIssues = async (booking: ListerBooking) => {
-    setActionLoading(booking.id);
-    try {
-      const res = await fetch("/api/security-deposit-action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session?.access_token ?? ""}`,
-        },
-        body: JSON.stringify({
-          bookingId: booking.id,
-          action: "lister_confirm_return",
-        }),
-      });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(data.error || "Could not confirm the return");
-      toast.success("Return confirmed - the renter's deposit is being released.");
-      await fetchBookings();
-    } catch (error) {
-      toast.error("Could not confirm the return", {
-        description: error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setActionLoading(null);
-    }
   };
 
   const handleApproveExtension = async (extension: BookingExtensionRow) => {
@@ -2691,11 +2656,6 @@ export default function ListerBookingsPage() {
                       <p className="text-lg font-bold">
                         PHP {Number(b.total_price).toLocaleString()}
                       </p>
-                      {Number(b.cars.security_deposit_amount ?? 0) > 0 ? (
-                        <p className="text-xs text-muted-foreground">
-                          Security deposit set: PHP {Number(b.cars.security_deposit_amount).toLocaleString()}
-                        </p>
-                      ) : null}
                       {showProjectedPayout ? (
                         <p className="text-xs text-muted-foreground">
                           {payoutLabel}:{" "}
@@ -3015,17 +2975,10 @@ export default function ListerBookingsPage() {
 
                       {(apparentState === "fully_paid" || apparentState === "active") && !b.lister_arrived_at && arrivalCheckinOpen && (
                         <div className="mt-2 text-right">
-                          {Number(b.cars.security_deposit_amount ?? 0) > 0 && (
-                            <div className="mb-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-left text-xs">
-                              <p className="font-semibold">Refundable deposit: {getSecurityDepositStatus(b)?.replace(/_/g, " ") || "required"}</p>
-                              <p className="mt-1 text-muted-foreground">The renter must complete the deposit before either party can check in.</p>
-                              <Button size="sm" variant="outline" className="mt-2" onClick={() => navigate(`/security-deposit/${b.id}`)}>Review deposit</Button>
-                            </div>
-                          )}
                           <p className="mb-2 text-xs font-medium text-foreground">Handover complete - renter has the car</p>
                           <ArrivalPhotoCapture
                             loading={actionLoading === b.id}
-                            disabled={actionLoading === b.id || (Number(b.cars.security_deposit_amount ?? 0) > 0 && getSecurityDepositStatus(b) !== "paid")}
+                            disabled={actionLoading === b.id}
                             onConfirmArrival={(location) => handleArrive(b.id, location)}
                           />
                           <div className="mt-2 flex items-center justify-end gap-1.5">
@@ -3034,7 +2987,7 @@ export default function ListerBookingsPage() {
                             </Button>
                             <span
                               className="inline-flex h-7 w-7 shrink-0 cursor-help items-center justify-center rounded-md text-muted-foreground"
-                              title="Optional, but highly encouraged: if there's ever a dispute, you and the renter both need this evidence. It's also required to file a deposit claim later."
+                              title="Optional, but highly encouraged: if there's ever a dispute, you and the renter both need this evidence."
                             >
                               <Eye className="h-3.5 w-3.5" />
                             </span>
@@ -3115,9 +3068,9 @@ export default function ListerBookingsPage() {
                             Flagged: vehicle not returned
                           </p>
                           <p className="mt-1">
-                            SafeDrive support is handling this case. The security
-                            deposit and any refund stay on hold. You can take this
-                            car offline from My Vehicles while the case is open.
+                            SafeDrive support is handling this case. Any refund
+                            stays on hold. You can take this car offline from My
+                            Vehicles while the case is open.
                           </p>
                         </div>
                       ) : canReportNonReturnNow ? (
@@ -3197,8 +3150,7 @@ export default function ListerBookingsPage() {
                             <div className="space-y-1.5">
                               <div className="flex flex-wrap justify-end gap-2">
                                 <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>Pickup report (required)</Button>
-                                <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/trip-report/${b.id}/return`)}>Return photos (for a claim)</Button>
-                                <Button size="sm" variant="outline" onClick={() => navigate(`/security-deposit/${b.id}`)}>Deposit</Button>
+                                <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/trip-report/${b.id}/return`)}>Return photos (optional)</Button>
                                 <Button
                                   size="sm"
                                   onClick={() => handleComplete(b)}
@@ -3210,7 +3162,7 @@ export default function ListerBookingsPage() {
                                 </Button>
                               </div>
                               <p className="text-[10px] text-muted-foreground text-right leading-tight">
-                                As the lister you must have filed the pickup ("before") report. A return report is optional - but you need your own complete pickup AND return reports to file a deposit claim.
+                                As the lister you must have filed the pickup ("before") report before finishing the trip.
                               </p>
                             </div>
                           )}
@@ -3224,40 +3176,6 @@ export default function ListerBookingsPage() {
                             Waiting for renter to complete
                           </p>
                         )}
-                      {apparentState === "completed" &&
-                        getSecurityDepositStatus(b) === "return_review" && (
-                          <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-left text-[11px] leading-relaxed">
-                            <p className="font-semibold text-foreground">Refundable deposit review</p>
-                            <p className="mt-1 text-muted-foreground">
-                              If the car came back fine, confirm the return now to release the renter's
-                              deposit. Otherwise file a documented claim before the window closes - after
-                              you confirm or the window ends you can no longer claim.
-                            </p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              <Button
-                                size="sm"
-                                onClick={() => handleConfirmReturnNoIssues(b)}
-                                disabled={actionLoading === b.id}
-                                className="gap-1"
-                              >
-                                {actionLoading === b.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="h-3.5 w-3.5" />
-                                )}
-                                Confirm return - no issues
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => navigate(`/security-deposit/${b.id}`)}
-                              >
-                                File a claim
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-
                       {apparentState === "completed" && !reviewedByOwner && (
                           <Button
                             size="sm"

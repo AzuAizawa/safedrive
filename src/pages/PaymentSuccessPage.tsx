@@ -9,8 +9,7 @@ type BookingPaymentStage =
   | "downpayment"
   | "full"
   | "balance"
-  | "extension"
-  | "security_deposit";
+  | "extension";
 
 const PAYMENT_CONFIRMATION_POLL_MS = 2500;
 const MAX_PAYMENT_CONFIRMATION_ATTEMPTS = 12;
@@ -25,12 +24,7 @@ const downpaymentConfirmedStatuses = new Set([
 const fullyPaidStatuses = new Set(["fully_paid", "active", "completed"]);
 
 const normalizePaymentStage = (stage: string | null): BookingPaymentStage => {
-  if (
-    stage === "full" ||
-    stage === "balance" ||
-    stage === "extension" ||
-    stage === "security_deposit"
-  ) {
+  if (stage === "full" || stage === "balance" || stage === "extension") {
     return stage;
   }
   return "downpayment";
@@ -83,18 +77,6 @@ const checkBookingPaymentConfirmation = async (
     return Boolean(extensionPayment?.id);
   }
 
-  if (stage === "security_deposit") {
-    const { data: deposit, error: depositError } = await supabase
-      .from("security_deposits")
-      .select("id")
-      .eq("booking_id", bookingId)
-      .eq("status", "paid")
-      .maybeSingle();
-
-    if (depositError) throw depositError;
-    return Boolean(deposit?.id);
-  }
-
   return downpaymentConfirmedStatuses.has(bookingStatus);
 };
 
@@ -142,10 +124,6 @@ const getConfirmedMessage = (
     return `Your extension payment is confirmed. SafeDrive has updated the booking extension record.${receiptNote}`;
   }
 
-  if (stage === "security_deposit") {
-    return `Your refundable security deposit is confirmed. SafeDrive has updated the deposit record.${receiptNote}`;
-  }
-
   if (stage === "balance") {
     return `Your remaining balance is confirmed. The booking is now fully paid.${receiptNote}`;
   }
@@ -168,10 +146,6 @@ const getDelayedMessage = (
 
   if (stage === "extension") {
     return "PayMongo sent you back to SafeDrive, but the extension payment webhook is still processing. Return to My Bookings and refresh in a moment.";
-  }
-
-  if (stage === "security_deposit") {
-    return "PayMongo sent you back to SafeDrive, but the security-deposit webhook is still processing. Return to My Bookings and refresh in a moment.";
   }
 
   if (stage === "balance") {

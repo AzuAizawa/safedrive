@@ -77,15 +77,14 @@ export async function loadAdminAttentionItems(isSuperAdmin: boolean) {
   ];
 
   if (isSuperAdmin) {
-    const [refundResult, payoutResult, depositResult, retentionResult, reconciliationResult] = await Promise.all([
+    const [refundResult, payoutResult, retentionResult, reconciliationResult] = await Promise.all([
       supabase.from("payments").select("id,booking_id,status,created_at").eq("payment_type", "refund").in("status", ["pending", "failed"]).order("created_at"),
       supabase.from("payments").select("id,booking_id,status,created_at").eq("payment_type", "payout").in("status", ["pending", "failed"]).order("created_at"),
-      supabase.from("security_deposits").select("id,booking_id,status,updated_at").in("status", ["return_review", "claim_open", "no_claim", "deduction_approved", "refund_pending", "failed"]).order("updated_at"),
       supabase.from("data_retention_requests").select("id,request_type,requester_email,status,created_at").in("status", ["submitted", "identity_check", "under_review", "approved"]).order("created_at"),
       supabase.from("reconciliation_items").select("id,issue_type,severity,status,created_at").in("status", ["open", "investigating"]).order("created_at"),
     ]);
 
-    [refundResult, payoutResult, depositResult, retentionResult, reconciliationResult].forEach(requireSuccess);
+    [refundResult, payoutResult, retentionResult, reconciliationResult].forEach(requireSuccess);
 
     items.push(
       ...(refundResult.data ?? []).map((item) => ({
@@ -103,14 +102,6 @@ export async function loadAdminAttentionItems(isSuperAdmin: boolean) {
         createdAt: item.created_at,
         kind: "payout" as const,
         link: "/admin/financial-reviews?view=payouts",
-      })),
-      ...(depositResult.data ?? []).map((item) => ({
-        id: `deposit-${item.id}`,
-        title: `Deposit for booking ${item.booking_id.slice(0, 8)}`,
-        detail: `Status: ${item.status.replace(/_/g, " ")}`,
-        createdAt: item.updated_at,
-        kind: "security" as const,
-        link: "/admin/financial-reviews?view=deposits",
       })),
       ...(retentionResult.data ?? []).map((item) => ({
         id: `retention-${item.id}`,

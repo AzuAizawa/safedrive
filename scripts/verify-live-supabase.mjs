@@ -85,8 +85,6 @@ const requiredTables = [
   "vehicle_unavailability",
   "trip_condition_reports",
   "trip_condition_photos",
-  "security_deposits",
-  "security_deposit_claims",
   "data_retention_requests",
   "financial_accounts",
   "ledger_journals",
@@ -99,7 +97,6 @@ const expectedAccounts = new Set([
   "1010",
   "1020",
   "2010",
-  "2020",
   "2030",
   "2040",
   "4010",
@@ -289,25 +286,6 @@ if (subscriptionError) {
   const duplicates = [...counts.values()].filter((count) => count > 1).length;
   if (duplicates) fail(`${duplicates} user(s) have duplicate active subscriptions`);
   else pass("no duplicate active subscriptions were found");
-}
-
-if (existingTables.has("security_deposit_claims")) {
-  const { data: openClaims, error } = await supabase
-    .from("security_deposit_claims")
-    .select("security_deposit_id")
-    .in("status", ["submitted", "renter_responded"])
-    .limit(10000);
-  if (error) {
-    fail(`open deposit-claim uniqueness could not be checked (${error.code || "query error"})`);
-  } else {
-    const counts = new Map();
-    for (const claim of openClaims || []) {
-      counts.set(claim.security_deposit_id, (counts.get(claim.security_deposit_id) || 0) + 1);
-    }
-    const duplicates = [...counts.values()].filter((count) => count > 1).length;
-    if (duplicates) fail(`${duplicates} security deposit(s) have duplicate open claims`);
-    else pass("no duplicate open security-deposit claims were found");
-  }
 }
 
 if (existingTables.has("ledger_journals") && existingTables.has("ledger_entries")) {

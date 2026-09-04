@@ -19,7 +19,7 @@ type TransactionalEmailInput = {
 type ReceiptInput = {
   bookingId: string;
   amount: number;
-  paymentType: "downpayment" | "balance" | "extension" | "security_deposit" | "full_payment";
+  paymentType: "downpayment" | "balance" | "extension" | "full_payment";
   paymentMethod: string;
   transactionId: string;
   baseOrigin: string;
@@ -100,8 +100,7 @@ const paymentLabel = (type: ReceiptInput["paymentType"]) => {
   if (type === "downpayment") return "Reservation downpayment";
   if (type === "balance") return "Booking balance";
   if (type === "extension") return "Rental extension";
-  if (type === "full_payment") return "Full booking payment";
-  return "Refundable security deposit";
+  return "Full booking payment";
 };
 
 const getVehicleLabel = (booking: ReceiptBooking) => {
@@ -336,8 +335,8 @@ export const sendPayoutReceiptEmail = async (
   const destinationValue = destination || input.payoutMethod;
 
   // Itemize what makes up this single payout so the lister can see the base
-  // rental, any paid trip extension, fuel/charge reimbursements, and an approved
-  // security-deposit claim - and the renter payment timeline behind it.
+  // rental, any paid trip extension, fuel/charge reimbursements - and the
+  // renter payment timeline behind it.
   const [bookingRes, extensionsRes, paymentsRes] = await Promise.all([
     supabase
       .from("bookings")
@@ -373,13 +372,9 @@ export const sendPayoutReceiptEmail = async (
     0,
   );
   // `input.amount` is the authoritative released total. The DB base_price holds
-  // only the rental (original + extension days); fuel and any approved deposit
-  // claim were added on top at payout time.
+  // only the rental (original + extension days); fuel was added on top at
+  // payout time.
   const baseRental = Math.max(0, dbBasePrice - extRental);
-  const approvedClaim = Math.max(
-    0,
-    Math.round((input.amount - dbBasePrice - fuel) * 100) / 100,
-  );
   const baseDays = Math.max(0, totalDays - extDays);
 
   const rows: Array<[string, string]> = [
@@ -393,7 +388,6 @@ export const sendPayoutReceiptEmail = async (
     ]);
   }
   if (fuel > 0) rows.push(["Fuel / charge reimbursement", peso(fuel)]);
-  if (approvedClaim > 0) rows.push(["Approved security-deposit claim", peso(approvedClaim)]);
   rows.push(["Total released", peso(input.amount)]);
   rows.push([destinationLabel, destinationValue]);
   rows.push(["Reference", reference]);

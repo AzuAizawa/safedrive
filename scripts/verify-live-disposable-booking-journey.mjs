@@ -141,10 +141,6 @@ const cleanup = async () => {
       }
 
       await removeMatching(
-        admin.from("security_deposits").delete().eq("booking_id", bookingId),
-        "remove security deposit",
-      );
-      await removeMatching(
         admin.from("payments").delete().eq("booking_id", bookingId),
         "remove payments",
       );
@@ -258,7 +254,6 @@ try {
       plate_number: plateNumber,
       mileage: 1000,
       price_per_day: 700,
-      security_deposit_amount: 0,
       location: "SafeDrive automated test location",
       fuel_category: "Gasoline",
       status: "approved",

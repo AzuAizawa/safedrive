@@ -519,13 +519,13 @@ export default async function handler(req: Request) {
         `Vehicle not returned: ${label(b)}`,
         `The lister reports that ${label(b)} was not returned by its scheduled return (${b.end_date}${
           b.dropoff_time ? ` ${b.dropoff_time}` : ""
-        }) and the ${GRACE_MINUTES}-minute grace window has passed. The booking is flagged (dispute_status=open) so the car can be taken offline; the security deposit and any refund stay on hold pending admin review. ${note ?? ""}`.trim(),
+        }) and the ${GRACE_MINUTES}-minute grace window has passed. The booking is flagged (dispute_status=open) so the car can be taken offline; any refund stays on hold pending admin review. ${note ?? ""}`.trim(),
       );
 
       await supabase.from("notifications").insert({
         user_id: b.renter_id,
         title: "Vehicle overdue — return it now",
-        message: `${label(b)} is past its return time. Return it immediately and file your return report, or SafeDrive support will escalate. The security deposit and any refund are on hold.`,
+        message: `${label(b)} is past its return time. Return it immediately and file your return report, or SafeDrive support will escalate. Any refund is on hold.`,
         type: "error",
         link: "/my-bookings",
       });

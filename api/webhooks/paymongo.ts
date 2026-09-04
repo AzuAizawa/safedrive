@@ -1,7 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ServiceRoleSupabaseClient } from "../lib/supabaseTypes.js";
 import { postCompletedPaymentToLedger, postCompletedRefundToLedger } from "../lib/ledger.js";
-import { finalizeSecurityDepositRelease } from "../lib/securityDeposit.js";
 import { sendPaymentReceiptEmail, sendRefundReceiptEmail, sendUserNotificationEmail } from "../lib/email.js";
 
 export const config = {
@@ -45,7 +44,7 @@ type PaymongoWebhookEvent = {
   };
 };
 
-type CompletedBookingPaymentType = "downpayment" | "balance" | "extension" | "security_deposit";
+type CompletedBookingPaymentType = "downpayment" | "balance" | "extension";
 
 const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlanDefinition> = {
   pro: {
@@ -337,7 +336,7 @@ const insertCompletedPaymentIfMissing = async (
     };
   },
   baseOrigin: string,
-  receipt: { amount: number; paymentType: "downpayment" | "balance" | "extension" | "security_deposit" | "full_payment" } | false = {
+  receipt: { amount: number; paymentType: "downpayment" | "balance" | "extension" | "full_payment" } | false = {
     amount: payment.amount,
     paymentType: payment.paymentType,
   },
@@ -434,53 +433,39 @@ export default async function handler(req: Request) {
       const refundStatus = typeof refundAttributes.status === "string" ? refundAttributes.status : null;
       const supabase = getSupabaseAdmin();
       if (!supabase || !refundId) return new Response(JSON.stringify({ statusCode: 200, body: { message: "IGNORED" } }), { status: 200, headers: { "Content-Type": "application/json" } });
-      const { data: deposit } = await supabase.from("security_deposits").select("id, renter_id, owner_id").eq("provider_refund_id", refundId).maybeSingle();
-      if (deposit) {
-        if (refundStatus === "succeeded") {
-          await finalizeSecurityDepositRelease(supabase, { depositId: deposit.id, providerRefundId: refundId, baseOrigin: new URL(req.url).origin });
-        } else if (refundStatus === "failed") {
-          await supabase.from("security_deposits").update({ status: "failed" }).eq("id", deposit.id).eq("status", "refund_pending");
-          await supabase.from("notifications").insert([
-            { user_id: deposit.renter_id, title: "Security Deposit Refund Delayed", message: "PayMongo reported that the refund needs super-admin attention. Your deposit record remains open.", type: "error", link: "/my-bookings" },
-            { user_id: deposit.owner_id, title: "Security Deposit Refund Delayed", message: "The deposit review remains open because the provider refund failed.", type: "warning", link: "/lister-bookings" },
-          ]);
-        }
-        await recordWebhookSecurityEvent(refundStatus === "failed" ? "failed" : "success", { reason: "Security deposit refund webhook handled", event_id: event.id, event_type: event.attributes?.type, refund_id: refundId, refund_status: refundStatus, deposit_id: deposit.id, livemode });
-      } else {
-        const { data: refundPayment } = await supabase
+      const { data: refundPayment } = await supabase
+        .from("payments")
+        .select("id, booking_id, amount, status")
+        .eq("payment_type", "refund")
+        .eq("transaction_id", refundId)
+        .maybeSingle();
+      if (!refundPayment) return new Response(JSON.stringify({ statusCode: 200, body: { message: "IGNORED" } }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (refundStatus === "succeeded") {
+        const { data: completedRefund, error: completedRefundError } = await supabase
           .from("payments")
-          .select("id, booking_id, amount, status")
-          .eq("payment_type", "refund")
-          .eq("transaction_id", refundId)
+          .update({ status: "completed" })
+          .eq("id", refundPayment.id)
+          .in("status", ["pending", "failed"])
+          .select("id")
           .maybeSingle();
-        if (!refundPayment) return new Response(JSON.stringify({ statusCode: 200, body: { message: "IGNORED" } }), { status: 200, headers: { "Content-Type": "application/json" } });
-        if (refundStatus === "succeeded") {
-          const { data: completedRefund, error: completedRefundError } = await supabase
-            .from("payments")
-            .update({ status: "completed" })
-            .eq("id", refundPayment.id)
-            .in("status", ["pending", "failed"])
-            .select("id")
-            .maybeSingle();
-          if (completedRefundError) throw completedRefundError;
-          await postCompletedRefundToLedger(supabase, { bookingId: refundPayment.booking_id, amount: Math.abs(Number(refundPayment.amount)), refundId });
-          if (completedRefund) {
-            const receipt = await sendRefundReceiptEmail(supabase, {
-              bookingId: refundPayment.booking_id,
-              amount: Math.abs(Number(refundPayment.amount)),
-              refundId,
-              refundMethod: "PayMongo",
-              baseOrigin: new URL(req.url).origin,
-            });
-            if (receipt.state !== "sent" && receipt.state !== "not_configured") {
-              console.warn("Refund receipt email was not delivered", { state: receipt.state, bookingId: refundPayment.booking_id });
-            }
+        if (completedRefundError) throw completedRefundError;
+        await postCompletedRefundToLedger(supabase, { bookingId: refundPayment.booking_id, amount: Math.abs(Number(refundPayment.amount)), refundId });
+        if (completedRefund) {
+          const receipt = await sendRefundReceiptEmail(supabase, {
+            bookingId: refundPayment.booking_id,
+            amount: Math.abs(Number(refundPayment.amount)),
+            refundId,
+            refundMethod: "PayMongo",
+            baseOrigin: new URL(req.url).origin,
+          });
+          if (receipt.state !== "sent" && receipt.state !== "not_configured") {
+            console.warn("Refund receipt email was not delivered", { state: receipt.state, bookingId: refundPayment.booking_id });
           }
-        } else if (refundStatus === "failed") {
-          await supabase.from("payments").update({ status: "failed" }).eq("id", refundPayment.id).eq("status", "pending");
         }
-        await recordWebhookSecurityEvent(refundStatus === "failed" ? "failed" : "success", { reason: "Booking refund webhook handled", event_id: event.id, event_type: event.attributes?.type, refund_id: refundId, refund_status: refundStatus, payment_record_id: refundPayment.id, booking_id: refundPayment.booking_id, livemode });
+      } else if (refundStatus === "failed") {
+        await supabase.from("payments").update({ status: "failed" }).eq("id", refundPayment.id).eq("status", "pending");
       }
+      await recordWebhookSecurityEvent(refundStatus === "failed" ? "failed" : "success", { reason: "Booking refund webhook handled", event_id: event.id, event_type: event.attributes?.type, refund_id: refundId, refund_status: refundStatus, payment_record_id: refundPayment.id, booking_id: refundPayment.booking_id, livemode });
       return new Response(JSON.stringify({ statusCode: 200, body: { message: "SUCCESS" } }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
 
@@ -540,39 +525,6 @@ export default async function handler(req: Request) {
       throw new Error(
         "CRITICAL: Missing SUPABASE_SERVICE_ROLE_KEY. Webhook cannot run securely without it.",
       );
-    }
-
-    if (referenceNumber.startsWith("security-deposit:")) {
-      const [, bookingId] = referenceNumber.split(":");
-      if (!bookingId) return new Response(JSON.stringify({ error: "Invalid security deposit reference" }), { status: 422, headers: { "Content-Type": "application/json" } });
-
-      const { data: deposit, error: depositError } = await supabase
-        .from("security_deposits")
-        .select("id, booking_id, renter_id, owner_id, amount_centavos, status, provider_checkout_id")
-        .eq("booking_id", bookingId)
-        .single();
-      if (depositError || !deposit) {
-        await recordWebhookSecurityEvent("failed", { reason: "Security deposit record not found", booking_id: bookingId, checkout_id: checkoutId, event_id: event.id, livemode });
-        return new Response("OK", { status: 200 });
-      }
-      if (deposit.provider_checkout_id !== checkoutId || paidAmountInCentavos !== Number(deposit.amount_centavos)) {
-        await recordWebhookSecurityEvent("failed", { reason: "Security deposit checkout or amount mismatch", booking_id: bookingId, checkout_id: checkoutId, expected_checkout_id: deposit.provider_checkout_id, expected_amount_in_centavos: deposit.amount_centavos, received_amount_in_centavos: paidAmountInCentavos, event_id: event.id, livemode });
-        return new Response(JSON.stringify({ error: "Security deposit verification failed" }), { status: 409, headers: { "Content-Type": "application/json" } });
-      }
-      if (deposit.status === "paid") return new Response(JSON.stringify({ statusCode: 200, body: { message: "ALREADY_PROCESSED" } }), { status: 200, headers: { "Content-Type": "application/json" } });
-
-      const { data: changed, error: updateError } = await supabase.from("security_deposits").update({ status: "paid", paid_at: new Date().toISOString(), provider_payment_id: paymongoPaymentMetadata.paymentId || checkoutId }).eq("id", deposit.id).eq("status", "awaiting_payment").select("id").maybeSingle();
-      if (updateError) throw updateError;
-      if (!changed) return new Response(JSON.stringify({ statusCode: 200, body: { message: "ALREADY_PROCESSED" } }), { status: 200, headers: { "Content-Type": "application/json" } });
-
-      await insertCompletedPaymentIfMissing(supabase, { bookingId, amount: paidAmountInCentavos / 100, paymentType: "security_deposit", paymentMethod: getPaymentMethodLabel(checkoutAttributes), transactionId: checkoutId, notes: buildPaymentNotes("Refundable security deposit confirmed by PayMongo webhook", paymongoPaymentMetadata) }, new URL(req.url).origin);
-      await supabase.from("notifications").insert([
-        { user_id: deposit.renter_id, title: "Security Deposit Confirmed", message: `Your refundable PHP ${(paidAmountInCentavos / 100).toLocaleString()} deposit is recorded separately from rental income.`, type: "success", link: "/my-bookings" },
-        { user_id: deposit.owner_id, title: "Security Deposit Confirmed", message: "The renter's refundable deposit is secured for this booking.", type: "info", link: "/lister-bookings" },
-      ]);
-      await supabase.from("audit_log").insert({ user_id: deposit.renter_id, action: "security_deposit_paid", entity_type: "security_deposit", entity_id: deposit.id, details: { booking_id: bookingId, amount_centavos: paidAmountInCentavos, checkout_id: checkoutId, webhook: true } });
-      await recordWebhookSecurityEvent("success", { reason: "Security deposit confirmed", booking_id: bookingId, checkout_id: checkoutId, event_id: event.id, livemode, paid_amount_in_centavos: paidAmountInCentavos });
-      return new Response(JSON.stringify({ statusCode: 200, body: { message: "SUCCESS" } }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
 
     if (referenceNumber.startsWith("subscription:")) {

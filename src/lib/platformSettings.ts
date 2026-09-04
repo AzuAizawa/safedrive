@@ -56,7 +56,6 @@ export const normalizeDownpaymentRate = (
 
 // Operational lifecycle timings. Read live (never snapshotted per booking).
 export const DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS = 3;
-export const DEFAULT_DEPOSIT_CLAIM_WINDOW_HOURS = 24;
 export const DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS = 18;
 
 const clampWholeHours = (
@@ -72,21 +71,19 @@ const clampWholeHours = (
 
 export type PlatformPolicyTimings = {
   arrivalCheckinLeadHours: number;
-  depositClaimWindowHours: number;
   listerCompletionTimeoutHours: number;
 };
 
 export const fetchPlatformPolicyTimings = async (): Promise<PlatformPolicyTimings> => {
   const fallback: PlatformPolicyTimings = {
     arrivalCheckinLeadHours: DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
-    depositClaimWindowHours: DEFAULT_DEPOSIT_CLAIM_WINDOW_HOURS,
     listerCompletionTimeoutHours: DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS,
   };
 
   const { data, error } = await supabase
     .from("platform_settings")
     .select(
-      "arrival_checkin_lead_hours, deposit_claim_window_hours, lister_completion_timeout_hours",
+      "arrival_checkin_lead_hours, lister_completion_timeout_hours",
     )
     .eq("id", "default")
     .maybeSingle();
@@ -102,12 +99,6 @@ export const fetchPlatformPolicyTimings = async (): Promise<PlatformPolicyTiming
       0,
       48,
       DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
-    ),
-    depositClaimWindowHours: clampWholeHours(
-      data?.deposit_claim_window_hours,
-      1,
-      168,
-      DEFAULT_DEPOSIT_CLAIM_WINDOW_HOURS,
     ),
     listerCompletionTimeoutHours: clampWholeHours(
       data?.lister_completion_timeout_hours,

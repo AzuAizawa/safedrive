@@ -27,7 +27,7 @@ export default function AdminDashboard() {
     void (async () => {
       setLoading(true);
       setLoadError(null);
-      const [profiles, vehicles, support, guests, payouts, refunds, deposits, retention, reconciliation, activity] = await Promise.all([
+      const [profiles, vehicles, support, guests, payouts, refunds, retention, reconciliation, activity] = await Promise.all([
         supabase.from("profiles").select("id, updated_at").eq("verified_status", "pending").order("updated_at", { ascending: true }),
         supabase.from("cars").select("id, created_at").eq("status", "pending").order("created_at", { ascending: true }),
         loadSupportTicketsNeedingAdminReply().catch((error: unknown) => {
@@ -37,12 +37,11 @@ export default function AdminDashboard() {
         supabase.from("guest_inquiries").select("id, created_at").in("status", ["open", "in_progress"]).order("created_at", { ascending: true }),
         isSuperAdmin ? supabase.from("payments").select("id, created_at").eq("payment_type", "payout").in("status", ["pending", "failed"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         isSuperAdmin ? supabase.from("payments").select("id, created_at").eq("payment_type", "refund").in("status", ["pending", "failed"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
-        isSuperAdmin ? supabase.from("security_deposits").select("id, updated_at").in("status", ["return_review", "claim_open", "no_claim", "deduction_approved", "refund_pending", "failed"]).order("updated_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         isSuperAdmin ? supabase.from("data_retention_requests").select("id, created_at").in("status", ["submitted", "identity_check", "under_review", "approved"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         isSuperAdmin ? supabase.from("reconciliation_items").select("id, created_at").in("status", ["open", "investigating"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(6),
       ]);
-      const firstError = [profiles, vehicles, guests, payouts, refunds, deposits, retention, reconciliation, activity].find(
+      const firstError = [profiles, vehicles, guests, payouts, refunds, retention, reconciliation, activity].find(
         (result) => result.error,
       )?.error;
       if (firstError) setLoadError(firstError.message);
@@ -55,7 +54,6 @@ export default function AdminDashboard() {
       if (isSuperAdmin) operational.push(
         { label: "Payout attention", count: payouts.data?.length ?? 0, oldest: payouts.data?.[0]?.created_at ?? null, to: "/admin/financial-reviews?view=payouts", icon: CreditCard, finance: true },
         { label: "Refund attention", count: refunds.data?.length ?? 0, oldest: refunds.data?.[0]?.created_at ?? null, to: "/admin/financial-reviews?view=refunds", icon: CreditCard, finance: true },
-        { label: "Deposit review", count: deposits.data?.length ?? 0, oldest: deposits.data?.[0]?.updated_at ?? null, to: "/admin/financial-reviews?view=deposits", icon: ShieldCheck, finance: true },
         { label: "Privacy requests", count: retention.data?.length ?? 0, oldest: retention.data?.[0]?.created_at ?? null, to: "/admin/retention-requests", icon: ShieldCheck, finance: true },
         { label: "Reconciliation issues", count: reconciliation.data?.length ?? 0, oldest: reconciliation.data?.[0]?.created_at ?? null, to: "/admin/reconciliation", icon: ShieldCheck, finance: true },
       );

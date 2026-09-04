@@ -1042,22 +1042,6 @@ export default async function handler(req: Request) {
         }
       }
 
-      const { data: requiredDeposit, error: requiredDepositError } = await supabase
-        .from("security_deposits")
-        .select("id, status")
-        .eq("booking_id", bookingRecord.id)
-        .maybeSingle();
-      if (requiredDepositError) throw requiredDepositError;
-      if (requiredDeposit && requiredDeposit.status !== "paid") {
-        return jsonResponse(
-          {
-            error:
-              "The refundable security deposit must be confirmed before either party can record arrival.",
-          },
-          409,
-        );
-      }
-
       // The lister owns the "before" evidence, so only the lister must file a
       // pickup condition report before the handover. The renter's pickup report
       // is optional; the renter just confirms they received the car.

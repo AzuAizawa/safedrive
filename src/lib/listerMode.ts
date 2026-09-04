@@ -61,8 +61,8 @@ const RENTER_PREFIXES = ["/my-bookings", "/inquiries", "/subscriptions"];
 
 /**
  * Which portal mode a destination belongs to, or null when it is neutral
- * (Support, verification, a security-deposit page, Browse, ...) and should not
- * force a switch. Query strings and hashes are ignored.
+ * (Support, verification, Browse, ...) and should not force a switch. Query
+ * strings and hashes are ignored.
  */
 export function portalModeForPath(
   path: string | null | undefined,

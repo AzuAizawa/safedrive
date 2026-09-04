@@ -32,7 +32,7 @@ master document instead of creating another report.
 
 - [ ] Guest asks without an account; admin is notified; Gmail reply succeeds; only then is it resolved.
 - [ ] KYC and vehicle approval/rejection/re-review work with correct roles.
-- [ ] Booking, agreement acceptance, payment, pickup, return, deposit, completion, and payout states are exercised.
+- [ ] Booking, agreement acceptance, payment, pickup, return, completion, and payout states are exercised.
 - [ ] Admin sees operational queues; only super-admin sees protected finance and retention pages.
 - [ ] Keyboard, focus, labels, contrast, screen reader, mobile widths, and supported browsers are recorded.
 

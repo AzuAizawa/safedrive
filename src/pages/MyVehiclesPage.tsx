@@ -55,7 +55,6 @@ import {
 } from "@/lib/vehicleValidation";
 
 const MAX_LISTING_PRICE = 100000;
-const MAX_SECURITY_DEPOSIT = 100000;
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const ALLOWED_PDF_TYPES = ["application/pdf"];
@@ -97,7 +96,6 @@ interface VehicleRow {
   plate_number: string;
   mileage: number | null;
   price_per_day: number;
-  security_deposit_amount: number;
   location: string | null;
   fuel_category: string | null;
   fuel_subtype: string | null;
@@ -289,7 +287,6 @@ export default function MyVehiclesPage() {
 
   const [editVehicle, setEditVehicle] = useState<VehicleRow | null>(null);
   const [editPrice, setEditPrice] = useState("");
-  const [editSecurityDeposit, setEditSecurityDeposit] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [editCity, setEditCity] = useState("");
   const [editSpecificLocation, setEditSpecificLocation] = useState("");
@@ -320,7 +317,6 @@ export default function MyVehiclesPage() {
     plate_number: "",
     mileage: "",
     price_per_day: "",
-    security_deposit_amount: "",
     location: "",
     city: "",
     specific_location: "",
@@ -577,21 +573,6 @@ export default function MyVehiclesPage() {
     }
     const pricePerDay = Number(form.price_per_day);
 
-    const securityDepositAmount =
-      form.security_deposit_amount === ""
-        ? 0
-        : Number(form.security_deposit_amount);
-    if (
-      !Number.isFinite(securityDepositAmount) ||
-      securityDepositAmount < 0 ||
-      securityDepositAmount > MAX_SECURITY_DEPOSIT
-    ) {
-      toast.error("Invalid security deposit amount", {
-        description: `Security deposit must be between PHP 0 and PHP ${MAX_SECURITY_DEPOSIT.toLocaleString()}.`,
-      });
-      return;
-    }
-
     if (carImages.length < 1 || carImages.length > 5) {
       toast.error("Please provide between 1 and 5 car images.");
       return;
@@ -637,7 +618,6 @@ export default function MyVehiclesPage() {
           plate_number: form.plate_number,
           mileage: form.mileage ? parseInt(form.mileage) : null,
           price_per_day: pricePerDay,
-          security_deposit_amount: securityDepositAmount,
           location: form.location ? [
             form.location,
             form.city || null,
@@ -727,7 +707,6 @@ export default function MyVehiclesPage() {
         plate_number: "",
         mileage: "",
         price_per_day: "",
-        security_deposit_amount: "",
         location: "",
         city: "",
         specific_location: "",
@@ -778,19 +757,6 @@ export default function MyVehiclesPage() {
     }
     const nextPrice = Number(editPrice);
 
-    const nextSecurityDeposit =
-      editSecurityDeposit === "" ? 0 : Number(editSecurityDeposit);
-    if (
-      !Number.isFinite(nextSecurityDeposit) ||
-      nextSecurityDeposit < 0 ||
-      nextSecurityDeposit > MAX_SECURITY_DEPOSIT
-    ) {
-      toast.error("Invalid security deposit amount", {
-        description: `Security deposit must be between PHP 0 and PHP ${MAX_SECURITY_DEPOSIT.toLocaleString()}.`,
-      });
-      return;
-    }
-
     if (!editRentalUseConfirmed) {
       toast.error("Rental-use confirmation is required", {
         description: "Confirm that the intended rental use was disclosed to the insurer before resubmitting.",
@@ -839,9 +805,8 @@ export default function MyVehiclesPage() {
       toast.loading("Updating details...", { id: toastId });
       const { error } = await supabase
         .from("cars")
-        .update({ 
+        .update({
           price_per_day: nextPrice,
-          security_deposit_amount: nextSecurityDeposit,
           location:
             [editLocation, editCity, editSpecificLocation]
               .filter(Boolean)
@@ -1461,36 +1426,6 @@ export default function MyVehiclesPage() {
                     )}
                 </div>
                 <div className="space-y-2">
-                  <Label>Security Deposit (PHP)</Label>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
-                      PHP
-                    </span>
-                  <Input
-                    type="number"
-                    min="0"
-                    max={MAX_SECURITY_DEPOSIT}
-                    step="1"
-                    placeholder="Optional refundable deposit"
-                    value={form.security_deposit_amount}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setForm({
-                        ...form,
-                        security_deposit_amount:
-                          value === ""
-                            ? ""
-                            : String(Math.min(Number(value), MAX_SECURITY_DEPOSIT)),
-                      });
-                    }}
-                    className="pl-12 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    This is shown separately from the online booking total so renters know if an owner-set deposit may still apply.
-                  </p>
-                </div>
-                <div className="space-y-2">
                   <Label>Registration expiry *</Label>
                   <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.registration_expiry} onChange={(event) => setForm({ ...form, registration_expiry: event.target.value })} required />
                 </div>
@@ -1912,14 +1847,6 @@ export default function MyVehiclesPage() {
                       <p className="text-sm text-muted-foreground mt-0.5">
                         <span className="font-medium text-foreground">{v.plate_number}</span> &bull; ₱{Number(v.price_per_day).toLocaleString()}/day
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Security deposit:{" "}
-                        <span className="font-medium text-foreground">
-                          {Number(v.security_deposit_amount) > 0
-                            ? `PHP ${Number(v.security_deposit_amount).toLocaleString()}`
-                            : "None"}
-                        </span>
-                      </p>
                       {(v.fuel_category || v.fuel_subtype) && (
                         <p className="mt-1 text-xs text-muted-foreground">
                           Fuel detail: {[v.fuel_category, v.fuel_subtype].filter(Boolean).join(" - ")}
@@ -2025,11 +1952,6 @@ export default function MyVehiclesPage() {
                         const parsedLocation = parseStoredLocation(v.location);
                         setEditVehicle(v);
                         setEditPrice(v.price_per_day.toString());
-                        setEditSecurityDeposit(
-                          Number(v.security_deposit_amount) > 0
-                            ? String(Number(v.security_deposit_amount))
-                            : "",
-                        );
                         setEditLocation(parsedLocation.region);
                         setEditCity(parsedLocation.city);
                         setEditSpecificLocation(parsedLocation.specificLocation);
@@ -2148,33 +2070,6 @@ export default function MyVehiclesPage() {
                         {validateListingPrice(editPrice)}
                       </p>
                     )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Security Deposit (PHP)</Label>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
-                        PHP
-                      </span>
-                      <Input
-                        type="number"
-                        min="0"
-                        max={MAX_SECURITY_DEPOSIT}
-                        value={editSecurityDeposit}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setEditSecurityDeposit(
-                            value === ""
-                              ? ""
-                              : String(Math.min(Number(value), MAX_SECURITY_DEPOSIT)),
-                          );
-                        }}
-                        placeholder="Optional refundable deposit"
-                        className="pl-12"
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      This stays separate from the online booking total and helps renters understand the owner-set deposit expectation.
-                    </p>
                   </div>
                   <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
                     <p className="font-medium text-foreground">

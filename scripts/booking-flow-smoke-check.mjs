@@ -48,7 +48,6 @@ const checks = [
     file: "src/pages/admin/AdminPlatformSettingsPage.tsx",
     markers: [
       "arrival_checkin_lead_hours",
-      "deposit_claim_window_hours",
       "lister_completion_timeout_hours",
       "apply live to every booking",
       "set_platform_contact_email",
@@ -105,27 +104,8 @@ const checks = [
     file: "api/lib/bookingCompletion.ts",
     markers: [
       "runBookingCompletionSideEffects",
-      "fetchDepositClaimWindowHours",
       "platform_commission_earned",
-      "return_review",
       "Payout did not run after completion",
-    ],
-  },
-  {
-    file: "api/lib/securityDeposit.ts",
-    markers: [
-      "runSecurityDepositRelease",
-      "enforceClaimWindow",
-      "The lister claim window is still open",
-      "safedrive-deposit-refund-",
-    ],
-  },
-  {
-    file: "api/security-deposit-action.ts",
-    markers: [
-      "lister_confirm_return",
-      "runSecurityDepositRelease",
-      "security_deposit_lister_confirmed_return",
     ],
   },
   {
@@ -134,8 +114,6 @@ const checks = [
       "owner_completion_auto_after_timeout",
       "lister_completion_timeout_hours",
       "runBookingCompletionSideEffects",
-      "runSecurityDepositRelease",
-      "depositAutoReleased",
     ],
   },
   {
@@ -150,14 +128,6 @@ const checks = [
     ],
     absentMarkers: [
       '"front", "back", "left", "right", "interior", "odometer", "fuel_or_battery"',
-    ],
-  },
-  {
-    file: "api/security-deposit-action.ts",
-    markers: [
-      "lister_confirm_return",
-      "your own complete pickup AND return condition reports",
-      "isCompleteReport",
     ],
   },
   {
@@ -420,15 +390,6 @@ const checks = [
     ],
   },
   {
-    file: "api/lib/securityDeposit.ts",
-    markers: [
-      "runSecurityDepositRelease",
-      "isDemoMoneyMovementEnabled",
-      "sandbox_deposit_refund_",
-      "Demo refund (no real transfer)",
-    ],
-  },
-  {
     file: "api/mark-manual-refund.ts",
     markers: [
       "GCash/Maya return method",
@@ -540,7 +501,6 @@ const checks = [
       "User inquiries",
       "isSuperAdmin",
       "Payout attention",
-      "Deposit review",
       "Oldest waiting",
     ],
   },
@@ -599,7 +559,7 @@ const checks = [
     file: "database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql",
     markers: [
       "payments_one_completed_checkout_event",
-      "payment_type in ('downpayment', 'balance', 'extension', 'security_deposit')",
+      "payment_type in ('downpayment', 'balance', 'extension')",
       "transaction_id is not null",
     ],
   },

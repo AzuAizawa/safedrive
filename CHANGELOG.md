@@ -9,6 +9,74 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Remove the security deposit feature entirely (CHAPTER 34)
+
+Requested removal: the refundable security-deposit flow (separate deposit
+checkout, claim review, auto-release, its own ledger liability account, and
+the payout gate waiting on it) was never used in production - a diagnostic
+query confirmed zero deposits, zero claims, zero deposit payment rows, and
+zero finalized deposit ledger journals in the live database - so it was hard
+deleted end to end rather than soft-disabled. Booking data did **not** need
+to be touched: `security_deposits.booking_id` pointed one-directionally at
+`bookings` (`ON DELETE RESTRICT`), so dropping the deposit tables never
+required touching booking rows.
+
+- **Removed entirely:** `api/security-deposit-action.ts`,
+  `api/create-security-deposit-checkout.ts`,
+  `api/process-security-deposit-release.ts`, `api/lib/securityDeposit.ts`,
+  `src/pages/SecurityDepositPage.tsx`,
+  `src/pages/admin/AdminSecurityDepositsPage.tsx`.
+- **Every process that gated on deposit state now proceeds without it**,
+  reconnected rather than left half-wired: arrival check-in
+  (`api/booking-action.ts`), payout eligibility
+  (`api/lib/payoutAutomation.ts`), booking completion
+  (`api/lib/bookingCompletion.ts`), the PayMongo webhook
+  (`api/webhooks/paymongo.ts`), receipts/ledger posting
+  (`api/lib/email.ts`, `api/lib/ledger.ts`), reconciliation
+  (`api/run-reconciliation.ts`), and deadline expiry
+  (`api/expire-booking-deadlines.ts` - also dropped its now-orphaned
+  deposit auto-release loop and gained a `booking_cancellations` write for
+  unpaid-deadline expiry, matching how a late cancellation is already
+  recorded for reliability scoring).
+- **Frontend:** removed every deposit display line, gate, and button from
+  `MyBookingsPage.tsx`, `ListerBookingsPage.tsx`, `CarDetailPage.tsx`, and
+  `MyVehiclesPage.tsx` (Add/Edit vehicle forms); removed the deposit tab
+  from `AdminFinancialReviewsPage.tsx`, the deposit-review count from
+  `AdminDashboard.tsx` and `adminAttention.ts`, the
+  `deposit_claim_window_hours` control from
+  `AdminPlatformSettingsPage.tsx`, and the two deposit routes from
+  `App.tsx`. Also fixed lingering deposit-claim wording in
+  `TripConditionReportPage.tsx`, `AdminPayoutsPage.tsx`, `TermsPage.tsx`
+  (dropped the now-inaccurate ToS clause 5.5), and `helpCenter.ts`
+  (repurposed the FAQ entry to downpayment-vs-balance).
+- **Types/QA:** `src/types/database.ts` (dropped the two deposit table
+  types and `cars.security_deposit_amount`/
+  `platform_settings.deposit_claim_window_hours` columns),
+  `scripts/financial-logic.test.mjs`, `scripts/booking-flow-smoke-check.mjs`,
+  and the `verify-live-*.mjs` scripts all updated to match - no orphaned
+  markers or checks left pointing at removed code.
+- **Database (CHAPTER 34):** drops `security_deposits` and
+  `security_deposit_claims`, drops `cars.security_deposit_amount` and
+  `platform_settings.deposit_claim_window_hours`, removes ledger account
+  `2020` (refundable-deposit liability), and recreates
+  `return_materially_changed_car_to_review()` and
+  `validate_platform_setting_change()` without the dropped-column
+  references those trigger/RPC functions used to have.
+- **Docs:** `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`,
+  `project_docs/SYSTEM_FLOWS.md`, `project_docs/RBAC_DESIGN.md`,
+  `project_docs/DATA_RETENTION_AND_DELETION.md`, `docs/system-process.md`,
+  `docs/system-process-flow.mermaid`, `docs/dfd-level-1.mermaid`,
+  `plans/todo.md`, and `plans/implementation-plan.md` all updated to drop
+  every current-tense deposit reference; historical changelog and
+  dated-spec entries that describe what existed *at the time* are left
+  alone on purpose - they're accurate records, not live claims.
+- Verified clean: `tsc -b`, lint, `check:api`, `check:alignment`, build,
+  `node --test` (financial-logic), and
+  `node scripts/booking-flow-smoke-check.mjs` all pass.
+- **Files:** ~30 files across `api/`, `src/`, `scripts/`, `project_docs/`,
+  and `docs/`; see `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql`
+  CHAPTER 34 for the full SQL.
+
 ## 2026-09-04 — Deadline timezone bug, arrival-card reorder, non-payment reliability
 
 Tester feedback: payment/response deadlines were showing hours past the

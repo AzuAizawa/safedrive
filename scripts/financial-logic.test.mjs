@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { calculatePaymentLedgerAllocation } from "../api/lib/ledger.ts";
-import { calculateSecurityDepositDisposition } from "../api/lib/securityDeposit.ts";
 
 test("a full renter payment allocates owner, commission, and disclosed processing fee", () => {
   const allocation = calculatePaymentLedgerAllocation({
@@ -58,36 +57,5 @@ test("invalid ledger allocations are rejected", () => {
         totalPrice: 1_100,
       }),
     /amount is invalid/,
-  );
-});
-
-test("an undisputed security deposit is fully released", () => {
-  assert.deepEqual(calculateSecurityDepositDisposition(10_000, []), {
-    approvedCentavos: 0,
-    refundableCentavos: 10_000,
-    status: "released",
-  });
-});
-
-test("an approved deduction releases only the remaining deposit", () => {
-  assert.deepEqual(calculateSecurityDepositDisposition(10_000, [2_500]), {
-    approvedCentavos: 2_500,
-    refundableCentavos: 7_500,
-    status: "partially_released",
-  });
-});
-
-test("approved claims are capped at the deposit liability", () => {
-  assert.deepEqual(calculateSecurityDepositDisposition(10_000, [7_000, 5_000]), {
-    approvedCentavos: 10_000,
-    refundableCentavos: 0,
-    status: "claimed",
-  });
-});
-
-test("invalid approved claim values are rejected", () => {
-  assert.throws(
-    () => calculateSecurityDepositDisposition(10_000, [-1]),
-    /claim amount is invalid/,
   );
 });
