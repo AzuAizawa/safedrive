@@ -52,6 +52,8 @@ interface AuthContextType {
   ) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  /** Re-sends the "Confirm your signup" email for an account stuck unconfirmed. */
+  resendConfirmationEmail: (email: string) => Promise<{ error: Error | null }>;
   sendOtp: (
     email: string,
     redirectPath?: string,
@@ -540,6 +542,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error as Error | null };
   };
 
+  // The original "Confirm your signup" email is sent once, at signUp() time,
+  // and easily gets lost or lands in spam. This re-sends the same Supabase
+  // template through the same link so a stuck account is never a dead end.
+  const resendConfirmationEmail = async (email: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: normalizedEmail,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/confirm?next=user`,
+      },
+    });
+    return { error: error as Error | null };
+  };
+
   const sendOtp = async (
     email: string,
     redirectPath = "/auth/confirm?next=user",
@@ -666,6 +683,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signOut,
         refreshProfile,
+        resendConfirmationEmail,
         sendOtp,
         verifyOtpCode,
         getAuthenticatorFactor,

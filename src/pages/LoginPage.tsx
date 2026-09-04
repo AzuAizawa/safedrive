@@ -114,9 +114,14 @@ export default function LoginPage() {
     return token;
   };
   const [, setLockoutTick] = useState(() => Date.now());
+  const [showResendConfirmation, setShowResendConfirmation] = useState(false);
+  const [resendingConfirmation, setResendingConfirmation] = useState(false);
+  const [resendCooldownUntil, setResendCooldownUntil] = useState(0);
+  const [, setResendTick] = useState(() => Date.now());
   const {
     signIn,
     signOut,
+    resendConfirmationEmail,
     sendOtp,
     verifyOtpCode,
     getAuthenticatorFactor,
@@ -148,7 +153,10 @@ export default function LoginPage() {
   const normalizedEmail = email.trim().toLowerCase();
 
   useEffect(() => {
-    const interval = window.setInterval(() => setLockoutTick(Date.now()), 1000);
+    const interval = window.setInterval(() => {
+      setLockoutTick(Date.now());
+      setResendTick(Date.now());
+    }, 1000);
     return () => window.clearInterval(interval);
   }, []);
 
@@ -256,6 +264,26 @@ export default function LoginPage() {
     return true;
   };
 
+  const RESEND_CONFIRMATION_COOLDOWN_MS = 60_000;
+
+  const handleResendConfirmation = async () => {
+    if (!normalizedEmail || resendingConfirmation) return;
+    if (Date.now() < resendCooldownUntil) return;
+    setResendingConfirmation(true);
+    const { error } = await resendConfirmationEmail(normalizedEmail);
+    if (error) {
+      toast.error("Could not resend the confirmation email", {
+        description: error.message,
+      });
+    } else {
+      setResendCooldownUntil(Date.now() + RESEND_CONFIRMATION_COOLDOWN_MS);
+      toast.success("Confirmation email sent", {
+        description: `Check ${maskEmail(normalizedEmail)}, including Spam/Promotions.`,
+      });
+    }
+    setResendingConfirmation(false);
+  };
+
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (lockoutState.isLocked) {
@@ -268,6 +296,7 @@ export default function LoginPage() {
       toast.error("Please wait for the security check to finish");
       return;
     }
+    setShowResendConfirmation(false);
     setIsLoading(true);
     const { error } = await signIn(normalizedEmail, password, consumeCaptcha());
     if (error) {
@@ -285,6 +314,9 @@ export default function LoginPage() {
           failed_attempts: failureState.failedAttempts,
           locked_until: new Date(failureState.lockedUntil).toISOString(),
         });
+      }
+      if (/email not confirmed/i.test(error.message)) {
+        setShowResendConfirmation(true);
       }
       toast.error("Login failed", { description: getFriendlyLoginError(error.message) });
       if (failureState.isLocked) {
@@ -761,6 +793,7 @@ export default function LoginPage() {
                     onChange={(e) => {
                       setEmail(e.target.value);
                       setLockoutTick(Date.now());
+                      setShowResendConfirmation(false);
                     }}
                     required
                     disabled={isLoading}
@@ -768,6 +801,29 @@ export default function LoginPage() {
                     className="h-10 disabled:opacity-60"
                   />
                 </div>
+                {showResendConfirmation && (
+                  <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-200">
+                    <p>
+                      This email is registered but not confirmed yet. Check your inbox
+                      (and Spam/Promotions) for the confirmation email, or send a new one.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="mt-2 h-8 w-full text-xs"
+                      disabled={resendingConfirmation || Date.now() < resendCooldownUntil}
+                      onClick={handleResendConfirmation}
+                    >
+                      {resendingConfirmation ? (
+                        <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+                      ) : null}
+                      {Date.now() < resendCooldownUntil
+                        ? `Resend in ${Math.ceil((resendCooldownUntil - Date.now()) / 1000)}s`
+                        : "Resend confirmation email"}
+                    </Button>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="password">Password</Label>

@@ -91,7 +91,8 @@ export default function SignUpPage() {
       }
     } else {
       toast.success("Account created!", {
-        description: "Please check your email to verify your account.",
+        description:
+          "Please check your email (including Spam/Promotions) to verify your account. Didn't get it? Try signing in and use the resend option there.",
       });
       navigate("/login");
     }

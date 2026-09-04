@@ -9,6 +9,23 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Resend signup confirmation email
+
+Tester feedback: the "Confirm your signup" email is sent exactly once, at
+signUp() time; if it lands in Spam/Promotions or is missed, the account was
+stuck with no way to get another one.
+
+- **`AuthContext.resendConfirmationEmail(email)`:** wraps
+  `supabase.auth.resend({ type: "signup", ... })` (same template, same
+  `emailRedirectTo`).
+- **`/login`:** a sign-in attempt that fails with "Email not confirmed" now
+  shows an inline banner with a "Resend confirmation email" button (60s
+  client-side cooldown, clears when the email field changes).
+- **`/signup`:** the success toast now mentions Spam/Promotions and the
+  resend option on `/login`.
+- **Files:** `src/contexts/AuthContext.tsx`,
+  `src/pages/{LoginPage,SignUpPage}.tsx`.
+
 ## 2026-09-04 — Pickup no-show / non-return incidents + fault attribution (CHAPTER 31)
 
 Closes the CHAPTER 27 fairness gap: an innocent party should not take the
