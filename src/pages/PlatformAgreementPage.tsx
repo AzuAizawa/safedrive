@@ -147,6 +147,19 @@ export default function PlatformAgreementPage() {
                 any such goodwill refund is released only after SafeDrive support review. The lister may also decline
                 the request, in which case the original return date and full booking amount stand.
               </li>
+              <li>
+                <strong>No Car at Pickup:</strong> If the Renter completes their arrival check-in and the Lister
+                fails to hand over the vehicle within the 30-minute grace period, the Renter may cancel the booking
+                through the app and receive a <em>full</em> automatic refund. The cancellation is recorded against
+                the Lister and does not affect the Renter&apos;s reliability record.
+              </li>
+              <li>
+                <strong>Renter No-Show:</strong> If the Lister completes their arrival check-in and the Renter fails
+                to appear within the 30-minute grace period, the Lister may cancel the booking through the app. The
+                Renter forfeits 50% of the amount captured as short-notice compensation to the Lister; the remaining
+                50% is refunded to the Renter only after SafeDrive support confirms the return method. The no-show is
+                recorded against the Renter.
+              </li>
             </ul>
           </section>
 

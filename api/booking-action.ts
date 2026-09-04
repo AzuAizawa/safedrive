@@ -26,6 +26,10 @@ type BookingActionPayload = {
     capturedAt?: string | null;
   } | null;
   note?: string | null;
+  // Set by the lister "take car offline" flow when the reason is stolen /
+  // damaged and an incident case is open: the cancellation is still recorded
+  // but excluded from the completion rate and the auto-pause strike count.
+  waiveStrike?: boolean;
 };
 
 type BookingRecord = {
@@ -891,6 +895,7 @@ export default async function handler(req: Request) {
       );
       const cancelWasLate =
         hoursBeforePickup !== null && hoursBeforePickup < cancelFullHours;
+      const strikeWaived = !renter && payload.waiveStrike === true;
 
       await supabase.from("booking_cancellations").upsert(
         {
@@ -909,10 +914,19 @@ export default async function handler(req: Request) {
         { onConflict: "booking_id" },
       );
 
+      // Separate write so a deploy that lands before CHAPTER 31 (no
+      // strike_waived column) still records the cancellation above.
+      if (strikeWaived) {
+        await supabase
+          .from("booking_cancellations")
+          .update({ strike_waived: true })
+          .eq("booking_id", bookingRecord.id);
+      }
+
       // Lister strike + auto-pause: 3 late cancellations of a paid booking
       // inside 60 days pulls every one of the lister's live listings offline
       // pending a support review.
-      if (!renter && cancelWasLate && hasCapturedBookingPayment) {
+      if (!renter && cancelWasLate && hasCapturedBookingPayment && !strikeWaived) {
         const sixtyDaysAgo = new Date(
           Date.now() - 60 * 24 * 3_600_000,
         ).toISOString();
@@ -923,6 +937,7 @@ export default async function handler(req: Request) {
           .eq("cancelled_by_role", "lister")
           .eq("was_late", true)
           .eq("had_captured_payment", true)
+          .eq("strike_waived", false)
           .gte("cancelled_at", sixtyDaysAgo);
 
         if ((recentLateCancels ?? 0) >= 3) {

@@ -9,6 +9,40 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Pickup no-show / non-return incidents + fault attribution (CHAPTER 31)
+
+Closes the CHAPTER 27 fairness gap: an innocent party should not take the
+reliability hit when a handover fails.
+
+- **SQL (CHAPTER 31, run manually):** `bookings.dispute_status`
+  (`none`/`open`/`resolved` — a sub-flag, not a new booking status) +
+  `booking_cancellations.strike_waived`; both reliability RPCs recreated to
+  ignore a waived cancellation.
+- **`api/booking-incident-action.ts` (new):** `renter_no_car` (renter checked
+  in, no car → cancel + full auto-refund, no reliability hit; cascade-aware —
+  an overdue previous renter is blamed instead and the lister strike is
+  waived), `renter_no_show` (lister checked in, renter absent → cancel, renter
+  keeps a 50% forfeit, other 50% queued for admin release), `report_non_return`
+  (active trip overdue → `dispute_status='open'`, support case, no cancel).
+- **Blocking:** a renter with an `open` dispute cannot create or pay for
+  bookings (`api/create-booking.ts`, `api/create-checkout.ts`,
+  `api/create-balance-checkout.ts`, each a separate defensive query); the
+  lister cannot re-enable that car's listing.
+- **`booking-action.ts`:** new `waiveStrike` payload flag; the auto-pause
+  strike count and `booking_cancellations` now honour `strike_waived`.
+- **`/my-vehicles` "Disable":** a car with upcoming bookings now opens a
+  confirmation modal that lists them + a reason select; on confirm each is
+  cancelled (paid → auto-refund), then the car goes offline. Reason
+  stolen/damaged waives the strikes and opens a `vehicle_offline` ticket; an
+  active trip blocks the toggle.
+- **`/my-bookings` / `/lister-bookings`:** the old "Report No-Show" links
+  (which only opened a support form) are replaced with the real actions above.
+- **Platform Agreement:** §4 gains the renter no-show 50%-forfeit clause.
+- **Files:** CHAPTER 31; `api/{booking-incident-action,booking-action,
+  create-booking,create-checkout,create-balance-checkout}.ts`;
+  `src/lib/incidents.ts`; `src/pages/{MyBookingsPage,ListerBookingsPage,
+  MyVehiclesPage,PlatformAgreementPage}.tsx`; `src/types/database.ts`.
+
 ## 2026-09-04 — Early return + expired-licence checkpoints
 
 - **Early return (CHAPTER 30, run manually):** `booking_early_returns` table +

@@ -323,6 +323,28 @@ export default async function handler(req: Request) {
       }
     }
 
+    // An unresolved non-return incident (renter still holding a car past its
+    // return date) blocks new bookings. Separate query so a deploy before
+    // CHAPTER 31 degrades to "no gate".
+    {
+      const { data: openIncident } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("renter_id", user.id)
+        .eq("dispute_status", "open")
+        .limit(1)
+        .maybeSingle();
+      if (openIncident) {
+        return jsonResponse(
+          {
+            error:
+              "You have an open case for a vehicle that was not returned on time. Resolve it with SafeDrive support before booking again.",
+          },
+          403,
+        );
+      }
+    }
+
     const { data: carData, error: carError } = await supabase
       .from("cars")
       .select(

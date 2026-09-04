@@ -270,7 +270,7 @@ const hashFileSha256 = async (file: File) => {
 
 
 export default function MyVehiclesPage() {
-  const { user, profile } = useAuth();
+  const { user, profile, session } = useAuth();
   const navigate = useNavigate();
   const { userMessage: userVerificationEta, vehicleMessage: vehicleVerificationEta } =
     useVerificationEtaMessages();
@@ -308,6 +308,14 @@ export default function MyVehiclesPage() {
   const [editing, setEditing] = useState(false);
   const [vehicleActionId, setVehicleActionId] = useState<string | null>(null);
   const [deleteTargetVehicle, setDeleteTargetVehicle] = useState<VehicleRow | null>(null);
+  const [disableTarget, setDisableTarget] = useState<VehicleRow | null>(null);
+  const [disableReason, setDisableReason] = useState<
+    "stolen" | "damaged" | "other"
+  >("other");
+  const [disableBookings, setDisableBookings] = useState<
+    { id: string; status: string }[] | null
+  >(null);
+  const [disableSubmitting, setDisableSubmitting] = useState(false);
 
   const [form, setForm] = useState({
     brand_id: null as string | null,
@@ -892,56 +900,207 @@ export default function MyVehiclesPage() {
     }
   };
 
-  const handleToggleVehicleLiveStatus = async (vehicle: VehicleRow) => {
+  const enableVehicleListing = async (vehicle: VehicleRow) => {
     if (!user) return;
 
-    const enabling = vehicle.status === "inactive";
-    const nextStatus = enabling ? "approved" : "inactive";
+    const liveCount = vehicles.filter((item) =>
+      isLiveVehicle(item.status),
+    ).length;
+    if (liveCount >= maxSlots) {
+      toast.error("Vehicle slot limit reached", {
+        description: `Your current plan allows ${maxSlots} live listing${
+          maxSlots === 1 ? "" : "s"
+        }. Upgrade your plan to reactivate more.`,
+      });
+      return;
+    }
 
-    if (enabling) {
-      const liveCount = vehicles.filter((item) =>
-        isLiveVehicle(item.status),
-      ).length;
-      if (liveCount >= maxSlots) {
-        toast.error("Vehicle slot limit reached", {
-          description: `Your current plan allows ${maxSlots} live listing${
-            maxSlots === 1 ? "" : "s"
-          }. Upgrade your plan to reactivate more.`,
-        });
-        return;
-      }
+    // A car with an unresolved non-return / incident case stays locked until
+    // SafeDrive support closes it. Separate query so a pre-CHAPTER-31 deploy
+    // degrades to "no lock".
+    const { data: openCase } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("car_id", vehicle.id)
+      .eq("dispute_status", "open")
+      .limit(1)
+      .maybeSingle();
+    if (openCase) {
+      toast.error("This listing is locked", {
+        description:
+          "An open incident case is still being reviewed by SafeDrive support. You can re-enable the listing once it is resolved.",
+      });
+      return;
     }
 
     setVehicleActionId(vehicle.id);
-
-    const toastId = toast.loading(
-      enabling ? "Enabling vehicle listing..." : "Disabling vehicle listing...",
-    );
-
+    const toastId = toast.loading("Enabling vehicle listing...");
     try {
       const { error } = await supabase
         .from("cars")
-        .update({ status: nextStatus })
+        .update({ status: "approved" })
         .eq("id", vehicle.id)
         .eq("owner_id", user.id);
-
       if (error) throw error;
-
-      toast.success(
-        enabling
-          ? "Vehicle listing is live again."
-          : "Vehicle listing has been disabled.",
-        { id: toastId },
-      );
+      toast.success("Vehicle listing is live again.", { id: toastId });
       fetchVehicles();
     } catch (error) {
-      toast.error(enabling ? "Failed to enable vehicle" : "Failed to disable vehicle", {
+      toast.error("Failed to enable vehicle", {
         id: toastId,
         description:
           error instanceof Error ? error.message : "Please try again.",
       });
     } finally {
       setVehicleActionId(null);
+    }
+  };
+
+  const openDisableFlow = async (vehicle: VehicleRow) => {
+    if (!user) return;
+    setVehicleActionId(vehicle.id);
+    try {
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("id, status, dispute_status")
+        .eq("car_id", vehicle.id)
+        .in("status", [
+          "pending",
+          "confirmed",
+          "awaiting_payment",
+          "downpayment_paid",
+          "fully_paid",
+          "active",
+        ]);
+      if (error) throw error;
+
+      const rows = (data ?? []) as {
+        id: string;
+        status: string;
+        dispute_status?: string | null;
+      }[];
+      const relevant = rows.filter(
+        (row) => (row.dispute_status ?? "none") !== "open",
+      );
+      const activeTrip = relevant.find((row) => row.status === "active");
+      if (activeTrip) {
+        toast.error("This car is out on an active trip", {
+          description:
+            "Take it offline after the trip ends. If there is a problem right now, report it from Bookings.",
+        });
+        return;
+      }
+
+      const pendingOrPaid = relevant.filter((row) => row.status !== "active");
+      if (pendingOrPaid.length === 0) {
+        // Nothing to cancel — disable straight away.
+        const { error: disableError } = await supabase
+          .from("cars")
+          .update({ status: "inactive" })
+          .eq("id", vehicle.id)
+          .eq("owner_id", user.id);
+        if (disableError) throw disableError;
+        toast.success("Vehicle listing has been disabled.");
+        fetchVehicles();
+        return;
+      }
+
+      setDisableTarget(vehicle);
+      setDisableReason("other");
+      setDisableBookings(pendingOrPaid);
+    } catch (error) {
+      toast.error("Failed to disable vehicle", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setVehicleActionId(null);
+    }
+  };
+
+  const confirmDisableWithBookings = async () => {
+    if (!user || !disableTarget || !disableBookings) return;
+    const vehicle = disableTarget;
+    const reason = disableReason;
+    const waiveStrike = reason === "stolen" || reason === "damaged";
+    const reasonNote =
+      reason === "stolen"
+        ? "Lister took the car offline: reported stolen or missing."
+        : reason === "damaged"
+          ? "Lister took the car offline: damaged and under repair."
+          : "Lister took the car offline.";
+
+    setDisableSubmitting(true);
+    try {
+      const failures: string[] = [];
+      for (const booking of disableBookings) {
+        const res = await fetch("/api/booking-action", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session?.access_token ?? ""}`,
+          },
+          body: JSON.stringify({
+            bookingId: booking.id,
+            action: "cancel",
+            note: reasonNote,
+            waiveStrike,
+          }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          failures.push(body.error || `Booking ${booking.id}`);
+        }
+      }
+
+      if (failures.length > 0) {
+        toast.error("Some bookings could not be cancelled", {
+          description: `${failures.length} of ${disableBookings.length} failed. Nothing was taken offline — resolve those bookings and try again.`,
+        });
+        return;
+      }
+
+      const { error: disableError } = await supabase
+        .from("cars")
+        .update({ status: "inactive" })
+        .eq("id", vehicle.id)
+        .eq("owner_id", user.id);
+      if (disableError) throw disableError;
+
+      if (waiveStrike) {
+        // Give SafeDrive support a paper trail for the waiver.
+        await supabase.from("support_tickets").insert({
+          user_id: user.id,
+          subject: `Vehicle taken offline (${
+            reason === "stolen" ? "stolen/missing" : "damaged"
+          }): ${vehicle.car_models.car_brands.name} ${vehicle.car_models.name} (${vehicle.plate_number})`,
+          tag: "vehicle_offline",
+          status: "open",
+        });
+      }
+
+      toast.success("Vehicle listing has been disabled.", {
+        description: `${disableBookings.length} affected booking${
+          disableBookings.length === 1 ? "" : "s"
+        } cancelled and refunded where paid.`,
+      });
+      setDisableTarget(null);
+      setDisableBookings(null);
+      fetchVehicles();
+    } catch (error) {
+      toast.error("Failed to disable vehicle", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setDisableSubmitting(false);
+    }
+  };
+
+  const handleToggleVehicleLiveStatus = (vehicle: VehicleRow) => {
+    if (vehicle.status === "inactive") {
+      void enableVehicleListing(vehicle);
+    } else {
+      void openDisableFlow(vehicle);
     }
   };
 
@@ -2289,6 +2448,53 @@ export default function MyVehiclesPage() {
             : Promise.resolve()
         }
       />
+      <ConfirmDialog
+        open={Boolean(disableTarget && disableBookings)}
+        title="Take this car offline?"
+        description={
+          disableTarget && disableBookings
+            ? `${disableBookings.length} upcoming booking${
+                disableBookings.length === 1 ? "" : "s"
+              } for ${disableTarget.car_models.car_brands.name} ${disableTarget.car_models.name} (${disableTarget.plate_number}) will be cancelled. Paid bookings are refunded automatically.`
+            : ""
+        }
+        confirmText="Cancel Bookings & Take Offline"
+        destructive
+        isLoading={disableSubmitting}
+        onCancel={() => {
+          setDisableTarget(null);
+          setDisableBookings(null);
+        }}
+        onConfirm={confirmDisableWithBookings}
+      >
+        <div className="space-y-3">
+          <div>
+            <Label htmlFor="disable-reason">Why are you taking it offline?</Label>
+            <Select
+              value={disableReason}
+              onValueChange={(value) =>
+                setDisableReason(value as "stolen" | "damaged" | "other")
+              }
+            >
+              <SelectTrigger id="disable-reason" className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="stolen">Vehicle stolen or missing</SelectItem>
+                <SelectItem value="damaged">
+                  Vehicle damaged — under repair
+                </SelectItem>
+                <SelectItem value="other">Personal use / other</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+            {disableReason === "other"
+              ? "Cancelling confirmed bookings on short notice can affect your completion rate, the same as any lister cancellation."
+              : "Because this is outside your control, these cancellations are recorded but will not count against your completion rate. SafeDrive support opens a case to verify."}
+          </p>
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

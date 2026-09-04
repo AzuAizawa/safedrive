@@ -581,6 +581,7 @@ export interface Database {
           downpayment_amount: number;
           balance_amount: number;
           status: string;
+          dispute_status: string;
           payment_deadline: string | null;
           owner_response_deadline: string | null;
           renter_completed: boolean;
@@ -624,6 +625,7 @@ export interface Database {
           downpayment_amount: number;
           balance_amount: number;
           status?: string;
+          dispute_status?: string;
           owner_response_deadline?: string | null;
           payment_deadline?: string | null;
           paymongo_checkout_id?: string | null;
@@ -667,6 +669,7 @@ export interface Database {
           downpayment_amount?: number;
           balance_amount?: number;
           status?: string;
+          dispute_status?: string;
           owner_response_deadline?: string | null;
           payment_deadline?: string | null;
           paymongo_checkout_id?: string | null;
@@ -930,6 +933,7 @@ export interface Database {
           hours_before_pickup: number | null;
           was_late: boolean;
           had_captured_payment: boolean;
+          strike_waived: boolean;
           cancelled_at: string;
         };
         Insert: {
@@ -943,6 +947,7 @@ export interface Database {
           hours_before_pickup?: number | null;
           was_late?: boolean;
           had_captured_payment?: boolean;
+          strike_waived?: boolean;
           cancelled_at?: string;
         };
         Update: {
@@ -956,6 +961,7 @@ export interface Database {
           hours_before_pickup?: number | null;
           was_late?: boolean;
           had_captured_payment?: boolean;
+          strike_waived?: boolean;
           cancelled_at?: string;
         };
         Relationships: [];

@@ -159,6 +159,27 @@ export default async function handler(req: Request) {
       }
     }
 
+    // Block payment while the renter has an unresolved non-return case.
+    // Separate query so a pre-CHAPTER-31 deploy degrades to no check.
+    {
+      const { data: openIncident } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("renter_id", user.id)
+        .eq("dispute_status", "open")
+        .limit(1)
+        .maybeSingle();
+      if (openIncident) {
+        return jsonResponse(
+          {
+            error:
+              "You have an open case for a vehicle that was not returned on time. Resolve it with SafeDrive support before paying for another booking.",
+          },
+          403,
+        );
+      }
+    }
+
     if (!bookingRecord.agreement_version_id) {
       return jsonResponse({ error: "This booking has no approved rental-agreement snapshot" }, 409);
     }

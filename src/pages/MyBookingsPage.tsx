@@ -9,7 +9,7 @@ import {
   getNoShowWindowState,
   getReturnReminderState,
 } from "@/lib/bookingLifecycle";
-import { buildNoShowSupportPath } from "@/lib/supportTickets";
+import { runIncidentAction } from "@/lib/incidents";
 import {
   getExtensionDisplayStatus,
   getExtensionStatusLabel,
@@ -69,6 +69,7 @@ interface BookingRow {
   downpayment_amount: number;
   balance_amount: number;
   status: string;
+  dispute_status?: string | null;
   renter_completed: boolean;
   owner_completed: boolean;
   payment_deadline: string | null;
@@ -248,6 +249,8 @@ export default function MyBookingsPage() {
   const [paymentLogs, setPaymentLogs] = useState<Payment[]>([]);
   const [paymentLogsLoading, setPaymentLogsLoading] = useState(false);
   const [cancelTargetBooking, setCancelTargetBooking] = useState<BookingRow | null>(null);
+  const [noCarTarget, setNoCarTarget] = useState<BookingRow | null>(null);
+  const [incidentLoading, setIncidentLoading] = useState<string | null>(null);
   const [carRatingSummaries, setCarRatingSummaries] = useState<Record<string, RatingSummary>>({});
   const [listerCancelledBookingIds, setListerCancelledBookingIds] = useState<
     Set<string>
@@ -925,15 +928,26 @@ export default function MyBookingsPage() {
     );
   };
 
-  const handleReportNoShow = (booking: BookingRow) => {
-    const vehicleLabel = `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`;
-    navigate(
-      buildNoShowSupportPath({
-        bookingId: booking.id,
-        vehicleLabel,
-        missingParty: "other party",
-      }),
-    );
+  const handleReportNoCar = async () => {
+    if (!noCarTarget) return;
+    setIncidentLoading(noCarTarget.id);
+    try {
+      await runIncidentAction(session?.access_token, {
+        bookingId: noCarTarget.id,
+        action: "renter_no_car",
+      });
+      toast.success("Booking cancelled — your full refund is being processed.", {
+        description: "Your reliability record is not affected. You can rebook another car now.",
+      });
+      setNoCarTarget(null);
+      fetchBookings();
+    } catch (err) {
+      toast.error("Could not file the report", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setIncidentLoading(null);
+    }
   };
 
   const openRateBookingModal = (booking: BookingRow) => {
@@ -2415,24 +2429,22 @@ export default function MyBookingsPage() {
                           </p>
                           <p className="mt-1">
                             {noShowState.canReport
-                              ? booking.renter_arrival_photo_url
-                                ? "Your arrival check-in and optional photo are on file. If the lister still has not arrived, you can report a no-show now for support review."
-                                : "Your arrival check-in is already on file. If the lister still has not arrived, you can report a no-show now for support review."
+                              ? "Your arrival check-in is on file and the lister still has not arrived with the car. You can cancel this booking now for a full refund — this will not affect your reliability record."
                               : `SafeDrive waits until ${noShowState.reportReadyAt.toLocaleTimeString([], {
                                   hour: "numeric",
                                   minute: "2-digit",
-                                })} before a no-show report can be filed. Add optional evidence only if you want extra support for the report.`}
+                                })} before you can cancel for no car at pickup. Add optional pickup photos in the meantime if you want extra evidence.`}
                           </p>
                           {noShowState.canReport ? (
                             <div className="mt-2">
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handleReportNoShow(booking)}
+                                onClick={() => setNoCarTarget(booking)}
                                 className="gap-1"
                               >
                                 <AlertCircle className="w-3.5 h-3.5" />
-                                Report No-Show
+                                No car at pickup — cancel &amp; refund
                               </Button>
                             </div>
                           ) : null}
@@ -3171,6 +3183,32 @@ export default function MyBookingsPage() {
             </div>
           </div>
         ) : null}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={Boolean(noCarTarget)}
+        title="No car available at pickup?"
+        description={
+          noCarTarget
+            ? `This cancels your booking for ${noCarTarget.cars.car_models.car_brands.name} ${noCarTarget.cars.car_models.name} (${noCarTarget.cars.plate_number}) and starts your full refund. Only do this if you checked in at the pickup point and the lister did not arrive with the car.`
+            : ""
+        }
+        confirmText="Cancel & Get Full Refund"
+        destructive
+        isLoading={Boolean(noCarTarget && incidentLoading === noCarTarget.id)}
+        onCancel={() => setNoCarTarget(null)}
+        onConfirm={handleReportNoCar}
+      >
+        <div className="space-y-2 rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+          <p>
+            SafeDrive refunds every peso you paid through PayMongo. Your
+            cancellation and completion rate are not affected — the record shows
+            the lister missed the handover.
+          </p>
+          <p>
+            SafeDrive support opens a case automatically so the lister can
+            respond.
+          </p>
+        </div>
       </ConfirmDialog>
     </div>
   );

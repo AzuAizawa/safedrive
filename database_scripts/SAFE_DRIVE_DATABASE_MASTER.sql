@@ -7523,4 +7523,121 @@ using (auth.uid() = renter_id or auth.uid() = owner_id or public.is_admin());
 
 grant select on public.booking_early_returns to authenticated;
 
+-- ============================================================================
+-- CHAPTER 31 - Pickup no-show / non-return incidents + fault attribution
+-- ============================================================================
+-- When something goes wrong at the handover, the affected booking must not
+-- silently stay `active` and the INNOCENT party must not take the reputation
+-- hit. This chapter adds:
+--   * bookings.dispute_status - a sub-flag ('none' | 'open' | 'resolved') so an
+--     un-returned or contested trip is out of the "active flow" (e.g. the
+--     lister can then take the car offline) without inventing a new booking
+--     status that would ripple through every filter.
+--   * booking_cancellations.strike_waived - a cancellation the system knows was
+--     not the party's fault (previous renter overstayed; car reported stolen /
+--     damaged): still recorded, but excluded from the completion rate and the
+--     auto-pause strike count.
+-- The resolution logic lives in api/booking-incident-action.ts.
+
+alter table public.bookings
+  add column if not exists dispute_status text not null default 'none';
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'bookings_dispute_status_check') then
+    alter table public.bookings add constraint bookings_dispute_status_check
+      check (dispute_status in ('none', 'open', 'resolved'));
+  end if;
+end $$;
+
+alter table public.booking_cancellations
+  add column if not exists strike_waived boolean not null default false;
+
+-- Reliability RPCs (CHAPTER 27) now ignore a waived cancellation.
+create or replace function public.get_lister_reliability(p_lister_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with completed as (
+    select count(*)::int as n
+    from public.bookings b
+    where b.owner_id = p_lister_id
+      and b.status = 'completed'
+      and b.end_date >= (now() - interval '365 days')::date
+  ),
+  cancels as (
+    select
+      count(*)::int as n,
+      count(*) filter (where c.was_late)::int as late_n
+    from public.booking_cancellations c
+    where c.lister_id = p_lister_id
+      and c.cancelled_by_role = 'lister'
+      and not coalesce(c.strike_waived, false)
+      and c.cancelled_at >= now() - interval '365 days'
+  )
+  select jsonb_build_object(
+    'completed_trips', (select n from completed),
+    'cancellations', (select n from cancels),
+    'late_cancellations', (select late_n from cancels),
+    'total', (select n from completed) + (select n from cancels),
+    'has_enough_history', ((select n from completed) + (select n from cancels)) >= 3,
+    'cancellation_rate',
+      case
+        when ((select n from completed) + (select n from cancels)) >= 3
+        then round(
+          (select n from cancels)::numeric
+          / nullif((select n from completed) + (select n from cancels), 0) * 100,
+          0
+        )
+        else null
+      end
+  );
+$$;
+grant execute on function public.get_lister_reliability(uuid) to anon, authenticated;
+
+create or replace function public.get_renter_reliability(p_renter_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with completed as (
+    select count(*)::int as n
+    from public.bookings b
+    where b.renter_id = p_renter_id
+      and b.status = 'completed'
+      and b.end_date >= (now() - interval '365 days')::date
+  ),
+  cancels as (
+    select count(*)::int as n
+    from public.booking_cancellations c
+    where c.renter_id = p_renter_id
+      and c.cancelled_by_role = 'renter'
+      and c.was_late
+      and not coalesce(c.strike_waived, false)
+      and c.cancelled_at >= now() - interval '365 days'
+  )
+  select jsonb_build_object(
+    'completed_trips', (select n from completed),
+    'cancellations', (select n from cancels),
+    'total', (select n from completed) + (select n from cancels),
+    'has_enough_history', ((select n from completed) + (select n from cancels)) >= 3,
+    'cancellation_rate',
+      case
+        when ((select n from completed) + (select n from cancels)) >= 3
+        then round(
+          (select n from cancels)::numeric
+          / nullif((select n from completed) + (select n from cancels), 0) * 100,
+          0
+        )
+        else null
+      end
+  );
+$$;
+grant execute on function public.get_renter_reliability(uuid) to authenticated;
+
 -- End of SafeDrive chaptered database master.

@@ -9,7 +9,7 @@ import {
   getNoShowWindowState,
   getReturnReminderState,
 } from "@/lib/bookingLifecycle";
-import { buildNoShowSupportPath } from "@/lib/supportTickets";
+import { canReportNonReturn, runIncidentAction } from "@/lib/incidents";
 import {
   getExtensionDisplayStatus,
   getExtensionStatusLabel,
@@ -38,6 +38,7 @@ import {
 import { uploadFile } from "@/lib/uploadUtils";
 import { Skeleton } from "@/components/ui/skeleton";
 import BookingPagination from "@/components/BookingPagination";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { formatDayCount } from "@/lib/formatCount";
 import { paginateItems } from "@/lib/pagination";
 import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
@@ -101,6 +102,7 @@ interface ListerBooking {
   downpayment_amount: number;
   balance_amount: number;
   status: string;
+  dispute_status?: string | null;
   owner_completed: boolean;
   renter_completed: boolean;
   owner_response_deadline: string | null;
@@ -245,6 +247,11 @@ export default function ListerBookingsPage() {
     null,
   );
   const [ratingBooking, setRatingBooking] = useState<ListerBooking | null>(null);
+  const [incidentTarget, setIncidentTarget] = useState<{
+    booking: ListerBooking;
+    kind: "renter_no_show" | "report_non_return";
+  } | null>(null);
+  const [incidentLoading, setIncidentLoading] = useState<string | null>(null);
   const [ratingValue, setRatingValue] = useState<number>(5);
   const [ratingFeedback, setRatingFeedback] = useState("");
   const [submittingRating, setSubmittingRating] = useState(false);
@@ -962,15 +969,29 @@ export default function ListerBookingsPage() {
     );
   };
 
-  const handleReportNoShow = (booking: ListerBooking) => {
-    const vehicleLabel = `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`;
-    navigate(
-      buildNoShowSupportPath({
+  const runIncident = async () => {
+    if (!incidentTarget) return;
+    const { booking, kind } = incidentTarget;
+    setIncidentLoading(booking.id);
+    try {
+      await runIncidentAction(session?.access_token, {
         bookingId: booking.id,
-        vehicleLabel,
-        missingParty: "renter",
-      }),
-    );
+        action: kind,
+      });
+      toast.success(
+        kind === "renter_no_show"
+          ? "Renter no-show recorded. The booking was cancelled."
+          : "Reported. SafeDrive support is now handling the non-return.",
+      );
+      setIncidentTarget(null);
+      await fetchBookings();
+    } catch (err) {
+      toast.error("Could not file the report", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setIncidentLoading(null);
+    }
   };
 
   const handleRateRenter = async () => {
@@ -2475,6 +2496,8 @@ export default function ListerBookingsPage() {
               "owner",
               new Date(clockNow),
             );
+            const canReportNonReturnNow = canReportNonReturn(b, new Date(clockNow));
+            const nonReturnFlagged = (b.dispute_status ?? "none") === "open";
             const reviewedByOwner = b.booking_reviews?.some(
               (review) =>
                 review.reviewer_id === user?.id &&
@@ -3084,27 +3107,65 @@ export default function ListerBookingsPage() {
                           </p>
                           <p className="mt-1">
                             {noShowState.canReport
-                              ? b.lister_arrival_photo_url
-                                ? "Your arrival check-in and optional photo are on file. If the renter still has not arrived, you can report a no-show now for support review."
-                                : "Your arrival check-in is already on file. If the renter still has not arrived, you can report a no-show now for support review."
+                              ? "Your arrival check-in is on file and the renter has not shown up. You can cancel this booking as a renter no-show — your reliability record is not affected and the renter keeps a 50% forfeit."
                               : `SafeDrive waits until ${noShowState.reportReadyAt.toLocaleTimeString([], {
                                   hour: "numeric",
                                   minute: "2-digit",
-                                })} before a no-show report can be filed. Add optional evidence only if you want extra support for the report.`}
+                                })} before a renter no-show can be filed. Add optional pickup evidence in the meantime.`}
                           </p>
                           {noShowState.canReport ? (
                             <div className="mt-2">
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handleReportNoShow(b)}
+                                onClick={() =>
+                                  setIncidentTarget({ booking: b, kind: "renter_no_show" })
+                                }
                                 className="gap-1"
                               >
                                 <CircleAlert className="w-3.5 h-3.5" />
-                                Report No-Show
+                                Renter no-show — cancel booking
                               </Button>
                             </div>
                           ) : null}
+                        </div>
+                      ) : null}
+
+                      {nonReturnFlagged ? (
+                        <div className="mt-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-red-800 dark:text-red-200">
+                          <p className="font-semibold text-red-900 dark:text-red-100">
+                            Flagged: vehicle not returned
+                          </p>
+                          <p className="mt-1">
+                            SafeDrive support is handling this case. The security
+                            deposit and any refund stay on hold. You can take this
+                            car offline from My Vehicles while the case is open.
+                          </p>
+                        </div>
+                      ) : canReportNonReturnNow ? (
+                        <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+                          <p className="font-semibold text-amber-900 dark:text-amber-100">
+                            Return time has passed
+                          </p>
+                          <p className="mt-1">
+                            The agreed return time plus the grace window is over and
+                            the renter has not completed the trip. Report a
+                            non-return so SafeDrive support can step in — this does
+                            not cancel the booking.
+                          </p>
+                          <div className="mt-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                setIncidentTarget({ booking: b, kind: "report_non_return" })
+                              }
+                              className="gap-1"
+                            >
+                              <CircleAlert className="w-3.5 h-3.5" />
+                              Report vehicle not returned
+                            </Button>
+                          </div>
                         </div>
                       ) : null}
 
@@ -3674,6 +3735,38 @@ export default function ListerBookingsPage() {
           </div>,
           document.body,
         )}
+      <ConfirmDialog
+        open={Boolean(incidentTarget)}
+        title={
+          incidentTarget?.kind === "renter_no_show"
+            ? "Report renter no-show?"
+            : "Report vehicle not returned?"
+        }
+        description={
+          incidentTarget
+            ? incidentTarget.kind === "renter_no_show"
+              ? `This cancels ${incidentTarget.booking.cars.car_models.car_brands.name} ${incidentTarget.booking.cars.car_models.name} (${incidentTarget.booking.cars.plate_number}). Only do this if you checked in at the pickup point and the renter never arrived.`
+              : `This flags ${incidentTarget.booking.cars.car_models.car_brands.name} ${incidentTarget.booking.cars.car_models.name} (${incidentTarget.booking.cars.plate_number}) as overdue and opens a SafeDrive support case. The booking is not cancelled.`
+            : ""
+        }
+        confirmText={
+          incidentTarget?.kind === "renter_no_show"
+            ? "Cancel Booking — Renter No-Show"
+            : "Report Non-Return"
+        }
+        destructive
+        isLoading={Boolean(
+          incidentTarget && incidentLoading === incidentTarget.booking.id,
+        )}
+        onCancel={() => setIncidentTarget(null)}
+        onConfirm={runIncident}
+      >
+        <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+          {incidentTarget?.kind === "renter_no_show"
+            ? "The renter keeps a 50% forfeit; SafeDrive support releases the rest after confirming the return method. Your completion rate is not affected."
+            : "SafeDrive support contacts the renter and manages recovery. Keep any pickup evidence ready. You can take the car offline from My Vehicles while the case is open."}
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

@@ -148,6 +148,27 @@ export default async function handler(req: Request) {
       }
     }
 
+    // Block while the renter has an unresolved non-return case (see
+    // api/create-checkout.ts). Separate query for graceful degradation.
+    {
+      const { data: openIncident } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("renter_id", user.id)
+        .eq("dispute_status", "open")
+        .limit(1)
+        .maybeSingle();
+      if (openIncident) {
+        return jsonResponse(
+          {
+            error:
+              "You have an open case for a vehicle that was not returned on time. Resolve it with SafeDrive support before paying the balance.",
+          },
+          403,
+        );
+      }
+    }
+
     if (bookingRecord.status !== "downpayment_paid") {
       return jsonResponse(
         {
