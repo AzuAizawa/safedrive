@@ -254,6 +254,15 @@ export default async function handler(req: Request) {
       return jsonResponse({ error: "Drop-off must be after pickup" }, 400);
     }
 
+    // The real pickup instant, for capping the owner-response deadline below.
+    // startDate.utcMs is a naive Date.UTC(y,m,d) of the Manila calendar date -
+    // correct for the date-only comparisons above (both sides shift by the
+    // same missing offset, so their differences stay right), but wrong once
+    // combined with a time-of-day and compared against a real clock: it reads
+    // 8 hours late. Subtract the Manila (UTC+8) offset to get the true instant.
+    const pickupInstantMs =
+      startDate.utcMs + pickupMinutes * 60_000 - 8 * 60 * 60 * 1000;
+
     const supabase = getSupabaseAdmin();
     const {
       data: { user },
@@ -545,7 +554,7 @@ export default async function handler(req: Request) {
         status: "pending",
         // 24 hours to respond, but never later than the trip's pickup time.
         owner_response_deadline: new Date(
-          Math.min(Date.now() + DAY_MS, startDate.utcMs + pickupMinutes * 60_000),
+          Math.min(Date.now() + DAY_MS, pickupInstantMs),
         ).toISOString(),
         renter_completed: false,
         owner_completed: false,

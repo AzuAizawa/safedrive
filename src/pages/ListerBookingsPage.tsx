@@ -35,7 +35,6 @@ import {
   ArrivalPhotoCapture,
   type ArrivalLocationEvidence,
 } from "@/components/ArrivalPhotoCapture";
-import { uploadFile } from "@/lib/uploadUtils";
 import { Skeleton } from "@/components/ui/skeleton";
 import BookingPagination from "@/components/BookingPagination";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -47,6 +46,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  Eye,
   XCircle,
   LayoutDashboard,
   Loader2,
@@ -808,45 +808,16 @@ export default function ListerBookingsPage() {
 
   const handleArrive = async (
     bookingId: string,
-    arrivalPhotoUrl?: string | null,
     arrivalLocation?: ArrivalLocationEvidence | null,
   ) => {
     setActionLoading(bookingId);
     const toastId = toast.loading(
       arrivalLocation
         ? "Recording arrival with optional location..."
-        : arrivalPhotoUrl
-          ? "Recording arrival with optional photo..."
-          : "Recording arrival...",
+        : "Recording arrival...",
     );
     try {
-      await runBookingAction(
-        bookingId,
-        "arrive",
-        arrivalPhotoUrl ?? null,
-        arrivalLocation ?? null,
-      );
-      toast.success("Arrival recorded successfully!", { id: toastId });
-      fetchBookings();
-    } catch (err) {
-      toast.error("Failed to record arrival", {
-        id: toastId,
-        description: err instanceof Error ? err.message : "Please try again.",
-      });
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleArriveWithPhoto = async (bookingId: string, file: File) => {
-    setActionLoading(bookingId);
-    const toastId = toast.loading("Uploading optional arrival photo...");
-    try {
-      const path = `${user?.id}/arrival_lister_${bookingId}_${Date.now()}`;
-      const result = await uploadFile(file, "vehicle-documents", path);
-      if (!result.success) throw new Error(result.error || "Upload failed.");
-
-      await runBookingAction(bookingId, "arrive", result.url ?? null);
+      await runBookingAction(bookingId, "arrive", null, arrivalLocation ?? null);
       toast.success("Arrival recorded successfully!", { id: toastId });
       fetchBookings();
     } catch (err) {
@@ -3052,17 +3023,24 @@ export default function ListerBookingsPage() {
                             </div>
                           )}
                           <p className="mb-2 text-xs font-medium text-foreground">Handover complete - renter has the car</p>
-                          <Button size="sm" variant="outline" className="mb-2" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>Complete pickup report first (required)</Button>
                           <ArrivalPhotoCapture
                             loading={actionLoading === b.id}
                             disabled={actionLoading === b.id || (Number(b.cars.security_deposit_amount ?? 0) > 0 && getSecurityDepositStatus(b) !== "paid")}
-                            onConfirmArrival={(location) =>
-                              handleArrive(b.id, null, location)
-                            }
-                            onPhotoReady={(file) => handleArriveWithPhoto(b.id, file)}
+                            onConfirmArrival={(location) => handleArrive(b.id, location)}
                           />
+                          <div className="mt-2 flex items-center justify-end gap-1.5">
+                            <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>
+                              Add pickup photos (optional)
+                            </Button>
+                            <span
+                              className="inline-flex h-7 w-7 shrink-0 cursor-help items-center justify-center rounded-md text-muted-foreground"
+                              title="Optional, but highly encouraged: if there's ever a dispute, you and the renter both need this evidence. It's also required to file a deposit claim later."
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </span>
+                          </div>
                           <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                            You file the "before" pickup report (4 photos). The renter then confirms they have the car. Arrival location is optional and stored only with your consent.
+                            Confirm arrival first, then the renter confirms they have the car. Arrival location is optional and stored only with your consent.
                           </p>
                         </div>
                       )}

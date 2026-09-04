@@ -31,7 +31,6 @@ import {
 } from "@/components/ArrivalPhotoCapture";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import BookingPagination from "@/components/BookingPagination";
-import { uploadFile } from "@/lib/uploadUtils";
 import { formatDayCount } from "@/lib/formatCount";
 import { paginateItems } from "@/lib/pagination";
 import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
@@ -45,6 +44,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  Eye,
   Loader2,
   CreditCard,
   Download,
@@ -713,45 +713,16 @@ export default function MyBookingsPage() {
   };
   const handleArrive = async (
     bookingId: string,
-    arrivalPhotoUrl?: string | null,
     arrivalLocation?: ArrivalLocationEvidence | null,
   ) => {
     setPayingFor(bookingId);
     const toastId = toast.loading(
       arrivalLocation
         ? "Recording arrival with optional location..."
-        : arrivalPhotoUrl
-          ? "Recording arrival with optional photo..."
-          : "Recording arrival...",
+        : "Recording arrival...",
     );
     try {
-      await runBookingAction(
-        bookingId,
-        "arrive",
-        arrivalPhotoUrl ?? null,
-        arrivalLocation ?? null,
-      );
-      toast.success("Arrival recorded successfully!", { id: toastId });
-      fetchBookings();
-    } catch (err) {
-      toast.error("Failed to record arrival", {
-        id: toastId,
-        description: err instanceof Error ? err.message : "Please try again.",
-      });
-    } finally {
-      setPayingFor(null);
-    }
-  };
-
-  const handleArriveWithPhoto = async (bookingId: string, file: File) => {
-    setPayingFor(bookingId);
-    const toastId = toast.loading("Uploading optional arrival photo...");
-    try {
-      const path = `${user?.id}/arrival_renter_${bookingId}_${Date.now()}`;
-      const result = await uploadFile(file, "vehicle-documents", path);
-      if (!result.success) throw new Error(result.error || "Upload failed.");
-
-      await runBookingAction(bookingId, "arrive", result.url ?? null);
+      await runBookingAction(bookingId, "arrive", null, arrivalLocation ?? null);
       toast.success("Arrival recorded successfully!", { id: toastId });
       fetchBookings();
     } catch (err) {
@@ -2405,17 +2376,24 @@ export default function MyBookingsPage() {
                               The lister confirms the handover first. You can also confirm now if you have the car.
                             </p>
                           )}
-                          <Button size="sm" variant="outline" className="mb-2" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>Add pickup photos (optional)</Button>
                           <ArrivalPhotoCapture
                             loading={payingFor === booking.id}
                             disabled={payingFor === booking.id || (Number(booking.cars.security_deposit_amount ?? 0) > 0 && getSecurityDepositStatus(booking) !== "paid")}
-                            onConfirmArrival={(location) =>
-                              handleArrive(booking.id, null, location)
-                            }
-                            onPhotoReady={(file) => handleArriveWithPhoto(booking.id, file)}
+                            onConfirmArrival={(location) => handleArrive(booking.id, location)}
                           />
+                          <div className="mt-2 flex items-center justify-end gap-1.5">
+                            <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>
+                              Add pickup photos (optional)
+                            </Button>
+                            <span
+                              className="inline-flex h-7 w-7 shrink-0 cursor-help items-center justify-center rounded-md text-muted-foreground"
+                              title="Optional, but highly encouraged: if there's ever a dispute, you and the lister both need this evidence."
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </span>
+                          </div>
                           <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                            Your own pickup photos are optional - the lister files the "before" report. Arrival location is optional and stored only with your consent.
+                            Confirm arrival first. Your own pickup photos are optional - the lister files the "before" report. Arrival location is optional and stored only with your consent.
                           </p>
                         </div>
                       )}

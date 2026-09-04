@@ -522,21 +522,15 @@ export default async function handler(req: Request) {
       // 24 hours to pay the reservation, but never past the trip's pickup time
       // so a next-day booking that stalls is auto-cancelled instead of blocking
       // the car. Matches the owner-response cap in api/create-booking.ts.
-      const [tripYear, tripMonth, tripDay] = bookingRecord.start_date
-        .split("-")
-        .map(Number);
-      const [pickupHour, pickupMinute] = (bookingRecord.pickup_time || "09:00")
-        .split(":")
-        .map(Number);
-      const tripStartMs = Date.UTC(
-        tripYear,
-        (tripMonth || 1) - 1,
-        tripDay || 1,
-        pickupHour || 9,
-        pickupMinute || 0,
-      );
+      // Reuse getBookingPickupMs() (already Manila-correct, -8h from naive
+      // UTC) instead of a separate inline calc - a prior duplicate here was
+      // missing that offset and let the cap run up to 8h past real pickup.
+      const tripStartMs = getBookingPickupMs(bookingRecord);
       const paymentDeadline = new Date(
-        Math.min(addDays(new Date(), 1).getTime(), tripStartMs),
+        Math.min(
+          addDays(new Date(), 1).getTime(),
+          tripStartMs ?? addDays(new Date(), 1).getTime(),
+        ),
       ).toISOString();
       const { data: bookingStateChanged, error: updateError } = await supabase
         .from("bookings")

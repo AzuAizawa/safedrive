@@ -15,6 +15,8 @@ type DeadlineBooking = {
   status: "pending" | "confirmed" | "awaiting_payment";
 };
 
+type UnpaidBooking = DeadlineBooking & { car_id: string };
+
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -60,7 +62,7 @@ const notifyParticipants = async (
       title: isOwnerResponseExpiry ? "Booking Request Expired" : "Booking Payment Expired",
       message: isOwnerResponseExpiry
         ? "The lister did not respond before the 24-hour review window closed, so your request was released."
-        : "The reservation payment deadline passed before PayMongo confirmed payment, so the booking was cancelled.",
+        : "The reservation payment deadline passed before PayMongo confirmed payment, so the booking was cancelled. This affects your completion rate.",
       type: "warning",
       link: "/my-bookings",
     },
@@ -109,7 +111,7 @@ export default async function handler(req: Request) {
 
     const { data: unpaidBookings, error: unpaidError } = await supabase
       .from("bookings")
-      .select("id, renter_id, owner_id, status")
+      .select("id, renter_id, owner_id, car_id, status")
       .in("status", ["confirmed", "awaiting_payment"])
       .not("payment_deadline", "is", null)
       .lte("payment_deadline", now)
@@ -137,7 +139,7 @@ export default async function handler(req: Request) {
       ownerResponseExpired += 1;
     }
 
-    for (const booking of (unpaidBookings ?? []) as DeadlineBooking[]) {
+    for (const booking of (unpaidBookings ?? []) as UnpaidBooking[]) {
       const { data: updated, error } = await supabase
         .from("bookings")
         .update({ status: "cancelled", payment_deadline: null })
@@ -149,6 +151,30 @@ export default async function handler(req: Request) {
 
       if (error) throw error;
       if (!updated) continue;
+
+      // The renter never completed the reservation payment (nothing was
+      // captured), so there is no refund to run - but it ties up the car the
+      // same way a late cancellation does, so it counts the same way against
+      // their reliability record. Never fails the run: a missing/pre-CHAPTER-27
+      // table must not block the actual booking cancellation above.
+      try {
+        await supabase.from("booking_cancellations").upsert(
+          {
+            booking_id: booking.id,
+            cancelled_by_role: "renter",
+            cancelled_by_id: booking.renter_id,
+            lister_id: booking.owner_id,
+            renter_id: booking.renter_id,
+            car_id: booking.car_id,
+            reason: "Payment deadline passed with no reservation payment captured.",
+            was_late: true,
+            had_captured_payment: false,
+          },
+          { onConflict: "booking_id" },
+        );
+      } catch {
+        // Non-fatal - see comment above.
+      }
 
       await notifyParticipants(supabase, booking, "payment_expired");
       paymentExpired += 1;

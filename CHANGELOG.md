@@ -9,6 +9,45 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Deadline timezone bug, arrival-card reorder, non-payment reliability
+
+Tester feedback: payment/response deadlines were showing hours past the
+actual pickup time, and the pickup/arrival card's flow and copy were
+confusing.
+
+- **8-hour deadline bug, root-caused and fixed:** `api/create-booking.ts`
+  (`owner_response_deadline`) and `api/booking-action.ts`'s `accept` handler
+  (`payment_deadline`) both combined a calendar date with a pickup time
+  using a naive `Date.UTC(y,m,d,h,m)` with no Manila (UTC+8) correction -
+  the exact same file's own `getBookingPickupMs()` (used for refund timing)
+  already did this correctly. Both deadlines could therefore land up to 8h
+  *past* the real pickup instead of being capped by it. `booking-action.ts`
+  now reuses `getBookingPickupMs()` instead of a duplicate buggy calc;
+  `create-booking.ts` gets the same `-8h` correction. The lister's "accept
+  within Xh" countdown reads directly off the fixed value, so it's
+  corrected too with no separate UI change.
+- **Renter reliability on non-payment:** a `confirmed`/`awaiting_payment`
+  booking that auto-cancels because the renter never completed payment now
+  writes a `booking_cancellations` row (`cancelled_by_role='renter'`,
+  `was_late=true`) in `api/expire-booking-deadlines.ts` - it ties up the
+  car the same way a late cancellation does, so it now counts the same way
+  toward `get_renter_reliability`. Previously this path left no reliability
+  trace at all.
+- **Arrival card reorder + cleanup** (`ArrivalPhotoCapture`, shared by
+  `/my-bookings` and `/lister-bookings`): "Confirm Arrival Now" /"Confirm
+  With Location" now come *before* the pickup-report button (you must
+  arrive before you can usefully photograph the handover), not after.
+  Removed "Take Optional Photo" / "Upload Optional Photo" (redundant next
+  to the dedicated 4-photo pickup report; that report is the real evidence
+  trail admins already use for disputes). The pickup-report button is
+  honestly labelled "(optional)" on both sides now - it never actually
+  blocked arrival, only the lister's copy claimed otherwise - with an eye
+  icon whose hover tooltip explains it's still worth doing (dispute
+  evidence; required to file a deposit claim later).
+- **Files:** `api/{create-booking,booking-action,expire-booking-deadlines}.ts`;
+  `src/components/ArrivalPhotoCapture.tsx`;
+  `src/pages/{MyBookingsPage,ListerBookingsPage}.tsx`.
+
 ## 2026-09-04 — Fix broken car photo on the car detail page
 
 Tester feedback: "May bug sa car picture /UI, di lumalabas yung picture sa
