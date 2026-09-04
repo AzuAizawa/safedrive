@@ -99,6 +99,10 @@ export default function CarDetailPage() {
     { start: string; end: string; category: string }[]
   >([]);
   const [showAgreement, setShowAgreement] = useState(false);
+  // Each lister's agreement PDF has its own conditions, so accepting must
+  // require actually opening this one - a previous car's "viewed" state
+  // must never carry over.
+  const [pdfViewed, setPdfViewed] = useState(false);
   const [acceptedAgreement, setAcceptedAgreement] = useState(false);
   const [agreementAccess, setAgreementAccess] = useState<AgreementAccess | null>(null);
   const [agreementLoading, setAgreementLoading] = useState(false);
@@ -223,6 +227,7 @@ export default function CarDetailPage() {
       setAcceptedAgreement(false);
       setAgreementAccess(null);
       setAgreementError(null);
+      setPdfViewed(false);
 
       if (!id || !user || profile?.verified_status !== "verified") return;
 
@@ -439,6 +444,12 @@ export default function CarDetailPage() {
     if (!agreementAccess) {
       toast.error("Rental agreement unavailable", {
         description: agreementError || "The lister's approved agreement must be available before you can accept it.",
+      });
+      return;
+    }
+    if (!pdfViewed) {
+      toast.error("Open the rental agreement PDF first", {
+        description: "Each lister sets their own conditions - review the PDF before accepting.",
       });
       return;
     }
@@ -1415,12 +1426,19 @@ export default function CarDetailPage() {
                   href={agreementUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => setPdfViewed(true)}
                 >
                   <Button size="sm" variant="outline" className="gap-2 border-border/70 bg-background/60 hover:bg-muted">
                     <Eye className="w-4 h-4" /> View PDF
                   </Button>
                 </a>
               </div>
+            )}
+            {agreementUrl && !pdfViewed && (
+              <p className="mb-4 -mt-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+                Open and review the lister's PDF above - it sets this vehicle's
+                specific conditions and differs from the summary below.
+              </p>
             )}
 
             {!agreementUrl && (
@@ -1476,7 +1494,8 @@ export default function CarDetailPage() {
               <Button
                 className="h-11 shadow-lg shadow-primary/20"
                 onClick={handleAgreementAccept}
-                disabled={!agreementAccess || agreementLoading}
+                disabled={!agreementAccess || agreementLoading || !pdfViewed}
+                title={!pdfViewed ? "Open the lister's PDF first" : undefined}
               >
                 Yes, I Agree and Continue
               </Button>

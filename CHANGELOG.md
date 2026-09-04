@@ -9,6 +9,21 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Force-view the lister's PDF before agreeing
+
+Tester feedback: "Dapat ma force view muna yung pdf bago ma click yung
+'Yes, I Agree and Continue'" - every lister's rental agreement PDF sets
+different conditions, but a renter could click Agree without ever opening
+it.
+
+- `CarDetailPage`: "Yes, I Agree and Continue" is now disabled until the
+  renter has clicked "View PDF" at least once for the currently loaded
+  agreement (tracked per agreement load, not per modal open/close, so
+  re-opening the same review dialog doesn't force a re-view). An amber hint
+  explains why the button is disabled; `handleAgreementAccept` also checks
+  it defensively in case the disabled state is ever bypassed.
+- **Files:** `src/pages/CarDetailPage.tsx`.
+
 ## 2026-09-04 — Registration/CTPL/comprehensive move to Renewal (CHAPTER 33, run manually)
 
 Tester feedback: "Edit Listing" let a lister silently retype
