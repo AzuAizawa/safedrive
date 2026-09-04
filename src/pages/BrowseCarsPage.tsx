@@ -110,6 +110,17 @@ export default function BrowseCarsPage() {
     setCurrentPage(1);
   };
 
+  const hasActiveFilters =
+    searchQuery !== "" ||
+    bodyTypeFilter !== "all" ||
+    brandFilter !== "all" ||
+    modelFilter !== "all" ||
+    fuelTypeFilter !== "all" ||
+    seatsFilter !== "all" ||
+    minPrice !== "" ||
+    maxPrice !== "" ||
+    sortBy !== "recommended";
+
   const getSelectedLabel = (value: string, fallback: string) =>
     value === "all" ? fallback : titleCase(value);
 
@@ -294,25 +305,9 @@ export default function BrowseCarsPage() {
           >
             <Filter className="w-4 h-4" />
             Filters{" "}
-            {(!["all"].includes(bodyTypeFilter) ||
-              !["all"].includes(brandFilter) ||
-              !["all"].includes(modelFilter) ||
-              !["all"].includes(fuelTypeFilter) ||
-              !["all"].includes(seatsFilter) ||
-              minPrice !== "" ||
-              maxPrice !== "" ||
-              sortBy !== "recommended") &&
-              "(Active)"}
+            {hasActiveFilters && "(Active)"}
           </Button>
-          {(searchQuery !== "" ||
-            bodyTypeFilter !== "all" ||
-            brandFilter !== "all" ||
-            modelFilter !== "all" ||
-            fuelTypeFilter !== "all" ||
-            seatsFilter !== "all" ||
-            minPrice !== "" ||
-            maxPrice !== "" ||
-            sortBy !== "recommended") && (
+          {hasActiveFilters && (
             <Button
               variant="ghost"
               className="h-10 shrink-0 px-2"
@@ -517,16 +512,20 @@ export default function BrowseCarsPage() {
           <CarFront className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
           <h3 className="text-lg font-semibold mb-1">No cars found</h3>
           <p className="text-muted-foreground text-sm mb-6">
-            We couldn't find any cars matching your current filters.
+            {hasActiveFilters
+              ? "We couldn't find any cars matching your current filters."
+              : "There are no listed cars available right now. Check back soon."}
           </p>
-          <Button
-            onClick={resetFilters}
-            variant="outline"
-            className="rounded-xl shadow-sm"
-          >
-            <X className="w-4 h-4 mr-2" />
-            Clear All Filters
-          </Button>
+          {hasActiveFilters && (
+            <Button
+              onClick={resetFilters}
+              variant="outline"
+              className="rounded-xl shadow-sm"
+            >
+              <X className="w-4 h-4 mr-2" />
+              Clear All Filters
+            </Button>
+          )}
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">

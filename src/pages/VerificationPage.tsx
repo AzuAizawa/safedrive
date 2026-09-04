@@ -263,7 +263,11 @@ const SearchableLocationInput = ({
       window.clearTimeout(blurTimeoutRef.current);
       blurTimeoutRef.current = null;
     }
-    setShowAllOnOpen(true);
+    // Only show the full unfiltered list when the field is empty. Re-focusing
+    // or re-clicking a field that already has typed text (e.g. to move the
+    // caret) must keep respecting the active search instead of dumping the
+    // whole list back in.
+    setShowAllOnOpen(draft.trim().length === 0);
     setOpen(true);
   };
 

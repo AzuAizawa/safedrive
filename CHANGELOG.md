@@ -9,6 +9,25 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Region/city/barangay search filter fix + honest Browse empty state
+
+Two tester reports.
+
+- **Verification address search:** typing into Region/City/Barangay (a
+  shared `SearchableLocationInput`) stopped filtering the dropdown as soon
+  as the field was clicked again (e.g. to move the caret) — `openMenu()`
+  unconditionally reset to "show everything," discarding the search. It now
+  only shows the full list when the field is empty; a click on a field that
+  already has text keeps filtering by what's typed. Fixes Region, City, and
+  Barangay at once (one shared component).
+- **Browse Cars "Clear All Filters":** it was showing on every empty
+  result, even with zero filters selected, which read as "your filter is
+  hiding cars" when the real cause was simply no listed cars yet. It now
+  only appears - and the message only blames filters - when a filter is
+  actually active; a genuinely empty catalog now says "no listed cars
+  available right now" instead.
+- **Files:** `src/pages/{VerificationPage,BrowseCarsPage}.tsx`.
+
 ## 2026-09-04 — Payout account number length guard (CHAPTER 32, run manually)
 
 Tester feedback: the payout Account Number field had no character limit.
