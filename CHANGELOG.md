@@ -9,6 +9,22 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Clearer file-input affordance app-wide
+
+Tester feedback: the licence-update file inputs "clickable siya pero parang
+walang hint... nag iiba behavior ng cursor" — the native `<input type=file>`
+box only made the "Choose File" text look like a button; the rest of the
+box (and the "No file chosen" text) read as inert, and the cursor changed
+between the two halves even though clicking anywhere opens the picker.
+
+- `components/ui/input.tsx`: file inputs now get a full-width pointer
+  cursor and the file-selector button is styled like a real outline button
+  (border + background + hover state), matching `buttonVariants`. One
+  shared component, so every file upload in the app (licence update, KYC
+  documents, vehicle documents/registration/insurance, support-ticket
+  attachments, trip-condition photos) gets the fix at once.
+- **Files:** `src/components/ui/input.tsx`.
+
 ## 2026-09-04 — Region/city/barangay search filter fix + honest Browse empty state
 
 Two tester reports.
