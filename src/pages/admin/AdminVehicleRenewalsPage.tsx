@@ -246,29 +246,23 @@ export default function AdminVehicleRenewalsPage() {
 
   const approveRenewal = async (row: RenewalRow) => {
     if (!user?.id || busyId) return;
-    const registration = window.prompt(
-      "New REGISTRATION expiry date (YYYY-MM-DD), from the updated OR/CR:",
-    );
-    if (!registration) return;
-    const ctpl = window.prompt(
-      "New CTPL expiry date (YYYY-MM-DD), from the updated CTPL:",
-    );
-    if (!ctpl) return;
-    const insurance = window.prompt(
-      "New comprehensive-insurance expiry (YYYY-MM-DD). Leave blank if none.",
-    );
 
-    const isValidFutureDate = (value: string) => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    // Dates come from the lister's own submission (checked against the
+    // documents opened above), not typed blind by the admin.
+    const registration = row.registration_expiry;
+    const ctpl = row.ctpl_expiry;
+    const insurance = row.comprehensive_insurance_expiry;
+
+    const isValidFutureDate = (value: string | null) => {
+      if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
       const date = new Date(`${value}T00:00:00`);
       return !Number.isNaN(date.getTime()) && date.getTime() > Date.now();
     };
     if (!isValidFutureDate(registration) || !isValidFutureDate(ctpl)) {
-      toast.error("Registration and CTPL dates must be valid future dates");
-      return;
-    }
-    if (insurance && insurance.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(insurance.trim())) {
-      toast.error("Insurance date must be YYYY-MM-DD or blank");
+      toast.error("This submission is missing valid registration/CTPL dates", {
+        description:
+          "Return it to the lister for changes - it predates the current renewal form or the dates have already lapsed.",
+      });
       return;
     }
 
@@ -280,7 +274,7 @@ export default function AdminVehicleRenewalsPage() {
           status: "approved",
           registration_expiry: registration,
           ctpl_expiry: ctpl,
-          comprehensive_insurance_expiry: insurance?.trim() || null,
+          comprehensive_insurance_expiry: insurance || null,
         })
         .eq("id", row.car_id);
       if (carError) throw carError;
@@ -311,7 +305,7 @@ export default function AdminVehicleRenewalsPage() {
           renewal_id: row.id,
           registration_expiry: registration,
           ctpl_expiry: ctpl,
-          comprehensive_insurance_expiry: insurance?.trim() || null,
+          comprehensive_insurance_expiry: insurance || null,
         },
       });
 
@@ -416,6 +410,20 @@ export default function AdminVehicleRenewalsPage() {
                       {row.current_mileage.toLocaleString()} km · submitted{" "}
                       {new Date(row.submitted_at).toLocaleDateString()}
                     </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Registration expiry:{" "}
+                      <strong className="text-foreground">
+                        {row.registration_expiry || "Missing"}
+                      </strong>{" "}
+                      · CTPL expiry:{" "}
+                      <strong className="text-foreground">
+                        {row.ctpl_expiry || "Missing"}
+                      </strong>{" "}
+                      · Comprehensive expiry:{" "}
+                      <strong className="text-foreground">
+                        {row.comprehensive_insurance_expiry || "Not supplied"}
+                      </strong>
+                    </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -436,7 +444,18 @@ export default function AdminVehicleRenewalsPage() {
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {RENEWAL_DOCS.map((doc) => (
+                  {[
+                    ...RENEWAL_DOCS,
+                    { key: "ctpl_document_path" as const, label: "CTPL document" },
+                    ...(row.comprehensive_document_path
+                      ? [
+                          {
+                            key: "comprehensive_document_path" as const,
+                            label: "Comprehensive document",
+                          },
+                        ]
+                      : []),
+                  ].map((doc) => (
                     <Button
                       key={doc.key}
                       size="sm"

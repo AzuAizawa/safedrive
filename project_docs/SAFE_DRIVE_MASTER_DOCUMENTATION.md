@@ -254,7 +254,14 @@ Insurance is **not a separate review**: the admin's single Approve on a vehicle 
 
 The "how long does review take" wording (identity and vehicle) is editable live in `/admin/platform-settings` (`user_verification_eta_message` / `vehicle_verification_eta_message` on `platform_settings`; `get_/set_verification_eta_messages`; super-admin direct edit, no vote) so a peak-season backlog can be communicated without a redeploy.
 
-### 6.4 Driver's licence validity and transmission (CHAPTER 29)
+### 6.4 Registration/CTPL/comprehensive live in Renewal, not Edit Listing (CHAPTER 33)
+
+The quick "Edit Listing" editor on `/my-vehicles` only touches booking-facing details (price, security deposit, pickup info, transmission, fuel, contact, GPS, rental agreement) - it can no longer retype `registration_expiry` / `ctpl_expiry` / `comprehensive_insurance_expiry` with no supporting document. Those three values are edited in exactly two places:
+
+- **Add Vehicle** (`/my-vehicles`, initial listing): registration and CTPL expiry are required; comprehensive is optional. Documents required at this stage are OR/CR front+back only - CTPL and comprehensive proof are not collected here.
+- **Registration & Insurance Renewal** (`/car-renewals`, `ListerCarRenewalPage`): open to any of the lister's live vehicles at any time (not only ones already forced offline with `status = 'renewal_required'`), so a lister can renew ahead of the expiry instead of only after being flagged. A submission bundles the 5 existing physical-inspection documents (OR/CR, LTO receipt, MVIR, emission test, updated photos) with the new registration/CTPL expiry dates, a required CTPL document, and an optional comprehensive expiry + document (the two must be given together or both left blank). `car_renewals` now carries `registration_expiry` / `ctpl_expiry` / `comprehensive_insurance_expiry` / `ctpl_document_path` / `comprehensive_document_path` (CHAPTER 33). `/admin/vehicle-renewals` (`AdminVehicleRenewalsPage`) reads and validates these lister-submitted dates on Approve instead of an admin re-typing them blind through a `window.prompt()`.
+
+### 6.5 Driver's licence validity and transmission (CHAPTER 29)
 
 The KYC review now also records two structured facts an admin reads from the licence photos in `/admin/users` (gated by `users.verify`): `profiles.license_expiry` (a date) and `profiles.license_transmission` (`automatic_only` | `manual_and_automatic`, from the AT / AT-MT restriction on the back of the current LTO card). Vehicles carry `cars.transmission` (`automatic` | `manual`), a required dropdown when listing and a material change that returns the listing to review.
 

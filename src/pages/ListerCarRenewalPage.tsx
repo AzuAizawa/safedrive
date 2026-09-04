@@ -49,13 +49,20 @@ export default function ListerCarRenewalPage() {
     mvir_path: null,
     emission_test_path: null,
     updated_car_photos_path: null,
+    ctpl_document_path: null,
+    comprehensive_document_path: null,
   });
+  const [registrationExpiry, setRegistrationExpiry] = useState("");
+  const [ctplExpiry, setCtplExpiry] = useState("");
+  const [comprehensiveExpiry, setComprehensiveExpiry] = useState("");
 
   const fetchRenewalData = useCallback(async () => {
     if (!user) return;
     setIsLoading(true);
     try {
-      // Fetch cars requiring renewal
+      // Any live listing can submit updated registration/CTPL/comprehensive
+      // documents here, not only one already forced offline - a lister
+      // should be able to renew ahead of the expiry date, not just after.
       const { data: carsData, error: carsError } = await supabase
         .from("cars")
         .select(
@@ -66,7 +73,7 @@ export default function ListerCarRenewalPage() {
         `,
         )
         .eq("owner_id", user.id)
-        .eq("status", "renewal_required");
+        .in("status", ["approved", "active", "renewal_required"]);
 
       if (carsError) throw carsError;
 
@@ -99,6 +106,23 @@ export default function ListerCarRenewalPage() {
     void fetchRenewalData();
   }, [fetchRenewalData]);
 
+  const selectCarForRenewal = (car: CarWithDetails) => {
+    setMileage("");
+    setFiles({
+      orcr_document_path: null,
+      lto_receipt_path: null,
+      mvir_path: null,
+      emission_test_path: null,
+      updated_car_photos_path: null,
+      ctpl_document_path: null,
+      comprehensive_document_path: null,
+    });
+    setRegistrationExpiry(car.registration_expiry ?? "");
+    setCtplExpiry(car.ctpl_expiry ?? "");
+    setComprehensiveExpiry(car.comprehensive_insurance_expiry ?? "");
+    setSelectedCar(car);
+  };
+
   const handleFileChange = (key: string, file: File | null) => {
     if (file && file.size > 10 * 1024 * 1024) {
       toast.error("File size must be under 10MB");
@@ -124,9 +148,44 @@ export default function ListerCarRenewalPage() {
       return;
     }
 
+    const todayIso = new Date().toISOString().slice(0, 10);
+    if (!registrationExpiry || registrationExpiry < todayIso) {
+      toast.error("Registration expiry is required", {
+        description: "Enter the new registration expiry date from your updated OR/CR.",
+      });
+      return;
+    }
+    if (!ctplExpiry || ctplExpiry < todayIso) {
+      toast.error("CTPL expiry is required", {
+        description: "Enter the new CTPL expiry date.",
+      });
+      return;
+    }
+    if (!files.ctpl_document_path) {
+      toast.error("CTPL document is required", {
+        description: "Upload the updated CTPL certificate/policy.",
+      });
+      return;
+    }
+    if (Boolean(comprehensiveExpiry) !== Boolean(files.comprehensive_document_path)) {
+      toast.error("Comprehensive insurance is incomplete", {
+        description:
+          "Provide both the expiry date and the document, or leave both blank if you have no comprehensive policy.",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const uploadPromises = renewalDocs.map(async (doc) => {
+      const docsToUpload = [
+        ...renewalDocs,
+        { key: "ctpl_document_path" as const, label: "CTPL document" },
+        ...(files.comprehensive_document_path
+          ? [{ key: "comprehensive_document_path" as const, label: "Comprehensive document" }]
+          : []),
+      ];
+
+      const uploadPromises = docsToUpload.map(async (doc) => {
         const file = files[doc.key]!;
         const ext = file.name.split(".").pop();
         const path = `renewals/${user.id}/${selectedCar.id}/${doc.key}_${Date.now()}.${ext}`;
@@ -151,6 +210,11 @@ export default function ListerCarRenewalPage() {
         mvir_path: "",
         emission_test_path: "",
         updated_car_photos_path: "",
+        registration_expiry: registrationExpiry,
+        ctpl_expiry: ctplExpiry,
+        comprehensive_insurance_expiry: comprehensiveExpiry || null,
+        ctpl_document_path: null,
+        comprehensive_document_path: null,
       };
 
       uploadResults.forEach((res) => {
@@ -188,29 +252,31 @@ export default function ListerCarRenewalPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
           <FileWarning className="w-8 h-8 text-amber-500" />
-          Vehicle Renewals
+          Registration &amp; Insurance Renewal
         </h1>
         <p className="text-muted-foreground mt-1">
-          Submit updated documents for vehicles that require their annual
-          renewal.
+          Submit updated registration, CTPL, and comprehensive-insurance
+          documents and dates - required once a vehicle is flagged, or any
+          time you want to renew ahead of the expiry.
         </p>
       </div>
 
       {!selectedCar ? (
         <Card>
           <CardHeader>
-            <CardTitle>Vehicles Requiring Renewal</CardTitle>
+            <CardTitle>Your Vehicles</CardTitle>
             <CardDescription>
-              Select a vehicle below to upload its updated compliance documents.
+              Select a vehicle below to submit updated compliance documents and
+              dates.
             </CardDescription>
           </CardHeader>
           <CardContent>
             {carsForRenewal.length === 0 ? (
               <div className="text-center py-12 border rounded-xl bg-muted/20">
                 <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                <h3 className="text-lg font-semibold">All caught up!</h3>
+                <h3 className="text-lg font-semibold">No live listings yet</h3>
                 <p className="text-muted-foreground">
-                  None of your vehicles currently require renewal.
+                  Once you have an approved vehicle, it will show up here.
                 </p>
               </div>
             ) : (
@@ -251,6 +317,11 @@ export default function ListerCarRenewalPage() {
                           Plate:{" "}
                           <span className="font-mono">{car.plate_number}</span>
                         </p>
+                        {car.status === "renewal_required" && (
+                          <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-600">
+                            <FileWarning className="h-3 w-3" /> Renewal required - offline until submitted
+                          </span>
+                        )}
                       </div>
                       <div>
                         {existingRenewal ? (
@@ -266,15 +337,17 @@ export default function ListerCarRenewalPage() {
                               </span>
                               <Button
                                 size="sm"
-                                onClick={() => setSelectedCar(car)}
+                                onClick={() => selectCarForRenewal(car)}
                               >
                                 Re-submit
                               </Button>
                             </div>
                           )
                         ) : (
-                          <Button onClick={() => setSelectedCar(car)}>
-                            Start Renewal
+                          <Button onClick={() => selectCarForRenewal(car)}>
+                            {car.status === "renewal_required"
+                              ? "Start Renewal"
+                              : "Update Documents"}
                           </Button>
                         )}
                       </div>
@@ -301,8 +374,9 @@ export default function ListerCarRenewalPage() {
                 Renewal Submission: {selectedCar.plate_number}
               </CardTitle>
               <CardDescription>
-                Upload the 6 mandatory documents to complete the physical
-                verification cycle.
+                Confirm the new validity dates and upload the supporting
+                documents. An admin reviews everything before the vehicle
+                relists.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -318,10 +392,59 @@ export default function ListerCarRenewalPage() {
                   />
                 </div>
 
+                <div className="space-y-3 rounded-xl border p-4">
+                  <h3 className="text-sm font-semibold">Registration &amp; Insurance Validity</h3>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label>Registration expiry *</Label>
+                      <Input
+                        type="date"
+                        min={new Date().toISOString().slice(0, 10)}
+                        value={registrationExpiry}
+                        onChange={(e) => setRegistrationExpiry(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>CTPL expiry *</Label>
+                      <Input
+                        type="date"
+                        min={new Date().toISOString().slice(0, 10)}
+                        value={ctplExpiry}
+                        onChange={(e) => setCtplExpiry(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Comprehensive insurance expiry</Label>
+                      <Input
+                        type="date"
+                        value={comprehensiveExpiry}
+                        onChange={(e) => setComprehensiveExpiry(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Optional. Leave blank if you carry no comprehensive
+                        policy.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid sm:grid-cols-2 gap-6">
-                  {renewalDocs.map((doc) => (
+                  {[
+                    ...renewalDocs,
+                    { key: "ctpl_document_path" as const, label: "CTPL document", optional: false },
+                    {
+                      key: "comprehensive_document_path" as const,
+                      label: "Comprehensive insurance document",
+                      optional: true,
+                    },
+                  ].map((doc) => (
                     <div key={doc.key} className="space-y-2">
-                      <Label>{doc.label} *</Label>
+                      <Label>
+                        {doc.label}
+                        {("optional" in doc && doc.optional) ? " (optional)" : " *"}
+                      </Label>
                       <label
                         className={`flex flex-col items-center justify-center p-6 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${
                           files[doc.key]

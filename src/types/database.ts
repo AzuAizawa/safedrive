@@ -417,6 +417,11 @@ export interface Database {
           emission_test_path: string;
           updated_car_photos_path: string;
           current_mileage: number;
+          registration_expiry: string | null;
+          ctpl_expiry: string | null;
+          comprehensive_insurance_expiry: string | null;
+          ctpl_document_path: string | null;
+          comprehensive_document_path: string | null;
           status: string;
           admin_notes: string | null;
           submitted_at: string;
@@ -432,6 +437,11 @@ export interface Database {
           emission_test_path: string;
           updated_car_photos_path: string;
           current_mileage: number;
+          registration_expiry?: string | null;
+          ctpl_expiry?: string | null;
+          comprehensive_insurance_expiry?: string | null;
+          ctpl_document_path?: string | null;
+          comprehensive_document_path?: string | null;
           status?: string;
           admin_notes?: string | null;
           submitted_at?: string;
@@ -447,6 +457,11 @@ export interface Database {
           emission_test_path?: string;
           updated_car_photos_path?: string;
           current_mileage?: number;
+          registration_expiry?: string | null;
+          ctpl_expiry?: string | null;
+          comprehensive_insurance_expiry?: string | null;
+          ctpl_document_path?: string | null;
+          comprehensive_document_path?: string | null;
           status?: string;
           admin_notes?: string | null;
           submitted_at?: string;

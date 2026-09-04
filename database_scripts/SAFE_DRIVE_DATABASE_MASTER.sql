@@ -7657,4 +7657,27 @@ alter table public.profiles
   add constraint profiles_payout_account_number_check
   check (payout_account_number is null or payout_account_number ~ '^[0-9]{0,16}$');
 
+-- ============================================================================
+-- CHAPTER 33 - Registration/CTPL/comprehensive belong to renewal, not Edit Listing
+-- ============================================================================
+-- Tester feedback: the quick "Edit Listing" editor let a lister silently
+-- retype registration/CTPL/comprehensive expiry with no supporting document,
+-- and the annual renewal flow only ever collected the OR/CR + 4 physical
+-- inspection documents - never a CTPL or comprehensive-insurance document,
+-- and never the new dates themselves (an admin re-typed them blind from a
+-- window.prompt() after eyeballing the OR/CR photo). This chapter moves
+-- expiry editing entirely into the lister-submitted, admin-reviewed renewal
+-- record: car_renewals now carries the three new expiry dates plus CTPL and
+-- comprehensive document paths, so approval reads real submitted data
+-- instead of a blind prompt. No new API handler - this is a direct,
+-- RLS-scoped table write from ListerCarRenewalPage.tsx and
+-- AdminVehicleRenewalsPage.tsx, same as the rest of car_renewals.
+
+alter table public.car_renewals
+  add column if not exists registration_expiry date,
+  add column if not exists ctpl_expiry date,
+  add column if not exists comprehensive_insurance_expiry date,
+  add column if not exists ctpl_document_path text,
+  add column if not exists comprehensive_document_path text;
+
 -- End of SafeDrive chaptered database master.

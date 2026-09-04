@@ -299,9 +299,6 @@ export default function MyVehiclesPage() {
   const [editGpsAvailable, setEditGpsAvailable] = useState(false);
   const [editContact, setEditContact] = useState("");
   const [editAdditionalInfo, setEditAdditionalInfo] = useState("");
-  const [editRegistrationExpiry, setEditRegistrationExpiry] = useState("");
-  const [editCtplExpiry, setEditCtplExpiry] = useState("");
-  const [editComprehensiveExpiry, setEditComprehensiveExpiry] = useState("");
   const [editRentalUseConfirmed, setEditRentalUseConfirmed] = useState(false);
   const [editRentalAgreement, setEditRentalAgreement] = useState<File | null>(null);
   const [editCarImages, setEditCarImages] = useState<File[]>([]);
@@ -794,24 +791,6 @@ export default function MyVehiclesPage() {
       return;
     }
 
-    const now = new Date();
-    const today = [
-      now.getFullYear(),
-      String(now.getMonth() + 1).padStart(2, "0"),
-      String(now.getDate()).padStart(2, "0"),
-    ].join("-");
-    if (!editRegistrationExpiry || editRegistrationExpiry < today) {
-      toast.error("Current vehicle registration is required", {
-        description: "Enter a registration expiry date that is today or later.",
-      });
-      return;
-    }
-    if (!editCtplExpiry || editCtplExpiry < today) {
-      toast.error("Current CTPL coverage is required", {
-        description: "Enter a CTPL expiry date that is today or later.",
-      });
-      return;
-    }
     if (!editRentalUseConfirmed) {
       toast.error("Rental-use confirmation is required", {
         description: "Confirm that the intended rental use was disclosed to the insurer before resubmitting.",
@@ -874,9 +853,6 @@ export default function MyVehiclesPage() {
           gps_available: editGpsAvailable,
           contact_number: editContact || null,
           additional_info: editAdditionalInfo || null,
-          registration_expiry: editRegistrationExpiry || null,
-          ctpl_expiry: editCtplExpiry || null,
-          comprehensive_insurance_expiry: editComprehensiveExpiry || null,
           insurer_rental_use_confirmed: editRentalUseConfirmed,
           insurance_verification_status: "pending",
           status: "pending",
@@ -2064,9 +2040,6 @@ export default function MyVehiclesPage() {
                         setEditGpsAvailable(Boolean(v.gps_available));
                         setEditContact(v.contact_number || "");
                         setEditAdditionalInfo(v.additional_info || "");
-                        setEditRegistrationExpiry(v.registration_expiry || "");
-                        setEditCtplExpiry(v.ctpl_expiry || "");
-                        setEditComprehensiveExpiry(v.comprehensive_insurance_expiry || "");
                         setEditRentalUseConfirmed(Boolean(v.insurer_rental_use_confirmed));
                         setEditRentalAgreement(null);
                         setEditCarImages([]);
@@ -2133,8 +2106,9 @@ export default function MyVehiclesPage() {
                 <CardHeader className="relative shrink-0 border-b border-border/60 pb-4 pr-12">
                   <CardTitle>Edit Listing: {editVehicle.plate_number}</CardTitle>
                   <CardDescription>
-                    Update dynamic values like price. Sensitive values require
-                    contacting support.
+                    Update booking-facing details like price and pickup info.
+                    Registration, CTPL, and comprehensive insurance are
+                    updated on the Registration &amp; Insurance Renewal page.
                   </CardDescription>
                   <button
                     type="button"
@@ -2203,10 +2177,29 @@ export default function MyVehiclesPage() {
                       This stays separate from the online booking total and helps renters understand the owner-set deposit expectation.
                     </p>
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <label className="space-y-2"><Label>Registration expiry</Label><Input type="date" value={editRegistrationExpiry} onChange={(event) => setEditRegistrationExpiry(event.target.value)} /></label>
-                    <label className="space-y-2"><Label>CTPL expiry</Label><Input type="date" value={editCtplExpiry} onChange={(event) => setEditCtplExpiry(event.target.value)} /></label>
-                    <label className="space-y-2"><Label>Comprehensive expiry</Label><Input type="date" value={editComprehensiveExpiry} onChange={(event) => setEditComprehensiveExpiry(event.target.value)} /></label>
+                  <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+                    <p className="font-medium text-foreground">
+                      Registration, CTPL &amp; comprehensive insurance
+                    </p>
+                    <p className="mt-1">
+                      Registration: {editVehicle.registration_expiry || "Not on file"} · CTPL:{" "}
+                      {editVehicle.ctpl_expiry || "Not on file"} · Comprehensive:{" "}
+                      {editVehicle.comprehensive_insurance_expiry || "Not supplied"}
+                    </p>
+                    <p className="mt-1">
+                      These are updated with supporting documents through the{" "}
+                      <button
+                        type="button"
+                        className="font-medium text-primary underline underline-offset-2"
+                        onClick={() => {
+                          setEditVehicle(null);
+                          navigate("/car-renewals");
+                        }}
+                      >
+                        Registration &amp; Insurance Renewal
+                      </button>{" "}
+                      page, not here.
+                    </p>
                   </div>
                   <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm"><input type="checkbox" className="mt-1" checked={editRentalUseConfirmed} onChange={(event) => setEditRentalUseConfirmed(event.target.checked)} /><span>I reconfirmed intended rental use with the insurer. Changing any insurance declaration sends this vehicle back to admin review.</span></label>
                   <div className="space-y-2">

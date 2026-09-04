@@ -9,6 +9,35 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Registration/CTPL/comprehensive move to Renewal (CHAPTER 33, run manually)
+
+Tester feedback: "Edit Listing" let a lister silently retype
+registration/CTPL/comprehensive expiry dates with **no supporting
+document**, while the annual renewal flow only ever collected 5 physical
+inspection documents (never a CTPL or comprehensive-insurance document, and
+never the dates themselves - an admin re-typed them blind via
+`window.prompt()` after eyeballing the OR/CR photo).
+
+- **`/my-vehicles` Edit Listing:** the three expiry date pickers are gone.
+  The card now only touches booking-facing info (price, deposit, location,
+  transmission, fuel, contact, GPS, rental agreement) and shows the current
+  dates read-only with a link to the renewal page.
+- **`/car-renewals` (`ListerCarRenewalPage`):** open to any of the lister's
+  live vehicles at any time (not only ones already forced offline), so a
+  lister can renew ahead of expiry. Now collects the new registration/CTPL
+  expiry (required) with a required CTPL document, and an optional
+  comprehensive expiry + document (must be given together or both blank) -
+  alongside the existing 5 inspection documents.
+- **`/admin/vehicle-renewals`:** Approve now reads and validates the
+  lister-submitted dates directly instead of three `window.prompt()`
+  dialogs; shows a CTPL-document button always and a comprehensive-document
+  button when one was uploaded.
+- **SQL (CHAPTER 33, run manually):** `car_renewals` gains
+  `registration_expiry`, `ctpl_expiry`, `comprehensive_insurance_expiry`,
+  `ctpl_document_path`, `comprehensive_document_path`.
+- **Files:** CHAPTER 33; `src/pages/{MyVehiclesPage,ListerCarRenewalPage,
+  admin/AdminVehicleRenewalsPage}.tsx`; `src/types/database.ts`.
+
 ## 2026-09-04 — Clearer file-input affordance app-wide
 
 Tester feedback: the licence-update file inputs "clickable siya pero parang
