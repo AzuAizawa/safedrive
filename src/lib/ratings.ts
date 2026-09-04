@@ -11,6 +11,16 @@ export type PublicCarReview = {
   created_at: string;
   reviewer_name: string;
   reviewer_avatar: string | null;
+  is_cancellation_review?: boolean;
+};
+
+export type Reliability = {
+  completedTrips: number;
+  cancellations: number;
+  lateCancellations: number;
+  /** Percent (0-100), or null until there is enough history to show one. */
+  cancellationRate: number | null;
+  hasEnoughHistory: boolean;
 };
 
 export type RenterReputation = {
@@ -91,6 +101,67 @@ export const fetchPublicCarReviews = async (
   } catch (err) {
     console.error("Failed to load car reviews:", err);
     return [];
+  }
+};
+
+const parseReliability = (raw: unknown): Reliability => {
+  const row = (raw ?? {}) as {
+    completed_trips?: number;
+    cancellations?: number;
+    late_cancellations?: number;
+    cancellation_rate?: number | string | null;
+    has_enough_history?: boolean;
+  };
+  const rate =
+    row.cancellation_rate === null || row.cancellation_rate === undefined
+      ? null
+      : Number(row.cancellation_rate);
+  return {
+    completedTrips: Number(row.completed_trips) || 0,
+    cancellations: Number(row.cancellations) || 0,
+    lateCancellations: Number(row.late_cancellations) || 0,
+    cancellationRate: rate !== null && Number.isFinite(rate) ? rate : null,
+    hasEnoughHistory: Boolean(row.has_enough_history),
+  };
+};
+
+const EMPTY_RELIABILITY: Reliability = {
+  completedTrips: 0,
+  cancellations: 0,
+  lateCancellations: 0,
+  cancellationRate: null,
+  hasEnoughHistory: false,
+};
+
+/** Lister reliability (rolling 365 days): completed trips vs cancellations. */
+export const fetchListerReliability = async (
+  listerId: string,
+): Promise<Reliability> => {
+  try {
+    const { data, error } = await supabase.rpc("get_lister_reliability", {
+      p_lister_id: listerId,
+    });
+    if (error) throw error;
+    return parseReliability(data);
+  } catch (err) {
+    console.error("Failed to load lister reliability:", err);
+    return EMPTY_RELIABILITY;
+  }
+};
+
+/** Renter reliability (rolling 365 days): completed trips vs late cancellations. */
+export const fetchRenterReliability = async (
+  renterId: string,
+): Promise<Reliability> => {
+  try {
+    const { data, error } = await supabase.rpc("get_renter_reliability", {
+      p_renter_id: renterId,
+    });
+    if (error) throw error;
+    return parseReliability(data);
+  } catch (err) {
+    console.error("Failed to load renter reliability:", err);
+    return EMPTY_RELIABILITY;
   }
 };
 

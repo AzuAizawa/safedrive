@@ -6916,4 +6916,214 @@ $$;
 revoke all on function public.anonymize_user(uuid, uuid) from public, anon;
 grant execute on function public.anonymize_user(uuid, uuid) to authenticated;
 
+-- ============================================================================
+-- CHAPTER 27 - Cancellation accountability + two-sided reliability signals
+-- ============================================================================
+-- Mirrors the mature P2P-rental model (Airbnb host cancellation policy /
+-- Superhost metrics, Turo All-Star Host, marketplace seller cancellation
+-- rates):
+--   * reviews (stars)          = quality,     per vehicle, after a completed trip
+--   * cancellation/completion  = reliability, per account, computed from behaviour
+-- A "late" cancellation is one made inside the booking's own
+-- refund_full_hours window - the SAME threshold the renter already faces, so
+-- both sides are treated symmetrically.
+
+-- ----------------------------------------------------------------------------
+-- 27.1  One row per cancelled booking, whoever cancelled.
+-- ----------------------------------------------------------------------------
+create table if not exists public.booking_cancellations (
+  booking_id uuid primary key references public.bookings(id) on delete cascade,
+  cancelled_by_role text not null check (cancelled_by_role in ('renter', 'lister')),
+  cancelled_by_id uuid references public.profiles(id) on delete set null,
+  lister_id uuid references public.profiles(id) on delete set null,
+  renter_id uuid references public.profiles(id) on delete set null,
+  car_id uuid references public.cars(id) on delete set null,
+  reason text,
+  hours_before_pickup numeric,
+  was_late boolean not null default false,
+  had_captured_payment boolean not null default false,
+  cancelled_at timestamptz not null default now()
+);
+
+create index if not exists booking_cancellations_lister_idx
+  on public.booking_cancellations (lister_id, cancelled_at);
+create index if not exists booking_cancellations_renter_idx
+  on public.booking_cancellations (renter_id, cancelled_at);
+
+alter table public.booking_cancellations enable row level security;
+
+drop policy if exists "Participants read booking cancellations" on public.booking_cancellations;
+create policy "Participants read booking cancellations"
+on public.booking_cancellations for select
+using (lister_id = auth.uid() or renter_id = auth.uid() or public.is_admin());
+-- No insert/update/delete policy: only the service-role API handler writes here.
+
+grant select on public.booking_cancellations to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 27.2  Lister reliability (rolling 365 days). anon + authenticated: a renter
+--       browsing a car needs this before booking.
+-- ----------------------------------------------------------------------------
+create or replace function public.get_lister_reliability(p_lister_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with completed as (
+    select count(*)::int as n
+    from public.bookings b
+    where b.owner_id = p_lister_id
+      and b.status = 'completed'
+      and b.end_date >= (now() - interval '365 days')::date
+  ),
+  cancels as (
+    select
+      count(*)::int as n,
+      count(*) filter (where c.was_late)::int as late_n
+    from public.booking_cancellations c
+    where c.lister_id = p_lister_id
+      and c.cancelled_by_role = 'lister'
+      and c.cancelled_at >= now() - interval '365 days'
+  )
+  select jsonb_build_object(
+    'completed_trips', (select n from completed),
+    'cancellations', (select n from cancels),
+    'late_cancellations', (select late_n from cancels),
+    'total', (select n from completed) + (select n from cancels),
+    'has_enough_history', ((select n from completed) + (select n from cancels)) >= 3,
+    'cancellation_rate',
+      case
+        when ((select n from completed) + (select n from cancels)) >= 3
+        then round(
+          (select n from cancels)::numeric
+          / nullif((select n from completed) + (select n from cancels), 0) * 100,
+          0
+        )
+        else null
+      end
+  );
+$$;
+grant execute on function public.get_lister_reliability(uuid) to anon, authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 27.3  Renter reliability (rolling 365 days). authenticated only - a lister
+--       seeing who booked them.
+-- ----------------------------------------------------------------------------
+create or replace function public.get_renter_reliability(p_renter_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with completed as (
+    select count(*)::int as n
+    from public.bookings b
+    where b.renter_id = p_renter_id
+      and b.status = 'completed'
+      and b.end_date >= (now() - interval '365 days')::date
+  ),
+  cancels as (
+    select count(*)::int as n
+    from public.booking_cancellations c
+    where c.renter_id = p_renter_id
+      and c.cancelled_by_role = 'renter'
+      and c.was_late
+      and c.cancelled_at >= now() - interval '365 days'
+  )
+  select jsonb_build_object(
+    'completed_trips', (select n from completed),
+    'cancellations', (select n from cancels),
+    'total', (select n from completed) + (select n from cancels),
+    'has_enough_history', ((select n from completed) + (select n from cancels)) >= 3,
+    'cancellation_rate',
+      case
+        when ((select n from completed) + (select n from cancels)) >= 3
+        then round(
+          (select n from cancels)::numeric
+          / nullif((select n from completed) + (select n from cancels), 0) * 100,
+          0
+        )
+        else null
+      end
+  );
+$$;
+grant execute on function public.get_renter_reliability(uuid) to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 27.4  Renter may review a lister who cancelled their booking (Airbnb-style).
+--       Additive to the existing "completed booking" INSERT policy - Postgres
+--       ORs multiple permissive policies for the same command.
+-- ----------------------------------------------------------------------------
+drop policy if exists "Renter reviews a lister cancellation" on public.booking_reviews;
+create policy "Renter reviews a lister cancellation" on public.booking_reviews
+for insert with check (
+  auth.uid() = reviewer_id
+  and reviewer_role = 'renter'
+  and exists (
+    select 1
+    from public.booking_cancellations bc
+    join public.bookings b on b.id = bc.booking_id
+    where bc.booking_id = booking_reviews.booking_id
+      and bc.cancelled_by_role = 'lister'
+      and b.renter_id = auth.uid()
+      and booking_reviews.reviewee_id = b.owner_id
+      and booking_reviews.car_id = b.car_id
+  )
+);
+
+drop policy if exists "Read booking cancellation reviews" on public.booking_reviews;
+create policy "Read booking cancellation reviews" on public.booking_reviews
+for select using (
+  exists (
+    select 1 from public.booking_cancellations bc
+    where bc.booking_id = booking_reviews.booking_id
+      and bc.cancelled_by_role = 'lister'
+  )
+);
+
+-- ----------------------------------------------------------------------------
+-- 27.5  Public car reviews now also surface a lister-cancellation review, with
+--       a flag so the UI can badge it. The numeric star averages
+--       (get_car_rating_summaries / get_lister_rating_summaries) stay
+--       completed-trip only - a cancellation review never moves the trip score.
+-- ----------------------------------------------------------------------------
+-- Return signature gains a column, so the old function must be dropped first.
+drop function if exists public.get_public_car_reviews(uuid);
+create or replace function public.get_public_car_reviews(p_car_id uuid)
+returns table(
+  id uuid, rating integer, feedback text, created_at timestamptz,
+  reviewer_name text, reviewer_avatar text, is_cancellation_review boolean
+)
+language sql stable security definer set search_path = public
+as $$
+  select r.id, r.rating, r.feedback, r.created_at,
+         coalesce(nullif(split_part(coalesce(p.full_name, ''), ' ', 1), ''), 'Renter'),
+         p.avatar_url,
+         false as is_cancellation_review
+  from public.booking_reviews r
+  join public.bookings b on b.id = r.booking_id
+  left join public.profiles p on p.id = r.reviewer_id
+  where r.car_id = p_car_id
+    and r.reviewer_role = 'renter'
+    and b.status = 'completed'
+    and public._review_is_published(r.booking_id, r.reviewer_id)
+  union all
+  select r.id, r.rating, r.feedback, r.created_at,
+         coalesce(nullif(split_part(coalesce(p.full_name, ''), ' ', 1), ''), 'Renter'),
+         p.avatar_url,
+         true as is_cancellation_review
+  from public.booking_reviews r
+  join public.booking_cancellations bc on bc.booking_id = r.booking_id
+  left join public.profiles p on p.id = r.reviewer_id
+  where r.car_id = p_car_id
+    and r.reviewer_role = 'renter'
+    and bc.cancelled_by_role = 'lister'
+  order by created_at desc
+  limit 50;
+$$;
+grant execute on function public.get_public_car_reviews(uuid) to anon, authenticated;
+
 -- End of SafeDrive chaptered database master.

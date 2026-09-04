@@ -305,6 +305,17 @@ After a booking reaches `completed`, both sides get one prompt on that booking c
 
 Reads for public / logged-out display go through SECURITY DEFINER functions that return only aggregates plus review text with a reviewer first name/avatar (no other PII): `get_car_rating_summaries()`, `get_lister_rating_summaries()`, `get_public_car_reviews(car_id)` (all `anon` + `authenticated`), and `get_renter_reputation(renter_id)` (`authenticated`). Writes still go straight to `booking_reviews` under its participant RLS. Client helpers are in `src/lib/ratings.ts`.
 
+### 8.3 Cancellation accountability & reliability (CHAPTER 27)
+
+Modelled on Airbnb host-cancellation policy / Superhost metrics and Turo All-Star Host: **reviews (stars) = quality, per vehicle, after a completed trip; cancellation/completion = reliability, per account, computed from behaviour.**
+
+- **Lister cancel:** a lister can cancel a `confirmed` / `downpayment_paid` / `fully_paid` pre-arrival booking from `/lister-bookings` (one reason from a dropdown + a warning). The renter gets an **automatic 100% refund** through the existing `booking-action` `cancel` path and a notification with a Browse link. No admin step unless the renter disputes.
+- **`booking_cancellations`:** one row per cancelled booking, either party. `was_late` = cancelled inside the booking's own `refund_full_hours` window — the same threshold the renter already faces, so both sides are judged symmetrically.
+- **Strike / auto-pause:** 3 late cancellations of a **paid** booking within 60 days sets every one of the lister's live cars to `inactive` and notifies them to contact support. Only repeat offenders are affected; an early cancel (outside the window) never counts.
+- **Reliability signals:** `get_lister_reliability(uid)` / `get_renter_reliability(uid)` (SECURITY DEFINER, rolling 365 days, a percentage only once there are ≥3 completed-or-cancelled bookings). Shown as a completion rate on the car page's lister block and on the renter card in `/lister-bookings`. Per **account**, not per car — a cancellation is operator behaviour.
+- **Review after a lister cancellation:** the renter can leave a star + comment (Airbnb-style auto-review). An additive RLS `INSERT` policy on `booking_reviews` permits it; `get_public_car_reviews` surfaces it with `is_cancellation_review = true` and the UI badges it. It is **excluded from the numeric star average** — `get_car_rating_summaries` / `get_lister_rating_summaries` stay completed-trip only.
+- **Reference:** `project_docs/DATA_RETENTION_AND_DELETION.md` is a sibling operational doc; the reliability-model rationale is defended from the four platforms above.
+
 ## 9. Security Deposit: Option B
 
 SafeDrive uses a **separate refundable deposit**, not a hidden deduction from rental income. This is simpler to explain and reconcile than mixing the deposit with rental revenue.

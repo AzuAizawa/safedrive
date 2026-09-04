@@ -55,7 +55,12 @@ import {
 import { toast } from "sonner";
 import { format } from "date-fns";
 import type { Payment } from "@/types/database";
-import { fetchRenterReputation, type RenterReputation } from "@/lib/ratings";
+import {
+  fetchRenterReliability,
+  fetchRenterReputation,
+  type Reliability,
+  type RenterReputation,
+} from "@/lib/ratings";
 import {
   DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
   fetchPlatformPolicyTimings,
@@ -243,6 +248,8 @@ export default function ListerBookingsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [bookingPage, setBookingPage] = useState(1);
   const [rejectingBooking, setRejectingBooking] = useState<ListerBooking | null>(null);
+  const [cancellingBooking, setCancellingBooking] = useState<ListerBooking | null>(null);
+  const [cancelReason, setCancelReason] = useState("Vehicle problem");
   const [rejectionReason, setRejectionReason] = useState("");
   const [vehicleActions, setVehicleActions] = useState<ListerVehicleActionItem[]>([]);
   const [renewalActions, setRenewalActions] = useState<ListerRenewalItem[]>([]);
@@ -252,6 +259,9 @@ export default function ListerBookingsPage() {
   const [payoutLogsLoading, setPayoutLogsLoading] = useState(false);
   const [renterReputations, setRenterReputations] = useState<
     Record<string, RenterReputation>
+  >({});
+  const [renterReliabilities, setRenterReliabilities] = useState<
+    Record<string, Reliability>
   >({});
   const [bookingExtensionsByBooking, setBookingExtensionsByBooking] = useState<
     Record<string, BookingExtensionRow[]>
@@ -443,16 +453,25 @@ export default function ListerBookingsPage() {
       ];
       if (renterIds.length === 0) {
         setRenterReputations({});
+        setRenterReliabilities({});
         return;
       }
       // Per-renter so the server applies the double-blind rule (only counts a
       // review once both parties rated that booking, or 14 days passed).
-      const entries = await Promise.all(
-        renterIds.map(
-          async (rid) => [rid, await fetchRenterReputation(rid)] as const,
+      const [reputationEntries, reliabilityEntries] = await Promise.all([
+        Promise.all(
+          renterIds.map(
+            async (rid) => [rid, await fetchRenterReputation(rid)] as const,
+          ),
         ),
-      );
-      setRenterReputations(Object.fromEntries(entries));
+        Promise.all(
+          renterIds.map(
+            async (rid) => [rid, await fetchRenterReliability(rid)] as const,
+          ),
+        ),
+      ]);
+      setRenterReputations(Object.fromEntries(reputationEntries));
+      setRenterReliabilities(Object.fromEntries(reliabilityEntries));
     };
 
     void loadRenterReputations();
@@ -590,7 +609,7 @@ export default function ListerBookingsPage() {
 
   const runBookingAction = async (
     bookingId: string,
-    action: "accept" | "reject" | "arrive" | "complete",
+    action: "accept" | "reject" | "arrive" | "complete" | "cancel",
     arrivalPhotoUrl?: string | null,
     arrivalLocation?: ArrivalLocationEvidence | null,
     note?: string | null,
@@ -683,6 +702,25 @@ export default function ListerBookingsPage() {
       fetchBookings();
     } catch (error) {
       toast.error("Failed to reject booking", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    }
+    setActionLoading(null);
+  };
+
+  const handleListerCancel = async (bookingId: string) => {
+    setActionLoading(bookingId);
+    try {
+      await runBookingAction(bookingId, "cancel", null, null, cancelReason);
+      toast.success("Booking cancelled", {
+        description: "The renter has been notified and their full refund is being processed.",
+      });
+      setCancellingBooking(null);
+      setCancelReason("Vehicle problem");
+      fetchBookings();
+    } catch (error) {
+      toast.error("Failed to cancel booking", {
         description:
           error instanceof Error ? error.message : "Please try again.",
       });
@@ -2329,6 +2367,7 @@ export default function ListerBookingsPage() {
             const badge = statusBadge(apparentState);
             const renterDisplay = getRenterDisplay(b);
             const renterRep = renterReputations[b.renter_id];
+            const renterRel = renterReliabilities[b.renter_id];
             const latestExtension = getLatestExtension(b.id);
             const processGuidance = getProcessGuidance(b, apparentState);
             const payoutStatus = getBookingPayoutStatus(b);
@@ -2525,6 +2564,19 @@ export default function ListerBookingsPage() {
                                 ) : null}
                               </span>
                             </p>
+                            {renterRel?.hasEnoughHistory &&
+                              renterRel.cancellationRate !== null && (
+                                <p
+                                  className={`mt-1 text-xs ${
+                                    renterRel.cancellationRate >= 15
+                                      ? "font-medium text-red-500"
+                                      : "text-muted-foreground"
+                                  }`}
+                                >
+                                  {100 - renterRel.cancellationRate}% completion
+                                  rate
+                                </p>
+                              )}
                           </div>
                         </button>
                       </div>
@@ -2754,6 +2806,27 @@ export default function ListerBookingsPage() {
                           </Button>
                         </div>
                       )}
+
+                      {["confirmed", "downpayment_paid", "fully_paid"].includes(
+                        apparentState,
+                      ) &&
+                        !b.lister_arrived_at &&
+                        !b.renter_arrived_at && (
+                          <div className="mt-2 flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setCancellingBooking(b);
+                                setCancelReason("Vehicle problem");
+                              }}
+                              disabled={actionLoading === b.id}
+                              className="gap-1 text-red-500 hover:bg-red-500/10 hover:text-red-600"
+                            >
+                              <XCircle className="w-3.5 h-3.5" /> Cancel booking
+                            </Button>
+                          </div>
+                        )}
 
                       {/* Arrival Phase - opens only near the booked pickup time */}
                       {(apparentState === "fully_paid" || apparentState === "active") &&
@@ -3075,6 +3148,83 @@ export default function ListerBookingsPage() {
                     </>
                   ) : (
                     "Reject Booking"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {cancellingBooking &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[130] flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-sm p-4 py-6"
+            onClick={() => {
+              if (actionLoading !== cancellingBooking.id) {
+                setCancellingBooking(null);
+              }
+            }}
+          >
+            <div
+              className="w-full max-w-md rounded-xl border border-border bg-background p-6 shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold">Cancel this booking?</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    The renter gets an automatic full refund and is notified to rebook.
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setCancellingBooking(null)}
+                  disabled={actionLoading === cancellingBooking.id}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <label className="text-sm font-medium">Reason</label>
+              <select
+                value={cancelReason}
+                onChange={(event) => setCancelReason(event.target.value)}
+                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="Vehicle problem">Vehicle problem</option>
+                <option value="Personal emergency">Personal emergency</option>
+                <option value="Double-booked">Double-booked</option>
+                <option value="Other">Other</option>
+              </select>
+
+              <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                Cancelling a paid booking close to pickup counts toward your
+                cancellation record and can pause your listings after repeated
+                last-minute cancellations.
+              </p>
+
+              <div className="mt-5 flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setCancellingBooking(null)}
+                  disabled={actionLoading === cancellingBooking.id}
+                >
+                  Keep booking
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => handleListerCancel(cancellingBooking.id)}
+                  disabled={actionLoading === cancellingBooking.id}
+                >
+                  {actionLoading === cancellingBooking.id ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Cancelling...
+                    </>
+                  ) : (
+                    "Cancel booking"
                   )}
                 </Button>
               </div>

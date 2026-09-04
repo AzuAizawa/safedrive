@@ -46,11 +46,13 @@ import { formatDayCount } from "@/lib/formatCount";
 import {
   fetchCarRatingSummaries,
   fetchListerRatingSummaries,
+  fetchListerReliability,
   fetchPublicCarReviews,
   formatAverage,
   type ListerRating,
   type PublicCarReview,
   type RatingSummary,
+  type Reliability,
 } from "@/lib/ratings";
 
 const MAX_BOOKING_TOTAL = 100000;
@@ -106,6 +108,9 @@ export default function CarDetailPage() {
   const [publicReviews, setPublicReviews] = useState<PublicCarReview[]>([]);
   const [carRating, setCarRating] = useState<RatingSummary | null>(null);
   const [listerRating, setListerRating] = useState<ListerRating | null>(null);
+  const [listerReliability, setListerReliability] = useState<Reliability | null>(
+    null,
+  );
   const [showInquiry, setShowInquiry] = useState(false);
   const [inquiryMessage, setInquiryMessage] = useState("");
   const [sendingInquiry, setSendingInquiry] = useState(false);
@@ -176,16 +181,21 @@ export default function CarDetailPage() {
         );
       }
 
-      const [reviews, carRatingMap, listerRatingMap] = await Promise.all([
-        fetchPublicCarReviews(id),
-        fetchCarRatingSummaries(),
-        fetchListerRatingSummaries(),
-      ]);
+      const [reviews, carRatingMap, listerRatingMap, reliability] =
+        await Promise.all([
+          fetchPublicCarReviews(id),
+          fetchCarRatingSummaries(),
+          fetchListerRatingSummaries(),
+          carRow.owner_id
+            ? fetchListerReliability(carRow.owner_id)
+            : Promise.resolve(null),
+        ]);
       setPublicReviews(reviews);
       setCarRating(carRatingMap[id] ?? null);
       setListerRating(
         carRow.owner_id ? listerRatingMap[carRow.owner_id] ?? null : null,
       );
+      setListerReliability(reliability);
     }
     setLoading(false);
   }, [id]);
@@ -577,16 +587,21 @@ export default function CarDetailPage() {
 
   const agreementUrl = agreementAccess?.url ?? null;
 
-  const reviewCount = carRating?.count ?? publicReviews.length;
+  // Trip reviews drive the star score; a lister-cancellation review is shown in
+  // the list (badged) but never moves the numeric rating.
+  const tripReviews = publicReviews.filter(
+    (review) => !review.is_cancellation_review,
+  );
+  const reviewCount = carRating?.count ?? tripReviews.length;
   const averageReviewRating =
     carRating?.average ??
-    (publicReviews.length > 0
-      ? publicReviews.reduce((total, review) => total + Number(review.rating), 0) /
-        publicReviews.length
+    (tripReviews.length > 0
+      ? tripReviews.reduce((total, review) => total + Number(review.rating), 0) /
+        tripReviews.length
       : 0);
   const ratingBuckets = [5, 4, 3, 2, 1].map((stars) => ({
     stars,
-    count: publicReviews.filter((review) => review.rating === stars).length,
+    count: tripReviews.filter((review) => review.rating === stars).length,
   }));
 
   const bookedDayRanges = bookedDates.map((b) => ({
@@ -700,6 +715,24 @@ export default function CarDetailPage() {
                   ) : (
                     <p className="text-xs text-muted-foreground">New lister</p>
                   )}
+                  {listerReliability?.hasEnoughHistory &&
+                    listerReliability.cancellationRate !== null && (
+                      <p
+                        className={`text-xs ${
+                          listerReliability.cancellationRate >= 15
+                            ? "font-medium text-red-500"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {100 - listerReliability.cancellationRate}% completion
+                        rate
+                        {listerReliability.cancellationRate >= 15
+                          ? ` · ${listerReliability.cancellations} recent cancellation${
+                              listerReliability.cancellations === 1 ? "" : "s"
+                            }`
+                          : ""}
+                      </p>
+                    )}
                   {(car.contact_number || car.profiles?.phone) && (
                     <p className="text-xs text-muted-foreground flex items-center gap-1">
                       📞 <span className="text-foreground font-medium">{car.contact_number || car.profiles?.phone}</span>
@@ -811,7 +844,7 @@ export default function CarDetailPage() {
                   </div>
                   <div className="flex-1 space-y-1">
                     {ratingBuckets.map((bucket) => {
-                      const shown = publicReviews.length || 1;
+                      const shown = tripReviews.length || 1;
                       return (
                         <div key={bucket.stars} className="flex items-center gap-2 text-xs">
                           <span className="w-3 text-muted-foreground">{bucket.stars}</span>
@@ -867,6 +900,11 @@ export default function CarDetailPage() {
                           />
                         ))}
                       </div>
+                      {review.is_cancellation_review && (
+                        <p className="mt-1.5 inline-flex rounded-md bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500">
+                          The lister cancelled this booking
+                        </p>
+                      )}
                       {review.feedback?.trim() && (
                         <p className="mt-2 text-sm text-muted-foreground">
                           {review.feedback.trim()}

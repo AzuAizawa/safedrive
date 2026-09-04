@@ -9,6 +9,34 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Lister cancellation accountability + two-sided reliability
+
+The API supported a lister cancelling a paid pre-trip booking (renter gets an
+automatic full refund) but no UI exposed it, so a flaky lister just no-showed,
+and there was no consequence and no signal to future renters. Modelled on
+Airbnb host-cancellation policy / Superhost metrics and Turo All-Star Host.
+
+- **Lister cancel button** on `/lister-bookings` for `confirmed` /
+  `downpayment_paid` / `fully_paid` pre-arrival bookings — one dropdown reason
+  + a warning, then the existing `booking-action` `cancel` path (full auto
+  refund to the renter, who is notified with a Browse link).
+- **`booking_cancellations`** table: one row per cancelled booking, either
+  party, with `was_late` (inside the booking's own `refund_full_hours`
+  window — same threshold the renter faces).
+- **Strike / auto-pause:** 3 late cancellations of a paid booking within 60
+  days sets every one of the lister's live cars to `inactive` + notifies them
+  to contact support. Repeat offenders only.
+- **Reliability signals** (`get_lister_reliability`, `get_renter_reliability`,
+  rolling 365 days, shown once ≥3 completed-or-cancelled): completion rate on
+  the car page's lister block and on the renter card in `/lister-bookings`.
+- **Review after a lister cancellation:** the renter can leave a star + comment
+  (Airbnb-style). Shown on the car page with a "The lister cancelled this
+  booking" badge; **excluded from the numeric star average** — trip reviews
+  only move the score.
+- **SQL:** CHAPTER 27 (run manually). **Files:** `api/booking-action.ts`,
+  `src/lib/ratings.ts`, `src/pages/{ListerBookingsPage,CarDetailPage,MyBookingsPage,BrowseCarsPage}.tsx`,
+  `src/types/database.ts`.
+
 ## 2026-09-03 — Ratings & reviews: standard marketplace model
 
 The rating flow existed but was incomplete: Browse showed no ratings,

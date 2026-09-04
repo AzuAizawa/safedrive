@@ -242,6 +242,9 @@ export default function MyBookingsPage() {
   const [paymentLogsLoading, setPaymentLogsLoading] = useState(false);
   const [cancelTargetBooking, setCancelTargetBooking] = useState<BookingRow | null>(null);
   const [carRatingSummaries, setCarRatingSummaries] = useState<Record<string, RatingSummary>>({});
+  const [listerCancelledBookingIds, setListerCancelledBookingIds] = useState<
+    Set<string>
+  >(new Set());
   const [renterReputation, setRenterReputation] = useState<
     Awaited<ReturnType<typeof fetchRenterReputation>> | null
   >(null);
@@ -308,6 +311,29 @@ export default function MyBookingsPage() {
       if (data) {
         const typedBookings = data as unknown as BookingRow[];
         setBookings(typedBookings);
+
+        // Separate, non-fatal query: a missing table (SQL chapter not yet run)
+        // must never break the bookings list.
+        try {
+          const cancelledIds = typedBookings
+            .filter((b) => b.status === "cancelled")
+            .map((b) => b.id);
+          if (cancelledIds.length > 0) {
+            const { data: cancels } = await supabase
+              .from("booking_cancellations")
+              .select("booking_id, cancelled_by_role")
+              .in("booking_id", cancelledIds)
+              .eq("cancelled_by_role", "lister");
+            setListerCancelledBookingIds(
+              new Set((cancels ?? []).map((row) => row.booking_id)),
+            );
+          } else {
+            setListerCancelledBookingIds(new Set());
+          }
+        } catch {
+          setListerCancelledBookingIds(new Set());
+        }
+
         setDocumentUrls(
           await createPrivateStorageUrlMap(
             "vehicle-private-documents",
@@ -1610,6 +1636,7 @@ export default function MyBookingsPage() {
                 review.reviewer_id === user?.id &&
                 review.reviewer_role === "renter",
             );
+            const listerCancelled = listerCancelledBookingIds.has(booking.id);
             const processGuidance = getProcessGuidance(booking, apparentState);
             const cancellationGuidance = canCancelBooking(booking, apparentState)
               ? getCancellationGuidance(booking, apparentState)
@@ -2303,6 +2330,25 @@ export default function MyBookingsPage() {
                             Rate Booking
                         </Button>
                       )}
+
+                      {apparentState === "cancelled" &&
+                        listerCancelled &&
+                        !reviewedByRenter && (
+                          <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-left">
+                            <p className="text-xs text-muted-foreground">
+                              The lister cancelled this booking. You can leave
+                              feedback about the experience.
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openRateBookingModal(booking)}
+                              className="mt-2 gap-1"
+                            >
+                              Rate this experience
+                            </Button>
+                          </div>
+                        )}
 
                       {(apparentState === "awaiting_payment" ||
                         apparentState === "confirmed") &&

@@ -849,6 +849,48 @@ export interface Database {
           },
         ];
       };
+      booking_cancellations: {
+        Row: {
+          booking_id: string;
+          cancelled_by_role: string;
+          cancelled_by_id: string | null;
+          lister_id: string | null;
+          renter_id: string | null;
+          car_id: string | null;
+          reason: string | null;
+          hours_before_pickup: number | null;
+          was_late: boolean;
+          had_captured_payment: boolean;
+          cancelled_at: string;
+        };
+        Insert: {
+          booking_id: string;
+          cancelled_by_role: string;
+          cancelled_by_id?: string | null;
+          lister_id?: string | null;
+          renter_id?: string | null;
+          car_id?: string | null;
+          reason?: string | null;
+          hours_before_pickup?: number | null;
+          was_late?: boolean;
+          had_captured_payment?: boolean;
+          cancelled_at?: string;
+        };
+        Update: {
+          booking_id?: string;
+          cancelled_by_role?: string;
+          cancelled_by_id?: string | null;
+          lister_id?: string | null;
+          renter_id?: string | null;
+          car_id?: string | null;
+          reason?: string | null;
+          hours_before_pickup?: number | null;
+          was_late?: boolean;
+          had_captured_payment?: boolean;
+          cancelled_at?: string;
+        };
+        Relationships: [];
+      };
       booking_reviews: {
         Row: {
           id: string;
@@ -1545,9 +1587,18 @@ export interface Database {
           created_at: string;
           reviewer_name: string;
           reviewer_avatar: string | null;
+          is_cancellation_review: boolean;
         }[];
       };
       get_renter_reputation: {
+        Args: { p_renter_id: string };
+        Returns: Json;
+      };
+      get_lister_reliability: {
+        Args: { p_lister_id: string };
+        Returns: Json;
+      };
+      get_renter_reliability: {
         Args: { p_renter_id: string };
         Returns: Json;
       };

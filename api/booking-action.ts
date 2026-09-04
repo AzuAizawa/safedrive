@@ -32,6 +32,7 @@ type BookingRecord = {
   id: string;
   renter_id: string;
   owner_id: string;
+  car_id: string;
   status: string;
   start_date: string;
   pickup_time: string | null;
@@ -423,6 +424,7 @@ export default async function handler(req: Request) {
         id,
         renter_id,
         owner_id,
+        car_id,
         status,
         start_date,
         pickup_time,
@@ -871,6 +873,92 @@ export default async function handler(req: Request) {
         details: auditDetails,
       });
 
+      // Record the cancellation for two-sided reliability signals. "Late" uses
+      // the booking's own refund_full_hours window - the same threshold the
+      // renter already faces, so both sides are judged symmetrically.
+      const cancelPickupMs = getBookingPickupMs(bookingRecord);
+      const hoursBeforePickup =
+        cancelPickupMs === null
+          ? null
+          : (cancelPickupMs - Date.now()) / 3_600_000;
+      const cancelFullHours = Math.round(
+        clampNumber(
+          bookingRecord.refund_full_hours_snapshot,
+          0,
+          720,
+          DEFAULT_REFUND_FULL_HOURS,
+        ),
+      );
+      const cancelWasLate =
+        hoursBeforePickup !== null && hoursBeforePickup < cancelFullHours;
+
+      await supabase.from("booking_cancellations").upsert(
+        {
+          booking_id: bookingRecord.id,
+          cancelled_by_role: renter ? "renter" : "lister",
+          cancelled_by_id: user.id,
+          lister_id: bookingRecord.owner_id,
+          renter_id: bookingRecord.renter_id,
+          car_id: bookingRecord.car_id,
+          reason: actionNote,
+          hours_before_pickup:
+            hoursBeforePickup === null ? null : Math.round(hoursBeforePickup),
+          was_late: cancelWasLate,
+          had_captured_payment: hasCapturedBookingPayment,
+        },
+        { onConflict: "booking_id" },
+      );
+
+      // Lister strike + auto-pause: 3 late cancellations of a paid booking
+      // inside 60 days pulls every one of the lister's live listings offline
+      // pending a support review.
+      if (!renter && cancelWasLate && hasCapturedBookingPayment) {
+        const sixtyDaysAgo = new Date(
+          Date.now() - 60 * 24 * 3_600_000,
+        ).toISOString();
+        const { count: recentLateCancels } = await supabase
+          .from("booking_cancellations")
+          .select("booking_id", { count: "exact", head: true })
+          .eq("lister_id", bookingRecord.owner_id)
+          .eq("cancelled_by_role", "lister")
+          .eq("was_late", true)
+          .eq("had_captured_payment", true)
+          .gte("cancelled_at", sixtyDaysAgo);
+
+        if ((recentLateCancels ?? 0) >= 3) {
+          const { data: pausedCars } = await supabase
+            .from("cars")
+            .update({ status: "inactive" })
+            .eq("owner_id", bookingRecord.owner_id)
+            .in("status", ["approved", "active"])
+            .select("id");
+          const pausedCount = pausedCars?.length ?? 0;
+          if (pausedCount > 0) {
+            await supabase.from("notifications").insert({
+              user_id: bookingRecord.owner_id,
+              title: "Listings paused",
+              message: `Your ${pausedCount} active listing${
+                pausedCount === 1 ? " was" : "s were"
+              } paused after repeated last-minute cancellations. Contact SafeDrive support to reactivate.`,
+              type: "error",
+              link: "/lister-bookings",
+            });
+            await supabase.from("audit_log").insert({
+              user_id: bookingRecord.owner_id,
+              action: "lister_listings_auto_paused",
+              entity_type: "profile",
+              entity_id: bookingRecord.owner_id,
+              details: {
+                reason: "repeated_late_cancellations",
+                window_days: 60,
+                late_cancellations: recentLateCancels,
+                cars_paused: pausedCount,
+              },
+            });
+          }
+        }
+      }
+
       const counterpartyId = renter
         ? bookingRecord.owner_id
         : bookingRecord.renter_id;
@@ -891,10 +979,10 @@ export default async function handler(req: Request) {
               ? `The renter cancelled ${getVehicleLabel(bookingRecord)}. Refund processing has started if it was still inside the 24-hour grace period.`
               : `The renter cancelled ${getVehicleLabel(bookingRecord)} before payment capture.`
             : hasCapturedBookingPayment
-              ? `The lister cancelled ${getVehicleLabel(bookingRecord)} before the trip started. Renter refund processing has started.`
-              : `The lister cancelled ${getVehicleLabel(bookingRecord)} before the trip started.`,
-          type: hasCapturedBookingPayment ? "info" : "error",
-          link: renter ? "/lister-bookings" : "/my-bookings",
+              ? `The lister cancelled ${getVehicleLabel(bookingRecord)} before the trip started. Your full refund is being processed - browse other cars to rebook.`
+              : `The lister cancelled ${getVehicleLabel(bookingRecord)} before the trip started. Browse other cars to rebook.`,
+          type: renter ? (hasCapturedBookingPayment ? "info" : "error") : "error",
+          link: renter ? "/lister-bookings" : "/browse",
         },
       ]);
       await sendUserNotificationEmail(supabase, {
