@@ -318,6 +318,7 @@ export interface Database {
           plate_number: string;
           mileage: number | null;
           price_per_day: number;
+          min_early_return_notice_hours: number | null;
           location: string | null;
           fuel_category: string | null;
           fuel_subtype: string | null;
@@ -343,6 +344,7 @@ export interface Database {
           plate_number: string;
           mileage?: number | null;
           price_per_day: number;
+          min_early_return_notice_hours?: number | null;
           location?: string | null;
           fuel_category?: string | null;
           fuel_subtype?: string | null;
@@ -368,6 +370,7 @@ export interface Database {
           plate_number?: string;
           mileage?: number | null;
           price_per_day?: number;
+          min_early_return_notice_hours?: number | null;
           location?: string | null;
           fuel_category?: string | null;
           fuel_subtype?: string | null;
@@ -594,6 +597,7 @@ export interface Database {
           balance_amount: number;
           status: string;
           dispute_status: string;
+          dispute_reason: string | null;
           payment_deadline: string | null;
           owner_response_deadline: string | null;
           renter_completed: boolean;
@@ -638,6 +642,7 @@ export interface Database {
           balance_amount: number;
           status?: string;
           dispute_status?: string;
+          dispute_reason?: string | null;
           owner_response_deadline?: string | null;
           payment_deadline?: string | null;
           paymongo_checkout_id?: string | null;
@@ -682,6 +687,7 @@ export interface Database {
           balance_amount?: number;
           status?: string;
           dispute_status?: string;
+          dispute_reason?: string | null;
           owner_response_deadline?: string | null;
           payment_deadline?: string | null;
           paymongo_checkout_id?: string | null;

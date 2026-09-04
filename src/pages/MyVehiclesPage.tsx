@@ -55,6 +55,10 @@ import {
 } from "@/lib/vehicleValidation";
 
 const MAX_LISTING_PRICE = 100000;
+// Displayed to the renter as a hint before they send an early-return request
+// (CHAPTER 38) - not an enforced block; the lister can still accept or
+// decline any request regardless of notice given.
+const MAX_EARLY_RETURN_NOTICE_HOURS = 72;
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const ALLOWED_PDF_TYPES = ["application/pdf"];
@@ -96,6 +100,7 @@ interface VehicleRow {
   plate_number: string;
   mileage: number | null;
   price_per_day: number;
+  min_early_return_notice_hours: number | null;
   location: string | null;
   fuel_category: string | null;
   fuel_subtype: string | null;
@@ -287,6 +292,7 @@ export default function MyVehiclesPage() {
 
   const [editVehicle, setEditVehicle] = useState<VehicleRow | null>(null);
   const [editPrice, setEditPrice] = useState("");
+  const [editMinEarlyReturnNoticeHours, setEditMinEarlyReturnNoticeHours] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [editCity, setEditCity] = useState("");
   const [editSpecificLocation, setEditSpecificLocation] = useState("");
@@ -317,6 +323,7 @@ export default function MyVehiclesPage() {
     plate_number: "",
     mileage: "",
     price_per_day: "",
+    min_early_return_notice_hours: "",
     location: "",
     city: "",
     specific_location: "",
@@ -573,6 +580,18 @@ export default function MyVehiclesPage() {
     }
     const pricePerDay = Number(form.price_per_day);
 
+    let minEarlyReturnNoticeHours: number | null = null;
+    if (form.min_early_return_notice_hours.trim() !== "") {
+      const parsed = Number(form.min_early_return_notice_hours);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_EARLY_RETURN_NOTICE_HOURS) {
+        toast.error("Invalid early-return notice", {
+          description: `Enter a whole number of hours from 0 to ${MAX_EARLY_RETURN_NOTICE_HOURS}, or leave it blank.`,
+        });
+        return;
+      }
+      minEarlyReturnNoticeHours = parsed;
+    }
+
     if (carImages.length < 1 || carImages.length > 5) {
       toast.error("Please provide between 1 and 5 car images.");
       return;
@@ -618,6 +637,7 @@ export default function MyVehiclesPage() {
           plate_number: form.plate_number,
           mileage: form.mileage ? parseInt(form.mileage) : null,
           price_per_day: pricePerDay,
+          min_early_return_notice_hours: minEarlyReturnNoticeHours,
           location: form.location ? [
             form.location,
             form.city || null,
@@ -707,6 +727,7 @@ export default function MyVehiclesPage() {
         plate_number: "",
         mileage: "",
         price_per_day: "",
+        min_early_return_notice_hours: "",
         location: "",
         city: "",
         specific_location: "",
@@ -756,6 +777,18 @@ export default function MyVehiclesPage() {
       return;
     }
     const nextPrice = Number(editPrice);
+
+    let nextMinEarlyReturnNoticeHours: number | null = null;
+    if (editMinEarlyReturnNoticeHours.trim() !== "") {
+      const parsed = Number(editMinEarlyReturnNoticeHours);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_EARLY_RETURN_NOTICE_HOURS) {
+        toast.error("Invalid early-return notice", {
+          description: `Enter a whole number of hours from 0 to ${MAX_EARLY_RETURN_NOTICE_HOURS}, or leave it blank.`,
+        });
+        return;
+      }
+      nextMinEarlyReturnNoticeHours = parsed;
+    }
 
     if (!editRentalUseConfirmed) {
       toast.error("Rental-use confirmation is required", {
@@ -807,6 +840,7 @@ export default function MyVehiclesPage() {
         .from("cars")
         .update({
           price_per_day: nextPrice,
+          min_early_return_notice_hours: nextMinEarlyReturnNoticeHours,
           location:
             [editLocation, editCity, editSpecificLocation]
               .filter(Boolean)
@@ -1426,6 +1460,25 @@ export default function MyVehiclesPage() {
                     )}
                 </div>
                 <div className="space-y-2">
+                  <Label>Minimum early-return notice (hours)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max={MAX_EARLY_RETURN_NOTICE_HOURS}
+                    step="1"
+                    placeholder="Optional - shown to the renter"
+                    value={form.min_early_return_notice_hours}
+                    onChange={(e) =>
+                      setForm({ ...form, min_early_return_notice_hours: e.target.value })
+                    }
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Shown to the renter before they request an early return. You can still
+                    accept or decline any request regardless of the notice given.
+                  </p>
+                </div>
+                <div className="space-y-2">
                   <Label>Registration expiry *</Label>
                   <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.registration_expiry} onChange={(event) => setForm({ ...form, registration_expiry: event.target.value })} required />
                 </div>
@@ -1858,6 +1911,14 @@ export default function MyVehiclesPage() {
                           {v.gps_available ? "Available" : "Not included"}
                         </span>
                       </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Early-return notice:{" "}
+                        <span className="font-medium text-foreground">
+                          {v.min_early_return_notice_hours != null
+                            ? `${v.min_early_return_notice_hours}h`
+                            : "None set"}
+                        </span>
+                      </p>
                       <p
                         className={`mt-1 text-xs ${
                           v.transmission ? "text-muted-foreground" : "text-amber-600"
@@ -1952,6 +2013,11 @@ export default function MyVehiclesPage() {
                         const parsedLocation = parseStoredLocation(v.location);
                         setEditVehicle(v);
                         setEditPrice(v.price_per_day.toString());
+                        setEditMinEarlyReturnNoticeHours(
+                          v.min_early_return_notice_hours != null
+                            ? String(v.min_early_return_notice_hours)
+                            : "",
+                        );
                         setEditLocation(parsedLocation.region);
                         setEditCity(parsedLocation.city);
                         setEditSpecificLocation(parsedLocation.specificLocation);
@@ -2070,6 +2136,22 @@ export default function MyVehiclesPage() {
                         {validateListingPrice(editPrice)}
                       </p>
                     )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Minimum early-return notice (hours)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max={MAX_EARLY_RETURN_NOTICE_HOURS}
+                      step="1"
+                      placeholder="Optional - shown to the renter"
+                      value={editMinEarlyReturnNoticeHours}
+                      onChange={(e) => setEditMinEarlyReturnNoticeHours(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Shown to the renter before they request an early return. You can still
+                      accept or decline any request regardless of the notice given.
+                    </p>
                   </div>
                   <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
                     <p className="font-medium text-foreground">

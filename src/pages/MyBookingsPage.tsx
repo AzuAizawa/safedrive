@@ -83,6 +83,7 @@ interface BookingRow {
   cars: {
     plate_number: string;
     location: string | null;
+    min_early_return_notice_hours: number | null;
     car_models: {
       name: string;
       car_brands: { name: string };
@@ -309,7 +310,7 @@ export default function MyBookingsPage() {
           `
           *,
           cars (
-            plate_number, location,
+            plate_number, location, min_early_return_notice_hours,
             car_models (name, car_brands (name)),
             car_documents (document_type, storage_path)
           ),
@@ -2740,6 +2741,14 @@ export default function MyBookingsPage() {
                   automatic refund for the unused days — the lister may choose to
                   give a goodwill refund.
                 </p>
+                {earlyReturnModalBooking.cars.min_early_return_notice_hours != null && (
+                  <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                    This lister prefers at least{" "}
+                    {earlyReturnModalBooking.cars.min_early_return_notice_hours} hour
+                    {earlyReturnModalBooking.cars.min_early_return_notice_hours === 1 ? "" : "s"}{" "}
+                    of notice, though they may still accept a shorter one.
+                  </p>
+                )}
               </div>
               <div className="space-y-3 px-5 py-4">
                 <div className="space-y-1.5">

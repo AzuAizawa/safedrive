@@ -7901,4 +7901,44 @@ create index if not exists trip_condition_photos_provenance_status_idx
 create index if not exists trip_condition_photos_review_flag_idx
   on public.trip_condition_photos (review_flag);
 
+-- ============================================================================
+-- CHAPTER 37 - Structured reason on a non-return report
+-- ============================================================================
+-- api/booking-incident-action.ts's report_non_return action (a lister flagging
+-- an overdue, un-returned vehicle) previously took no reason at all - the
+-- incident ticket was opened with no category, so "the car was stolen" and
+-- "the renter is just late replying" looked identical in any future filtering
+-- or reporting. This adds a small, optional, checked reason column so the
+-- lister's chosen reason is on record structurally (not just folded into an
+-- unstructured support-ticket message), while remaining nullable so every
+-- other dispute_status transition (and any historical row) is unaffected.
+
+alter table public.bookings
+  add column if not exists dispute_reason text;
+
+alter table public.bookings
+  drop constraint if exists bookings_dispute_reason_check,
+  add constraint bookings_dispute_reason_check
+  check (
+    dispute_reason is null
+    or dispute_reason in ('renter_unreachable', 'stolen_or_missing', 'accident_or_breakdown', 'other')
+  );
+
+-- ============================================================================
+-- CHAPTER 38 - Early-return minimum-notice hint (per lister, informational)
+-- ============================================================================
+-- The lister can optionally state how much notice they'd like before an
+-- early-return request - shown to the renter before they send one. This is a
+-- displayed preference, not an enforced rule: the lister can still approve or
+-- decline any request regardless of the notice actually given, and
+-- api/booking-early-return-action.ts does not read or gate on this column.
+
+alter table public.cars
+  add column if not exists min_early_return_notice_hours integer;
+
+alter table public.cars
+  drop constraint if exists cars_min_early_return_notice_hours_check,
+  add constraint cars_min_early_return_notice_hours_check
+  check (min_early_return_notice_hours is null or min_early_return_notice_hours between 0 and 72);
+
 -- End of SafeDrive chaptered database master.

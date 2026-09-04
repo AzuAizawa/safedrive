@@ -8,10 +8,32 @@ export const config = {
 
 type IncidentAction = "renter_no_car" | "renter_no_show" | "report_non_return";
 
+// Structured reason for report_non_return (CHAPTER 37) - kept in sync with
+// NON_RETURN_REASON_OPTIONS in src/lib/incidents.ts and the check constraint
+// on bookings.dispute_reason. Not used by the other two incident actions.
+type NonReturnReason =
+  | "renter_unreachable"
+  | "stolen_or_missing"
+  | "accident_or_breakdown"
+  | "other";
+const NON_RETURN_REASONS: NonReturnReason[] = [
+  "renter_unreachable",
+  "stolen_or_missing",
+  "accident_or_breakdown",
+  "other",
+];
+const NON_RETURN_REASON_LABELS: Record<NonReturnReason, string> = {
+  renter_unreachable: "Renter is not responding / unreachable",
+  stolen_or_missing: "Vehicle reported stolen or missing",
+  accident_or_breakdown: "Accident or breakdown preventing return",
+  other: "Other",
+};
+
 type IncidentPayload = {
   bookingId?: string;
   action?: IncidentAction;
   note?: string | null;
+  reason?: string | null;
 };
 
 type PaymentRow = {
@@ -524,9 +546,15 @@ export default async function handler(req: Request) {
         );
       }
 
+      const nonReturnReason: NonReturnReason = NON_RETURN_REASONS.includes(
+        payload.reason as NonReturnReason,
+      )
+        ? (payload.reason as NonReturnReason)
+        : "other";
+
       const { error: flagError } = await supabase
         .from("bookings")
-        .update({ dispute_status: "open" })
+        .update({ dispute_status: "open", dispute_reason: nonReturnReason })
         .eq("id", b.id)
         .eq("status", "active");
       if (flagError) throw flagError;
@@ -540,7 +568,7 @@ export default async function handler(req: Request) {
         `Vehicle not returned: ${label(b)}`,
         `The lister reports that ${label(b)} was not returned by its scheduled return (${b.end_date}${
           b.dropoff_time ? ` ${b.dropoff_time}` : ""
-        }) and the ${GRACE_MINUTES}-minute grace window has passed. The booking is flagged (dispute_status=open) so the car can be taken offline; any refund stays on hold pending admin review. ${note ?? ""}`.trim(),
+        }) and the ${GRACE_MINUTES}-minute grace window has passed. The booking is flagged (dispute_status=open) so the car can be taken offline; any refund stays on hold pending admin review. Reported reason: ${NON_RETURN_REASON_LABELS[nonReturnReason]}. ${note ?? ""}`.trim(),
       );
 
       await supabase.from("notifications").insert({
@@ -564,7 +592,7 @@ export default async function handler(req: Request) {
         action: "lister_reported_non_return",
         entity_type: "booking",
         entity_id: b.id,
-        details: { end_date: b.end_date, note },
+        details: { end_date: b.end_date, reason: nonReturnReason, note },
       });
 
       return jsonResponse({ success: true, state: "flagged" });

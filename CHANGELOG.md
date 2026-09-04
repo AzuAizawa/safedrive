@@ -9,6 +9,45 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Process-planning Phase 1: liability notice, structured non-return reason, early-return notice hint (CHAPTER 37-38)
+
+Three smaller, independent items from the arrival/handover process planning
+session:
+
+- **Security-deposit liability disclaimer.** Now that the security-deposit
+  feature is gone (CHAPTER 34), added an explicit clause to the renter-facing
+  rental agreement summary (`CarDetailPage.tsx`, new item 5) and expanded
+  `PlatformAgreementPage.tsx`'s Limitation of Liability section (§8): SafeDrive
+  is not a party to vehicle condition/damage/theft/loss disputes between
+  Lister and Renter - those are governed by the vehicle-specific rental
+  agreement and the existing anti-carnapping policy (§6) - and keeps only a
+  neutral, timestamped record (pickup/return reports, arrival check-ins) to
+  support either side. No code/schema change.
+- **Structured reason on a non-return report (CHAPTER 37).** A lister
+  reporting an overdue, un-returned vehicle previously gave no reason at all -
+  "stolen" and "renter's just late replying" looked identical in the ticket.
+  Added a required reason dropdown (Renter unreachable / Vehicle stolen or
+  missing / Accident or breakdown / Other) to the report dialog in
+  `ListerBookingsPage.tsx`, a new checked `bookings.dispute_reason` column,
+  and the label now appears in the opened support-ticket message and the
+  audit log - a real, filterable field instead of unstructured free text.
+- **Early-return minimum-notice hint (CHAPTER 38).** A lister can optionally
+  set `cars.min_early_return_notice_hours` (0-72, in `MyVehiclesPage.tsx`'s
+  Add/Edit forms, also shown on the vehicle card) - surfaced to the renter in
+  `MyBookingsPage.tsx`'s early-return request modal as a hint before they
+  send one. Deliberately informational only, not an enforced block: the
+  lister can already approve or decline any request regardless of notice
+  given, so a hard rule would add schema/validation complexity for little
+  extra protection over what "the lister can just say no" already provides.
+- Verified clean: `tsc -b`, lint, `check:api`, `check:alignment`,
+  `check:booking-flow`, and a full production build all pass.
+- **Files:** `src/pages/CarDetailPage.tsx`, `src/pages/PlatformAgreementPage.tsx`,
+  `api/booking-incident-action.ts`, `src/lib/incidents.ts`,
+  `src/pages/ListerBookingsPage.tsx`, `src/pages/MyVehiclesPage.tsx`,
+  `src/pages/MyBookingsPage.tsx`, `src/types/database.ts`,
+  `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 37-38),
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
 ## 2026-09-05 — Free-form live-camera pickup photos for the lister (CHAPTER 36)
 
 From the arrival/handover process planning session: the lister's required

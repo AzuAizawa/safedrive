@@ -1403,6 +1403,17 @@ export default function CarDetailPage() {
                 period (the booked dates) transfer direct financial and legal
                 liability to the acting Renter.
               </p>
+              <p>
+                <strong>5. SafeDrive's Role:</strong> SafeDrive is not a party to
+                vehicle condition, damage, or loss disputes between the Lister
+                and Renter - these are governed by this agreement and the
+                Lister's own vehicle-specific rental document. SafeDrive keeps a
+                neutral, timestamped record (pickup/return reports, arrival
+                check-ins) to support either party in a dispute, but does not
+                hold a refundable security deposit and is not obligated to
+                compensate either party for a damaged, lost, or unreturned
+                vehicle.
+              </p>
             </div>
 
             {agreementUrl && (

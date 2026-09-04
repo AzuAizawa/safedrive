@@ -5,6 +5,22 @@ export type IncidentAction =
   | "renter_no_show"
   | "report_non_return";
 
+// Structured reason for report_non_return (CHAPTER 37), kept in sync with
+// NON_RETURN_REASONS in api/booking-incident-action.ts and the check
+// constraint on bookings.dispute_reason. Not used by the other two actions.
+export type NonReturnReason =
+  | "renter_unreachable"
+  | "stolen_or_missing"
+  | "accident_or_breakdown"
+  | "other";
+
+export const NON_RETURN_REASON_OPTIONS: Array<{ value: NonReturnReason; label: string }> = [
+  { value: "renter_unreachable", label: "Renter is not responding / unreachable" },
+  { value: "stolen_or_missing", label: "Vehicle reported stolen or missing" },
+  { value: "accident_or_breakdown", label: "Accident or breakdown preventing return" },
+  { value: "other", label: "Other" },
+];
+
 type NonReturnBooking = {
   status: string;
   end_date: string;
@@ -35,7 +51,12 @@ export const canReportNonReturn = (
 
 export const runIncidentAction = async (
   accessToken: string | undefined,
-  body: { bookingId: string; action: IncidentAction; note?: string | null },
+  body: {
+    bookingId: string;
+    action: IncidentAction;
+    note?: string | null;
+    reason?: NonReturnReason | null;
+  },
 ) => {
   const res = await fetch("/api/booking-incident-action", {
     method: "POST",

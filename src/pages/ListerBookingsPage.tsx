@@ -9,7 +9,12 @@ import {
   getNoShowWindowState,
   getReturnReminderState,
 } from "@/lib/bookingLifecycle";
-import { canReportNonReturn, runIncidentAction } from "@/lib/incidents";
+import {
+  canReportNonReturn,
+  runIncidentAction,
+  NON_RETURN_REASON_OPTIONS,
+  type NonReturnReason,
+} from "@/lib/incidents";
 import {
   getExtensionDisplayStatus,
   getExtensionStatusLabel,
@@ -249,6 +254,8 @@ export default function ListerBookingsPage() {
     booking: ListerBooking;
     kind: "renter_no_show" | "report_non_return";
   } | null>(null);
+  const [nonReturnReason, setNonReturnReason] =
+    useState<NonReturnReason>("renter_unreachable");
   const [incidentLoading, setIncidentLoading] = useState<string | null>(null);
   const [ratingValue, setRatingValue] = useState<number>(5);
   const [ratingFeedback, setRatingFeedback] = useState("");
@@ -921,6 +928,7 @@ export default function ListerBookingsPage() {
       await runIncidentAction(session?.access_token, {
         bookingId: booking.id,
         action: kind,
+        ...(kind === "report_non_return" ? { reason: nonReturnReason } : {}),
       });
       toast.success(
         kind === "renter_no_show"
@@ -3096,9 +3104,10 @@ export default function ListerBookingsPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() =>
-                                setIncidentTarget({ booking: b, kind: "report_non_return" })
-                              }
+                              onClick={() => {
+                                setNonReturnReason("renter_unreachable");
+                                setIncidentTarget({ booking: b, kind: "report_non_return" });
+                              }}
                               className="gap-1"
                             >
                               <CircleAlert className="w-3.5 h-3.5" />
@@ -3665,6 +3674,24 @@ export default function ListerBookingsPage() {
         onCancel={() => setIncidentTarget(null)}
         onConfirm={runIncident}
       >
+        {incidentTarget?.kind === "report_non_return" && (
+          <div className="mb-3 space-y-1.5 text-left">
+            <label className="text-xs font-medium text-foreground">
+              Reason for the support case
+            </label>
+            <select
+              value={nonReturnReason}
+              onChange={(e) => setNonReturnReason(e.target.value as NonReturnReason)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              {NON_RETURN_REASON_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
           {incidentTarget?.kind === "renter_no_show"
             ? `The renter keeps a ${noShowRefundPercent}% forfeit; SafeDrive support releases the rest after confirming the return method. Your completion rate is not affected.`

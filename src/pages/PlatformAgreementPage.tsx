@@ -222,6 +222,14 @@ export default function PlatformAgreementPage() {
               applies only to the extent allowed by Philippine law and cannot remove mandatory consumer or statutory
               rights. Obtain legal and insurance review before real-money public use.
             </p>
+            <p className="mt-3">
+              SafeDrive does not hold a refundable security deposit and is not a party to vehicle condition, damage,
+              theft, or loss disputes between a Lister and Renter - those are governed by the vehicle-specific rental
+              agreement described in Section 4 and the anti-carnapping policy in Section 6. SafeDrive's role is limited
+              to keeping a neutral, timestamped record (pickup/return condition reports, arrival check-ins) that either
+              party may use to support their case; it is not obligated to compensate either party for a damaged, lost,
+              or unreturned vehicle.
+            </p>
           </section>
         </div>
 
