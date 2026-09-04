@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { inspectContentProvenance } from "@/lib/contentProvenance";
+import { useVerificationEtaMessages } from "@/lib/platformSettings";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -391,6 +392,7 @@ const isValidDriverLicense = (value: string) => /^[A-Z]\d{2}-\d{2}-\d{6}$/.test(
 export default function VerificationPage() {
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
+  const { userMessage: verificationEtaMessage } = useVerificationEtaMessages();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDeactivateModal, setShowDeactivateModal] = useState(false);
   const [deactivateError, setDeactivateError] = useState("");
@@ -1604,9 +1606,8 @@ export default function VerificationPage() {
         </div>
         <h2 className="text-2xl font-bold mb-2">Verification Pending</h2>
         <p className="text-muted-foreground mb-6">
-          Your verification is being reviewed by our team. Most reviews finish
-          within 24 hours, while more complex checks may take 1 to 3 business
-          days. We&apos;ll notify you as soon as the decision is ready.
+          Your verification is being reviewed by our team. {verificationEtaMessage}{" "}
+          We&apos;ll notify you as soon as the decision is ready.
         </p>
         <Button variant="outline" onClick={() => navigate("/browse")}>
           Go to Browse
@@ -1844,7 +1845,7 @@ export default function VerificationPage() {
 
       await refreshProfile();
       toast.success("Verification submitted!", {
-        description: "Our team will review your submission.",
+        description: verificationEtaMessage,
       });
     } catch (err: unknown) {
       const error = err as Error;
@@ -1924,9 +1925,7 @@ export default function VerificationPage() {
       <div className="mb-6 p-4 rounded-lg bg-muted/40 border border-border/60">
         <p className="text-sm font-semibold">How lister access is unlocked</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Most verification reviews finish within 24 hours. Complex cases may
-          take 1 to 3 business days depending on document quality and manual
-          checking needs.
+          {verificationEtaMessage}
         </p>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-muted-foreground">
           <li>Submit the full identity verification form on this page.</li>

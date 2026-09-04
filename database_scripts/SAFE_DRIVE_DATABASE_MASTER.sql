@@ -7126,4 +7126,81 @@ as $$
 $$;
 grant execute on function public.get_public_car_reviews(uuid) to anon, authenticated;
 
+-- ============================================================================
+-- CHAPTER 28 - Editable verification ETA messages
+-- ============================================================================
+-- The "how long does verification take" wording was hard-coded ("24 hours /
+-- 1-3 business days"). During a peak season an admin needs to change that
+-- expectation without a redeploy so users do not complain that day 3 passed
+-- with no decision. This is display text, not a money or policy value, so a
+-- single super admin edits it directly - same model as the platform contact
+-- email, no proposal / vote.
+
+alter table public.platform_settings
+  add column if not exists user_verification_eta_message text not null
+    default 'Most identity reviews finish within 24 hours. Complex cases may take 1 to 3 business days.',
+  add column if not exists vehicle_verification_eta_message text not null
+    default 'Most vehicle reviews finish within 24 hours. Complex cases may take 1 to 3 business days.';
+
+create or replace function public.get_verification_eta_messages()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'user_message', coalesce(
+      nullif(trim(user_verification_eta_message), ''),
+      'Most identity reviews finish within 24 hours. Complex cases may take 1 to 3 business days.'
+    ),
+    'vehicle_message', coalesce(
+      nullif(trim(vehicle_verification_eta_message), ''),
+      'Most vehicle reviews finish within 24 hours. Complex cases may take 1 to 3 business days.'
+    )
+  )
+  from public.platform_settings
+  where id = 'default';
+$$;
+grant execute on function public.get_verification_eta_messages() to anon, authenticated;
+
+create or replace function public.set_verification_eta_messages(
+  p_user_message text,
+  p_vehicle_message text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user text := trim(coalesce(p_user_message, ''));
+  v_vehicle text := trim(coalesce(p_vehicle_message, ''));
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can change the verification ETA messages';
+  end if;
+  if char_length(v_user) not between 10 and 400
+     or char_length(v_vehicle) not between 10 and 400 then
+    raise exception 'Each message must be 10 to 400 characters';
+  end if;
+
+  update public.platform_settings
+  set user_verification_eta_message = v_user,
+      vehicle_verification_eta_message = v_vehicle,
+      updated_at = now()
+  where id = 'default';
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (
+    auth.uid(), 'verification_eta_messages_updated', 'platform_settings', 'default',
+    jsonb_build_object('user_message', v_user, 'vehicle_message', v_vehicle)
+  );
+
+  return jsonb_build_object('user_message', v_user, 'vehicle_message', v_vehicle);
+end;
+$$;
+revoke all on function public.set_verification_eta_messages(text, text) from public, anon;
+grant execute on function public.set_verification_eta_messages(text, text) to authenticated;
+
 -- End of SafeDrive chaptered database master.

@@ -1249,6 +1249,8 @@ export interface Database {
           deposit_claim_window_hours: number;
           lister_completion_timeout_hours: number;
           contact_email: string;
+          user_verification_eta_message: string;
+          vehicle_verification_eta_message: string;
           created_at: string;
           updated_at: string;
         };
@@ -1265,6 +1267,8 @@ export interface Database {
           deposit_claim_window_hours?: number;
           lister_completion_timeout_hours?: number;
           contact_email?: string;
+          user_verification_eta_message?: string;
+          vehicle_verification_eta_message?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -1281,6 +1285,8 @@ export interface Database {
           deposit_claim_window_hours?: number;
           lister_completion_timeout_hours?: number;
           contact_email?: string;
+          user_verification_eta_message?: string;
+          vehicle_verification_eta_message?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -1596,6 +1602,14 @@ export interface Database {
       };
       get_lister_reliability: {
         Args: { p_lister_id: string };
+        Returns: Json;
+      };
+      get_verification_eta_messages: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
+      set_verification_eta_messages: {
+        Args: { p_user_message: string; p_vehicle_message: string };
         Returns: Json;
       };
       get_renter_reliability: {

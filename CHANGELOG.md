@@ -9,6 +9,33 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — My Vehicles lifecycle hub + editable verification ETA
+
+My Vehicles was a flat list; a `renewal_required` car showed a misleading
+"Pending" badge (no key in `statusBadge`), the renewal flow lived only on a
+separate `/car-renewals` page, and the verification wait time was hard-coded.
+
+- **My Vehicles restructure:** In review / Listed / Inactive sub-tabs
+  (`AdminSectionTabs`), auto-landing on the tab that needs attention.
+- **`renewal_required` badge fix** + an in-card "Renew documents" CTA linking
+  to `/car-renewals`, so the renewal flow is reachable from the vehicle.
+- **Compliance reframe:** the "Insurance review: …" line becomes a "Documents"
+  row of Registration / CTPL / Comprehensive chips coloured by expiry
+  (valid / expiring ≤30d / expired-or-missing).
+- **Pending card:** explicit "In admin review · <ETA> · you'll be notified".
+  Rejected card shows the reason inline.
+- **Editable verification ETA (CHAPTER 28):** `platform_settings` gains
+  `user_verification_eta_message` / `vehicle_verification_eta_message`;
+  `get_verification_eta_messages()` (anon+auth) and
+  `set_verification_eta_messages()` (super-admin, direct edit, audit-logged,
+  10–400 chars). A super admin can raise the ETA during a peak season from
+  `/admin/platform-settings` with no redeploy. Consumed by VerificationPage
+  (pending screen, form intro, submit toast) and MyVehiclesPage (pending
+  card, add form, submit toast, "unlock Lister Mode" card).
+- **Files:** `src/pages/{MyVehiclesPage,VerificationPage}.tsx`,
+  `src/pages/admin/AdminPlatformSettingsPage.tsx`, `src/lib/platformSettings.ts`,
+  `src/types/database.ts`.
+
 ## 2026-09-04 — Lister cancellation accountability + two-sided reliability
 
 The API supported a lister cancelling a paid pre-trip booking (renter gets an

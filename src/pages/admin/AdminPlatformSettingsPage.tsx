@@ -18,7 +18,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
-import { DEFAULT_CONTACT_EMAIL } from "@/lib/platformSettings";
+import {
+  DEFAULT_CONTACT_EMAIL,
+  DEFAULT_USER_VERIFICATION_ETA,
+  DEFAULT_VEHICLE_VERIFICATION_ETA,
+} from "@/lib/platformSettings";
 
 const isEmailShaped = (value: string) =>
   /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
@@ -207,9 +211,17 @@ export default function AdminPlatformSettingsPage() {
   const [contactDraft, setContactDraft] = useState(DEFAULT_CONTACT_EMAIL);
   const [savingContact, setSavingContact] = useState(false);
 
+  const [etaUser, setEtaUser] = useState(DEFAULT_USER_VERIFICATION_ETA);
+  const [etaUserDraft, setEtaUserDraft] = useState(DEFAULT_USER_VERIFICATION_ETA);
+  const [etaVehicle, setEtaVehicle] = useState(DEFAULT_VEHICLE_VERIFICATION_ETA);
+  const [etaVehicleDraft, setEtaVehicleDraft] = useState(
+    DEFAULT_VEHICLE_VERIFICATION_ETA,
+  );
+  const [savingEta, setSavingEta] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [settingsRes, pendingRes, countRes, historyRes, contactRes] = await Promise.all([
+    const [settingsRes, pendingRes, countRes, historyRes, contactRes, etaRes] = await Promise.all([
       supabase
         .from("platform_settings")
         .select(
@@ -234,6 +246,7 @@ export default function AdminPlatformSettingsPage() {
         .order("resolved_at", { ascending: false })
         .limit(6),
       supabase.rpc("get_platform_contact_email"),
+      supabase.rpc("get_verification_eta_messages"),
     ]);
 
     const loadedContact =
@@ -242,6 +255,23 @@ export default function AdminPlatformSettingsPage() {
         : DEFAULT_CONTACT_EMAIL;
     setContactEmail(loadedContact);
     setContactDraft(loadedContact);
+
+    const etaData = (etaRes.data ?? {}) as {
+      user_message?: string;
+      vehicle_message?: string;
+    };
+    const loadedEtaUser =
+      typeof etaData.user_message === "string" && etaData.user_message.trim()
+        ? etaData.user_message.trim()
+        : DEFAULT_USER_VERIFICATION_ETA;
+    const loadedEtaVehicle =
+      typeof etaData.vehicle_message === "string" && etaData.vehicle_message.trim()
+        ? etaData.vehicle_message.trim()
+        : DEFAULT_VEHICLE_VERIFICATION_ETA;
+    setEtaUser(loadedEtaUser);
+    setEtaUserDraft(loadedEtaUser);
+    setEtaVehicle(loadedEtaVehicle);
+    setEtaVehicleDraft(loadedEtaVehicle);
 
     if (settingsRes.error || !settingsRes.data) {
       toast.error("Could not load platform settings.");
@@ -393,6 +423,43 @@ export default function AdminPlatformSettingsPage() {
       });
     } finally {
       setSavingContact(false);
+    }
+  };
+
+  const handleSaveEta = async () => {
+    const nextUser = etaUserDraft.trim();
+    const nextVehicle = etaVehicleDraft.trim();
+    if (
+      nextUser.length < 10 ||
+      nextUser.length > 400 ||
+      nextVehicle.length < 10 ||
+      nextVehicle.length > 400
+    ) {
+      toast.error("Each message must be 10 to 400 characters.");
+      return;
+    }
+    if (nextUser === etaUser && nextVehicle === etaVehicle) {
+      toast.info("Those are already the live messages.");
+      return;
+    }
+    setSavingEta(true);
+    try {
+      const { error } = await supabase.rpc("set_verification_eta_messages", {
+        p_user_message: nextUser,
+        p_vehicle_message: nextVehicle,
+      });
+      if (error) throw error;
+      setEtaUser(nextUser);
+      setEtaVehicle(nextVehicle);
+      toast.success(
+        "Verification ETA messages updated. They now show on the verification and My Vehicles pages.",
+      );
+    } catch (err) {
+      toast.error("Could not update the ETA messages", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setSavingEta(false);
     }
   };
 
@@ -633,6 +700,71 @@ export default function AdminPlatformSettingsPage() {
                   {!isSuperAdmin && " · only a super admin can change this."}
                 </p>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-primary" />
+                Verification ETA messages
+              </CardTitle>
+              <CardDescription>
+                The "how long does review take" wording shown to users after they
+                submit identity verification, and to listers after they submit a
+                vehicle. Display text, not a policy value, so a single super
+                admin edits it directly - raise it during a peak season so
+                nobody complains that day 3 passed with no decision.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-sm">User identity verification</Label>
+                <textarea
+                  value={etaUserDraft}
+                  onChange={(e) => setEtaUserDraft(e.target.value)}
+                  disabled={!isSuperAdmin || savingEta}
+                  maxLength={400}
+                  rows={2}
+                  className="min-h-16 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Live: {etaUser}
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm">Vehicle listing verification</Label>
+                <textarea
+                  value={etaVehicleDraft}
+                  onChange={(e) => setEtaVehicleDraft(e.target.value)}
+                  disabled={!isSuperAdmin || savingEta}
+                  maxLength={400}
+                  rows={2}
+                  className="min-h-16 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Live: {etaVehicle}
+                  {!isSuperAdmin && " · only a super admin can change these."}
+                </p>
+              </div>
+              {isSuperAdmin ? (
+                <Button
+                  onClick={handleSaveEta}
+                  disabled={
+                    savingEta ||
+                    (etaUserDraft.trim() === etaUser &&
+                      etaVehicleDraft.trim() === etaVehicle)
+                  }
+                  className="gap-2"
+                >
+                  {savingEta ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Clock className="h-4 w-4" />
+                  )}
+                  Save messages
+                </Button>
+              ) : null}
             </CardContent>
           </Card>
 

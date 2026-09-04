@@ -248,6 +248,12 @@ SafeDrive therefore warns that:
 
 When a lister changes critical vehicle, ownership, pricing, deposit, insurance, location, or agreement information, database triggers return the vehicle to `pending`. It becomes public again only after admin review, following the same principle used during initial registration.
 
+Insurance is **not a separate review**: the admin's single Approve on a vehicle fires the `enforce_vehicle_insurance_approval` trigger, which requires a current registration and CTPL plus the rental-use confirmation, then auto-stamps `insurance_verification_status` (`verified`, or `warning` when comprehensive cover is missing/expired). The lister sees this on `/my-vehicles` as a **Documents** row — Registration / CTPL / Comprehensive chips coloured by expiry — not a parallel task.
+
+`/my-vehicles` is organised into **In review** (`pending` + `renewal_required`), **Listed** (`approved`/`active`), and **Inactive** (`inactive`/`rejected`) tabs. A `renewal_required` vehicle carries an in-card "Renew documents" link to `/car-renewals`; a `pending` vehicle shows the configurable review ETA and "you'll be notified". Approval and renewal-approval both send an in-app notification and a Resend email.
+
+The "how long does review take" wording (identity and vehicle) is editable live in `/admin/platform-settings` (`user_verification_eta_message` / `vehicle_verification_eta_message` on `platform_settings`; `get_/set_verification_eta_messages`; super-admin direct edit, no vote) so a peak-season backlog can be communicated without a redeploy.
+
 Vehicle maintenance and blackout dates are stored separately from bookings. The lister manages them on a **month calendar** (`/vehicle-availability`): dates with a booking show red and are not selectable, already-blocked dates show amber, and the lister taps a free range to block it. No reason or category is collected - an unavailable date is simply unavailable. A blackout cannot conflict with an active booking. Booking creation checks both bookings and blackouts.
 
 ## 7. Vehicle-Specific Rental Agreement

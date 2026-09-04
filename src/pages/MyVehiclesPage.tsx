@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -32,6 +32,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Car,
   CheckCircle,
+  Clock,
+  FileWarning,
   ImageIcon,
   Loader2,
   Plus,
@@ -42,6 +44,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import AdminSectionTabs from "@/components/AdminSectionTabs";
+import { useVerificationEtaMessages } from "@/lib/platformSettings";
 import type { CarBrand, CarModel } from "@/types/database";
 import {
   PLATE_NUMBER_PATTERN,
@@ -106,6 +110,7 @@ interface VehicleRow {
   insurer_rental_use_confirmed: boolean;
   insurance_verification_status: string;
   status: string;
+  rejection_reason: string | null;
   created_at: string | null;
   car_models: { name: string; body_type: string; car_brands: { name: string } };
 }
@@ -128,6 +133,43 @@ const statusBadge: Record<string, { label: string; color: string }> = {
     color: "text-red-600 bg-red-50 dark:bg-red-950/30",
   },
   inactive: { label: "Inactive", color: "text-muted-foreground bg-muted" },
+  renewal_required: {
+    label: "Renewal needed",
+    color: "text-orange-600 bg-orange-50 dark:bg-orange-950/30",
+  },
+};
+
+type VehicleTab = "in_review" | "listed" | "inactive";
+
+const VEHICLE_TAB_STATUSES: Record<VehicleTab, string[]> = {
+  in_review: ["pending", "renewal_required"],
+  listed: ["approved", "active"],
+  inactive: ["inactive", "rejected"],
+};
+
+// Green if the document is valid with comfortable runway, amber if it expires
+// within 30 days, red if missing or already expired.
+const documentChipTone = (expiry: string | null) => {
+  if (!expiry) return "border-red-500/30 bg-red-500/5 text-red-600";
+  const days = Math.floor(
+    (new Date(`${expiry}T00:00:00`).getTime() - Date.now()) / 86_400_000,
+  );
+  if (Number.isNaN(days) || days < 0)
+    return "border-red-500/30 bg-red-500/5 text-red-600";
+  if (days <= 30)
+    return "border-amber-500/30 bg-amber-500/5 text-amber-600";
+  return "border-emerald-500/30 bg-emerald-500/5 text-emerald-600";
+};
+
+const documentChipLabel = (expiry: string | null) => {
+  if (!expiry) return "Missing";
+  const days = Math.floor(
+    (new Date(`${expiry}T00:00:00`).getTime() - Date.now()) / 86_400_000,
+  );
+  if (Number.isNaN(days)) return expiry;
+  if (days < 0) return `Expired ${expiry}`;
+  if (days <= 30) return `Expires ${expiry}`;
+  return `Valid to ${expiry}`;
 };
 
 const formatModelLabel = (model: CarModel) =>
@@ -228,7 +270,11 @@ const hashFileSha256 = async (file: File) => {
 
 export default function MyVehiclesPage() {
   const { user, profile } = useAuth();
+  const navigate = useNavigate();
+  const { userMessage: userVerificationEta, vehicleMessage: vehicleVerificationEta } =
+    useVerificationEtaMessages();
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
+  const [vehicleTab, setVehicleTab] = useState<VehicleTab>("in_review");
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [brands, setBrands] = useState<CarBrand[]>([]);
@@ -426,6 +472,41 @@ export default function MyVehiclesPage() {
   const isLiveVehicle = (status: string) =>
     status === "approved" || status === "active";
 
+  const vehicleTabCounts = useMemo(
+    () => ({
+      in_review: vehicles.filter((v) =>
+        VEHICLE_TAB_STATUSES.in_review.includes(v.status),
+      ).length,
+      listed: vehicles.filter((v) =>
+        VEHICLE_TAB_STATUSES.listed.includes(v.status),
+      ).length,
+      inactive: vehicles.filter((v) =>
+        VEHICLE_TAB_STATUSES.inactive.includes(v.status),
+      ).length,
+    }),
+    [vehicles],
+  );
+
+  // Land on the tab that needs attention: anything in review wins, otherwise
+  // show the live listings.
+  useEffect(() => {
+    if (vehicles.length === 0) return;
+    setVehicleTab((current) => {
+      if (vehicleTabCounts[current] > 0) return current;
+      if (vehicleTabCounts.in_review > 0) return "in_review";
+      if (vehicleTabCounts.listed > 0) return "listed";
+      return "inactive";
+    });
+  }, [vehicles.length, vehicleTabCounts]);
+
+  const visibleVehicles = useMemo(
+    () =>
+      sortedVehicles.filter((v) =>
+        VEHICLE_TAB_STATUSES[vehicleTab].includes(v.status),
+      ),
+    [sortedVehicles, vehicleTab],
+  );
+
   const normalizePlate = (value: string) => value.trim().toUpperCase();
 
   const checkPlateNumber = async (plateNumber: string) => {
@@ -621,7 +702,10 @@ export default function MyVehiclesPage() {
         );
       }
 
-      toast.success("Vehicle submitted for approval!", { id: toastId });
+      toast.success("Vehicle submitted for approval!", {
+        id: toastId,
+        description: vehicleVerificationEta,
+      });
       setShowForm(false);
       setForm({
         brand_id: null,
@@ -975,8 +1059,7 @@ export default function MyVehiclesPage() {
           <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3 text-sm">
             <p className="font-medium">How to unlock Lister Mode</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Most verification reviews finish within 24 hours. Complex cases
-              may take 1 to 3 business days before lister access is unlocked.
+              {userVerificationEta}
             </p>
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
               <li>Complete identity verification with your driver's license, backup ID, and selfies.</li>
@@ -1002,7 +1085,8 @@ export default function MyVehiclesPage() {
           <CardHeader>
             <CardTitle>List a New Vehicle</CardTitle>
             <CardDescription>
-              Your vehicle will be reviewed by our team before going live.
+              Your vehicle will be reviewed by our team before going live.{" "}
+              {vehicleVerificationEta}
             </CardDescription>
           </CardHeader>
           <form onSubmit={handleSubmit}>
@@ -1628,7 +1712,28 @@ export default function MyVehiclesPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {sortedVehicles.map((v) => {
+          <AdminSectionTabs<VehicleTab>
+            value={vehicleTab}
+            onChange={setVehicleTab}
+            ariaLabel="Filter your vehicles by stage"
+            tabs={[
+              { value: "in_review", label: "In review", count: vehicleTabCounts.in_review },
+              { value: "listed", label: "Listed", count: vehicleTabCounts.listed },
+              { value: "inactive", label: "Inactive", count: vehicleTabCounts.inactive },
+            ]}
+          />
+
+          {visibleVehicles.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">
+              {vehicleTab === "in_review"
+                ? "Nothing waiting for review."
+                : vehicleTab === "listed"
+                  ? "No live listings yet."
+                  : "No inactive or rejected vehicles."}
+            </p>
+          ) : null}
+
+          {visibleVehicles.map((v) => {
             const badge = statusBadge[v.status] || statusBadge.pending;
             return (
               <Card key={v.id} className="hover:shadow-md transition-shadow">
@@ -1663,15 +1768,71 @@ export default function MyVehiclesPage() {
                           {v.gps_available ? "Available" : "Not included"}
                         </span>
                       </p>
-                      <p className={`mt-1 text-xs ${v.insurance_verification_status === "verified" ? "text-green-600" : "text-amber-600"}`}>
-                        Insurance review: {v.insurance_verification_status.replace(/_/g, " ")}
-                        {v.registration_expiry ? ` · registration ${v.registration_expiry}` : " · registration missing"}
-                        {v.ctpl_expiry ? ` · CTPL ${v.ctpl_expiry}` : " · CTPL missing"}
-                      </p>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                      <div className="mt-2">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          Documents
+                        </p>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {[
+                            { label: "Registration", expiry: v.registration_expiry },
+                            { label: "CTPL", expiry: v.ctpl_expiry },
+                            {
+                              label: "Comprehensive",
+                              expiry: v.comprehensive_insurance_expiry,
+                            },
+                          ].map((doc) => (
+                            <span
+                              key={doc.label}
+                              className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${documentChipTone(
+                                doc.expiry,
+                              )}`}
+                            >
+                              {doc.label}: {documentChipLabel(doc.expiry)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1.5">
                         {v.location && <span className="flex items-center gap-1">📍 {v.location}</span>}
                         {v.contact_number && <span className="flex items-center gap-1">📞 {v.contact_number}</span>}
                       </div>
+
+                      {v.status === "pending" && (
+                        <p className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+                          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            In admin review. {vehicleVerificationEta} You&apos;ll
+                            get a notification once it&apos;s decided.
+                          </span>
+                        </p>
+                      )}
+
+                      {v.status === "renewal_required" && (
+                        <div className="mt-2 rounded-md border border-orange-500/25 bg-orange-500/5 px-2 py-2 text-xs">
+                          <p className="flex items-start gap-1.5 text-orange-700 dark:text-orange-300">
+                            <FileWarning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              This listing is offline until you upload renewed
+                              registration, CTPL, and insurance documents.
+                            </span>
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-2 h-8 gap-1.5 border-orange-500/40 text-orange-700 hover:bg-orange-500/10 dark:text-orange-300"
+                            onClick={() => navigate("/car-renewals")}
+                          >
+                            <FileWarning className="h-3.5 w-3.5" />
+                            Renew documents
+                          </Button>
+                        </div>
+                      )}
+
+                      {v.status === "rejected" && v.rejection_reason && (
+                        <p className="mt-2 rounded-md border border-red-500/20 bg-red-500/5 px-2 py-1.5 text-xs text-red-600">
+                          Rejected: {v.rejection_reason}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">

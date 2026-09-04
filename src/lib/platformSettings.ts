@@ -218,6 +218,69 @@ export const usePlatformContactEmail = (): string => {
   return email;
 };
 
+// "How long does verification take" wording. Super-admin editable (direct edit,
+// no consensus vote - display text, not a policy number) so it can be bumped
+// during a peak season without a redeploy. Read live.
+export const DEFAULT_USER_VERIFICATION_ETA =
+  "Most identity reviews finish within 24 hours. Complex cases may take 1 to 3 business days.";
+export const DEFAULT_VEHICLE_VERIFICATION_ETA =
+  "Most vehicle reviews finish within 24 hours. Complex cases may take 1 to 3 business days.";
+
+export type VerificationEtaMessages = {
+  userMessage: string;
+  vehicleMessage: string;
+};
+
+export const fetchVerificationEtaMessages =
+  async (): Promise<VerificationEtaMessages> => {
+    const fallback: VerificationEtaMessages = {
+      userMessage: DEFAULT_USER_VERIFICATION_ETA,
+      vehicleMessage: DEFAULT_VEHICLE_VERIFICATION_ETA,
+    };
+    try {
+      const { data, error } = await supabase.rpc("get_verification_eta_messages");
+      if (error) throw error;
+      const row = (data ?? {}) as {
+        user_message?: string;
+        vehicle_message?: string;
+      };
+      return {
+        userMessage:
+          typeof row.user_message === "string" && row.user_message.trim()
+            ? row.user_message.trim()
+            : fallback.userMessage,
+        vehicleMessage:
+          typeof row.vehicle_message === "string" && row.vehicle_message.trim()
+            ? row.vehicle_message.trim()
+            : fallback.vehicleMessage,
+      };
+    } catch (error) {
+      console.error("Failed to load verification ETA messages:", error);
+      return fallback;
+    }
+  };
+
+/**
+ * Live verification ETA messages, with the hard-coded defaults until the value
+ * loads or if the lookup fails - the UI never shows a blank ETA.
+ */
+export const useVerificationEtaMessages = (): VerificationEtaMessages => {
+  const [messages, setMessages] = useState<VerificationEtaMessages>({
+    userMessage: DEFAULT_USER_VERIFICATION_ETA,
+    vehicleMessage: DEFAULT_VEHICLE_VERIFICATION_ETA,
+  });
+  useEffect(() => {
+    let active = true;
+    void fetchVerificationEtaMessages().then((value) => {
+      if (active) setMessages(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return messages;
+};
+
 export const fetchPlatformCommissionRate = async () => {
   const settings = await fetchPlatformPricingSettings();
   return settings.commissionRate;
