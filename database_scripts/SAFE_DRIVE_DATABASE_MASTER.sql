@@ -7203,4 +7203,264 @@ $$;
 revoke all on function public.set_verification_eta_messages(text, text) from public, anon;
 grant execute on function public.set_verification_eta_messages(text, text) to authenticated;
 
+-- ============================================================================
+-- CHAPTER 29 - Driver's licence validity + transmission (AT / AT-MT) gating
+-- ============================================================================
+-- The KYC review captured licence photos but no structured expiry or the
+-- Philippine licence's transmission restriction (the back of the current LTO
+-- card states AT or AT/MT). This chapter adds:
+--   * profiles.license_expiry / license_transmission - admin-set during review
+--   * profiles.license_update_pending - the renter flags a re-submission
+--   * cars.transmission - lister-set, 'automatic' | 'manual'
+-- Enforcement (api/create-booking.ts) is deliberately CONSERVATIVE: the gate
+-- only bites on EXPLICIT values - an unset renter or car is nudged in the UI,
+-- never hard-blocked - so the platform is not frozen the moment this ships.
+
+alter table public.profiles
+  add column if not exists license_expiry date,
+  add column if not exists license_transmission text,
+  add column if not exists license_update_pending boolean not null default false,
+  add column if not exists license_expiry_notified_at timestamptz;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'profiles_license_transmission_check'
+  ) then
+    alter table public.profiles add constraint profiles_license_transmission_check
+      check (license_transmission is null
+             or license_transmission in ('automatic_only', 'manual_and_automatic'));
+  end if;
+end $$;
+
+alter table public.cars
+  add column if not exists transmission text;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'cars_transmission_check'
+  ) then
+    alter table public.cars add constraint cars_transmission_check
+      check (transmission is null or transmission in ('automatic', 'manual'));
+  end if;
+end $$;
+
+-- ----------------------------------------------------------------------------
+-- 29.1  User-facing guard: a verified user still cannot self-edit licence
+--       validity/restriction; they may only RAISE license_update_pending.
+-- ----------------------------------------------------------------------------
+create or replace function public.protect_profile_sensitive_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  privileged boolean;
+begin
+  privileged := public.is_admin()
+    or current_user in ('postgres', 'service_role', 'supabase_admin');
+
+  if privileged then
+    return new;
+  end if;
+
+  if auth.uid() is null or auth.uid() <> old.id then
+    raise exception 'Only the owning user or an admin can update this profile';
+  end if;
+
+  if new.role is distinct from old.role then
+    raise exception 'Users cannot change their own role';
+  end if;
+
+  if new.rejection_reason is distinct from old.rejection_reason then
+    raise exception 'Users cannot change verification rejection reasons';
+  end if;
+
+  if new.login_blocked_until is distinct from old.login_blocked_until
+     or new.login_block_reason is distinct from old.login_block_reason then
+    raise exception 'Users cannot change login block settings';
+  end if;
+
+  if new.verified_status is distinct from old.verified_status then
+    if not (
+      old.verified_status in ('unverified', 'rejected')
+      and new.verified_status = 'pending'
+    ) then
+      raise exception 'Users cannot self-approve or directly change verification status';
+    end if;
+  end if;
+
+  if old.verified_status = 'verified' and (
+    new.first_name is distinct from old.first_name
+    or new.middle_name is distinct from old.middle_name
+    or new.last_name is distinct from old.last_name
+    or new.full_name is distinct from old.full_name
+    or new.birthday is distinct from old.birthday
+    or new.driver_license is distinct from old.driver_license
+    or new.national_id is distinct from old.national_id
+    or new.secondary_id_type is distinct from old.secondary_id_type
+  ) then
+    raise exception 'Verified identity fields require admin review to change';
+  end if;
+
+  if new.license_expiry is distinct from old.license_expiry
+     or new.license_transmission is distinct from old.license_transmission
+     or new.license_expiry_notified_at is distinct from old.license_expiry_notified_at then
+    raise exception 'Driver''s licence validity is set by an admin during review';
+  end if;
+
+  if new.license_update_pending is distinct from old.license_update_pending
+     and not (old.license_update_pending = false and new.license_update_pending = true) then
+    raise exception 'Only an admin can clear a pending licence update';
+  end if;
+
+  if new.is_lister is distinct from old.is_lister
+     and old.verified_status <> 'verified' then
+    raise exception 'Only verified users can change lister mode';
+  end if;
+
+  if old.deleted_at is not null
+     and new.deleted_at is distinct from old.deleted_at then
+    raise exception 'Deleted profiles cannot be reactivated by the user';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_profile_sensitive_fields on public.profiles;
+create trigger protect_profile_sensitive_fields
+  before update on public.profiles
+  for each row execute function public.protect_profile_sensitive_fields();
+
+-- ----------------------------------------------------------------------------
+-- 29.2  Admin-facing guard: editing licence validity needs users.verify.
+-- ----------------------------------------------------------------------------
+create or replace function public.enforce_admin_profile_permission()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if current_user in ('postgres', 'service_role', 'supabase_admin') then
+    return new;
+  end if;
+  if not public.is_admin() or public.is_super_admin() then
+    return new;
+  end if;
+
+  if (new.verified_status  is distinct from old.verified_status
+      or new.rejection_reason is distinct from old.rejection_reason)
+     and not public.admin_can('users.verify') then
+    raise exception 'Changing verification status requires the users.verify permission';
+  end if;
+
+  if (new.license_expiry is distinct from old.license_expiry
+      or new.license_transmission is distinct from old.license_transmission
+      or new.license_update_pending is distinct from old.license_update_pending)
+     and not public.admin_can('users.verify') then
+    raise exception 'Changing driver''s licence details requires the users.verify permission';
+  end if;
+
+  if (new.login_blocked_until is distinct from old.login_blocked_until
+      or new.login_block_reason is distinct from old.login_block_reason)
+     and not public.admin_can('users.moderate') then
+    raise exception 'Changing a login block requires the users.moderate permission';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_admin_profile_permission on public.profiles;
+create trigger enforce_admin_profile_permission
+  before update on public.profiles
+  for each row execute function public.enforce_admin_profile_permission();
+
+-- ----------------------------------------------------------------------------
+-- 29.3  A transmission change is a material listing change -> back to review.
+-- ----------------------------------------------------------------------------
+create or replace function public.return_materially_changed_car_to_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.status in ('approved', 'active', 'inactive') and (
+    old.model_id is distinct from new.model_id or old.plate_number is distinct from new.plate_number or
+    old.mileage is distinct from new.mileage or old.price_per_day is distinct from new.price_per_day or
+    old.security_deposit_amount is distinct from new.security_deposit_amount or old.location is distinct from new.location or
+    old.fuel_category is distinct from new.fuel_category or old.fuel_subtype is distinct from new.fuel_subtype or
+    old.gps_available is distinct from new.gps_available or old.contact_number is distinct from new.contact_number or
+    old.additional_info is distinct from new.additional_info or
+    old.transmission is distinct from new.transmission or
+    old.registration_expiry is distinct from new.registration_expiry or old.ctpl_expiry is distinct from new.ctpl_expiry or
+    old.comprehensive_insurance_expiry is distinct from new.comprehensive_insurance_expiry or
+    old.insurer_rental_use_confirmed is distinct from new.insurer_rental_use_confirmed
+  ) then
+    new.status := 'pending';
+    new.last_verified_at := null;
+    new.rejection_reason := null;
+    new.insurance_verification_status := 'pending';
+  end if;
+  return new;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 29.4  Cron helper: notify a renter whose licence is expiring / expired.
+--       Called by api/flag-expiring-licenses.ts (CRON_SECRET). Deduped by
+--       license_expiry_notified_at so a user is nudged at most weekly.
+-- ----------------------------------------------------------------------------
+create or replace function public.notify_expiring_licenses()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count integer := 0;
+  r record;
+begin
+  for r in
+    select id, license_expiry
+    from public.profiles
+    where deleted_at is null
+      and verified_status = 'verified'
+      and license_expiry is not null
+      and license_expiry <= (current_date + 30)
+      and (license_expiry_notified_at is null
+           or license_expiry_notified_at < now() - interval '7 days')
+  loop
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      r.id,
+      case when r.license_expiry < current_date
+           then 'Driver''s licence expired'
+           else 'Driver''s licence expiring soon' end,
+      case when r.license_expiry < current_date
+           then 'Your driver''s licence expired on ' || to_char(r.license_expiry, 'Mon DD, YYYY')
+                || '. Submit an updated licence from Account & Identity so an admin can renew your access.'
+           else 'Your driver''s licence expires on ' || to_char(r.license_expiry, 'Mon DD, YYYY')
+                || '. Submit an updated licence from Account & Identity to avoid a booking hold.' end,
+      case when r.license_expiry < current_date then 'error' else 'warning' end,
+      '/verify'
+    );
+
+    update public.profiles
+    set license_expiry_notified_at = now()
+    where id = r.id;
+
+    v_count := v_count + 1;
+  end loop;
+
+  return v_count;
+end;
+$$;
+revoke all on function public.notify_expiring_licenses() from public, anon, authenticated;
+
 -- End of SafeDrive chaptered database master.

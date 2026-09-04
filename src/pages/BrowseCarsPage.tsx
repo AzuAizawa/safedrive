@@ -20,6 +20,7 @@ import {
   Calendar,
   CarFront,
   Filter,
+  Settings,
   Star,
   X,
 } from "lucide-react";
@@ -602,6 +603,13 @@ export default function BrowseCarsPage() {
                       {car.car_models.fuel_type.charAt(0).toUpperCase() +
                         car.car_models.fuel_type.slice(1)}
                     </span>
+                    {(car.transmission === "automatic" ||
+                      car.transmission === "manual") && (
+                      <span className="flex items-center gap-1">
+                        <Settings className="w-3.5 h-3.5" />
+                        {car.transmission === "automatic" ? "Automatic" : "Manual"}
+                      </span>
+                    )}
                     {car.location && (
                       <span className="flex items-center gap-1">
                         <MapPin className="w-3.5 h-3.5" />

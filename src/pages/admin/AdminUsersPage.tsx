@@ -121,10 +121,18 @@ export default function AdminUsersPage() {
   const [kycOcrProgress, setKycOcrProgress] = useState<KycOcrProgress | null>(null);
   const [kycOcrError, setKycOcrError] = useState("");
   const [kycOcrRunning, setKycOcrRunning] = useState(false);
+  const [licenseExpiryDraft, setLicenseExpiryDraft] = useState("");
+  const [licenseTransmissionDraft, setLicenseTransmissionDraft] = useState("");
+  const [savingLicense, setSavingLicense] = useState(false);
 
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  useEffect(() => {
+    setLicenseExpiryDraft(selectedUser?.license_expiry ?? "");
+    setLicenseTransmissionDraft(selectedUser?.license_transmission ?? "");
+  }, [selectedUser]);
 
   useEffect(() => {
     if (!selectedUser) {
@@ -444,8 +452,83 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleSaveLicense = async () => {
+    if (!selectedUser || !adminUser || savingLicense) return;
+    if (
+      licenseTransmissionDraft &&
+      !["automatic_only", "manual_and_automatic"].includes(licenseTransmissionDraft)
+    ) {
+      toast.error("Pick a transmission restriction.");
+      return;
+    }
+    if (licenseExpiryDraft && Number.isNaN(new Date(licenseExpiryDraft).getTime())) {
+      toast.error("Enter a valid expiry date.");
+      return;
+    }
+    setSavingLicense(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          license_expiry: licenseExpiryDraft || null,
+          license_transmission: licenseTransmissionDraft || null,
+          license_update_pending: false,
+        })
+        .eq("id", selectedUser.id);
+      if (error) throw error;
+      await supabase.from("audit_log").insert({
+        user_id: adminUser.id,
+        action: "admin_set_driver_license",
+        entity_type: "profile",
+        entity_id: selectedUser.id,
+        details: {
+          admin_email: adminUser.email,
+          license_expiry: licenseExpiryDraft || null,
+          license_transmission: licenseTransmissionDraft || null,
+        },
+      });
+      if (selectedUser.license_update_pending) {
+        await supabase.from("notifications").insert({
+          user_id: selectedUser.id,
+          title: "Driver's licence reviewed",
+          message:
+            "An admin has reviewed your updated driver's licence. Your booking access reflects the new details.",
+          type: "success",
+          link: "/verify",
+        });
+      }
+      toast.success("Driver's licence details saved.");
+      setSelectedUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              license_expiry: licenseExpiryDraft || null,
+              license_transmission: licenseTransmissionDraft || null,
+              license_update_pending: false,
+            }
+          : prev,
+      );
+      fetchUsers();
+    } catch (err) {
+      toast.error("Could not save licence details", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setSavingLicense(false);
+    }
+  };
+
   const handleApprove = async () => {
     if (!selectedUser || !adminUser) return;
+    if (
+      !selectedUser.license_expiry &&
+      !licenseExpiryDraft &&
+      !window.confirm(
+        "No driver's licence expiry / transmission is set for this account. Approve anyway? The renter is grandfathered on expiry and treated as automatic-only until you set the details.",
+      )
+    ) {
+      return;
+    }
     setActionLoading(true);
 
     const { error } = await supabase
@@ -1228,6 +1311,61 @@ export default function AdminUsersPage() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Driver's licence review */}
+                <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">
+                      Driver&apos;s licence
+                    </p>
+                    {selectedUser.license_update_pending ? (
+                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-600">
+                        Renter submitted an update
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Read the expiry and the AT / AT-MT restriction from the back
+                    of the licence, then save. A past expiry blocks new bookings;
+                    an &quot;automatic only&quot; renter can book automatic cars only.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Licence expiry</Label>
+                      <Input
+                        type="date"
+                        value={licenseExpiryDraft}
+                        onChange={(e) => setLicenseExpiryDraft(e.target.value)}
+                        disabled={savingLicense}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Transmission restriction</Label>
+                      <select
+                        value={licenseTransmissionDraft}
+                        onChange={(e) =>
+                          setLicenseTransmissionDraft(e.target.value)
+                        }
+                        disabled={savingLicense}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value="">Not set</option>
+                        <option value="automatic_only">Automatic only</option>
+                        <option value="manual_and_automatic">
+                          Manual &amp; Automatic
+                        </option>
+                      </select>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void handleSaveLicense()}
+                    disabled={savingLicense}
+                  >
+                    {savingLicense ? "Saving…" : "Save licence details"}
+                  </Button>
                 </div>
 
                 {/* Rejection reason input */}

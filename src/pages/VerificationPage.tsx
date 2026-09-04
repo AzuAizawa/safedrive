@@ -3,6 +3,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { inspectContentProvenance } from "@/lib/contentProvenance";
+import {
+  LICENSE_TRANSMISSION_LABEL,
+  licenseExpiryLabel,
+  licenseExpiryState,
+  type LicenseTransmission,
+} from "@/lib/driversLicense";
 import { useVerificationEtaMessages } from "@/lib/platformSettings";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -483,6 +489,11 @@ export default function VerificationPage() {
   });
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [addressTouched, setAddressTouched] = useState(false);
+  const [licenseUpdateOpen, setLicenseUpdateOpen] = useState(false);
+  const [licenseUpdateFiles, setLicenseUpdateFiles] = useState<
+    Record<"license_qr" | "license_front" | "license_back", File | null>
+  >({ license_qr: null, license_front: null, license_back: null });
+  const [licenseUpdateSubmitting, setLicenseUpdateSubmitting] = useState(false);
   const regionOptions = useMemo(
     () => (Array.isArray(regions) ? regions : []),
     [regions],
@@ -969,6 +980,99 @@ export default function VerificationPage() {
     }
   };
 
+  const handleLicenseUpdate = async () => {
+    if (!user || licenseUpdateSubmitting) return;
+    const entries = Object.entries(licenseUpdateFiles) as [
+      "license_qr" | "license_front" | "license_back",
+      File | null,
+    ][];
+    if (entries.some(([, file]) => !file)) {
+      toast.error("Upload all three photos", {
+        description: "LTO digital-licence QR, licence front, and licence back.",
+      });
+      return;
+    }
+    setLicenseUpdateSubmitting(true);
+    const toastId = toast.loading("Uploading updated licence...");
+    try {
+      for (const [key, file] of entries) {
+        if (!file) continue;
+        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+          throw new Error("Only JPG, PNG, or WEBP images are allowed.");
+        }
+        const ext = file.name.split(".").pop() || "jpg";
+        const path = `${user.id}/${key}.${ext}`;
+        const provenance = await inspectContentProvenance(file);
+        const { error: uploadError } = await supabase.storage
+          .from("user-verification")
+          .upload(path, file, { upsert: true });
+        if (uploadError) throw new Error(uploadError.message);
+        await supabase
+          .from("verification_images")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("image_type", key);
+        const { error: insertError } = await supabase
+          .from("verification_images")
+          .insert({
+            user_id: user.id,
+            image_type: key,
+            storage_path: path,
+            ...provenance,
+            review_flag: "needs_admin_review",
+            review_reason: "Renter submitted an updated driver's licence.",
+          });
+        if (insertError) {
+          const { error: fallbackError } = await supabase
+            .from("verification_images")
+            .insert({ user_id: user.id, image_type: key, storage_path: path });
+          if (fallbackError) throw new Error(fallbackError.message);
+        }
+      }
+
+      await supabase
+        .from("profiles")
+        .update({ license_update_pending: true })
+        .eq("id", user.id);
+
+      const { data: admins } = await supabase
+        .from("profiles")
+        .select("id")
+        .in("role", ["admin", "super_admin"])
+        .is("deleted_at", null);
+      if (admins?.length) {
+        await supabase.from("notifications").insert(
+          admins.map((admin) => ({
+            user_id: admin.id,
+            title: "Driver's licence update submitted",
+            message: `${profile?.full_name || profile?.email || "A renter"} submitted an updated driver's licence for review.`,
+            type: "warning",
+            link: "/admin/users",
+          })),
+        );
+      }
+
+      await refreshProfile();
+      toast.success("Updated licence submitted", {
+        id: toastId,
+        description: "An admin will review it and refresh your expiry / transmission.",
+      });
+      setLicenseUpdateOpen(false);
+      setLicenseUpdateFiles({
+        license_qr: null,
+        license_front: null,
+        license_back: null,
+      });
+    } catch (err) {
+      toast.error("Could not submit the updated licence", {
+        id: toastId,
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setLicenseUpdateSubmitting(false);
+    }
+  };
+
   const handleUpdateProfileDetails = async () => {
     if (!user) return;
     setIsSavingProfile(true);
@@ -1433,6 +1537,141 @@ export default function VerificationPage() {
                 </p>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between gap-3">
+            <div>
+              <CardTitle>Driver&apos;s Licence</CardTitle>
+              <CardDescription>
+                Validity and transmission are set by an admin from your uploaded
+                licence. Submit an updated licence when yours is renewed.
+              </CardDescription>
+            </div>
+            {profile.license_update_pending ? (
+              <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-600">
+                Update under review
+              </span>
+            ) : null}
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Expiry
+                </p>
+                <p
+                  className={`text-sm font-semibold ${
+                    licenseExpiryState(profile.license_expiry) === "expired"
+                      ? "text-red-500"
+                      : licenseExpiryState(profile.license_expiry) === "expiring"
+                        ? "text-amber-500"
+                        : "text-foreground"
+                  }`}
+                >
+                  {licenseExpiryLabel(profile.license_expiry)}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Transmission
+                </p>
+                <p className="text-sm font-semibold">
+                  {profile.license_transmission
+                    ? LICENSE_TRANSMISSION_LABEL[
+                        profile.license_transmission as LicenseTransmission
+                      ]
+                    : "Not reviewed yet"}
+                </p>
+              </div>
+            </div>
+
+            {licenseExpiryState(profile.license_expiry) === "expired" && (
+              <p className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-600">
+                Your licence has expired. New bookings are on hold until an admin
+                reviews an updated licence.
+              </p>
+            )}
+            {profile.license_transmission === "automatic_only" && (
+              <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-600">
+                Your licence is automatic-only, so you can book automatic
+                vehicles only. Submit an updated licence if this has changed.
+              </p>
+            )}
+
+            {!licenseUpdateOpen ? (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setLicenseUpdateOpen(true)}
+                >
+                  Update licence
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    navigate(
+                      "/support?tag=license_dispute&subject=Driver's licence details",
+                    )
+                  }
+                >
+                  Report a mistake in my licence details
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Upload clear photos of your current licence. If a photo is too
+                  blurry an admin can reject it with a reason.
+                </p>
+                {(
+                  [
+                    { key: "license_qr", label: "LTO digital-licence QR code" },
+                    { key: "license_front", label: "Licence front" },
+                    { key: "license_back", label: "Licence back (shows AT / AT-MT)" },
+                  ] as const
+                ).map((f) => (
+                  <div key={f.key} className="space-y-1">
+                    <Label className="text-xs">{f.label}</Label>
+                    <Input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={licenseUpdateSubmitting}
+                      onChange={(e) =>
+                        setLicenseUpdateFiles((prev) => ({
+                          ...prev,
+                          [f.key]: e.target.files?.[0] ?? null,
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    disabled={licenseUpdateSubmitting}
+                    onClick={() => void handleLicenseUpdate()}
+                  >
+                    {licenseUpdateSubmitting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Submit updated licence"
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={licenseUpdateSubmitting}
+                    onClick={() => setLicenseUpdateOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 

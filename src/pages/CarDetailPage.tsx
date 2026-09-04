@@ -31,6 +31,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  Settings,
   ShieldCheck,
   Loader2,
   Eye,
@@ -54,6 +55,7 @@ import {
   type RatingSummary,
   type Reliability,
 } from "@/lib/ratings";
+import { carTransmissionLabel, isLicenseExpired } from "@/lib/driversLicense";
 
 const MAX_BOOKING_TOTAL = 100000;
 
@@ -277,6 +279,18 @@ export default function CarDetailPage() {
   const images = car?.car_images || [];
   const currentImage = images[currentImageIndex];
 
+  // Driver's-licence gate (mirrors api/create-booking.ts): only explicit values
+  // block. Shown as a booking-disabled reason with a link to the update flow.
+  const licenceExpired = isLicenseExpired(profile?.license_expiry);
+  const transmissionBlocked =
+    profile?.license_transmission === "automatic_only" &&
+    car?.transmission === "manual";
+  const licenceGateReason = licenceExpired
+    ? "Your driver's licence has expired. Submit an updated licence from Account & Identity."
+    : transmissionBlocked
+      ? "This vehicle is manual and your driver's licence is automatic-only. Submit an updated licence if this changed."
+      : null;
+
   const handleBooking = async (agreementOverride = false) => {
     if (!user || !car || !profile) return;
 
@@ -290,6 +304,12 @@ export default function CarDetailPage() {
 
     if (car.owner_id === user.id) {
       toast.error("You can't book your own car");
+      return;
+    }
+
+    if (licenceGateReason) {
+      toast.error("Driver's licence check", { description: licenceGateReason });
+      navigate("/verify");
       return;
     }
 
@@ -532,7 +552,9 @@ export default function CarDetailPage() {
     dateRange?.from && dateRange?.to
       ? isDateOverlapping(dateRange.from, dateRange.to)
       : false;
-  const bookingDisabledReason = !dateRange?.from || !dateRange?.to
+  const bookingDisabledReason = licenceGateReason
+    ? licenceGateReason
+    : !dateRange?.from || !dateRange?.to
     ? "Select both pickup and return dates first."
     : totalDays <= 0
       ? "Choose a valid rental duration."
@@ -776,6 +798,11 @@ export default function CarDetailPage() {
                 value: `${car.car_models.seats} seats`,
               },
               { icon: Fuel, label: "Fuel", value: car.car_models.fuel_type },
+              {
+                icon: Settings,
+                label: "Transmission",
+                value: carTransmissionLabel(car.transmission),
+              },
               {
                 icon: Gauge,
                 label: "Mileage",
@@ -1275,6 +1302,7 @@ export default function CarDetailPage() {
                     submitting ||
                     agreementLoading ||
                     !agreementAccess ||
+                    Boolean(licenceGateReason) ||
                     !dateRange?.from ||
                     !dateRange?.to ||
                     totalDays <= 0 ||

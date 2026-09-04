@@ -41,6 +41,10 @@ export interface Database {
           login_block_reason: string | null;
           admin_disabled_at: string | null;
           admin_created_by: string | null;
+          license_expiry: string | null;
+          license_transmission: string | null;
+          license_update_pending: boolean;
+          license_expiry_notified_at: string | null;
           deleted_at: string | null;
           created_at: string;
           updated_at: string;
@@ -73,6 +77,10 @@ export interface Database {
           login_block_reason?: string | null;
           admin_disabled_at?: string | null;
           admin_created_by?: string | null;
+          license_expiry?: string | null;
+          license_transmission?: string | null;
+          license_update_pending?: boolean;
+          license_expiry_notified_at?: string | null;
           deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -105,6 +113,10 @@ export interface Database {
           login_block_reason?: string | null;
           admin_disabled_at?: string | null;
           admin_created_by?: string | null;
+          license_expiry?: string | null;
+          license_transmission?: string | null;
+          license_update_pending?: boolean;
+          license_expiry_notified_at?: string | null;
           deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -313,6 +325,7 @@ export interface Database {
           gps_available: boolean;
           additional_info: string | null;
           contact_number: string | null;
+          transmission: string | null;
           status: string;
           rejection_reason: string | null;
           last_verified_at: string | null;
@@ -338,6 +351,7 @@ export interface Database {
           gps_available?: boolean;
           additional_info?: string | null;
           contact_number?: string | null;
+          transmission?: string | null;
           status?: string;
           rejection_reason?: string | null;
           last_verified_at?: string | null;
@@ -363,6 +377,7 @@ export interface Database {
           gps_available?: boolean;
           additional_info?: string | null;
           contact_number?: string | null;
+          transmission?: string | null;
           status?: string;
           rejection_reason?: string | null;
           last_verified_at?: string | null;

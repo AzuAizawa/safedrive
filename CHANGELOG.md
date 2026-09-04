@@ -9,6 +9,41 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Driver's licence validity + transmission (AT / AT-MT) gating
+
+The KYC review captured licence photos but no structured expiry and no
+Philippine transmission restriction. Renters with an automatic-only licence
+could book manual cars, and an expired licence was never a booking gate.
+
+- **DB (CHAPTER 29, run manually):** `profiles.license_expiry` /
+  `license_transmission` (`automatic_only` | `manual_and_automatic`) /
+  `license_update_pending` / `license_expiry_notified_at`; `cars.transmission`
+  (`automatic` | `manual`). `protect_profile_sensitive_fields` +
+  `enforce_admin_profile_permission` extended (user cannot self-edit validity;
+  admin edit needs `users.verify`). `return_materially_changed_car_to_review`
+  now treats a transmission change as material. `notify_expiring_licenses()`.
+- **Admin** (`/admin/users`, `users.verify`): a Driver's licence panel to set
+  expiry (date picker) + restriction (dropdown) from the licence photos;
+  clears `license_update_pending`; approve prompts if not set.
+- **Renter** (`/verify`): Driver's Licence card with the expiry countdown /
+  restriction, an "Update licence" mini-form (re-uploads QR + front + back,
+  flags a re-review, notifies admins), and a "Report a mistake" link →
+  `license_dispute` support ticket.
+- **Lister** (`/my-vehicles`): required Transmission dropdown on the add form,
+  editable in the edit modal (material change), shown on the vehicle card.
+- **Gate** (`api/create-booking.ts`, conservative — only explicit values
+  block, read in separate queries so a pre-SQL deploy degrades to no gate):
+  explicit past expiry blocks; `automatic_only` renter cannot book a `manual`
+  car. Browse + car page show the transmission and the disabled-with-reason
+  booking button.
+- **Cron:** `api/flag-expiring-licenses.ts` (daily) + the workflow job.
+- **UX:** login / sign-up forms disable their inputs while an attempt runs.
+- **Files:** CHAPTER 29; `api/{create-booking,flag-expiring-licenses}.ts`;
+  `src/lib/driversLicense.ts`; `src/pages/{VerificationPage,MyVehiclesPage,
+  BrowseCarsPage,CarDetailPage,LoginPage,SignUpPage}.tsx`;
+  `src/pages/admin/AdminUsersPage.tsx`; `src/types/database.ts`;
+  `.github/workflows/scheduled-workers.yml`.
+
 ## 2026-09-04 — My Vehicles lifecycle hub + editable verification ETA
 
 My Vehicles was a flat list; a `renewal_required` car showed a misleading

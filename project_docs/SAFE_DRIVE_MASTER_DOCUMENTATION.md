@@ -254,6 +254,17 @@ Insurance is **not a separate review**: the admin's single Approve on a vehicle 
 
 The "how long does review take" wording (identity and vehicle) is editable live in `/admin/platform-settings` (`user_verification_eta_message` / `vehicle_verification_eta_message` on `platform_settings`; `get_/set_verification_eta_messages`; super-admin direct edit, no vote) so a peak-season backlog can be communicated without a redeploy.
 
+### 6.4 Driver's licence validity and transmission (CHAPTER 29)
+
+The KYC review now also records two structured facts an admin reads from the licence photos in `/admin/users` (gated by `users.verify`): `profiles.license_expiry` (a date) and `profiles.license_transmission` (`automatic_only` | `manual_and_automatic`, from the AT / AT-MT restriction on the back of the current LTO card). Vehicles carry `cars.transmission` (`automatic` | `manual`), a required dropdown when listing and a material change that returns the listing to review.
+
+`api/create-booking.ts` enforces two gates, **conservatively - only explicit values block**, so nothing freezes on rollout:
+
+- **Expiry:** an explicit past `license_expiry` blocks new bookings (a null value - every account verified before this chapter - is grandfathered until an admin sets it).
+- **Transmission:** an `automatic_only` renter cannot book a `manual` car. Any unset value (renter or car) is allowed and only nudged in the UI.
+
+A verified renter sees a Driver's Licence card on `/verify` with the expiry countdown, the restriction, an "Update licence" mini-form (re-uploads the QR + front + back, sets `license_update_pending`, notifies admins), and a "Report a mistake" link that opens a `license_dispute` support ticket. `api/flag-expiring-licenses.ts` (daily cron, `notify_expiring_licenses()`) nudges renters ≤30 days from expiry, deduped weekly.
+
 Vehicle maintenance and blackout dates are stored separately from bookings. The lister manages them on a **month calendar** (`/vehicle-availability`): dates with a booking show red and are not selectable, already-blocked dates show amber, and the lister taps a free range to block it. No reason or category is collected - an unavailable date is simply unavailable. A blackout cannot conflict with an active booking. Booking creation checks both bookings and blackouts.
 
 ## 7. Vehicle-Specific Rental Agreement
@@ -1246,6 +1257,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/data-request.ts` | GET/POST; user | List own privacy requests or submit a new request and notify super-admins |
 | `api/expire-booking-deadlines.ts` | GET/POST; cron secret | Expire ignored owner/payment deadlines without browser dependence |
 | `api/flag-expired-vehicle-documents.ts` | GET/POST; cron secret | Daily: move vehicles with an expired registration/CTPL/insurance date to `renewal_required` and notify the lister |
+| `api/flag-expiring-licenses.ts` | GET/POST; cron secret | Daily: notify a verified renter whose driver's licence expires within 30 days (or has expired); deduped weekly via `profiles.license_expiry_notified_at` |
 | `api/get-approved-rental-agreement.ts` | GET; participant | Return only the agreement version approved/snapshotted for the booking |
 | `api/mark-manual-refund.ts` | POST; super-admin | Record an actually completed manual refund with method/reference |
 | `api/process-payout.ts` | POST; super-admin | Run payout eligibility and PayMongo/simulator automation |

@@ -289,6 +289,40 @@ export default async function handler(req: Request) {
       );
     }
 
+    // Driver's licence gate. Read in a SEPARATE query so a deployment that
+    // lands before CHAPTER 29 runs (missing columns) degrades to "no gate"
+    // instead of failing every booking.
+    let licenseExpiry: string | null = null;
+    let licenseTransmission: string | null = null;
+    {
+      const { data: lic } = await supabase
+        .from("profiles")
+        .select("license_expiry, license_transmission")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (lic) {
+        licenseExpiry = (lic as { license_expiry: string | null }).license_expiry;
+        licenseTransmission = (
+          lic as { license_transmission: string | null }
+        ).license_transmission;
+      }
+    }
+
+    // Only an EXPLICIT past expiry blocks - an account verified before this
+    // check has license_expiry = null and is grandfathered.
+    if (licenseExpiry) {
+      const licenceEnd = new Date(`${licenseExpiry}T23:59:59`);
+      if (!Number.isNaN(licenceEnd.getTime()) && licenceEnd.getTime() < Date.now()) {
+        return jsonResponse(
+          {
+            error:
+              "Your driver's licence has expired. Submit an updated licence from Account & Identity so an admin can restore your booking access.",
+          },
+          403,
+        );
+      }
+    }
+
     const { data: carData, error: carError } = await supabase
       .from("cars")
       .select(
@@ -315,6 +349,26 @@ export default async function handler(req: Request) {
     const car = carData as unknown as CarRecord;
     if (!["approved", "active"].includes(car.status ?? "")) {
       return jsonResponse({ error: "This car is not available for booking" }, 409);
+    }
+
+    // Transmission gate (separate query, same graceful-degradation reason as
+    // the licence read): only an explicit automatic-only licence against an
+    // explicit manual car is blocked.
+    if (licenseTransmission === "automatic_only") {
+      const { data: carTx } = await supabase
+        .from("cars")
+        .select("transmission")
+        .eq("id", carId)
+        .maybeSingle();
+      if ((carTx as { transmission: string | null } | null)?.transmission === "manual") {
+        return jsonResponse(
+          {
+            error:
+              "This vehicle has a manual transmission and your driver's licence is automatic-only. Submit an updated licence if this has changed.",
+          },
+          403,
+        );
+      }
     }
 
     if (car.owner_id === user.id) {

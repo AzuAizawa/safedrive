@@ -109,6 +109,7 @@ interface VehicleRow {
   comprehensive_insurance_expiry: string | null;
   insurer_rental_use_confirmed: boolean;
   insurance_verification_status: string;
+  transmission: string | null;
   status: string;
   rejection_reason: string | null;
   created_at: string | null;
@@ -293,6 +294,7 @@ export default function MyVehiclesPage() {
   const [editCity, setEditCity] = useState("");
   const [editSpecificLocation, setEditSpecificLocation] = useState("");
   const [editFuelCategory, setEditFuelCategory] = useState("");
+  const [editTransmission, setEditTransmission] = useState("");
   const [editFuelSubtype, setEditFuelSubtype] = useState("");
   const [editGpsAvailable, setEditGpsAvailable] = useState(false);
   const [editContact, setEditContact] = useState("");
@@ -319,6 +321,7 @@ export default function MyVehiclesPage() {
     specific_location: "",
     fuel_category: "",
     fuel_subtype: "",
+    transmission: "",
     gps_available: false,
     contact_number: profile?.phone || "",
     manufacturing_year: "",
@@ -599,6 +602,11 @@ export default function MyVehiclesPage() {
       return;
     }
 
+    if (!["automatic", "manual"].includes(form.transmission)) {
+      toast.error("Select the vehicle transmission (Automatic or Manual).");
+      return;
+    }
+
     const todayIso = new Date().toISOString().slice(0, 10);
     if (
       !form.registration_expiry ||
@@ -632,6 +640,7 @@ export default function MyVehiclesPage() {
           ].filter(Boolean).join(" - ") : null,
           fuel_category: form.fuel_category || null,
           fuel_subtype: form.fuel_subtype || null,
+          transmission: form.transmission || null,
           gps_available: form.gps_available,
           contact_number: form.contact_number || null,
           additional_info: form.additional_info || null,
@@ -719,6 +728,7 @@ export default function MyVehiclesPage() {
         specific_location: "",
         fuel_category: "",
         fuel_subtype: "",
+        transmission: "",
         gps_available: false,
         contact_number: profile?.phone || "",
         manufacturing_year: "",
@@ -852,6 +862,7 @@ export default function MyVehiclesPage() {
               .join(" - ") || null,
           fuel_category: editFuelCategory || null,
           fuel_subtype: editFuelSubtype || null,
+          transmission: editTransmission || null,
           gps_available: editGpsAvailable,
           contact_number: editContact || null,
           additional_info: editAdditionalInfo || null,
@@ -1203,6 +1214,24 @@ export default function MyVehiclesPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Transmission *</Label>
+                  <select
+                    value={form.transmission}
+                    onChange={(e) =>
+                      setForm({ ...form, transmission: e.target.value })
+                    }
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Select transmission</option>
+                    <option value="automatic">Automatic</option>
+                    <option value="manual">Manual</option>
+                  </select>
+                  <p className="text-[10px] text-muted-foreground">
+                    A renter with an automatic-only licence can book automatic
+                    vehicles only.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Plate Number *</Label>
@@ -1768,6 +1797,20 @@ export default function MyVehiclesPage() {
                           {v.gps_available ? "Available" : "Not included"}
                         </span>
                       </p>
+                      <p
+                        className={`mt-1 text-xs ${
+                          v.transmission ? "text-muted-foreground" : "text-amber-600"
+                        }`}
+                      >
+                        Transmission:{" "}
+                        <span className="font-medium text-foreground">
+                          {v.transmission === "automatic"
+                            ? "Automatic"
+                            : v.transmission === "manual"
+                              ? "Manual"
+                              : "Not specified — set it on your next edit"}
+                        </span>
+                      </p>
                       <div className="mt-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                           Documents
@@ -1858,6 +1901,7 @@ export default function MyVehiclesPage() {
                         setEditSpecificLocation(parsedLocation.specificLocation);
                         setEditFuelCategory(v.fuel_category || "");
                         setEditFuelSubtype(v.fuel_subtype || "");
+                        setEditTransmission(v.transmission || "");
                         setEditGpsAvailable(Boolean(v.gps_available));
                         setEditContact(v.contact_number || "");
                         setEditAdditionalInfo(v.additional_info || "");
@@ -2033,6 +2077,21 @@ export default function MyVehiclesPage() {
                       onChange={(e) => setEditSpecificLocation(e.target.value)}
                       placeholder="e.g. STI Novaliches, building entrance, mall pickup bay"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Transmission</Label>
+                    <select
+                      value={editTransmission}
+                      onChange={(e) => setEditTransmission(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Not specified</option>
+                      <option value="automatic">Automatic</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                    <p className="text-[10px] text-muted-foreground">
+                      Changing this sends the listing back to admin review.
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <Label>Fuel Category</Label>
