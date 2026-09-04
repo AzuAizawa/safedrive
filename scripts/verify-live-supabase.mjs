@@ -171,7 +171,7 @@ if (existingTables.has("financial_accounts")) {
     const foundCodes = new Set((accounts || []).map((account) => account.code));
     const missingCodes = [...expectedAccounts].filter((code) => !foundCodes.has(code));
     if (missingCodes.length) fail(`${missingCodes.length} required financial account(s) are missing`);
-    else pass("all nine required financial accounts are seeded");
+    else pass("all eight required financial accounts are seeded");
   }
 }
 
