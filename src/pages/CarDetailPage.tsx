@@ -275,6 +275,10 @@ export default function CarDetailPage() {
   }, [agreementReloadNonce, id, profile?.verified_status, user]);
 
   const getImageUrl = (path: string) => {
+    // Backwards compat: some rows store the full public URL instead of a
+    // relative storage path (see MyVehiclesPage's car_images inserts).
+    // Passing a full URL to getPublicUrl() would double-prefix it and 404.
+    if (path.startsWith("http")) return path;
     const { data } = supabase.storage
       .from("vehicle-documents")
       .getPublicUrl(path);

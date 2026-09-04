@@ -9,6 +9,26 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Fix broken car photo on the car detail page
+
+Tester feedback: "May bug sa car picture /UI, di lumalabas yung picture sa
+ibang car" - one car's (Kia Soluto) photo showed as a broken image on its
+detail page even though it showed fine on Browse.
+
+- **Root cause:** `car_images.storage_path` is supposed to hold a relative
+  storage path (`getPublicUrl()` builds the full URL at read time) - that's
+  what Add Vehicle stores. But re-uploading images through `/my-vehicles`
+  Edit Listing stored the *already-resolved* full public URL instead, which
+  `CarDetailPage`'s `getImageUrl()` then fed back into `getPublicUrl()`,
+  double-prefixing it into a 404. `BrowseCarsPage`, `LandingPage`, and
+  `ListerCarRenewalPage` already special-cased a full-URL value; only the
+  detail page didn't.
+- Fixed both ends: Edit Listing's image re-upload now stores the relative
+  path like Add Vehicle does, and `CarDetailPage.getImageUrl()` now returns
+  a stored full URL as-is (the same backwards-compat check the other three
+  pages already had), so already-affected rows display correctly too.
+- **Files:** `src/pages/{CarDetailPage,MyVehiclesPage}.tsx`.
+
 ## 2026-09-04 — Force-view the lister's PDF before agreeing
 
 Tester feedback: "Dapat ma force view muna yung pdf bago ma click yung

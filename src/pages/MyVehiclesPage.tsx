@@ -827,13 +827,12 @@ export default function MyVehiclesPage() {
           const file = editCarImages[i];
           const path = `${user?.id}/${editVehicle.id}/image_${Date.now()}_${i}`;
           const result = await uploadFile(file, "vehicle-documents", path);
-          if (result.success && result.url) {
-            await supabase.from("car_images").insert({
-              car_id: editVehicle.id,
-              storage_path: result.url,
-              is_primary: i === 0,
-            });
-          }
+          if (!result.success) throw new Error(result.error || "Upload failed");
+          await supabase.from("car_images").insert({
+            car_id: editVehicle.id,
+            storage_path: path, // store relative path, not full URL - see getCarImageUrl
+            is_primary: i === 0,
+          });
         }
       }
 
