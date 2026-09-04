@@ -126,7 +126,8 @@ export default function SignUpPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="h-10"
+                  disabled={isLoading}
+                  className="h-10 disabled:opacity-60"
                 />
               </div>
               <div className="space-y-2">
@@ -139,12 +140,14 @@ export default function SignUpPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className="h-10 pr-10"
+                    disabled={isLoading}
+                    className="h-10 pr-10 disabled:opacity-60"
                   />
                   <button
                     type="button"
+                    disabled={isLoading}
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                   >
                     {showPassword ? (
                       <EyeOff className="w-4 h-4" />
@@ -184,7 +187,8 @@ export default function SignUpPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
-                  className="h-10"
+                  disabled={isLoading}
+                  className="h-10 disabled:opacity-60"
                 />
               </div>
               <div className="rounded-lg border border-border bg-muted/30 p-3">

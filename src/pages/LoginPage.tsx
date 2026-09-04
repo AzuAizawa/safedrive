@@ -763,14 +763,15 @@ export default function LoginPage() {
                       setLockoutTick(Date.now());
                     }}
                     required
+                    disabled={isLoading}
                     autoComplete="off"
-                    className="h-10"
+                    className="h-10 disabled:opacity-60"
                   />
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="password">Password</Label>
-                    <button type="button" className="text-xs text-primary hover:underline font-medium" onClick={() => {
+                    <button type="button" disabled={isLoading} className="text-xs text-primary hover:underline font-medium disabled:opacity-50" onClick={() => {
                       setForgotEmail(email);
                       setIsForgotModalOpen(true);
                     }}>
@@ -785,13 +786,15 @@ export default function LoginPage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
+                      disabled={isLoading}
                       autoComplete="new-password"
-                      className="h-10 pr-10"
+                      className="h-10 pr-10 disabled:opacity-60"
                     />
                     <button
                       type="button"
+                      disabled={isLoading}
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                     >
                       {showPassword ? (
                         <EyeOff className="w-4 h-4" />
