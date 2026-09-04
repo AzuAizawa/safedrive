@@ -250,7 +250,9 @@ export default function AdminUsersPage() {
   };
 
   const filteredUsers = users.filter((u) => {
-    const matchesFilter = filter === "all" || u.verified_status === filter;
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "resubmission" ? Boolean(u.license_update_pending) : u.verified_status === filter);
     const matchesSearch =
       search === "" ||
       (u.full_name || "").toLowerCase().includes(search.toLowerCase()) ||
@@ -871,6 +873,7 @@ export default function AdminUsersPage() {
             <SelectItem value="verified">Verified</SelectItem>
             <SelectItem value="rejected">Rejected</SelectItem>
             <SelectItem value="unverified">Unverified</SelectItem>
+            <SelectItem value="resubmission">Resubmission</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -934,18 +937,22 @@ export default function AdminUsersPage() {
                     <TableCell>
                       <span
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                          u.verified_status === "verified"
-                            ? "text-green-600 bg-green-50 dark:bg-green-950/30"
-                            : u.verified_status === "pending"
-                              ? "text-amber-600 bg-amber-50 dark:bg-amber-950/30"
-                              : u.verified_status === "rejected"
-                                ? "text-red-600 bg-red-50 dark:bg-red-950/30"
-                                : "text-muted-foreground bg-muted"
+                          u.license_update_pending
+                            ? "text-amber-600 bg-amber-50 dark:bg-amber-950/30"
+                            : u.verified_status === "verified"
+                              ? "text-green-600 bg-green-50 dark:bg-green-950/30"
+                              : u.verified_status === "pending"
+                                ? "text-amber-600 bg-amber-50 dark:bg-amber-950/30"
+                                : u.verified_status === "rejected"
+                                  ? "text-red-600 bg-red-50 dark:bg-red-950/30"
+                                  : "text-muted-foreground bg-muted"
                         }`}
                       >
                         <ShieldCheck className="w-3 h-3" />
-                        {u.verified_status.charAt(0).toUpperCase() +
-                          u.verified_status.slice(1)}
+                        {u.license_update_pending
+                          ? "Resubmission"
+                          : u.verified_status.charAt(0).toUpperCase() +
+                            u.verified_status.slice(1)}
                       </span>
                     </TableCell>
                     <TableCell>

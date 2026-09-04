@@ -5481,7 +5481,6 @@ where conname in (
   'vehicle_unavailability_no_overlap',
   'cars_price_per_day_check',
   'cars_plate_number_format',
-  'cars_security_deposit_amount_check',
   'trip_condition_reports_booking_id_reporter_id_phase_key'
 )
 order by table_name, conname;
@@ -5494,6 +5493,7 @@ where trigger_schema = 'public'
     'protect_car_submission_fields',
     'notify_admins_of_vehicle_submission',
     'notify_admins_of_pending_verification',
+    'notify_admins_of_license_update',
     'notify_support_ticket_created',
     'notify_admins_of_guest_inquiry',
     'set_guest_inquiry_updated_at',
@@ -7791,5 +7791,51 @@ begin
   end loop;
 end;
 $$;
+
+-- ============================================================================
+-- CHAPTER 35 - Notify admins server-side when a verified renter resubmits
+-- their driver's licence
+-- ============================================================================
+-- VerificationPage.tsx's handleLicenseUpdate() (the "renewed my licence"
+-- resubmission flow for an already-verified renter) tried to notify admins by
+-- inserting notification rows directly from the browser as the renter - but
+-- "Users can insert own notifications" only allows auth.uid() = user_id, so
+-- every one of those inserts was silently rejected by RLS (the result was
+-- never checked). The uploaded images and license_update_pending flag were
+-- saved correctly; admins just never found out a resubmission happened, so
+-- nothing prompted them to open /admin/users and see it. Fixed the same way
+-- every other admin-notification path in this schema already works: a
+-- SECURITY DEFINER trigger that inserts as the function owner, bypassing RLS
+-- entirely, mirroring notify_admins_of_pending_verification.
+
+create or replace function public.notify_admins_of_license_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.license_update_pending = true
+     and old.license_update_pending is distinct from new.license_update_pending then
+    insert into public.notifications (user_id, title, message, type, link)
+    select
+      id,
+      'Driver''s licence update submitted',
+      coalesce(new.full_name, new.email, 'A renter') || ' submitted an updated driver''s licence for review.',
+      'warning',
+      '/admin/users'
+    from public.profiles
+    where role in ('admin', 'super_admin')
+      and deleted_at is null;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists notify_admins_of_license_update on public.profiles;
+create trigger notify_admins_of_license_update
+after update of license_update_pending on public.profiles
+for each row execute function public.notify_admins_of_license_update();
 
 -- End of SafeDrive chaptered database master.

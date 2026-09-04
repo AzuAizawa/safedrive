@@ -9,6 +9,47 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Driver's licence resubmission: admin notification, status label (CHAPTER 35)
+
+Tester feedback: after resubmitting a driver's licence (an already-verified
+renter renewing an expired one), the admin side showed no sign it happened -
+no notification, and the user's row in User Management still just said
+"Verified" with nothing calling out the pending resubmission.
+
+- **Root cause of the missing notification:** `VerificationPage.tsx`'s
+  `handleLicenseUpdate()` tried to insert notification rows for admins
+  directly from the renter's browser session. RLS's
+  `"Users can insert own notifications"` only allows `auth.uid() = user_id`,
+  so every one of those inserts was silently rejected - the result was never
+  checked, so nothing surfaced the failure. Confirmed live: the uploaded
+  images and `license_update_pending` flag were saved correctly, but zero
+  notification rows existed for any admin.
+- **Fixed the same way every other admin-notification path in this schema
+  already works:** a `SECURITY DEFINER` trigger
+  (`notify_admins_of_license_update`, fires `after update of
+  license_update_pending on profiles`) that inserts as the function owner,
+  bypassing RLS entirely - mirroring `notify_admins_of_pending_verification`.
+  Removed the dead client-side insert from `handleLicenseUpdate()`.
+- **New "Resubmission" status:** `AdminUsersPage.tsx`'s User Management table
+  now shows an amber "Resubmission" badge (instead of "Verified") for any
+  user with `license_update_pending`, and it's filterable from the status
+  dropdown - previously the only place this showed at all was a small badge
+  inside the per-user review modal.
+- The reported "uploaded photo doesn't show up on the admin side" traced to
+  the same root cause, not a data or storage bug - live verification
+  confirmed all 6 verification images (existing + the 3 resubmitted ones)
+  were correctly stored with valid signed URLs; admins simply had no prompt
+  to go look.
+- Also cleaned up two stale references caught while in this file: the
+  diagnostic trigger-name and constraint-name lists at the end of
+  `SAFE_DRIVE_DATABASE_MASTER.sql` still named `cars_security_deposit_amount_check`
+  (dropped with the column in CHAPTER 34) and were missing the new trigger.
+- Verified clean: `tsc -b`, lint, `check:alignment`,
+  `check:booking-flow`, and a full production build all pass.
+- **Files:** `src/pages/VerificationPage.tsx`,
+  `src/pages/admin/AdminUsersPage.tsx`,
+  `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 35).
+
 ## 2026-09-05 — Remove the security deposit feature entirely (CHAPTER 34)
 
 Requested removal: the refundable security-deposit flow (separate deposit

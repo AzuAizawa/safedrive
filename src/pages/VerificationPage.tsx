@@ -1045,22 +1045,10 @@ export default function VerificationPage() {
         .update({ license_update_pending: true })
         .eq("id", user.id);
 
-      const { data: admins } = await supabase
-        .from("profiles")
-        .select("id")
-        .in("role", ["admin", "super_admin"])
-        .is("deleted_at", null);
-      if (admins?.length) {
-        await supabase.from("notifications").insert(
-          admins.map((admin) => ({
-            user_id: admin.id,
-            title: "Driver's licence update submitted",
-            message: `${profile?.full_name || profile?.email || "A renter"} submitted an updated driver's licence for review.`,
-            type: "warning",
-            link: "/admin/users",
-          })),
-        );
-      }
+      // Admins are notified server-side by the notify_admins_of_license_update
+      // trigger on profiles.license_update_pending (CHAPTER 35) - a renter's
+      // browser session can't insert notification rows for other users (RLS
+      // only allows auth.uid() = user_id), so that used to fail silently here.
 
       await refreshProfile();
       toast.success("Updated licence submitted", {
