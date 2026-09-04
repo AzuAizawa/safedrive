@@ -395,6 +395,12 @@ const normalizeDriverLicenseInput = (value: string) => {
 
 const isValidDriverLicense = (value: string) => /^[A-Z]\d{2}-\d{2}-\d{6}$/.test(value);
 
+// GCash/Maya wallet numbers are digits only; 16 covers every supported
+// destination with headroom, and matches the DB check constraint.
+const PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH = 16;
+const sanitizePayoutAccountNumber = (value: string) =>
+  value.replace(/[^\d]/g, "").slice(0, PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH);
+
 export default function VerificationPage() {
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
@@ -1507,7 +1513,12 @@ export default function VerificationPage() {
                   Account Number
                 </p>
                 {isEditingPayout ? (
-                  <Input value={payoutAccountNumber} onChange={(e) => setPayoutAccountNumber(e.target.value.replace(/[^\d]/g, ""))} placeholder="Wallet or account number" />
+                  <Input
+                    value={payoutAccountNumber}
+                    onChange={(e) => setPayoutAccountNumber(sanitizePayoutAccountNumber(e.target.value))}
+                    maxLength={PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH}
+                    placeholder="Wallet or account number"
+                  />
                 ) : (
                   <p className="text-lg font-semibold break-all">{profile.payout_account_number || "Not set"}</p>
                 )}
@@ -2570,7 +2581,8 @@ export default function VerificationPage() {
               <Input
                 id="payout_account_number"
                 value={payoutAccountNumber}
-                onChange={(e) => setPayoutAccountNumber(e.target.value.replace(/[^\d]/g, ""))}
+                onChange={(e) => setPayoutAccountNumber(sanitizePayoutAccountNumber(e.target.value))}
+                maxLength={PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH}
                 placeholder="Wallet or account number"
               />
             </div>
@@ -3027,11 +3039,12 @@ export default function VerificationPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Account Number</Label>
-                  <Input 
-                    type="text" 
+                  <Input
+                    type="text"
                     placeholder="e.g., 09123456789"
-                    value={payoutAccountNumber} 
-                    onChange={(e) => setPayoutAccountNumber(e.target.value.replace(/[^\d]/g, ""))} 
+                    value={payoutAccountNumber}
+                    onChange={(e) => setPayoutAccountNumber(sanitizePayoutAccountNumber(e.target.value))}
+                    maxLength={PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH}
                   />
                 </div>
                 <Button 

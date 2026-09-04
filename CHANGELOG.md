@@ -9,6 +9,19 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Payout account number length guard (CHAPTER 32, run manually)
+
+Tester feedback: the payout Account Number field had no character limit.
+
+- All three payout-account-number inputs (identity verification form, the
+  `/verify` "Edit Payout Details" card, and the lister-mode payout modal)
+  now share one `sanitizePayoutAccountNumber` helper: digits only, capped at
+  16, plus `maxLength={16}` on the input.
+- **SQL (CHAPTER 32, run manually):** backfills any existing value to its
+  first 16 digits and adds `profiles_payout_account_number_check` so a
+  bypassed/old client can never write past the UI's limit.
+- **Files:** CHAPTER 32; `src/pages/VerificationPage.tsx`.
+
 ## 2026-09-04 — Clickable logo on the login / sign-up pages
 
 Tester feedback: the SafeDrive logo should be clickable everywhere and go to

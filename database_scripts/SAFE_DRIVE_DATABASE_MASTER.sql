@@ -7640,4 +7640,21 @@ as $$
 $$;
 grant execute on function public.get_renter_reliability(uuid) to authenticated;
 
+-- ============================================================================
+-- CHAPTER 32 - Payout account number length guard
+-- ============================================================================
+-- The client already strips payout_account_number to digits only, but had no
+-- upper bound (tester found a wallet field accepting an arbitrarily long
+-- string). Bound it at the database too, matching the client's 16-digit cap,
+-- so a bypassed/old client can never write past what the UI allows.
+
+update public.profiles
+set payout_account_number = left(regexp_replace(payout_account_number, '[^0-9]', '', 'g'), 16)
+where payout_account_number is not null;
+
+alter table public.profiles drop constraint if exists profiles_payout_account_number_check;
+alter table public.profiles
+  add constraint profiles_payout_account_number_check
+  check (payout_account_number is null or payout_account_number ~ '^[0-9]{0,16}$');
+
 -- End of SafeDrive chaptered database master.
