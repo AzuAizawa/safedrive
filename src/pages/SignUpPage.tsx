@@ -104,12 +104,15 @@ export default function SignUpPage() {
       <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-primary/5 rounded-full blur-3xl translate-x-1/3 translate-y-1/3 pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-md animate-scale-in">
-        <div className="flex items-center justify-center gap-2.5 mb-8">
+        <Link
+          to="/"
+          className="flex items-center justify-center gap-2.5 mb-8 transition-opacity hover:opacity-80"
+        >
           <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/25">
             <Car className="w-6 h-6 text-primary-foreground" />
           </div>
           <span className="text-2xl font-bold tracking-tight">SafeDrive</span>
-        </div>
+        </Link>
 
         <Card className="shadow-2xl border-border/50">
           <CardHeader className="text-center pb-2">

@@ -9,6 +9,18 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Clickable logo on the login / sign-up pages
+
+Tester feedback: the SafeDrive logo should be clickable everywhere and go to
+the main landing page; it already did inside the dashboard (back to
+`/browse` or `/lister-bookings`) and the admin panel (back to `/admin`) via
+`DashboardLayout` / `AdminLayout` — only the logged-out `/login` and
+`/signup` headers were a static, non-clickable mark.
+
+- `/login`, `/signup`: the header logo is now a `Link to="/"` (the public
+  landing page).
+- **Files:** `src/pages/{LoginPage,SignUpPage}.tsx`.
+
 ## 2026-09-04 — Resend signup confirmation email
 
 Tester feedback: the "Confirm your signup" email is sent exactly once, at
