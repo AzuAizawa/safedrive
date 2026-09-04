@@ -77,6 +77,14 @@ export default function PlatformAgreementPage() {
                 <strong>Manual Verification:</strong> No user may list a vehicle or book a reservation until their
                 identity and documents have been manually reviewed and approved by SafeDrive Administration.
               </li>
+              <li>
+                <strong>Ongoing Licence Validity:</strong> A current, unexpired driver&apos;s licence is required to
+                <em> book</em> (rent) a vehicle. SafeDrive records the licence expiry and the licence&apos;s
+                transmission restriction (Automatic-only or Automatic/Manual) during review; a renter whose licence
+                is automatic-only may only book automatic vehicles. An expired licence places new bookings and
+                checkout on hold until an updated licence is reviewed. Listing and managing your own vehicles relies
+                on your verified identity only and is not affected by licence expiry.
+              </li>
             </ul>
           </section>
 
@@ -130,6 +138,14 @@ export default function PlatformAgreementPage() {
                 the rest is short-notice lister compensation, and the exact figure is confirmed by support review.
                 A pre-trip lister cancellation always starts a full refund attempt, with super-admin review if provider
                 confirmation is unavailable.
+              </li>
+              <li>
+                <strong>Early Return:</strong> A renter may request, through the booking, to return the vehicle before
+                the booked end date. The booked rental period belongs to the renter, so an early return does
+                <em> not</em> entitle the renter to any refund for the unused days. If the lister approves the early
+                return, the lister may — at their sole discretion — grant a goodwill refund of an amount they choose;
+                any such goodwill refund is released only after SafeDrive support review. The lister may also decline
+                the request, in which case the original return date and full booking amount stand.
               </li>
             </ul>
           </section>

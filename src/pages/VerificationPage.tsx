@@ -1590,9 +1590,21 @@ export default function VerificationPage() {
             {licenseExpiryState(profile.license_expiry) === "expired" && (
               <p className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-600">
                 Your licence has expired. New bookings are on hold until an admin
-                reviews an updated licence.
+                reviews an updated licence.{" "}
+                <span className="text-muted-foreground">
+                  Listing and managing your own vehicles is not affected — a
+                  driver&apos;s licence is only needed to rent.
+                </span>
               </p>
             )}
+            {profile.is_lister &&
+              licenseExpiryState(profile.license_expiry) === "expiring" && (
+                <p className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Your licence on file expires soon. It still stands as your
+                  identity record for hosting, but submitting a renewed licence
+                  keeps your verification current.
+                </p>
+              )}
             {profile.license_transmission === "automatic_only" && (
               <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-600">
                 Your licence is automatic-only, so you can book automatic

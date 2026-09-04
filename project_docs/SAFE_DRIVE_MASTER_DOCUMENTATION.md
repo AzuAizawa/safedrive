@@ -333,6 +333,14 @@ Modelled on Airbnb host-cancellation policy / Superhost metrics and Turo All-Sta
 - **Review after a lister cancellation:** the renter can leave a star + comment (Airbnb-style auto-review). An additive RLS `INSERT` policy on `booking_reviews` permits it; `get_public_car_reviews` surfaces it with `is_cancellation_review = true` and the UI badges it. It is **excluded from the numeric star average** — `get_car_rating_summaries` / `get_lister_rating_summaries` stay completed-trip only.
 - **Reference:** `project_docs/DATA_RETENTION_AND_DELETION.md` is a sibling operational doc; the reliability-model rationale is defended from the four platforms above.
 
+### 8.4 Early return (CHAPTER 30)
+
+The mirror of a booking extension: a renter asks to hand the car back **before** the booked end date. Standard P2P practice (Turo / Getaround) — the booked period is the renter's, so an early return **carries no automatic refund** for the unused days. `booking_early_returns` holds the request; `api/booking-early-return-action.ts` handles `request` / `approve` / `reject` / `cancel` with the service-role key (the client only reads state).
+
+- **Request** (renter, `/my-bookings`): booking `fully_paid` / `active`, not yet being completed, no open extension; the new date must be earlier than the current one, after pickup, and not in the past.
+- **Approve** (lister, `/lister-bookings`): moves `bookings.end_date` earlier — the freed dates become bookable and the return reminder / completion / deposit window follow automatically. The lister may enter an optional **goodwill refund** amount; if set, a `payments` `refund` row (`payment_method = 'manual_review'`) is created and released only through the standard admin refund review in Financial Reviews. No goodwill = no refund.
+- **Reject** keeps the original end date and full amount. Both sides are notified (in-app + email); the Platform Agreement §4 states the no-automatic-refund rule.
+
 ## 9. Security Deposit: Option B
 
 SafeDrive uses a **separate refundable deposit**, not a hidden deduction from rental income. This is simpler to explain and reconcile than mixing the deposit with rental revenue.
@@ -1244,6 +1252,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/admin-reset-password.ts` | POST; super-admin | Reset a non-admin user's password and audit the action |
 | `api/booking-action.ts` | POST; booking participant | Accept/reject/cancel/arrive/finish/no-show booking actions with state gates |
 | `api/booking-extension-action.ts` | POST; participant | Request, approve, reject, or expire a booking extension |
+| `api/booking-early-return-action.ts` | POST; participant | Request / approve / reject / cancel an early return; approve moves `bookings.end_date` earlier and (optionally) opens a lister goodwill-refund review |
 | `api/cancel-subscription.ts` | POST; subscriber | Cancel the caller's active subscription and audit it |
 | `api/create-balance-checkout.ts` | POST; renter | Recalculate eligibility and create PayMongo balance checkout |
 | `api/create-booking.ts` | POST; eligible renter | Server-authoritative price/date/overlap validation and booking insertion |

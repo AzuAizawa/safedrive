@@ -864,6 +864,60 @@ export interface Database {
           },
         ];
       };
+      booking_early_returns: {
+        Row: {
+          id: string;
+          booking_id: string;
+          renter_id: string;
+          owner_id: string;
+          current_end_date: string;
+          requested_end_date: string;
+          reason: string | null;
+          status: string;
+          owner_decision_note: string | null;
+          goodwill_refund_amount: number;
+          requested_at: string;
+          approved_at: string | null;
+          rejected_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          booking_id: string;
+          renter_id: string;
+          owner_id: string;
+          current_end_date: string;
+          requested_end_date: string;
+          reason?: string | null;
+          status?: string;
+          owner_decision_note?: string | null;
+          goodwill_refund_amount?: number;
+          requested_at?: string;
+          approved_at?: string | null;
+          rejected_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          booking_id?: string;
+          renter_id?: string;
+          owner_id?: string;
+          current_end_date?: string;
+          requested_end_date?: string;
+          reason?: string | null;
+          status?: string;
+          owner_decision_note?: string | null;
+          goodwill_refund_amount?: number;
+          requested_at?: string;
+          approved_at?: string | null;
+          rejected_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       booking_cancellations: {
         Row: {
           booking_id: string;

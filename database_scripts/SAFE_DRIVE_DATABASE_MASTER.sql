@@ -7463,4 +7463,64 @@ end;
 $$;
 revoke all on function public.notify_expiring_licenses() from public, anon, authenticated;
 
+-- ============================================================================
+-- CHAPTER 30 - Early return (early-out) requests
+-- ============================================================================
+-- The mirror image of booking_extensions: a renter asks to hand the car back
+-- BEFORE the booked end date. Standard P2P practice (Turo / Getaround): early
+-- return is a convenience for both sides, NOT a money-back event - the trip
+-- period is the renter's. Any refund is a discretionary lister goodwill
+-- amount, released through the same manual admin refund review as every other
+-- out-of-band refund. All writes go through api/booking-early-return-action.ts
+-- with the service-role key; the client only reads the request state.
+
+create table if not exists public.booking_early_returns (
+  id uuid primary key default gen_random_uuid(),
+  booking_id uuid not null references public.bookings(id) on delete cascade,
+  renter_id uuid not null references public.profiles(id) on delete cascade,
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  current_end_date date not null,
+  requested_end_date date not null,
+  reason text,
+  status text not null default 'pending'
+    check (status in ('pending', 'approved', 'rejected', 'cancelled', 'expired')),
+  owner_decision_note text,
+  goodwill_refund_amount numeric not null default 0 check (goodwill_refund_amount >= 0),
+  requested_at timestamptz not null default now(),
+  approved_at timestamptz,
+  rejected_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint booking_early_returns_earlier
+    check (requested_end_date < current_end_date)
+);
+
+create index if not exists booking_early_returns_booking_id_idx
+  on public.booking_early_returns (booking_id, created_at desc);
+create index if not exists booking_early_returns_status_idx
+  on public.booking_early_returns (status);
+
+create or replace function public.set_booking_early_returns_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists booking_early_returns_set_updated_at on public.booking_early_returns;
+create trigger booking_early_returns_set_updated_at
+before update on public.booking_early_returns
+for each row execute function public.set_booking_early_returns_updated_at();
+
+alter table public.booking_early_returns enable row level security;
+
+drop policy if exists "Participants read early returns" on public.booking_early_returns;
+create policy "Participants read early returns"
+on public.booking_early_returns for select
+using (auth.uid() = renter_id or auth.uid() = owner_id or public.is_admin());
+-- No insert/update/delete policy: only the service-role API handler writes here.
+
+grant select on public.booking_early_returns to authenticated;
+
 -- End of SafeDrive chaptered database master.

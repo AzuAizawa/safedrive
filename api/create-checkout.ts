@@ -133,6 +133,32 @@ export default async function handler(req: Request) {
       return jsonResponse({ error: "You are not allowed to pay for this booking" }, 403);
     }
 
+    // Second driver's-licence checkpoint: block payment if the renter's licence
+    // expired between the request and now. Separate query so a pre-CHAPTER-29
+    // deploy degrades to no check. No captured payment yet, so the renter can
+    // cancel for a full refund and renew.
+    {
+      const { data: lic } = await supabase
+        .from("profiles")
+        .select("license_expiry")
+        .eq("id", user.id)
+        .maybeSingle();
+      const licExpiry = (lic as { license_expiry: string | null } | null)
+        ?.license_expiry;
+      if (licExpiry) {
+        const end = new Date(`${licExpiry}T23:59:59`);
+        if (!Number.isNaN(end.getTime()) && end.getTime() < Date.now()) {
+          return jsonResponse(
+            {
+              error:
+                "Your driver's licence has expired. Renew it (Account & Identity) before paying, or cancel this booking for a full refund.",
+            },
+            403,
+          );
+        }
+      }
+    }
+
     if (!bookingRecord.agreement_version_id) {
       return jsonResponse({ error: "This booking has no approved rental-agreement snapshot" }, 409);
     }

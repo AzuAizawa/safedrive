@@ -9,6 +9,30 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-04 — Early return + expired-licence checkpoints
+
+- **Early return (CHAPTER 30, run manually):** `booking_early_returns` table +
+  `api/booking-early-return-action.ts` (request / approve / reject / cancel,
+  mirror of extensions). A renter asks to hand the car back before the booked
+  end date; **no automatic refund** for unused days (Turo/Getaround standard);
+  the lister may approve with an optional goodwill refund that goes through the
+  standard admin refund review. Approve moves `bookings.end_date` earlier.
+  `/my-bookings` gets a "Request early return" button + modal + status card;
+  `/lister-bookings` gets Approve/Reject with a goodwill field + note.
+- **Expired-licence second checkpoint:** `api/create-checkout.ts` and
+  `api/create-balance-checkout.ts` block payment when the renter's licence has
+  an explicit past expiry (separate query, degrades to no check pre-SQL); the
+  renter can cancel for a full refund.
+- **`/verify` clarity:** an expired licence now says listing/hosting is
+  unaffected; a lister with a soon-expiring licence gets a soft "keep your ID
+  current" prompt.
+- **Platform Agreement:** §2 gains an ongoing-licence-validity clause; §4 gains
+  the early-return no-automatic-refund clause.
+- **Files:** CHAPTER 30; `api/{booking-early-return-action,create-checkout,
+  create-balance-checkout}.ts`; `src/lib/earlyReturns.ts`;
+  `src/pages/{MyBookingsPage,ListerBookingsPage,VerificationPage,
+  PlatformAgreementPage}.tsx`; `src/types/database.ts`.
+
 ## 2026-09-04 — Driver's licence validity + transmission (AT / AT-MT) gating
 
 The KYC review captured licence photos but no structured expiry and no

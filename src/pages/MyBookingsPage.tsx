@@ -15,6 +15,13 @@ import {
   getExtensionStatusLabel,
   getExtensionTone,
 } from "@/lib/bookingExtensions";
+import {
+  earlyReturnStatusLabel,
+  earlyReturnTone,
+  latestEarlyReturn,
+  runEarlyReturnAction,
+  type EarlyReturnRow,
+} from "@/lib/earlyReturns";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -256,6 +263,18 @@ export default function MyBookingsPage() {
     Record<string, { requestedEndDate: string; reason: string; fuelTopUpAmount: string }>
   >({});
   const [extensionActionLoading, setExtensionActionLoading] = useState<string | null>(null);
+  const [earlyReturnsByBooking, setEarlyReturnsByBooking] = useState<
+    Record<string, EarlyReturnRow[]>
+  >({});
+  const [earlyReturnModalBooking, setEarlyReturnModalBooking] =
+    useState<BookingRow | null>(null);
+  const [earlyReturnDraft, setEarlyReturnDraft] = useState({
+    requestedEndDate: "",
+    reason: "",
+  });
+  const [earlyReturnLoading, setEarlyReturnLoading] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -478,6 +497,80 @@ export default function MyBookingsPage() {
 
     void fetchBookingExtensions();
   }, [bookings, user]);
+
+  useEffect(() => {
+    const loadEarlyReturns = async () => {
+      const ids = bookings.map((b) => b.id);
+      if (ids.length === 0) {
+        setEarlyReturnsByBooking({});
+        return;
+      }
+      // Non-fatal: a deploy that lands before CHAPTER 30 has no such table.
+      const { data, error } = await supabase
+        .from("booking_early_returns")
+        .select("*")
+        .in("booking_id", ids)
+        .order("created_at", { ascending: false });
+      if (error) {
+        setEarlyReturnsByBooking({});
+        return;
+      }
+      const grouped = ((data ?? []) as EarlyReturnRow[]).reduce<
+        Record<string, EarlyReturnRow[]>
+      >((acc, row) => {
+        (acc[row.booking_id] ||= []).push(row);
+        return acc;
+      }, {});
+      setEarlyReturnsByBooking(grouped);
+    };
+    void loadEarlyReturns();
+  }, [bookings]);
+
+  const submitEarlyReturnRequest = async () => {
+    if (!earlyReturnModalBooking) return;
+    const bookingId = earlyReturnModalBooking.id;
+    if (!earlyReturnDraft.requestedEndDate) {
+      toast.error("Pick the new return date.");
+      return;
+    }
+    setEarlyReturnLoading(bookingId);
+    try {
+      await runEarlyReturnAction(session?.access_token, {
+        action: "request",
+        bookingId,
+        requestedEndDate: earlyReturnDraft.requestedEndDate,
+        reason: earlyReturnDraft.reason.trim() || null,
+      });
+      toast.success("Early-return request sent to the lister.");
+      setEarlyReturnModalBooking(null);
+      setEarlyReturnDraft({ requestedEndDate: "", reason: "" });
+      fetchBookings();
+    } catch (err) {
+      toast.error("Could not send the request", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setEarlyReturnLoading(null);
+    }
+  };
+
+  const cancelEarlyReturn = async (earlyReturnId: string, bookingId: string) => {
+    setEarlyReturnLoading(bookingId);
+    try {
+      await runEarlyReturnAction(session?.access_token, {
+        action: "cancel",
+        earlyReturnId,
+      });
+      toast.success("Early-return request withdrawn.");
+      fetchBookings();
+    } catch (err) {
+      toast.error("Could not withdraw the request", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setEarlyReturnLoading(null);
+    }
+  };
 
   const runBookingAction = async (
     bookingId: string,
@@ -1656,6 +1749,13 @@ export default function MyBookingsPage() {
               : 0;
             const extensionBlocksCompletion =
               apparentExtensionStatus === "pending" || apparentExtensionStatus === "approved";
+            const latestEarly = latestEarlyReturn(earlyReturnsByBooking[booking.id]);
+            const canRequestEarlyReturn =
+              (apparentState === "fully_paid" || apparentState === "active") &&
+              !booking.renter_completed &&
+              !booking.owner_completed &&
+              !extensionBlocksCompletion &&
+              (!latestEarly || latestEarly.status !== "pending");
             const noShowState = getNoShowWindowState(
               booking,
               "renter",
@@ -2087,6 +2187,83 @@ export default function MyBookingsPage() {
                             onClick={() => setExtensionRequestBooking(booking)}
                           >
                             Request extension
+                          </Button>
+                        </div>
+                      ) : null}
+
+                      {latestEarly &&
+                      latestEarly.status !== "cancelled" ? (
+                        <div
+                          className={`mt-3 max-w-xl rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${earlyReturnTone(
+                            latestEarly.status,
+                          )}`}
+                        >
+                          <p className="font-semibold">Early return</p>
+                          <p className="mt-1">
+                            {earlyReturnStatusLabel(latestEarly.status)}. Requested
+                            new return:{" "}
+                            {format(
+                              new Date(latestEarly.requested_end_date),
+                              "MMM d, yyyy",
+                            )}
+                            .
+                          </p>
+                          {latestEarly.reason ? (
+                            <p className="mt-1">Reason: {latestEarly.reason}</p>
+                          ) : null}
+                          {latestEarly.owner_decision_note ? (
+                            <p className="mt-1 opacity-80">
+                              Lister note: {latestEarly.owner_decision_note}
+                            </p>
+                          ) : null}
+                          {latestEarly.status === "approved" &&
+                          Number(latestEarly.goodwill_refund_amount) > 0 ? (
+                            <p className="mt-1 font-medium">
+                              Goodwill refund:{" "}
+                              {formatCurrency(
+                                Number(latestEarly.goodwill_refund_amount),
+                              )}{" "}
+                              (released by SafeDrive support)
+                            </p>
+                          ) : latestEarly.status === "approved" ? (
+                            <p className="mt-1">
+                              No refund for the unused days.
+                            </p>
+                          ) : null}
+                          {latestEarly.status === "pending" ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="mt-2 h-8 px-2 text-xs text-red-500 hover:text-red-600"
+                              disabled={earlyReturnLoading === booking.id}
+                              onClick={() =>
+                                void cancelEarlyReturn(latestEarly.id, booking.id)
+                              }
+                            >
+                              Withdraw request
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {canRequestEarlyReturn ? (
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          <span className="text-[11px] text-muted-foreground">
+                            Finishing early?
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 px-2 text-xs"
+                            onClick={() => {
+                              setEarlyReturnDraft({
+                                requestedEndDate: "",
+                                reason: "",
+                              });
+                              setEarlyReturnModalBooking(booking);
+                            }}
+                          >
+                            Request early return
                           </Button>
                         </div>
                       ) : null}
@@ -2581,6 +2758,94 @@ export default function MyBookingsPage() {
         </Card>
       </div>
       )}
+
+      {earlyReturnModalBooking &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+            onClick={() => setEarlyReturnModalBooking(null)}
+          >
+            <div
+              className="w-full max-w-md rounded-xl border border-border bg-background shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="border-b border-border px-5 py-4">
+                <h2 className="text-lg font-semibold">Request early return</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Ask the lister to move the return date earlier. There is no
+                  automatic refund for the unused days — the lister may choose to
+                  give a goodwill refund.
+                </p>
+              </div>
+              <div className="space-y-3 px-5 py-4">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">New return date</label>
+                  <input
+                    type="date"
+                    value={earlyReturnDraft.requestedEndDate}
+                    min={new Date().toISOString().slice(0, 10)}
+                    max={format(
+                      new Date(
+                        new Date(earlyReturnModalBooking.end_date).getTime() -
+                          86_400_000,
+                      ),
+                      "yyyy-MM-dd",
+                    )}
+                    onChange={(e) =>
+                      setEarlyReturnDraft((d) => ({
+                        ...d,
+                        requestedEndDate: e.target.value,
+                      }))
+                    }
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Current return:{" "}
+                    {format(
+                      new Date(earlyReturnModalBooking.end_date),
+                      "MMM d, yyyy",
+                    )}
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Reason (optional)</label>
+                  <textarea
+                    value={earlyReturnDraft.reason}
+                    maxLength={500}
+                    onChange={(e) =>
+                      setEarlyReturnDraft((d) => ({ ...d, reason: e.target.value }))
+                    }
+                    className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="e.g. trip ended sooner than planned"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+                <Button
+                  variant="ghost"
+                  onClick={() => setEarlyReturnModalBooking(null)}
+                  disabled={earlyReturnLoading === earlyReturnModalBooking.id}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => void submitEarlyReturnRequest()}
+                  disabled={
+                    earlyReturnLoading === earlyReturnModalBooking.id ||
+                    !earlyReturnDraft.requestedEndDate
+                  }
+                >
+                  {earlyReturnLoading === earlyReturnModalBooking.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Send request"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {extensionRequestBooking &&
         (() => {

@@ -15,6 +15,13 @@ import {
   getExtensionStatusLabel,
   getExtensionTone,
 } from "@/lib/bookingExtensions";
+import {
+  earlyReturnStatusLabel,
+  earlyReturnTone,
+  latestEarlyReturn,
+  runEarlyReturnAction,
+  type EarlyReturnRow,
+} from "@/lib/earlyReturns";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -267,6 +274,12 @@ export default function ListerBookingsPage() {
     Record<string, BookingExtensionRow[]>
   >({});
   const [extensionDecisionNotes, setExtensionDecisionNotes] = useState<Record<string, string>>({});
+  const [earlyReturnsByBooking, setEarlyReturnsByBooking] = useState<
+    Record<string, EarlyReturnRow[]>
+  >({});
+  const [earlyReturnNotes, setEarlyReturnNotes] = useState<Record<string, string>>({});
+  const [earlyReturnGoodwill, setEarlyReturnGoodwill] = useState<Record<string, string>>({});
+  const [earlyReturnActionLoading, setEarlyReturnActionLoading] = useState<string | null>(null);
   const [extensionActionLoading, setExtensionActionLoading] = useState<string | null>(null);
   const [openBookingId, setOpenBookingId] = useState<string | null>(null);
   const getApparentStatus = getListerBookingStatus;
@@ -606,6 +619,64 @@ export default function ListerBookingsPage() {
 
     void fetchBookingExtensions();
   }, [bookings, user]);
+
+  useEffect(() => {
+    const loadEarlyReturns = async () => {
+      const ids = bookings.map((b) => b.id);
+      if (ids.length === 0) {
+        setEarlyReturnsByBooking({});
+        return;
+      }
+      const { data, error } = await supabase
+        .from("booking_early_returns")
+        .select("*")
+        .in("booking_id", ids)
+        .order("created_at", { ascending: false });
+      if (error) {
+        setEarlyReturnsByBooking({});
+        return;
+      }
+      const grouped = ((data ?? []) as EarlyReturnRow[]).reduce<
+        Record<string, EarlyReturnRow[]>
+      >((acc, row) => {
+        (acc[row.booking_id] ||= []).push(row);
+        return acc;
+      }, {});
+      setEarlyReturnsByBooking(grouped);
+    };
+    void loadEarlyReturns();
+  }, [bookings]);
+
+  const decideEarlyReturn = async (
+    earlyReturn: EarlyReturnRow,
+    action: "approve" | "reject",
+  ) => {
+    setEarlyReturnActionLoading(earlyReturn.id);
+    try {
+      await runEarlyReturnAction(session?.access_token, {
+        action,
+        earlyReturnId: earlyReturn.id,
+        ownerDecisionNote:
+          earlyReturnNotes[earlyReturn.id]?.trim() || null,
+        goodwillRefundAmount:
+          action === "approve"
+            ? Number(earlyReturnGoodwill[earlyReturn.id] || 0) || 0
+            : undefined,
+      });
+      toast.success(
+        action === "approve"
+          ? "Early return approved — the return date was moved earlier."
+          : "Early-return request declined.",
+      );
+      fetchBookings();
+    } catch (err) {
+      toast.error("Could not save the decision", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setEarlyReturnActionLoading(null);
+    }
+  };
 
   const runBookingAction = async (
     bookingId: string,
@@ -2369,6 +2440,7 @@ export default function ListerBookingsPage() {
             const renterRep = renterReputations[b.renter_id];
             const renterRel = renterReliabilities[b.renter_id];
             const latestExtension = getLatestExtension(b.id);
+            const latestEarly = latestEarlyReturn(earlyReturnsByBooking[b.id]);
             const processGuidance = getProcessGuidance(b, apparentState);
             const payoutStatus = getBookingPayoutStatus(b);
             const shouldShowPayoutStatus =
@@ -2773,6 +2845,111 @@ export default function ListerBookingsPage() {
                                 </Button>
                               </div>
                             </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {latestEarly && latestEarly.status !== "cancelled" ? (
+                        <div
+                          className={`mt-3 w-full rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${earlyReturnTone(
+                            latestEarly.status,
+                          )}`}
+                        >
+                          <p className="font-semibold">Early return request</p>
+                          <p className="mt-1">
+                            {earlyReturnStatusLabel(latestEarly.status)}. New
+                            return:{" "}
+                            {format(
+                              new Date(latestEarly.requested_end_date),
+                              "MMM d, yyyy",
+                            )}{" "}
+                            (was{" "}
+                            {format(
+                              new Date(latestEarly.current_end_date),
+                              "MMM d, yyyy",
+                            )}
+                            ).
+                          </p>
+                          {latestEarly.reason ? (
+                            <p className="mt-1">Reason: {latestEarly.reason}</p>
+                          ) : null}
+                          {latestEarly.status === "pending" ? (
+                            <div className="mt-2 space-y-2">
+                              <input
+                                type="number"
+                                min={0}
+                                placeholder="Goodwill refund (optional, PHP)"
+                                value={earlyReturnGoodwill[latestEarly.id] ?? ""}
+                                onChange={(e) =>
+                                  setEarlyReturnGoodwill((m) => ({
+                                    ...m,
+                                    [latestEarly.id]: e.target.value,
+                                  }))
+                                }
+                                className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                              />
+                              <input
+                                type="text"
+                                placeholder="Note to the renter (optional)"
+                                value={earlyReturnNotes[latestEarly.id] ?? ""}
+                                onChange={(e) =>
+                                  setEarlyReturnNotes((m) => ({
+                                    ...m,
+                                    [latestEarly.id]: e.target.value,
+                                  }))
+                                }
+                                className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  className="h-8 px-2 text-xs"
+                                  disabled={earlyReturnActionLoading === latestEarly.id}
+                                  onClick={() =>
+                                    void decideEarlyReturn(latestEarly, "approve")
+                                  }
+                                >
+                                  {earlyReturnActionLoading === latestEarly.id ? (
+                                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                                  )}
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 px-2 text-xs text-red-500 hover:text-red-600"
+                                  disabled={earlyReturnActionLoading === latestEarly.id}
+                                  onClick={() =>
+                                    void decideEarlyReturn(latestEarly, "reject")
+                                  }
+                                >
+                                  <XCircle className="mr-1 h-3.5 w-3.5" />
+                                  Reject
+                                </Button>
+                              </div>
+                              <p className="text-[10px] opacity-80">
+                                No refund is owed for unused days. A goodwill
+                                refund, if you set one, is released by SafeDrive
+                                support.
+                              </p>
+                            </div>
+                          ) : null}
+                          {latestEarly.status === "approved" &&
+                          Number(latestEarly.goodwill_refund_amount) > 0 ? (
+                            <p className="mt-1 font-medium">
+                              Goodwill refund: PHP{" "}
+                              {Number(
+                                latestEarly.goodwill_refund_amount,
+                              ).toLocaleString()}{" "}
+                              (SafeDrive support will release it)
+                            </p>
+                          ) : null}
+                          {latestEarly.owner_decision_note ? (
+                            <p className="mt-1 opacity-80">
+                              Your note: {latestEarly.owner_decision_note}
+                            </p>
                           ) : null}
                         </div>
                       ) : null}

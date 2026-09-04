@@ -125,6 +125,29 @@ export default async function handler(req: Request) {
       );
     }
 
+    // Second driver's-licence checkpoint (see api/create-checkout.ts).
+    {
+      const { data: lic } = await supabase
+        .from("profiles")
+        .select("license_expiry")
+        .eq("id", user.id)
+        .maybeSingle();
+      const licExpiry = (lic as { license_expiry: string | null } | null)
+        ?.license_expiry;
+      if (licExpiry) {
+        const end = new Date(`${licExpiry}T23:59:59`);
+        if (!Number.isNaN(end.getTime()) && end.getTime() < Date.now()) {
+          return jsonResponse(
+            {
+              error:
+                "Your driver's licence has expired. Renew it (Account & Identity) before paying the balance, or cancel this booking for a full refund.",
+            },
+            403,
+          );
+        }
+      }
+    }
+
     if (bookingRecord.status !== "downpayment_paid") {
       return jsonResponse(
         {
