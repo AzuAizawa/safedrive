@@ -9,6 +9,42 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Make the renter no-show refund share admin-configurable
+
+Decision from the arrival/handover process planning session: the renter
+no-show forfeit (renter never appears at pickup, lister cancels) stays at
+its current 50/50 split, but that number was hardcoded (`* 0.5`) in
+`api/booking-incident-action.ts` instead of reading the same
+admin-configurable setting the short-notice cancellation policy already
+uses.
+
+- `renter_no_show` now reads `refund_late_renter_percent_snapshot` off the
+  booking (the same per-booking snapshot column Terms 6.2 short-notice
+  cancellations already use), clamped 0-100 with a 50 default - so it's one
+  admin-configurable number for "renter bailed with notice" and "renter
+  never showed," and existing bookings keep the split they were created
+  under even if the platform-wide setting changes later. Every message that
+  referenced a literal "50%" (the refund note, the super-admin review
+  notification, the incident ticket, the renter's own notification) now
+  interpolates the actual percent.
+- `AdminPlatformSettingsPage.tsx`'s "Short-notice renter refund share"
+  setting hint now says it covers both cases, since one number now drives
+  both policies.
+- `ListerBookingsPage.tsx`'s two no-show advisory strings (before/after
+  filing the report) now read the live percent via
+  `fetchPlatformPricingSettings()` instead of a hardcoded "50%".
+- Fixed the same hardcoded "50%" in `PlatformAgreementPage.tsx`'s Renter
+  No-Show clause and two spots in
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md` to say "default 50%"/
+  reference the setting, matching how the Cancellation Policy paragraph
+  right above it is already phrased.
+- Verified clean: `tsc -b`, lint, `check:api`, `check:alignment`,
+  `check:booking-flow`, and a full production build all pass.
+- **Files:** `api/booking-incident-action.ts`,
+  `src/pages/admin/AdminPlatformSettingsPage.tsx`,
+  `src/pages/ListerBookingsPage.tsx`, `src/pages/PlatformAgreementPage.tsx`,
+  `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
 ## 2026-09-05 — Driver's licence resubmission: admin notification, status label (CHAPTER 35)
 
 Tester feedback: after resubmitting a driver's licence (an already-verified

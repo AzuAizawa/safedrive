@@ -123,7 +123,7 @@ const FIELDS: Record<
   },
   refund_late_renter_percent: {
     label: "Short-notice renter refund share",
-    hint: "Percent the renter gets back on a short-notice cancellation (0-100).",
+    hint: "Percent the renter gets back on a short-notice cancellation, or when the renter no-shows at pickup (0-100).",
     unit: "%",
     toDisplay: (s) => String(Math.round(s * 100) / 100),
     fromDisplay: (i) => {

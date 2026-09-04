@@ -156,9 +156,9 @@ export default function PlatformAgreementPage() {
               <li>
                 <strong>Renter No-Show:</strong> If the Lister completes their arrival check-in and the Renter fails
                 to appear within the 30-minute grace period, the Lister may cancel the booking through the app. The
-                Renter forfeits 50% of the amount captured as short-notice compensation to the Lister; the remaining
-                50% is refunded to the Renter only after SafeDrive support confirms the return method. The no-show is
-                recorded against the Renter.
+                Renter forfeits the same published share of the amount captured (default 50%) as short-notice
+                compensation to the Lister; the remainder is refunded to the Renter only after SafeDrive support
+                confirms the return method. The no-show is recorded against the Renter.
               </li>
             </ul>
           </section>

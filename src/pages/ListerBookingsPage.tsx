@@ -71,7 +71,9 @@ import {
 } from "@/lib/ratings";
 import {
   DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+  DEFAULT_REFUND_LATE_RENTER_PERCENT,
   fetchPlatformPolicyTimings,
+  fetchPlatformPricingSettings,
 } from "@/lib/platformSettings";
 
 const getBookingPickupMs = (booking: {
@@ -235,6 +237,9 @@ export default function ListerBookingsPage() {
   const [arrivalLeadHours, setArrivalLeadHours] = useState(
     DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
   );
+  const [noShowRefundPercent, setNoShowRefundPercent] = useState(
+    DEFAULT_REFUND_LATE_RENTER_PERCENT,
+  );
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedRenter, setSelectedRenter] = useState<ListerBooking | null>(
     null,
@@ -305,6 +310,9 @@ export default function ListerBookingsPage() {
     let active = true;
     void fetchPlatformPolicyTimings().then((timings) => {
       if (active) setArrivalLeadHours(timings.arrivalCheckinLeadHours);
+    });
+    void fetchPlatformPricingSettings().then((pricing) => {
+      if (active) setNoShowRefundPercent(pricing.refundLateRenterPercent);
     });
     return () => {
       active = false;
@@ -3038,7 +3046,7 @@ export default function ListerBookingsPage() {
                           </p>
                           <p className="mt-1">
                             {noShowState.canReport
-                              ? "Your arrival check-in is on file and the renter has not shown up. You can cancel this booking as a renter no-show — your reliability record is not affected and the renter keeps a 50% forfeit."
+                              ? `Your arrival check-in is on file and the renter has not shown up. You can cancel this booking as a renter no-show — your reliability record is not affected and the renter keeps a ${noShowRefundPercent}% forfeit.`
                               : `SafeDrive waits until ${noShowState.reportReadyAt.toLocaleTimeString([], {
                                   hour: "numeric",
                                   minute: "2-digit",
@@ -3659,7 +3667,7 @@ export default function ListerBookingsPage() {
       >
         <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
           {incidentTarget?.kind === "renter_no_show"
-            ? "The renter keeps a 50% forfeit; SafeDrive support releases the rest after confirming the return method. Your completion rate is not affected."
+            ? `The renter keeps a ${noShowRefundPercent}% forfeit; SafeDrive support releases the rest after confirming the return method. Your completion rate is not affected.`
             : "SafeDrive support contacts the renter and manages recovery. Keep any pickup evidence ready. You can take the car offline from My Vehicles while the case is open."}
         </div>
       </ConfirmDialog>

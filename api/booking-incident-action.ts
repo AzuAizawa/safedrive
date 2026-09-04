@@ -35,6 +35,7 @@ type BookingRow = {
   lister_arrived_at: string | null;
   renter_completed: boolean;
   owner_completed: boolean;
+  refund_late_renter_percent_snapshot: number | string | null;
   payments: PaymentRow[];
   cars: {
     plate_number: string;
@@ -44,6 +45,18 @@ type BookingRow = {
 
 const GRACE_MINUTES = 30;
 const REFUNDABLE = ["downpayment", "balance"];
+// Renter no-show forfeit share. Snapshot per booking on the same field the
+// short-notice cancellation policy uses (Terms 6.2) - one admin-configurable
+// number covers both "renter bailed with notice" and "renter never showed",
+// and existing bookings keep the split they were created under even if the
+// platform-wide setting changes later.
+const DEFAULT_REFUND_LATE_RENTER_PERCENT = 50;
+
+const clampNumber = (value: unknown, min: number, max: number, fallback: number) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return fallback;
+  return parsed;
+};
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -160,6 +173,7 @@ export default async function handler(req: Request) {
         id, car_id, renter_id, owner_id, status, dispute_status,
         start_date, end_date, pickup_time, dropoff_time,
         renter_arrived_at, lister_arrived_at, renter_completed, owner_completed,
+        refund_late_renter_percent_snapshot,
         payments ( payment_type, status, amount ),
         cars ( plate_number, car_models ( name, car_brands ( name ) ) )
       `,
@@ -372,7 +386,14 @@ export default async function handler(req: Request) {
       }
 
       const captured = capturedTotal(b);
-      const renterShare = Math.round(captured * 0.5 * 100) / 100;
+      const noShowRefundPercent = clampNumber(
+        b.refund_late_renter_percent_snapshot,
+        0,
+        100,
+        DEFAULT_REFUND_LATE_RENTER_PERCENT,
+      );
+      const renterShare =
+        Math.round(captured * (noShowRefundPercent / 100) * 100) / 100;
       let refundPaymentId: string | null = null;
       if (captured > 0) {
         const { data: refundRow } = await supabase
@@ -384,7 +405,7 @@ export default async function handler(req: Request) {
             status: "pending",
             payment_method: "manual_review",
             transaction_id: null,
-            notes: `Renter no-show at pickup. Policy: renter keeps 50% forfeit — refund PHP ${renterShare.toLocaleString()} of PHP ${captured.toLocaleString()} captured; the rest is lister compensation. Admin confirms the return method.`,
+            notes: `Renter no-show at pickup. Policy: renter keeps ${noShowRefundPercent}% forfeit — refund PHP ${renterShare.toLocaleString()} of PHP ${captured.toLocaleString()} captured; the rest is lister compensation. Admin confirms the return method.`,
           })
           .select("id")
           .single();
@@ -400,7 +421,7 @@ export default async function handler(req: Request) {
             superAdmins.map((admin) => ({
               user_id: admin.id,
               title: "Renter no-show refund to review",
-              message: `A renter no-showed. Confirm the 50% refund (PHP ${renterShare.toLocaleString()}) in Financial Reviews.`,
+              message: `A renter no-showed. Confirm the ${noShowRefundPercent}% refund (PHP ${renterShare.toLocaleString()}) in Financial Reviews.`,
               type: "warning",
               link: "/admin/financial-reviews?view=refunds",
             })),
@@ -431,7 +452,7 @@ export default async function handler(req: Request) {
         `Renter no-show at pickup: ${label(b)}`,
         `The lister checked in at pickup and the renter did not appear within the ${GRACE_MINUTES}-minute grace window. Booking cancelled. ${
           captured > 0
-            ? `PHP ${captured.toLocaleString()} was captured; policy releases a 50% refund (PHP ${renterShare.toLocaleString()}) to the renter after admin confirms the return method.`
+            ? `PHP ${captured.toLocaleString()} was captured; policy releases a ${noShowRefundPercent}% refund (PHP ${renterShare.toLocaleString()}) to the renter after admin confirms the return method.`
             : "No captured payment to refund."
         } ${note ?? ""}`.trim(),
       );
@@ -442,7 +463,7 @@ export default async function handler(req: Request) {
           title: "Booking cancelled — you did not show up",
           message:
             captured > 0
-              ? `You did not appear for ${label(b)} at pickup. Per the no-show policy you keep a 50% forfeit; SafeDrive support will release your ${renterShare.toLocaleString()} refund. This affects your completion rate.`
+              ? `You did not appear for ${label(b)} at pickup. Per the no-show policy you keep a ${noShowRefundPercent}% forfeit; SafeDrive support will release your ${renterShare.toLocaleString()} refund. This affects your completion rate.`
               : `You did not appear for ${label(b)} at pickup. This affects your completion rate.`,
           type: "error",
           link: "/my-bookings",
