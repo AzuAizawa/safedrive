@@ -9,6 +9,37 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Fixed the dashboard's mode badge showing the wrong side after a direct link into the other portal space
+
+Reported bug: the header sometimes read "Lister Mode" (badge, nav, colors)
+while the actual page on screen was a renter-only page (or vice versa).
+
+Root cause: `ModeRoute.tsx` (the backstop for bookmarked/emailed links into
+the *other* portal mode's space) renders the destination page immediately
+and flips `profiles.is_lister` in the background - it "never blocks" by
+design. `DashboardLayout`'s chrome read the same persisted flag directly, so
+for the whole async round-trip until the flip resolved, the badge/nav showed
+the *previous* mode while the page underneath already matched the
+destination's mode.
+
+- `DashboardLayout.tsx` now derives its display-only `isLister` from
+  `portalModeForPath(location.pathname)` first, falling back to the
+  persisted flag only on neutral routes - so the badge/nav match the current
+  route from the first paint, no waiting on the background flip.
+- The persisted flag (`profileIsLister`) stays authoritative for the actual
+  toggle action - `handleToggleMode`'s verification gate, the database
+  write, and the "Switch to Renter"/"Switch to Lister" button label all
+  still act on the real stored value, not the route-derived one.
+- Swept every other `profile.is_lister` read in the app (`ModeRoute.tsx`,
+  `VerificationPage.tsx`, `NotificationsPage.tsx`, `SubscriptionPlansPage.tsx`,
+  the legal-page "back" links) - all of them are either on neutral routes or
+  genuine eligibility/mode-switch-decision checks that correctly need the
+  true flag, not display. `DashboardLayout`'s badge was the only literal
+  "Lister Mode"/"Renter Mode" text in the codebase.
+
+Files: `src/components/DashboardLayout.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
 ## 2026-09-05 — Balance-payment deadline: a downpayment-only booking can no longer sit unpaid forever (CHAPTER 42)
 
 Raised while discussing the no-show refund policy: once a booking reached

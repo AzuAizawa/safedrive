@@ -514,7 +514,13 @@ const checks = [
   },
   {
     file: "src/components/DashboardLayout.tsx",
-    markers: ["Get Verified", "Switch to Renter"],
+    markers: [
+      "Get Verified",
+      "Switch to Renter",
+      "profileIsLister",
+      "portalModeForPath",
+      "routeMode ? routeMode ===",
+    ],
     absentMarkers: [
       // Merged into the InquiryWidget floating button - see that file's entry.
       "My Inquiries",

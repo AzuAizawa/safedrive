@@ -3,6 +3,7 @@ import { Outlet, NavLink, Link, useLocation, useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { recordSecurityEvent } from "@/lib/securityLog";
+import { portalModeForPath } from "@/lib/listerMode";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -42,7 +43,18 @@ export default function DashboardLayout() {
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
 
   const isVerified = profile?.verified_status === "verified";
-  const isLister = profile?.is_lister;
+  // The persisted account flag - authoritative for the toggle action itself
+  // (what clicking "Switch to X" actually writes), never for display.
+  const profileIsLister = Boolean(profile?.is_lister);
+  // Everything else (badge, nav, colors, logo target) prefers the CURRENT
+  // ROUTE's implied mode over the persisted flag. Direct URL / bookmarked /
+  // email-link entry into the other mode's space renders its page
+  // immediately (ModeRoute never blocks) and flips the flag in the
+  // background - without this, the chrome would show the stale mode for
+  // that whole async round-trip, mismatched against the page already on
+  // screen (e.g. the "Lister Mode" badge over a renter-only page).
+  const routeMode = portalModeForPath(location.pathname);
+  const isLister = routeMode ? routeMode === "lister" : profileIsLister;
   const logoTarget = isLister ? "/lister-bookings" : "/browse";
   const legalReturnTo =
     `${location.pathname}${location.search}${location.hash}` || logoTarget;
@@ -61,8 +73,11 @@ export default function DashboardLayout() {
   const handleToggleMode = useCallback(async () => {
     if (!user || !profile) return;
 
-    // Safety check: Prevent unverified users from switching to lister mode
-    if (!isVerified && !isLister) {
+    // Acts on the persisted flag, not the route-derived display value above -
+    // this writes the account's actual stored mode, so it must flip away
+    // from what is actually stored, not from whichever mode the current
+    // page happens to imply.
+    if (!isVerified && !profileIsLister) {
       toast.error("Identity Verification Required", {
         description:
           "Please complete your verification to unlock Lister features.",
@@ -73,12 +88,12 @@ export default function DashboardLayout() {
 
     const { error } = await supabase
       .from("profiles")
-      .update({ is_lister: !isLister })
+      .update({ is_lister: !profileIsLister })
       .eq("id", user.id);
     if (!error) {
       await refreshProfile();
       // Hard redirect to clear all react states and avoid routing missing pages (404/blank)
-      if (!isLister) {
+      if (!profileIsLister) {
         window.location.href = "/lister-bookings";
       } else {
         window.location.href = "/browse";
@@ -88,7 +103,7 @@ export default function DashboardLayout() {
         description: error.message || "Database error",
       });
     }
-  }, [user, profile, isLister, isVerified, refreshProfile, navigate]);
+  }, [user, profile, profileIsLister, isVerified, refreshProfile, navigate]);
 
   const handleUnlockListerMode = useCallback(() => {
     toast.info("How to unlock Lister Mode", {
@@ -366,7 +381,7 @@ export default function DashboardLayout() {
                         className="rounded-xl p-2.5 bg-primary/5 text-primary focus:text-primary"
                       >
                         <ArrowLeftRight className="mr-2 h-4 w-4" />
-                        {isLister ? "Switch to Renter" : "Switch to Lister"}
+                        {profileIsLister ? "Switch to Renter" : "Switch to Lister"}
                       </DropdownMenuItem>
                     ) : (
                       <DropdownMenuItem
@@ -498,7 +513,7 @@ export default function DashboardLayout() {
                     }}
                   >
                     <ArrowLeftRight className="w-4 h-4" />
-                    {isLister ? "Switch to Renter" : "Switch to Lister"}
+                    {profileIsLister ? "Switch to Renter" : "Switch to Lister"}
                   </Button>
                 </div>
               ) : (
