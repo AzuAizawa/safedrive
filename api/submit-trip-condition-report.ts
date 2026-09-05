@@ -9,24 +9,16 @@ type Payload = {
   fuelOrBatteryLevel?: number | null;
   damageNotes?: string;
   evidenceWaived?: boolean;
-  latitude?: number | null;
-  longitude?: number | null;
-  locationAccuracyMeters?: number | null;
-  locationConsent?: boolean;
   photos?: Array<{ category?: string; storagePath?: string; provenance?: unknown }>;
 };
 
-const requiredCategories = ["front", "back", "odometer", "fuel_or_battery"];
-const optionalCategories = ["left", "right", "interior", "damage"];
-const allowedCategories = new Set([...requiredCategories, ...optionalCategories]);
-
-// The lister's required pickup report uses free-form live-camera photos
-// instead of the fixed categories above (see CHAPTER 36). At most 4 rows can
-// ever pass this filter since only 4 category values exist here - no
-// separate max-count check is needed. Return reports and the renter's
-// optional pickup report are unaffected and keep the categories above.
-const LIVE_PICKUP_CATEGORIES = ["live_photo_1", "live_photo_2", "live_photo_3", "live_photo_4"];
-const livePickupCategorySet = new Set(LIVE_PICKUP_CATEGORIES);
+// Every trip condition report - pickup or return, either role - uses
+// free-form live-camera photos (process-planning redesign, retires the old
+// fixed front/back/odometer/fuel_or_battery category system entirely). At
+// most 4 rows can ever pass this filter since only 4 category values exist
+// here - no separate max-count check is needed.
+const LIVE_PHOTO_CATEGORIES = ["live_photo_1", "live_photo_2", "live_photo_3", "live_photo_4"];
+const livePhotoCategorySet = new Set(LIVE_PHOTO_CATEGORIES);
 
 const PROVENANCE_STATUS_VALUES = new Set(["unknown", "credential_present", "credential_missing", "credential_invalid"]);
 const REVIEW_FLAG_VALUES = new Set(["none", "needs_admin_review", "approved_after_review", "rejected_after_review"]);
@@ -111,16 +103,11 @@ export default async function handler(req: Request) {
       return respond({ error: "Return evidence is accepted only after both parties complete arrival check-in" }, 409);
     }
 
-    // Photos are required only for the party that owns the evidence at each
-    // phase: the lister at pickup ("before" state) and the renter at return
-    // ("after" state). The other side's report is optional but encouraged.
-    const photosRequiredForRole =
-      (payload.phase === "pickup" && reporterRole === "lister") ||
-      (payload.phase === "return" && reporterRole === "renter");
-    // Only the lister's required pickup report uses free-form live-camera
-    // photos - return (either role) and the renter's optional pickup report
-    // keep the fixed-category system below unchanged.
-    const isLiveLisPickup = payload.phase === "pickup" && reporterRole === "lister";
+    // The lister carries the evidentiary burden at both ends of the trip
+    // (process-planning redesign): required at pickup AND at return. The
+    // renter's own report at either phase is optional - their own record for
+    // their own protection, never a blocker.
+    const photosRequiredForRole = reporterRole === "lister";
 
     if (payload.phase === "return") {
       const { data: pickupReport, error: pickupReportError } = await supabase
@@ -144,36 +131,17 @@ export default async function handler(req: Request) {
       }
     }
 
-    const activeAllowedCategories = isLiveLisPickup ? livePickupCategorySet : allowedCategories;
-    const photos = (payload.photos ?? []).filter((photo): photo is { category: string; storagePath: string; provenance?: unknown } => Boolean(photo.category && photo.storagePath && activeAllowedCategories.has(photo.category)));
+    const photos = (payload.photos ?? []).filter((photo): photo is { category: string; storagePath: string; provenance?: unknown } => Boolean(photo.category && photo.storagePath && livePhotoCategorySet.has(photo.category)));
     const categories = new Set(photos.map((photo) => photo.category));
-    const missingRequired = isLiveLisPickup
-      ? (categories.size === 0 ? ["live_photo"] : [])
-      : requiredCategories.filter((category) => !categories.has(category));
+    const missingRequired = categories.size === 0 ? ["live_photo"] : [];
     if (missingRequired.length > 0 && photosRequiredForRole && !evidenceWaived) {
       return respond(
-        {
-          error: isLiveLisPickup
-            ? "At least one live-captured vehicle photo is required (or submit with an explicit waiver)."
-            : "Front, back, odometer, and fuel/battery photos are required (or submit with an explicit waiver).",
-        },
+        { error: "At least one live-captured vehicle photo is required (or submit with an explicit waiver)." },
         400,
       );
     }
     const waivedThisReport = photosRequiredForRole && missingRequired.length > 0 && evidenceWaived;
     if (photos.some((photo) => !photo.storagePath.startsWith(`${booking.id}/${user.id}/`))) return respond({ error: "Invalid evidence path" }, 400);
-    if (payload.locationConsent) {
-      const latitude = Number(payload.latitude);
-      const longitude = Number(payload.longitude);
-      const accuracy = Number(payload.locationAccuracyMeters);
-      if (
-        !Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
-        !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
-        !Number.isFinite(accuracy) || accuracy < 0
-      ) {
-        return respond({ error: "Optional location evidence is invalid" }, 400);
-      }
-    }
 
     const evidenceExists = await Promise.all(photos.map(async (photo) => {
       const lastSlash = photo.storagePath.lastIndexOf("/");
@@ -200,10 +168,10 @@ export default async function handler(req: Request) {
       fuel_or_battery_level: level,
       evidence_waived: waivedThisReport,
       damage_notes: String(payload.damageNotes || "").trim().slice(0, 3000),
-      latitude: payload.locationConsent ? payload.latitude ?? null : null,
-      longitude: payload.locationConsent ? payload.longitude ?? null : null,
-      location_accuracy_meters: payload.locationConsent ? payload.locationAccuracyMeters ?? null : null,
-      location_consent: Boolean(payload.locationConsent),
+      latitude: null,
+      longitude: null,
+      location_accuracy_meters: null,
+      location_consent: false,
     }).select("id, submitted_at").single();
     if (reportError?.code === "23505") {
       return respond({ error: "You already submitted this report" }, 409);
@@ -231,7 +199,7 @@ export default async function handler(req: Request) {
         throw photoError;
       }
     }
-    await supabase.from("audit_log").insert({ user_id: user.id, action: "trip_condition_report_submitted", entity_type: "booking", entity_id: booking.id, details: { report_id: report.id, phase: payload.phase, reporter_role: reporterRole, photo_categories: [...categories], photos_required: photosRequiredForRole, evidence_waived: waivedThisReport, missing_photo_categories: missingRequired, location_supplied: Boolean(payload.locationConsent) } });
+    await supabase.from("audit_log").insert({ user_id: user.id, action: "trip_condition_report_submitted", entity_type: "booking", entity_id: booking.id, details: { report_id: report.id, phase: payload.phase, reporter_role: reporterRole, photo_categories: [...categories], photos_required: photosRequiredForRole, evidence_waived: waivedThisReport } });
     return respond({ success: true, reportId: report.id, submittedAt: report.submitted_at }, 201);
   } catch (error) {
     console.error("Trip condition report failed", error);

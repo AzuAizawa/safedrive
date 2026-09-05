@@ -9,6 +9,63 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Handover/return redesign, backend (superseding Phase 3's gate)
+
+Tester feedback after using the live-camera pickup flow and sequential
+return handover: the required-photo asymmetry and the renter-blocks-owner /
+owner-blocks-renter completion gates didn't match the intended process. This
+is the backend half of a larger redesign; the matching dashboard UI
+(MyBookingsPage/ListerBookingsPage trip-progress redesign, "confirm renter
+is here" override, Report Place Limit consolidation, Transmission lock, a
+photo-evidence viewer) is the next, separate piece of work.
+
+- **Arrival is unconditional again.** Removed the CHAPTER-36 gate that
+  required the lister's pickup report to already be filed before their own
+  `arrive` call succeeded - arrival is now a quick presence check for both
+  sides, full stop. Vehicle verification (live photos) and handover
+  confirmation are separate, later steps, enforced at `complete` instead
+  (already the existing behavior there, now the *only* place it's checked).
+- **New owner-only override:** `arrive` accepts `confirmOnBehalfOfRenter`,
+  letting the lister mark the renter's arrival themselves (e.g. renter's
+  phone is dead) instead of only the renter being able to tap it.
+- **The lister now carries the evidentiary burden at both ends of the
+  trip**, not just pickup: `complete` requires the owner to have filed
+  *both* a pickup and a return condition report with at least one live
+  photo each. The renter's own report at either phase is fully optional -
+  their own record for their own protection, never a blocker.
+- **Removed the sequential completion gate added for Phase 3.** The
+  renter's `complete` no longer waits on `owner_completed`, and the
+  owner's `complete` no longer waits on `renter_return_arrived_at` /
+  `renter_completed`. The owner's completion (backed by their required
+  live-photo reports) finalizes the trip on its own, with or without the
+  renter's participation; the renter's own completion is now a pure,
+  non-blocking courtesy record. Removed the auto-confirmation cron branch
+  in `api/expire-booking-deadlines.ts` that existed only to un-stick the
+  gate this replaces - it's no longer reachable.
+- **`return_arrive` (the renter's "I've returned the car" announcement)
+  is now purely informational** - it never blocks anything - and gained
+  its own arrival-style time window (opens the same configured number of
+  hours before the scheduled return instant as pickup does, respecting an
+  approved early return's updated `end_date`).
+- **Retired the fixed front/back/left/right/interior/odometer/fuel_or_battery
+  category system entirely.** Every trip condition report - pickup or
+  return, either role - now uses the same free-form 1-4 live-camera photos
+  introduced for the lister's pickup report in CHAPTER 36.
+  `hasRequiredTripPhotos` no longer branches on phase.
+- **Removed optional location capture** from trip condition reports
+  (`TripConditionReportPage.tsx` and `api/submit-trip-condition-report.ts`)
+  per this decision; `TripConditionReportPage.tsx` also gained a Back
+  button and simplified to a single unified live-camera flow (no more
+  fixed-category branch).
+- No new SQL was needed - every field this reuses already exists from
+  CHAPTER 36-39.
+- Verified clean: `tsc -b`, lint, `check:api`, `check:alignment`,
+  `check:booking-flow` (markers updated for the retired fixed-category
+  system), and a full production build all pass.
+- **Files:** `api/booking-action.ts`, `api/submit-trip-condition-report.ts`,
+  `api/expire-booking-deadlines.ts`, `src/pages/TripConditionReportPage.tsx`,
+  `scripts/booking-flow-smoke-check.mjs`.
+
 ## 2026-09-05 — Process-planning Phase 3: sequential return handover (CHAPTER 39)
 
 Completion at return was fully symmetric - either party could tap "Finish

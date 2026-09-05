@@ -31,6 +31,10 @@ type BookingActionPayload = {
   // damaged and an incident case is open: the cancellation is still recorded
   // but excluded from the completion rate and the auto-pause strike count.
   waiveStrike?: boolean;
+  // Owner-only override on the "arrive" action: lets the lister confirm the
+  // renter's arrival on their behalf (e.g. renter's phone is dead) instead of
+  // waiting for the renter to tap it themselves.
+  confirmOnBehalfOfRenter?: boolean;
 };
 
 type BookingRecord = {
@@ -40,7 +44,9 @@ type BookingRecord = {
   car_id: string;
   status: string;
   start_date: string;
+  end_date: string;
   pickup_time: string | null;
+  dropoff_time: string | null;
   commission: number | string;
   total_price: number | string;
   refund_full_hours_snapshot: number | string | null;
@@ -108,42 +114,31 @@ const isOwner = (booking: BookingRecord, userId: string) =>
 const isRenter = (booking: BookingRecord, userId: string) =>
   booking.renter_id === userId;
 
-const REQUIRED_TRIP_PHOTO_CATEGORIES = [
-  "front",
-  "back",
-  "odometer",
-  "fuel_or_battery",
-] as const;
-
-// The lister's required pickup report uses free-form live-camera photos
-// (CHAPTER 36) instead of the fixed categories above - at least one of these
-// 4 generic slots satisfies it. Return reports keep the fixed-category rule.
-const LIVE_PICKUP_PHOTO_CATEGORIES = [
+// Every trip condition report - pickup or return, either role - now uses
+// free-form live-camera photos (process-planning redesign): at least one of
+// these 4 generic slots satisfies the requirement. The fixed front/back/
+// odometer/fuel_or_battery category system is retired.
+const LIVE_PHOTO_CATEGORIES = [
   "live_photo_1",
   "live_photo_2",
   "live_photo_3",
   "live_photo_4",
 ] as const;
 
-// `phase` must only ever be "pickup" when checking the LISTER's own report -
-// never the renter's optional pickup report - since the live-camera rule only
-// applies to the lister's required submission. Both current call sites honor
-// this; keep it true if a third call site is ever added.
 const hasRequiredTripPhotos = (
   report: {
     trip_condition_photos?: Array<{ category: string }> | null;
     evidence_waived?: boolean | null;
   },
-  phase: "pickup" | "return",
+  // Kept for call-site clarity even though the check no longer branches on
+  // it - both phases use the same live-photo rule.
+  _phase: "pickup" | "return",
 ) => {
   if (report.evidence_waived) return true;
   const categories = new Set(
     (report.trip_condition_photos ?? []).map((photo) => photo.category),
   );
-  if (phase === "pickup") {
-    return LIVE_PICKUP_PHOTO_CATEGORIES.some((category) => categories.has(category));
-  }
-  return REQUIRED_TRIP_PHOTO_CATEGORIES.every((category) => categories.has(category));
+  return LIVE_PHOTO_CATEGORIES.some((category) => categories.has(category));
 };
 const REFUNDABLE_BOOKING_PAYMENT_TYPES = ["downpayment", "balance"];
 
@@ -252,6 +247,22 @@ const getBookingPickupMs = (booking: BookingRecord) => {
     .map((part) => Number(part));
   if (!year || !month || !day) return null;
   // start_date is a plain calendar date; treat pickup as Manila local time.
+  const asUtc = Date.UTC(year, month - 1, day, hour || 0, minute || 0);
+  return asUtc - 8 * 60 * 60 * 1000;
+};
+
+// Same Manila-correct pattern as getBookingPickupMs, for the scheduled
+// return instant. end_date already reflects an approved early return (the
+// approval flow moves it earlier), so no separate early-return handling is
+// needed here.
+const getBookingDropoffMs = (booking: BookingRecord) => {
+  const [year, month, day] = (booking.end_date || "")
+    .split("-")
+    .map((part) => Number(part));
+  const [hour, minute] = (booking.dropoff_time || "18:00")
+    .split(":")
+    .map((part) => Number(part));
+  if (!year || !month || !day) return null;
   const asUtc = Date.UTC(year, month - 1, day, hour || 0, minute || 0);
   return asUtc - 8 * 60 * 60 * 1000;
 };
@@ -453,7 +464,9 @@ export default async function handler(req: Request) {
         car_id,
         status,
         start_date,
+        end_date,
         pickup_time,
+        dropoff_time,
         commission,
         total_price,
         refund_full_hours_snapshot,
@@ -1065,30 +1078,17 @@ export default async function handler(req: Request) {
         }
       }
 
-      // The lister owns the "before" evidence, so only the lister must file a
-      // pickup condition report before the handover. The renter's pickup report
-      // is optional; the renter just confirms they received the car.
-      if (owner) {
-        const { data: pickupReport, error: pickupReportError } = await supabase
-          .from("trip_condition_reports")
-          .select("id, evidence_waived, trip_condition_photos(category)")
-          .eq("booking_id", bookingRecord.id)
-          .eq("reporter_id", user.id)
-          .eq("phase", "pickup")
-          .maybeSingle();
-        if (pickupReportError) throw pickupReportError;
-        if (!pickupReport || !hasRequiredTripPhotos(pickupReport, "pickup")) {
-          return jsonResponse(
-            { error: "Submit your pickup condition report and photos before confirming the handover" },
-            409,
-          );
-        }
-      }
+      // Arrival is a quick, unconditional presence check for both sides now -
+      // vehicle verification (live photos) and handover confirmation are
+      // separate steps that happen afterward, checked at "complete" instead
+      // of gating arrival itself.
+      const onBehalfOfRenter = owner && payload.confirmOnBehalfOfRenter === true;
 
       const arrivalTime = new Date().toISOString();
       const arrivalLocation = normalizeArrivalLocation(payload.arrivalLocation);
       const updatePayload: Record<string, string | number | null> = {};
-      const ownArrivalField = renter ? "renter_arrived_at" : "lister_arrived_at";
+      const ownArrivalField =
+        renter || onBehalfOfRenter ? "renter_arrived_at" : "lister_arrived_at";
       const addLocationEvidence = (prefix: "renter" | "lister") => {
         if (!arrivalLocation) return;
         updatePayload[`${prefix}_arrival_latitude`] = arrivalLocation.latitude;
@@ -1099,16 +1099,18 @@ export default async function handler(req: Request) {
           arrivalLocation.capturedAt;
       };
 
-      if (renter) {
+      if (renter || onBehalfOfRenter) {
         if (bookingRecord.renter_arrived_at) {
           return jsonResponse(
-            { error: "Your arrival has already been recorded" },
+            { error: "Renter arrival has already been recorded" },
             409,
           );
         }
         updatePayload.renter_arrived_at = arrivalTime;
-        updatePayload.renter_arrival_photo_url = payload.arrivalPhotoUrl ?? null;
-        addLocationEvidence("renter");
+        if (renter) {
+          updatePayload.renter_arrival_photo_url = payload.arrivalPhotoUrl ?? null;
+          addLocationEvidence("renter");
+        }
         if (bookingRecord.lister_arrived_at && bookingRecord.status === "fully_paid") {
           nextStatus = "active";
           updatePayload.status = nextStatus;
@@ -1213,7 +1215,11 @@ export default async function handler(req: Request) {
 
       await supabase.from("audit_log").insert({
         user_id: user.id,
-        action: renter ? "renter_arrived_booking" : "owner_arrived_booking",
+        action: onBehalfOfRenter
+          ? "owner_confirmed_renter_arrived_booking"
+          : renter
+            ? "renter_arrived_booking"
+            : "owner_arrived_booking",
         entity_type: "booking",
         entity_id: bookingRecord.id,
         details: {
@@ -1227,19 +1233,21 @@ export default async function handler(req: Request) {
         },
       });
 
-      const counterpartyId = renter
+      const counterpartyId = renter || onBehalfOfRenter
         ? bookingRecord.owner_id
         : bookingRecord.renter_id;
 
-      await supabase.from("notifications").insert({
-        user_id: counterpartyId,
-        title: renter ? "Renter Confirmed Pickup" : "Handover Confirmed by Lister",
-        message: renter
-          ? `The renter confirmed they have the car for ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`
-          : `The lister confirmed the handover for ${getVehicleLabel(bookingRecord)}. Open the booking and tap "Confirm - I have the car" to start your trip.`,
-        type: "info",
-        link: renter ? "/lister-bookings" : "/my-bookings",
-      });
+      if (!onBehalfOfRenter) {
+        await supabase.from("notifications").insert({
+          user_id: counterpartyId,
+          title: renter ? "Renter Confirmed Pickup" : "Handover Confirmed by Lister",
+          message: renter
+            ? `The renter confirmed they have the car for ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`
+            : `The lister confirmed the handover for ${getVehicleLabel(bookingRecord)}. Open the booking and tap "Confirm - I have the car" to start your trip.`,
+          type: "info",
+          link: renter ? "/lister-bookings" : "/my-bookings",
+        });
+      }
 
       if (activatedByThisRequest) {
         await supabase.from("notifications").insert([
@@ -1269,9 +1277,10 @@ export default async function handler(req: Request) {
     }
 
     // The renter's lightweight "I've returned the car" announcement at the
-    // return point. Distinct from "complete": this just signals the lister to
-    // inspect the car, and gates the lister's own completion below (CHAPTER
-    // 39) so the lister can't confirm receipt of a car that hasn't shown up.
+    // return point. Purely an optional courtesy notification to the lister -
+    // it does not gate anything below. The lister can complete the trip
+    // (backed by their own required return-phase live-photo report) with or
+    // without the renter ever calling this.
     if (payload.action === "return_arrive") {
       if (!renter) {
         return jsonResponse(
@@ -1290,6 +1299,25 @@ export default async function handler(req: Request) {
           { error: "You already confirmed the car has been returned" },
           409,
         );
+      }
+
+      // Mirrors the pickup arrival-check-in window: opens the same
+      // configured number of hours before the scheduled return instant, so a
+      // renter can't prematurely announce a return far ahead of the agreed
+      // time (that's what "request an early return" is for instead).
+      // end_date/dropoff_time already reflect an approved early return.
+      const dropoffMs = getBookingDropoffMs(bookingRecord);
+      if (dropoffMs !== null) {
+        const leadHours = await fetchArrivalCheckinLeadHours(supabase);
+        const opensAtMs = dropoffMs - leadHours * 60 * 60 * 1000;
+        if (Date.now() < opensAtMs) {
+          return jsonResponse(
+            {
+              error: `You can confirm the return ${leadHours} hour${leadHours === 1 ? "" : "s"} before the agreed return time (from ${formatManilaStamp(opensAtMs)}). Returning earlier than that? Use "Request early return" instead.`,
+            },
+            409,
+          );
+        }
       }
 
       const returnArrivalTime = new Date().toISOString();
@@ -1395,22 +1423,27 @@ export default async function handler(req: Request) {
         }
         throw conditionReportError;
       }
-      // Asymmetric evidence: the lister must have filed the pickup ("before")
-      // report; the renter must have filed the return ("after") report. The
-      // other phase is optional for each side.
-      const requiredReportPhase = renter ? "return" : "pickup";
-      const requiredReport = (conditionReports ?? []).find(
-        (report) => report.phase === requiredReportPhase,
-      );
-      if (!requiredReport || !hasRequiredTripPhotos(requiredReport, requiredReportPhase)) {
-        return jsonResponse(
-          {
-            error: renter
-              ? "Submit your return condition report with photos before finishing the trip."
-              : "Submit your pickup condition report with photos before finishing the trip.",
-          },
-          409,
-        );
+      // The lister carries the evidentiary burden at both ends of the trip
+      // now (process-planning redesign): a required live-photo report at
+      // pickup AND at return. The renter's own reports at either phase are
+      // optional - their own record for their own protection, never a
+      // blocker. The renter can complete any time after arrival with no
+      // report requirement at all.
+      if (owner) {
+        const pickupReport = (conditionReports ?? []).find((r) => r.phase === "pickup");
+        if (!pickupReport || !hasRequiredTripPhotos(pickupReport, "pickup")) {
+          return jsonResponse(
+            { error: "Submit your pickup condition report with live photos before finishing the trip." },
+            409,
+          );
+        }
+        const returnReport = (conditionReports ?? []).find((r) => r.phase === "return");
+        if (!returnReport || !hasRequiredTripPhotos(returnReport, "return")) {
+          return jsonResponse(
+            { error: "Submit your return condition report with live photos before confirming receipt." },
+            409,
+          );
+        }
       }
 
       const updatePayload: Record<string, boolean | string> = {};
@@ -1430,23 +1463,14 @@ export default async function handler(req: Request) {
             409,
           );
         }
-        // Sequential handover (CHAPTER 39): the renter's final confirmation
-        // only unlocks after the lister has confirmed receiving the car back
-        // - this is the renter's own record that the lister acknowledged the
-        // return, not just the lister's word alone.
-        if (!bookingRecord.owner_completed) {
-          return jsonResponse(
-            {
-              error:
-                'Wait for the lister to confirm they received the car ("Confirm - Car Received") before finishing your side.',
-            },
-            409,
-          );
-        }
+        // The renter's own completion is an optional courtesy record now -
+        // it never blocks, and never blocks on the lister either.
         updatePayload.renter_completed = true;
         updatePayload.renter_completed_at = completionStamp;
-        nextStatus = "completed";
-        updatePayload.status = nextStatus;
+        if (bookingRecord.owner_completed) {
+          nextStatus = "completed";
+          updatePayload.status = nextStatus;
+        }
       } else if (owner) {
         if (!bookingRecord.lister_arrived_at) {
           return jsonResponse(
@@ -1460,26 +1484,13 @@ export default async function handler(req: Request) {
             409,
           );
         }
-        // Sequential handover (CHAPTER 39): the lister can't confirm
-        // receiving a car that hasn't shown up yet. renter_completed is an
-        // OR-fallback for bookings that reached renter_completed under the
-        // pre-CHAPTER-39 symmetric rule (no renter_return_arrived_at exists
-        // on those rows) so an in-flight booking never gets stuck.
-        if (!bookingRecord.renter_return_arrived_at && !bookingRecord.renter_completed) {
-          return jsonResponse(
-            {
-              error:
-                'Wait for the renter to confirm they\'ve returned the car before confirming receipt.',
-            },
-            409,
-          );
-        }
         updatePayload.owner_completed = true;
         updatePayload.owner_completed_at = completionStamp;
-        if (bookingRecord.renter_completed) {
-          nextStatus = "completed";
-          updatePayload.status = nextStatus;
-        }
+        // The lister's own completion - backed by their required pickup AND
+        // return live-photo reports - is what finalizes the trip on its own.
+        // The renter's participation at return is optional and never a gate.
+        nextStatus = "completed";
+        updatePayload.status = nextStatus;
       }
 
       const { data: bookingStateChanged, error: updateError } = await supabase

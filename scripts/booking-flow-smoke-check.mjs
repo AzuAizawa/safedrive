@@ -112,7 +112,6 @@ const checks = [
     file: "api/expire-booking-deadlines.ts",
     markers: [
       "owner_completion_auto_after_timeout",
-      "owner_return_confirmation_auto_after_timeout",
       "lister_completion_timeout_hours",
       "runBookingCompletionSideEffects",
     ],
@@ -120,47 +119,43 @@ const checks = [
   {
     file: "api/submit-trip-condition-report.ts",
     markers: [
-      'requiredCategories = ["front", "back", "odometer", "fuel_or_battery"]',
       "evidenceWaived",
       "optionalReading",
-      "missing_photo_categories",
       "photosRequiredForRole",
-      'payload.phase === "pickup" && reporterRole === "lister"',
-      "LIVE_PICKUP_CATEGORIES",
+      "LIVE_PHOTO_CATEGORIES",
       "sanitizeProvenance",
+      'reporterRole === "lister"',
     ],
     absentMarkers: [
       '"front", "back", "left", "right", "interior", "odometer", "fuel_or_battery"',
+      'requiredCategories = ["front", "back", "odometer", "fuel_or_battery"]',
     ],
   },
   {
     file: "api/booking-action.ts",
     markers: [
       "if (report.evidence_waived) return true;",
-      "id, evidence_waived, trip_condition_photos(category)",
-      "LIVE_PICKUP_PHOTO_CATEGORIES",
+      "id, phase, evidence_waived, trip_condition_photos(category)",
+      "LIVE_PHOTO_CATEGORIES",
     ],
   },
   {
     file: "src/pages/TripConditionReportPage.tsx",
     markers: [
-      "optionalPhotos",
-      "Submit without the",
+      "Submit without a vehicle photo",
       "evidenceWaived",
       "photosRequired",
       "This report is optional for you",
       "getUserMedia",
       "live_photo_",
-      "isLiveLisPickup",
     ],
+    absentMarkers: ["isLiveLisPickup", "optionalPhotos"],
   },
   {
     file: "api/booking-action.ts",
     markers: [
       "Handover Confirmed by Lister",
-      "The lister owns the \"before\" evidence",
-      "Asymmetric evidence: the lister must have filed the pickup",
-      'const requiredReportPhase = renter ? "return" : "pickup"',
+      "confirmOnBehalfOfRenter",
       "return_arrive",
       "renter_return_arrived_at",
     ],
