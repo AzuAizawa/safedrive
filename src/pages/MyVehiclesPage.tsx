@@ -378,9 +378,7 @@ export default function MyVehiclesPage() {
   });
   const [carImages, setCarImages] = useState<File[]>([]);
   const [orFile, setOrFile] = useState<File | null>(null);
-  const [orBackFile, setOrBackFile] = useState<File | null>(null);
   const [crFile, setCrFile] = useState<File | null>(null);
-  const [crBackFile, setCrBackFile] = useState<File | null>(null);
   const [ctplFile, setCtplFile] = useState<File | null>(null);
   const [comprehensiveInsuranceFile, setComprehensiveInsuranceFile] = useState<File | null>(null);
   const [rentalAgreementFile, setRentalAgreementFile] = useState<File | null>(
@@ -640,8 +638,8 @@ export default function MyVehiclesPage() {
       return;
     }
 
-    if (!orFile || !orBackFile || !crFile || !crBackFile) {
-      toast.error("OR and CR front/back photos are required.");
+    if (!orFile || !crFile) {
+      toast.error("OR and CR photos are required.");
       return;
     }
 
@@ -725,10 +723,8 @@ export default function MyVehiclesPage() {
       }
 
       const vehicleDocuments = [
-        { file: orFile, type: "or_front", label: "OR front" },
-        { file: orBackFile, type: "or_back", label: "OR back" },
-        { file: crFile, type: "cr_front", label: "CR front" },
-        { file: crBackFile, type: "cr_back", label: "CR back" },
+        { file: orFile, type: "or", label: "OR" },
+        { file: crFile, type: "cr", label: "CR" },
         { file: ctplFile, type: "ctpl", label: "CTPL" },
         { file: comprehensiveInsuranceFile, type: "comprehensive_insurance", label: "comprehensive insurance" },
       ];
@@ -796,9 +792,7 @@ export default function MyVehiclesPage() {
       });
       setCarImages([]);
       setOrFile(null);
-      setOrBackFile(null);
       setCrFile(null);
-      setCrBackFile(null);
       setCtplFile(null);
       setComprehensiveInsuranceFile(null);
       setRentalAgreementFile(null);
@@ -1767,12 +1761,12 @@ export default function MyVehiclesPage() {
 
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Original Receipt (OR) Front *</Label>
+                  <Label>Official Receipt (OR) *</Label>
                   <div className="flex gap-4 items-start">
                     <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
                       <Upload className="w-5 h-5 text-muted-foreground mb-1" />
                       <span className="text-xs text-muted-foreground text-center px-1">
-                        {orFile ? "Change OR front" : "Upload OR front"}
+                        {orFile ? "Change OR" : "Upload OR"}
                       </span>
                       <input
                         type="file"
@@ -1802,47 +1796,12 @@ export default function MyVehiclesPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Original Receipt (OR) Back *</Label>
+                  <Label>Certificate of Registration (CR) *</Label>
                   <div className="flex gap-4 items-start">
                     <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
                       <Upload className="w-5 h-5 text-muted-foreground mb-1" />
                       <span className="text-xs text-muted-foreground text-center px-1">
-                        {orBackFile ? "Change OR back" : "Upload OR back"}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          if (!file) {
-                            setOrBackFile(null);
-                            return;
-                          }
-                          if (validateUploadFile(file, ALLOWED_IMAGE_TYPES, "OR back document")) {
-                            setOrBackFile(file);
-                          } else {
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                    </label>
-                    {orBackFile && (
-                      <div className="flex items-center gap-2 p-3 bg-secondary rounded-lg border">
-                        <CheckCircle className="w-5 h-5 text-green-500" />
-                        <span className="text-sm font-medium">{orBackFile.name}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Certificate of Registration (CR) Front *</Label>
-                  <div className="flex gap-4 items-start">
-                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
-                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
-                      <span className="text-xs text-muted-foreground text-center px-1">
-                        {crFile ? "Change CR front" : "Upload CR front"}
+                        {crFile ? "Change CR" : "Upload CR"}
                       </span>
                       <input
                         type="file"
@@ -1866,41 +1825,6 @@ export default function MyVehiclesPage() {
                       <div className="flex items-center gap-2 p-3 bg-secondary rounded-lg border">
                         <CheckCircle className="w-5 h-5 text-green-500" />
                         <span className="text-sm font-medium">{crFile.name}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Certificate of Registration (CR) Back *</Label>
-                  <div className="flex gap-4 items-start">
-                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
-                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
-                      <span className="text-xs text-muted-foreground text-center px-1">
-                        {crBackFile ? "Change CR back" : "Upload CR back"}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          if (!file) {
-                            setCrBackFile(null);
-                            return;
-                          }
-                          if (validateUploadFile(file, ALLOWED_IMAGE_TYPES, "CR back document")) {
-                            setCrBackFile(file);
-                          } else {
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                    </label>
-                    {crBackFile && (
-                      <div className="flex items-center gap-2 p-3 bg-secondary rounded-lg border">
-                        <CheckCircle className="w-5 h-5 text-green-500" />
-                        <span className="text-sm font-medium">{crBackFile.name}</span>
                       </div>
                     )}
                   </div>

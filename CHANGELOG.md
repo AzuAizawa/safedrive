@@ -9,6 +9,26 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Add Vehicle: OR/CR are single-page documents, drop the front/back split
+
+Reported bug: Add Vehicle asked for "OR front", "OR back", "CR front", and
+"CR back" - four uploads. Both an Official Receipt and a Certificate of
+Registration are single-page documents with no back page, so the split was
+never meaningful and just made listing harder.
+
+- `MyVehiclesPage.tsx` now asks for one OR photo and one CR photo. Removed
+  `orBackFile`/`crBackFile` state, the two upload widgets, and the
+  now-satisfied validation for them.
+- Uploaded document types changed from `or_front`/`or_back`/`cr_front`/`cr_back`
+  to plain `or`/`cr`. No SQL migration needed - `car_documents.document_type`
+  has no CHECK constraint - and `AdminVehicleApprovalPage.tsx` already
+  recognized bare `or`/`cr` alongside the legacy `_front`/`_back` values (kept
+  as-is there, unchanged, so a car listed before this fix still displays its
+  documents correctly).
+
+Files: `src/pages/MyVehiclesPage.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
 ## 2026-09-05 — Booking Conversations replace "Ask the lister"; My Inquiries folded into the floating widget (CHAPTER 41)
 
 Triggered by a real reported bug: the `/support` "Lister Messages" tab was a
