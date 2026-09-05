@@ -9,6 +9,31 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Car photo not showing on some listings (stale carousel index)
+
+Reported: opening a car's detail page sometimes showed the no-photo
+placeholder even though the car does have photos. Checked the actual data
+first (live DB + direct storage fetches for every car and every image row) -
+every listing's photos exist and load fine at the storage level, so this
+wasn't a data or storage bug.
+
+The real cause: `CarDetailPage.tsx` keeps `currentImageIndex` (which photo
+the carousel is on) in component state, but navigating from one car's page
+straight to another car's page - without a full reload - reuses the same
+page instance, so the index never reset. Landing on a car with fewer photos
+than the index you were previously on left `images[currentImageIndex]`
+pointing past the end of the new car's photo array, so `currentImage` was
+`undefined` and the placeholder rendered instead - even for a car with
+photos.
+
+- `currentImageIndex` now resets to `0` whenever the `id` route param
+  changes.
+- Defensive fallback: `currentImage` now falls back to `images[0]` if the
+  index is ever out of range, so this can't recur from some other future
+  state-timing edge case either.
+
+Files: `src/pages/CarDetailPage.tsx`.
+
 ## 2026-09-05 — Booking extensions had no upper bound - capped at 30 days total
 
 Reported: a live test could request an extension all the way to 2028 from a

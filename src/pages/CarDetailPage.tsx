@@ -206,6 +206,16 @@ export default function CarDetailPage() {
     fetchCar();
   }, [fetchCar]);
 
+  // Reset the photo carousel position whenever a different car is viewed.
+  // Without this, navigating from a car with more photos to one with fewer
+  // (without a full page reload - e.g. clicking straight from one listing to
+  // another) leaves currentImageIndex pointing past the end of the new car's
+  // images array, so currentImage becomes undefined and the placeholder icon
+  // shows even though the new car does have photos.
+  useEffect(() => {
+    setCurrentImageIndex(0);
+  }, [id]);
+
   useEffect(() => {
     void (async () => {
       const settings = await fetchPlatformPricingSettings();
@@ -282,7 +292,11 @@ export default function CarDetailPage() {
   };
 
   const images = car?.car_images || [];
-  const currentImage = images[currentImageIndex];
+  // Defensive fallback: if currentImageIndex is ever out of range (e.g. the
+  // reset effect above hasn't run yet, or a car's photo count changes while
+  // this page is open), fall back to the first photo instead of showing the
+  // no-photo placeholder for a car that does have photos.
+  const currentImage = images[currentImageIndex] ?? images[0];
 
   // Driver's-licence gate (mirrors api/create-booking.ts): only explicit values
   // block. Shown as a booking-disabled reason with a link to the update flow.
