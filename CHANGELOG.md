@@ -9,6 +9,48 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Add Vehicle form: required early-return dropdown, CTPL/insurance uploads, region/city dropdowns (CHAPTER 40)
+
+A batch of Add Vehicle form fixes requested after live testing: the minimum
+early-return notice was a free-text number box that most listers left blank or
+misunderstood, CTPL/comprehensive insurance expiry dates had no supporting
+document (unlike registration), and the pickup/dropoff region and city fields
+were free-text (with only region backed by a `<datalist>`), letting listers
+type anything.
+
+- **Minimum early-return notice is now a required 1-24h dropdown**, not an
+  optional free-text number field. Renamed range CHAPTER 38 introduced
+  (0-72h, optional) is tightened to 1-24h, required on every new listing.
+  CHAPTER 40 tightens the DB check constraint to match; the column stays
+  nullable at the database level so cars listed before this chapter (with no
+  value, or an old 0-72 value) don't become invalid - only new submissions
+  from the UI always supply one now.
+- **CTPL document upload added to Add Vehicle**, required alongside its
+  existing expiry date (matching the OR/CR upload pattern). **Comprehensive
+  insurance document upload also added**, optional (matching its optional
+  expiry date). `car_documents.document_type` has no CHECK constraint, so
+  the new `ctpl` / `comprehensive_insurance` document types needed no schema
+  change.
+- **Mileage (km) field label now explicitly marked "(optional)"** for
+  clarity - the field itself was already optional.
+- **Pickup/Dropoff Region converted from a free-text input (with a
+  `<datalist>` suggestion list) to a required `<select>` dropdown**, backed
+  by the existing curated `VEHICLE_REGION_OPTIONS` list (11 broad Philippine
+  marketing regions). Changing the region clears the selected city.
+- **City/Municipality converted to a region-scoped `<select>` dropdown**,
+  same treatment as region, with a curated per-region city list
+  (`VEHICLE_CITY_OPTIONS`) and an explicit "Other (type manually)" fallback
+  that reveals a free-text input, so a lister whose city isn't in the
+  curated list is never blocked from listing.
+- Both conversions applied identically to the Edit Listing form (region/city
+  there were already free-text; brought in line with Add Vehicle).
+
+Files: `src/pages/MyVehiclesPage.tsx`,
+`database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 40),
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-05 — Handover/return redesign, dashboard UI (matches the backend rework)
 
 The UI half of the handover/return redesign - makes the dashboards match

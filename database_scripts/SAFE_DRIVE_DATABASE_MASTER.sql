@@ -7960,4 +7960,18 @@ alter table public.cars
 alter table public.bookings
   add column if not exists renter_return_arrived_at timestamptz;
 
+-- ============================================================================
+-- CHAPTER 40 - Minimum early-return notice becomes a required 1-24h picklist
+-- ============================================================================
+-- Tighten the range CHAPTER 38 introduced (0-72, optional) to 1-24, matching
+-- the new required dropdown in the Add/Edit Vehicle forms. The column stays
+-- nullable at the database level - a car listed before this chapter has no
+-- value yet and must not become invalid - but every new submission from the
+-- UI now always supplies one.
+
+alter table public.cars
+  drop constraint if exists cars_min_early_return_notice_hours_check,
+  add constraint cars_min_early_return_notice_hours_check
+  check (min_early_return_notice_hours is null or min_early_return_notice_hours between 1 and 24);
+
 -- End of SafeDrive chaptered database master.

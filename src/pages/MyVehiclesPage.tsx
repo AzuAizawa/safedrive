@@ -58,7 +58,12 @@ const MAX_LISTING_PRICE = 100000;
 // Displayed to the renter as a hint before they send an early-return request
 // (CHAPTER 38) - not an enforced block; the lister can still accept or
 // decline any request regardless of notice given.
-const MAX_EARLY_RETURN_NOTICE_HOURS = 72;
+const MIN_EARLY_RETURN_NOTICE_HOURS = 1;
+const MAX_EARLY_RETURN_NOTICE_HOURS = 24;
+const EARLY_RETURN_NOTICE_HOUR_OPTIONS = Array.from(
+  { length: MAX_EARLY_RETURN_NOTICE_HOURS - MIN_EARLY_RETURN_NOTICE_HOURS + 1 },
+  (_, index) => MIN_EARLY_RETURN_NOTICE_HOURS + index,
+);
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const ALLOWED_PDF_TYPES = ["application/pdf"];
@@ -75,6 +80,40 @@ const VEHICLE_REGION_OPTIONS = [
   "Northern Mindanao",
   "Southern Mindanao",
 ] as const;
+
+// Common cities/municipalities per broad region bucket above - not an
+// exhaustive PSGC list, just enough to cover most listings. "Other" always
+// falls back to a free-text field so no lister is ever blocked by a gap here.
+const VEHICLE_CITY_OPTIONS: Record<(typeof VEHICLE_REGION_OPTIONS)[number], string[]> = {
+  "Metro Manila": [
+    "Quezon City", "Manila", "Makati", "Taguig", "Pasig", "Mandaluyong",
+    "Marikina", "Pasay", "Parañaque", "Las Piñas", "Muntinlupa", "Caloocan",
+    "Malabon", "Navotas", "Valenzuela", "San Juan", "Pateros",
+  ],
+  "Metro Cebu": [
+    "Cebu City", "Mandaue", "Lapu-Lapu", "Talisay", "Consolacion", "Liloan",
+    "Minglanilla", "Compostela",
+  ],
+  "Metro Davao": ["Davao City", "Panabo", "Tagum", "Digos", "Samal"],
+  "Northern Luzon": [
+    "Baguio", "Laoag", "Vigan", "Tuguegarao", "Ilagan", "Dagupan",
+    "San Fernando (La Union)", "Batac",
+  ],
+  "Central Luzon": [
+    "San Fernando (Pampanga)", "Angeles", "Olongapo", "Tarlac City",
+    "Malolos", "San Jose del Monte", "Cabanatuan", "Balanga", "Meycauayan",
+  ],
+  "Southern Luzon": [
+    "Batangas City", "Lipa", "Lucena", "Calamba", "Santa Rosa", "Antipolo",
+    "San Pablo", "Naga (Camarines Sur)", "Legazpi", "Puerto Princesa",
+  ],
+  "Western Visayas": ["Iloilo City", "Bacolod", "Roxas", "Kalibo"],
+  "Central Visayas": ["Tagbilaran", "Dumaguete"],
+  "Eastern Visayas": ["Tacloban", "Ormoc", "Catbalogan", "Calbayog"],
+  "Northern Mindanao": ["Cagayan de Oro", "Iligan", "Malaybalay", "Valencia"],
+  "Southern Mindanao": ["General Santos", "Koronadal", "Tacurong", "Kidapawan"],
+};
+const OTHER_CITY_OPTION = "Other (type manually)";
 
 const FUEL_CATEGORY_OPTIONS = {
   Gasoline: [
@@ -258,9 +297,6 @@ const validateUploadFile = (
 const sanitizePhilippineMobileNumber = (value: string) =>
   value.replace(/\D/g, "").slice(0, 11);
 
-const sanitizeVehicleRegionInput = (value: string) =>
-  value.replace(/[0-9]/g, "");
-
 const isMissingProvenanceColumnError = (message: string) =>
   message.toLowerCase().includes("provenance") ||
   message.toLowerCase().includes("review_flag") ||
@@ -323,7 +359,7 @@ export default function MyVehiclesPage() {
     plate_number: "",
     mileage: "",
     price_per_day: "",
-    min_early_return_notice_hours: "",
+    min_early_return_notice_hours: "24",
     location: "",
     city: "",
     specific_location: "",
@@ -345,6 +381,8 @@ export default function MyVehiclesPage() {
   const [orBackFile, setOrBackFile] = useState<File | null>(null);
   const [crFile, setCrFile] = useState<File | null>(null);
   const [crBackFile, setCrBackFile] = useState<File | null>(null);
+  const [ctplFile, setCtplFile] = useState<File | null>(null);
+  const [comprehensiveInsuranceFile, setComprehensiveInsuranceFile] = useState<File | null>(null);
   const [rentalAgreementFile, setRentalAgreementFile] = useState<File | null>(
     null,
   );
@@ -581,11 +619,16 @@ export default function MyVehiclesPage() {
     const pricePerDay = Number(form.price_per_day);
 
     let minEarlyReturnNoticeHours: number | null = null;
-    if (form.min_early_return_notice_hours.trim() !== "") {
+    {
       const parsed = Number(form.min_early_return_notice_hours);
-      if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_EARLY_RETURN_NOTICE_HOURS) {
-        toast.error("Invalid early-return notice", {
-          description: `Enter a whole number of hours from 0 to ${MAX_EARLY_RETURN_NOTICE_HOURS}, or leave it blank.`,
+      if (
+        form.min_early_return_notice_hours.trim() === "" ||
+        !Number.isInteger(parsed) ||
+        parsed < MIN_EARLY_RETURN_NOTICE_HOURS ||
+        parsed > MAX_EARLY_RETURN_NOTICE_HOURS
+      ) {
+        toast.error("Select a minimum early-return notice", {
+          description: `Choose a whole number of hours from ${MIN_EARLY_RETURN_NOTICE_HOURS} to ${MAX_EARLY_RETURN_NOTICE_HOURS}.`,
         });
         return;
       }
@@ -599,6 +642,11 @@ export default function MyVehiclesPage() {
 
     if (!orFile || !orBackFile || !crFile || !crBackFile) {
       toast.error("OR and CR front/back photos are required.");
+      return;
+    }
+
+    if (!ctplFile) {
+      toast.error("CTPL document photo is required.");
       return;
     }
 
@@ -681,6 +729,8 @@ export default function MyVehiclesPage() {
         { file: orBackFile, type: "or_back", label: "OR back" },
         { file: crFile, type: "cr_front", label: "CR front" },
         { file: crBackFile, type: "cr_back", label: "CR back" },
+        { file: ctplFile, type: "ctpl", label: "CTPL" },
+        { file: comprehensiveInsuranceFile, type: "comprehensive_insurance", label: "comprehensive insurance" },
       ];
 
       for (const document of vehicleDocuments) {
@@ -727,7 +777,7 @@ export default function MyVehiclesPage() {
         plate_number: "",
         mileage: "",
         price_per_day: "",
-        min_early_return_notice_hours: "",
+        min_early_return_notice_hours: "24",
         location: "",
         city: "",
         specific_location: "",
@@ -749,6 +799,8 @@ export default function MyVehiclesPage() {
       setOrBackFile(null);
       setCrFile(null);
       setCrBackFile(null);
+      setCtplFile(null);
+      setComprehensiveInsuranceFile(null);
       setRentalAgreementFile(null);
       fetchVehicles();
     } catch (err: unknown) {
@@ -779,11 +831,16 @@ export default function MyVehiclesPage() {
     const nextPrice = Number(editPrice);
 
     let nextMinEarlyReturnNoticeHours: number | null = null;
-    if (editMinEarlyReturnNoticeHours.trim() !== "") {
+    {
       const parsed = Number(editMinEarlyReturnNoticeHours);
-      if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_EARLY_RETURN_NOTICE_HOURS) {
-        toast.error("Invalid early-return notice", {
-          description: `Enter a whole number of hours from 0 to ${MAX_EARLY_RETURN_NOTICE_HOURS}, or leave it blank.`,
+      if (
+        editMinEarlyReturnNoticeHours.trim() === "" ||
+        !Number.isInteger(parsed) ||
+        parsed < MIN_EARLY_RETURN_NOTICE_HOURS ||
+        parsed > MAX_EARLY_RETURN_NOTICE_HOURS
+      ) {
+        toast.error("Select a minimum early-return notice", {
+          description: `Choose a whole number of hours from ${MIN_EARLY_RETURN_NOTICE_HOURS} to ${MAX_EARLY_RETURN_NOTICE_HOURS}.`,
         });
         return;
       }
@@ -1111,11 +1168,6 @@ export default function MyVehiclesPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <datalist id="vehicle-region-options">
-        {VEHICLE_REGION_OPTIONS.map((region) => (
-          <option key={region} value={region} />
-        ))}
-      </datalist>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">My Vehicles</h1>
@@ -1414,7 +1466,7 @@ export default function MyVehiclesPage() {
                   })()}
                 </div>
                 <div className="space-y-2">
-                  <Label>Mileage (km)</Label>
+                  <Label>Mileage (km) <span className="text-xs font-normal text-muted-foreground">(optional)</span></Label>
                   <Input
                     type="number"
                     min="0"
@@ -1460,19 +1512,21 @@ export default function MyVehiclesPage() {
                     )}
                 </div>
                 <div className="space-y-2">
-                  <Label>Minimum early-return notice (hours)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    max={MAX_EARLY_RETURN_NOTICE_HOURS}
-                    step="1"
-                    placeholder="Optional - shown to the renter"
+                  <Label>Minimum early-return notice (hours) *</Label>
+                  <select
                     value={form.min_early_return_notice_hours}
                     onChange={(e) =>
                       setForm({ ...form, min_early_return_notice_hours: e.target.value })
                     }
-                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
+                    required
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    {EARLY_RETURN_NOTICE_HOUR_OPTIONS.map((hour) => (
+                      <option key={hour} value={hour}>
+                        {hour} hour{hour === 1 ? "" : "s"}
+                      </option>
+                    ))}
+                  </select>
                   <p className="text-xs text-muted-foreground">
                     Shown to the renter before they request an early return. You can still
                     accept or decline any request regardless of the notice given.
@@ -1485,11 +1539,69 @@ export default function MyVehiclesPage() {
                 <div className="space-y-2">
                   <Label>CTPL expiry *</Label>
                   <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.ctpl_expiry} onChange={(event) => setForm({ ...form, ctpl_expiry: event.target.value })} required />
+                  <div className="flex items-center gap-3">
+                    <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
+                      <Upload className="h-3.5 w-3.5" />
+                      {ctplFile ? "Change CTPL" : "Upload CTPL *"}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setCtplFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_IMAGE_TYPES, "CTPL document")) {
+                            setCtplFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {ctplFile && (
+                      <div className="flex items-center gap-2 rounded-lg border bg-secondary p-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span className="text-xs font-medium">{ctplFile.name}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Comprehensive insurance expiry</Label>
                   <Input type="date" value={form.comprehensive_insurance_expiry} onChange={(event) => setForm({ ...form, comprehensive_insurance_expiry: event.target.value })} />
                   <p className="text-xs text-muted-foreground">Optional for the thesis build, but a missing or expired policy creates an admin warning.</p>
+                  <div className="flex items-center gap-3">
+                    <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
+                      <Upload className="h-3.5 w-3.5" />
+                      {comprehensiveInsuranceFile ? "Change policy" : "Upload policy"}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setComprehensiveInsuranceFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_IMAGE_TYPES, "comprehensive insurance document")) {
+                            setComprehensiveInsuranceFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {comprehensiveInsuranceFile && (
+                      <div className="flex items-center gap-2 rounded-lg border bg-secondary p-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span className="text-xs font-medium">{comprehensiveInsuranceFile.name}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
                   <input type="checkbox" className="mt-1" checked={form.insurer_rental_use_confirmed} onChange={(event) => setForm({ ...form, insurer_rental_use_confirmed: event.target.checked })} required />
@@ -1498,27 +1610,57 @@ export default function MyVehiclesPage() {
                 <div className="space-y-4 sm:col-span-2">
                   <div className="space-y-2">
                     <Label>Pickup/Dropoff Region *</Label>
-                    <Input
-                      list="vehicle-region-options"
+                    <select
                       value={form.location}
-                      onChange={(e) =>
-                        setForm({ ...form, location: sanitizeVehicleRegionInput(e.target.value) })
-                      }
-                      placeholder="Type or select a region"
+                      onChange={(e) => setForm({ ...form, location: e.target.value, city: "" })}
                       required
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      You can type to search or select a region from the suggested list.
-                    </p>
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="" disabled>Select a region</option>
+                      {VEHICLE_REGION_OPTIONS.map((region) => (
+                        <option key={region} value={region}>{region}</option>
+                      ))}
+                    </select>
                   </div>
                   <div className="space-y-2">
                     <Label>City/Municipality *</Label>
-                    <Input
-                      value={form.city}
-                      onChange={(e) => setForm({ ...form, city: e.target.value })}
-                      placeholder="e.g. Quezon City, Makati, Pasig"
-                      required
-                    />
+                    {(() => {
+                      const cityChoices = VEHICLE_CITY_OPTIONS[form.location as (typeof VEHICLE_REGION_OPTIONS)[number]] ?? [];
+                      const isOther = form.city !== "" && !cityChoices.includes(form.city);
+                      return (
+                        <>
+                          <select
+                            value={isOther ? OTHER_CITY_OPTION : form.city}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                city: e.target.value === OTHER_CITY_OPTION ? "" : e.target.value,
+                              })
+                            }
+                            disabled={!form.location}
+                            required
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <option value="" disabled>
+                              {form.location ? "Select a city/municipality" : "Select a region first"}
+                            </option>
+                            {cityChoices.map((city) => (
+                              <option key={city} value={city}>{city}</option>
+                            ))}
+                            <option value={OTHER_CITY_OPTION}>{OTHER_CITY_OPTION}</option>
+                          </select>
+                          {isOther && (
+                            <Input
+                              value={form.city}
+                              onChange={(e) => setForm({ ...form, city: e.target.value })}
+                              placeholder="Type the city or municipality"
+                              required
+                              className="mt-2"
+                            />
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="space-y-2">
                     <Label>Specific Pick-up Location/Landmark *</Label>
@@ -2014,9 +2156,11 @@ export default function MyVehiclesPage() {
                         setEditVehicle(v);
                         setEditPrice(v.price_per_day.toString());
                         setEditMinEarlyReturnNoticeHours(
-                          v.min_early_return_notice_hours != null
+                          v.min_early_return_notice_hours != null &&
+                            v.min_early_return_notice_hours >= MIN_EARLY_RETURN_NOTICE_HOURS &&
+                            v.min_early_return_notice_hours <= MAX_EARLY_RETURN_NOTICE_HOURS
                             ? String(v.min_early_return_notice_hours)
-                            : "",
+                            : String(MAX_EARLY_RETURN_NOTICE_HOURS),
                         );
                         setEditLocation(parsedLocation.region);
                         setEditCity(parsedLocation.city);
@@ -2138,16 +2282,19 @@ export default function MyVehiclesPage() {
                     )}
                   </div>
                   <div className="space-y-2">
-                    <Label>Minimum early-return notice (hours)</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      max={MAX_EARLY_RETURN_NOTICE_HOURS}
-                      step="1"
-                      placeholder="Optional - shown to the renter"
+                    <Label>Minimum early-return notice (hours) *</Label>
+                    <select
                       value={editMinEarlyReturnNoticeHours}
                       onChange={(e) => setEditMinEarlyReturnNoticeHours(e.target.value)}
-                    />
+                      required
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      {EARLY_RETURN_NOTICE_HOUR_OPTIONS.map((hour) => (
+                        <option key={hour} value={hour}>
+                          {hour} hour{hour === 1 ? "" : "s"}
+                        </option>
+                      ))}
+                    </select>
                     <p className="text-xs text-muted-foreground">
                       Shown to the renter before they request an early return. You can still
                       accept or decline any request regardless of the notice given.
@@ -2180,23 +2327,49 @@ export default function MyVehiclesPage() {
                   <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm"><input type="checkbox" className="mt-1" checked={editRentalUseConfirmed} onChange={(event) => setEditRentalUseConfirmed(event.target.checked)} /><span>I reconfirmed intended rental use with the insurer. Changing any insurance declaration sends this vehicle back to admin review.</span></label>
                   <div className="space-y-2">
                     <Label>Pickup Region</Label>
-                    <Input
-                      list="vehicle-region-options"
+                    <select
                       value={editLocation}
-                      onChange={(e) => setEditLocation(sanitizeVehicleRegionInput(e.target.value))}
-                      placeholder="Type or select a region"
-                    />
+                      onChange={(e) => { setEditLocation(e.target.value); setEditCity(""); }}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Select a region</option>
+                      {VEHICLE_REGION_OPTIONS.map((region) => (
+                        <option key={region} value={region}>{region}</option>
+                      ))}
+                    </select>
                   </div>
                   <div className="space-y-2">
                     <Label>City/Municipality</Label>
-                    <Input
-                      value={editCity}
-                      onChange={(e) => setEditCity(e.target.value)}
-                      placeholder="e.g. Quezon City, Makati, Pasig"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      You can type the city or municipality manually here for testing or if no preset matches.
-                    </p>
+                    {(() => {
+                      const cityChoices = VEHICLE_CITY_OPTIONS[editLocation as (typeof VEHICLE_REGION_OPTIONS)[number]] ?? [];
+                      const isOther = editCity !== "" && !cityChoices.includes(editCity);
+                      return (
+                        <>
+                          <select
+                            value={isOther ? OTHER_CITY_OPTION : editCity}
+                            onChange={(e) => setEditCity(e.target.value === OTHER_CITY_OPTION ? "" : e.target.value)}
+                            disabled={!editLocation}
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <option value="">
+                              {editLocation ? "Select a city/municipality" : "Select a region first"}
+                            </option>
+                            {cityChoices.map((city) => (
+                              <option key={city} value={city}>{city}</option>
+                            ))}
+                            <option value={OTHER_CITY_OPTION}>{OTHER_CITY_OPTION}</option>
+                          </select>
+                          {isOther && (
+                            <Input
+                              value={editCity}
+                              onChange={(e) => setEditCity(e.target.value)}
+                              placeholder="Type the city or municipality"
+                              className="mt-2"
+                            />
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="space-y-2">
                     <Label>Specific Pick-up Location/Landmark</Label>
