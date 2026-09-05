@@ -7970,7 +7970,9 @@ alter table public.bookings
 -- UI now always supplies one.
 
 alter table public.cars
-  drop constraint if exists cars_min_early_return_notice_hours_check,
+  drop constraint if exists cars_min_early_return_notice_hours_check;
+
+alter table public.cars
   add constraint cars_min_early_return_notice_hours_check
   check (min_early_return_notice_hours is null or min_early_return_notice_hours between 1 and 24);
 
