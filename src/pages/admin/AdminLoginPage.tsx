@@ -625,28 +625,14 @@ export default function AdminLoginPage() {
     setIsLoading(false);
   };
 
+  // Email code only - an expired authenticator challenge no longer needs a
+  // manual "refresh" button. handleOtpSubmit already recovers from that case
+  // by itself (silently requests a fresh challenge and asks for the newest
+  // code), with no failed-attempt penalty, so the proactive refresh button
+  // that used to sit here was pure duplicate coverage.
   const handleResendOtp = async () => {
     if (!normalizedEmail) return;
     setIsLoading(true);
-
-    if (codeMethod === "authenticator" && authFactorId) {
-      const { challengeId, error } =
-        await startAuthenticatorChallenge(authFactorId);
-      if (error || !challengeId) {
-        toast.error("Failed to refresh authenticator challenge", {
-          description: error?.message ?? "Please try again.",
-        });
-      } else {
-        setAuthChallengeId(challengeId);
-        setOtpExpiresAt(null);
-        persistPendingOtpState("authenticator", authFactorId, challengeId);
-        toast.success("Authenticator challenge refreshed", {
-          description: "Use the newest 6-digit code in your app.",
-        });
-      }
-      setIsLoading(false);
-      return;
-    }
 
     const { error } = await sendOtp(
       normalizedEmail,
@@ -998,17 +984,17 @@ export default function AdminLoginPage() {
                   )}
                 </Button>
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleResendOtp}
-                  disabled={isLoading}
-                  className="w-full h-10 bg-transparent border-white/10 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg text-xs font-bold transition-all duration-300"
-                >
-                  {codeMethod === "authenticator"
-                    ? "Refresh Authenticator Check"
-                    : "Resend Security Code"}
-                </Button>
+                {codeMethod !== "authenticator" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleResendOtp}
+                    disabled={isLoading}
+                    className="w-full h-10 bg-transparent border-white/10 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg text-xs font-bold transition-all duration-300"
+                  >
+                    Resend Security Code
+                  </Button>
+                )}
 
                 {codeMethod === "authenticator" && (
                   <Button

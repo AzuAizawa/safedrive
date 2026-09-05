@@ -9,6 +9,22 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Retired the redundant "Refresh Authenticator Check" login button
+
+Reported as pointless. Investigated: it does not refresh the 6-digit
+authenticator-app code (that rotates on its own every 30s, client-side,
+unrelated to this button) - it requests a fresh server-side MFA challenge,
+which can go stale if a user sits on the code-entry screen a while. But
+`handleOtpSubmit` already auto-recovers from exactly that case on its own:
+a stale-challenge error (`isStaleAuthenticatorChallengeError`) silently
+requests a new challenge and asks for the newest code, with no failed-
+attempt/lockout penalty - so the manual button was pure duplicate coverage
+of an already-automatic path. Removed for the authenticator code method on
+both login pages; "Resend Code" stays for the email-code method, where no
+such automatic recovery exists.
+
+Files: `src/pages/LoginPage.tsx`, `src/pages/admin/AdminLoginPage.tsx`.
+
 ## 2026-09-05 — Platform-setting votes are locked once cast + auto-expire (CHAPTER 45); license-transmission booking gate now visible before the click
 
 ### Consensus-vote logic bug (CHAPTER 45)

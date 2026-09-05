@@ -8,6 +8,20 @@ const frontendCriticalWritePattern =
 
 const checks = [
   {
+    // "Refresh Authenticator Check" was retired - handleOtpSubmit's stale-
+    // challenge auto-recovery (isStaleAuthenticatorChallengeError) already
+    // covers it with no failed-attempt penalty, so the manual button was
+    // pure duplicate coverage of an already-automatic path.
+    file: "src/pages/LoginPage.tsx",
+    markers: ["isStaleAuthenticatorChallengeError", "Authenticator check expired"],
+    absentMarkers: ["Refresh Authenticator Check"],
+  },
+  {
+    file: "src/pages/admin/AdminLoginPage.tsx",
+    markers: ["isStaleAuthenticatorChallengeError", "Authenticator check expired"],
+    absentMarkers: ["Refresh Authenticator Check"],
+  },
+  {
     file: "src/pages/admin/AdminUsersPage.tsx",
     markers: [
       "handleRejectLicense",
