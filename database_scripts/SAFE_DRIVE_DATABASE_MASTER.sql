@@ -8350,4 +8350,34 @@ begin
 end;
 $$;
 
+-- ============================================================================
+-- CHAPTER 46 - Early-return requests get a real response deadline
+-- ============================================================================
+-- Reported gap: a pending early-return request (booking_early_returns) had
+-- no deadline of any kind - the lister could leave it unanswered forever,
+-- with the renter stuck not knowing whether to plan around the early date or
+-- the original one. The 'expired' status value already existed in this
+-- table's check constraint from day one, clearly anticipating this, but
+-- nothing ever computed a deadline or set anything to that status.
+--
+-- booking_early_returns.response_deadline is stamped once, at request time
+-- (api/booking-early-return-action.ts): min(now + 24h, end of the requested
+-- new return day) - the lister deciding after the renter already wanted the
+-- car back would be moot, so the deadline never extends past that point,
+-- same "never past the moment that matters" cap already used for
+-- payment_deadline/balance_deadline. A pending request past its deadline is
+-- treated the same as a decline - the booking's end_date is never touched by
+-- expiry, only by an actual approval - and is resolved two ways: a defensive
+-- check inline in approve/reject/cancel (closes the narrow race window
+-- before the next cron tick), and the authoritative path, a new section in
+-- api/expire-booking-deadlines.ts (already running every 15 minutes) that
+-- flips it with full notifications to both sides.
+
+alter table public.booking_early_returns
+  add column if not exists response_deadline timestamptz;
+
+create index if not exists idx_booking_early_returns_response_deadline
+  on public.booking_early_returns (response_deadline)
+  where response_deadline is not null;
+
 -- End of SafeDrive chaptered database master.

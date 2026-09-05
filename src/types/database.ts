@@ -910,6 +910,7 @@ export interface Database {
           owner_decision_note: string | null;
           goodwill_refund_amount: number;
           requested_at: string;
+          response_deadline: string | null;
           approved_at: string | null;
           rejected_at: string | null;
           created_at: string;
@@ -927,6 +928,7 @@ export interface Database {
           owner_decision_note?: string | null;
           goodwill_refund_amount?: number;
           requested_at?: string;
+          response_deadline?: string | null;
           approved_at?: string | null;
           rejected_at?: string | null;
           created_at?: string;
@@ -944,6 +946,7 @@ export interface Database {
           owner_decision_note?: string | null;
           goodwill_refund_amount?: number;
           requested_at?: string;
+          response_deadline?: string | null;
           approved_at?: string | null;
           rejected_at?: string | null;
           created_at?: string;

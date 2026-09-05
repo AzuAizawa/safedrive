@@ -42,7 +42,10 @@ type EarlyReturnRecord = {
   status: string;
   current_end_date: string;
   requested_end_date: string;
+  response_deadline: string | null;
 };
+
+const RESPONSE_WINDOW_HOURS = 24;
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -82,6 +85,15 @@ const todayDateOnly = () => {
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
   );
+};
+
+// End of that calendar day, Manila local time, as an epoch ms instant - same
+// -8h-from-naive-UTC pattern used across booking-action.ts /
+// booking-incident-action.ts for Manila-correct instants from a plain date.
+const manilaEndOfDayMs = (dateOnly: string) => {
+  const [y, m, d] = dateOnly.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return Date.UTC(y, m - 1, d, 23, 59, 59) - 8 * 60 * 60 * 1000;
 };
 
 export default async function handler(req: Request) {
@@ -208,6 +220,18 @@ export default async function handler(req: Request) {
         );
       }
 
+      // The lister must decide within 24h, capped at the end of the
+      // requested (earlier) return day itself - deciding after the renter
+      // already wanted the car back is moot. Same "never past the moment
+      // that matters" cap already used for payment_deadline/balance_deadline.
+      const requestedEndOfDayMs = manilaEndOfDayMs(payload.requestedEndDate);
+      const responseDeadline = new Date(
+        Math.min(
+          Date.now() + RESPONSE_WINDOW_HOURS * 60 * 60 * 1000,
+          requestedEndOfDayMs ?? Date.now() + RESPONSE_WINDOW_HOURS * 60 * 60 * 1000,
+        ),
+      ).toISOString();
+
       const { data: row, error: insertError } = await supabase
         .from("booking_early_returns")
         .insert({
@@ -218,6 +242,7 @@ export default async function handler(req: Request) {
           requested_end_date: payload.requestedEndDate,
           reason: payload.reason?.trim() || null,
           status: "pending",
+          response_deadline: responseDeadline,
         })
         .select("*")
         .single();
@@ -270,6 +295,28 @@ export default async function handler(req: Request) {
       return jsonResponse({ error: "Early-return request not found" }, 404);
     }
     const er = early as EarlyReturnRecord;
+
+    // Defensive freshness check, same idiom as booking-action.ts's accept
+    // handler: the cron (api/expire-booking-deadlines.ts) is the primary
+    // path that flips a stale pending request to 'expired' with full
+    // notifications - this just closes the narrow race window between the
+    // deadline passing and the next cron tick, for whichever action arrives
+    // first.
+    if (
+      er.status === "pending" &&
+      er.response_deadline &&
+      Date.now() > new Date(er.response_deadline).getTime()
+    ) {
+      await supabase
+        .from("booking_early_returns")
+        .update({ status: "expired" })
+        .eq("id", er.id)
+        .eq("status", "pending");
+      return jsonResponse(
+        { error: "This early-return request expired before it was decided." },
+        409,
+      );
+    }
 
     if (payload.action === "approve") {
       if (er.owner_id !== user.id) {

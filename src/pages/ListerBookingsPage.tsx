@@ -2927,6 +2927,12 @@ export default function ListerBookingsPage() {
                             )}
                             ).
                           </p>
+                          {latestEarly.status === "pending" && latestEarly.response_deadline ? (
+                            <p className="mt-1">
+                              {formatCountdown(latestEarly.response_deadline)} to decide, or it
+                              auto-expires and the original return date stands.
+                            </p>
+                          ) : null}
                           {latestEarly.reason ? (
                             <p className="mt-1">Reason: {latestEarly.reason}</p>
                           ) : null}

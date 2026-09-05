@@ -31,6 +31,14 @@ type BalanceDeadlineBooking = RefundableBooking & {
   balance_reminder_sent_at: string | null;
 };
 
+type PendingEarlyReturn = {
+  id: string;
+  renter_id: string;
+  owner_id: string;
+  requested_end_date: string;
+  current_end_date: string;
+};
+
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -356,6 +364,67 @@ export default async function handler(req: Request) {
       balanceReminderSent += 1;
     }
 
+    // --- Early-return response deadline: the lister never approved or
+    // rejected a pending early-return request within its response window
+    // (booking_early_returns.response_deadline, stamped at request time in
+    // api/booking-early-return-action.ts). No response is treated the same
+    // as a decline - the booking's end_date is never touched, so the
+    // original return date simply stands.
+    const { data: staleEarlyReturns, error: staleEarlyReturnsError } = await supabase
+      .from("booking_early_returns")
+      .select("id, renter_id, owner_id, requested_end_date, current_end_date")
+      .eq("status", "pending")
+      .not("response_deadline", "is", null)
+      .lte("response_deadline", nowIso)
+      .limit(200);
+
+    if (staleEarlyReturnsError) throw staleEarlyReturnsError;
+
+    let earlyReturnExpired = 0;
+    for (const er of (staleEarlyReturns ?? []) as PendingEarlyReturn[]) {
+      const { data: claimedEarlyReturn, error: claimEarlyReturnError } = await supabase
+        .from("booking_early_returns")
+        .update({ status: "expired" })
+        .eq("id", er.id)
+        .eq("status", "pending")
+        .select("id")
+        .maybeSingle();
+
+      if (claimEarlyReturnError) throw claimEarlyReturnError;
+      if (!claimedEarlyReturn) continue;
+
+      await supabase.from("notifications").insert([
+        {
+          user_id: er.renter_id,
+          title: "Early return request expired",
+          message: `The lister did not respond to your early-return request in time. The original return date (${er.current_end_date}) stands.`,
+          type: "warning",
+          link: "/my-bookings",
+        },
+        {
+          user_id: er.owner_id,
+          title: "Early return request expired",
+          message: `You did not respond to a renter's early-return request in time, so it expired. The original return date (${er.current_end_date}) stands.`,
+          type: "warning",
+          link: "/lister-bookings",
+        },
+      ]);
+
+      await supabase.from("audit_log").insert({
+        user_id: null,
+        action: "booking_early_return_expired",
+        entity_type: "booking_early_return",
+        entity_id: er.id,
+        details: {
+          automated: true,
+          requested_end_date: er.requested_end_date,
+          current_end_date: er.current_end_date,
+        },
+      });
+
+      earlyReturnExpired += 1;
+    }
+
     // --- Auto-complete when the renter finished but the lister never confirmed.
     const { data: settingsRow } = await supabase
       .from("platform_settings")
@@ -443,6 +512,7 @@ export default async function handler(req: Request) {
       paymentExpired,
       balanceDeadlineExpired,
       balanceReminderSent,
+      earlyReturnExpired,
       listerCompletionAuto,
     });
   } catch (error) {

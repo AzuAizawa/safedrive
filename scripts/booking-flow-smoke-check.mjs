@@ -8,6 +8,15 @@ const frontendCriticalWritePattern =
 
 const checks = [
   {
+    file: "api/booking-early-return-action.ts",
+    markers: [
+      "RESPONSE_WINDOW_HOURS",
+      "manilaEndOfDayMs",
+      "response_deadline",
+      "This early-return request expired before it was decided.",
+    ],
+  },
+  {
     // "Refresh Authenticator Check" was retired - handleOtpSubmit's stale-
     // challenge auto-recovery (isStaleAuthenticatorChallengeError) already
     // covers it with no failed-attempt penalty, so the manual button was
@@ -221,6 +230,7 @@ const checks = [
       "Message Lister",
       "openBookingConversation",
       "balance_deadline",
+      "latestEarly.response_deadline",
     ],
     absentMarkers: [
       "booking_reviews exists in the live schema but is not part of the generated types yet",
@@ -329,6 +339,8 @@ const checks = [
       "balanceReminderSent",
       "getCancellationRefundPlan",
       "balance payment deadline missed",
+      "booking_early_return_expired",
+      "earlyReturnExpired",
     ],
   },
   {
@@ -501,6 +513,7 @@ const checks = [
       "Message Renter",
       "openBookingConversation",
       "balance_deadline",
+      "latestEarly.response_deadline",
     ],
     absentMarkers: [
       "booking_reviews exists in the live schema but is not part of the generated types yet",

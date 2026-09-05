@@ -2275,6 +2275,12 @@ export default function MyBookingsPage() {
                             )}
                             .
                           </p>
+                          {latestEarly.status === "pending" && latestEarly.response_deadline ? (
+                            <p className="mt-1">
+                              {formatCountdown(latestEarly.response_deadline)} for the lister to
+                              decide, or it expires and the original return date stands.
+                            </p>
+                          ) : null}
                           {latestEarly.reason ? (
                             <p className="mt-1">Reason: {latestEarly.reason}</p>
                           ) : null}

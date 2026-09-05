@@ -9,6 +9,35 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Early-return requests get a real response deadline (CHAPTER 46)
+
+Reported: the lister's response time on an early-return request should have
+a time limit - it didn't. A pending `booking_early_returns` row could sit
+unanswered forever; the renter had no way to know whether to plan around the
+early date or the original one. The table's `status` check constraint has
+allowed `'expired'` since CHAPTER 30 - clearly anticipated from day one - but
+nothing ever computed a deadline or set anything to that status.
+
+- `booking_early_returns.response_deadline` is stamped at request time:
+  `min(now + 24h, end of the requested new return day)` - deciding after the
+  renter already wanted the car back would be moot, so it's capped there,
+  same "never past the moment that matters" rule already used for
+  `payment_deadline`/`balance_deadline`.
+- A pending request past its deadline is treated as a decline - the
+  booking's `end_date` is never touched by expiry, only by an actual
+  approval - and moves to `expired`. Resolved two ways: a defensive check
+  inline in `approve`/`reject`/`cancel` (closes the narrow race window
+  before the next cron tick), and the authoritative path, a new section in
+  `api/expire-booking-deadlines.ts` (already running every 15 minutes) that
+  notifies both sides.
+- Countdown surfaced on the pending-request card on both `/my-bookings` and
+  `/lister-bookings`.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 46),
+`api/booking-early-return-action.ts`, `api/expire-booking-deadlines.ts`,
+`src/pages/MyBookingsPage.tsx`, `src/pages/ListerBookingsPage.tsx`,
+`src/types/database.ts`, `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
 ## 2026-09-05 — Retired the redundant "Refresh Authenticator Check" login button
 
 Reported as pointless. Investigated: it does not refresh the 6-digit
