@@ -600,6 +600,8 @@ export interface Database {
           dispute_reason: string | null;
           payment_deadline: string | null;
           owner_response_deadline: string | null;
+          balance_deadline: string | null;
+          balance_reminder_sent_at: string | null;
           renter_completed: boolean;
           owner_completed: boolean;
           renter_completed_at: string | null;
@@ -646,6 +648,8 @@ export interface Database {
           dispute_reason?: string | null;
           owner_response_deadline?: string | null;
           payment_deadline?: string | null;
+          balance_deadline?: string | null;
+          balance_reminder_sent_at?: string | null;
           paymongo_checkout_id?: string | null;
           paymongo_balance_checkout_id?: string | null;
           renter_completed?: boolean | null;
@@ -692,6 +696,8 @@ export interface Database {
           dispute_reason?: string | null;
           owner_response_deadline?: string | null;
           payment_deadline?: string | null;
+          balance_deadline?: string | null;
+          balance_reminder_sent_at?: string | null;
           paymongo_checkout_id?: string | null;
           paymongo_balance_checkout_id?: string | null;
           renter_completed?: boolean | null;
@@ -1331,6 +1337,8 @@ export interface Database {
           refund_late_renter_percent: number;
           arrival_checkin_lead_hours: number;
           lister_completion_timeout_hours: number;
+          balance_deadline_hours: number;
+          balance_reminder_hours_before: number;
           contact_email: string;
           user_verification_eta_message: string;
           vehicle_verification_eta_message: string;
@@ -1348,6 +1356,8 @@ export interface Database {
           refund_late_renter_percent?: number;
           arrival_checkin_lead_hours?: number;
           lister_completion_timeout_hours?: number;
+          balance_deadline_hours?: number;
+          balance_reminder_hours_before?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;
@@ -1365,6 +1375,8 @@ export interface Database {
           refund_late_renter_percent?: number;
           arrival_checkin_lead_hours?: number;
           lister_completion_timeout_hours?: number;
+          balance_deadline_hours?: number;
+          balance_reminder_hours_before?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;

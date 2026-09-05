@@ -124,7 +124,10 @@ Server recalculates everything:
 - `reject` → `rejected`; notifies renter.
 - Cron `POST /api/expire-booking-deadlines` (needs `CRON_SECRET`): `pending`
   past owner deadline → `rejected`; `confirmed`/`awaiting_payment` past payment
-  deadline → `cancelled`. Notifies both parties. Capped 200 + 200 per run.
+  deadline → `cancelled`; `downpayment_paid` past `balance_deadline` (CHAPTER
+  42) → `cancelled` through the late-cancellation refund policy, not a plain
+  no-refund expiry (money was already captured) - plus a one-time reminder
+  before that deadline hits. Notifies both parties. Capped 200 per query.
   **Requires an external scheduler** (GitHub Actions workflow
   `scheduled-workers.yml`, or any cron hitting the URL with the bearer secret).
 
@@ -150,6 +153,10 @@ Server recalculates everything:
     debit `1010`, credit `2010` + `2040` + `4020`, then `finalize_ledger_journal`).
   - Notifies both parties; sends the renter a **payment receipt** via Resend;
     records `delivery_state`.
+  - On the downpayment branch specifically, also stamps
+    `bookings.balance_deadline = min(now + balance_deadline_hours, pickup
+    time)` (CHAPTER 42) - see §8's cron bullet for what happens if it passes
+    unpaid.
 - `/payment/success` is a waiting screen only — never the authority.
 
 ## 10. Security deposit (Removed)

@@ -372,6 +372,15 @@ Replaces the retired pre-booking "Ask the lister" (a car detail page inquiry wit
 - **Soft-archive on completion:** the moment the linked booking's status becomes `completed` or `cancelled`, the thread disappears from both dashboards' **Booking Conversations** list (`SupportTicketsPage` joins `bookings.status` and filters client-side) - not deleted, still readable by an admin (`/admin/support`, "Member conversations") for disputes. A conversation ticket with no `booking_id` (a survivor from before this chapter) is never archived.
 - **Not a new table:** no schema change was needed - `support_tickets.booking_id` already existed (added for "Report Booking").
 
+### 8.7 Balance-payment deadline (CHAPTER 42)
+
+Before this chapter, a booking that reached `downpayment_paid` had no deadline of any kind on the remaining balance - the deadline-expiry cron only ever expired `confirmed`/`awaiting_payment` (pre-any-payment) bookings, and `downpayment_paid` still counts as an active status for overlap purposes, so an unpaid balance permanently blocked the car's dates with no automatic recovery and no reminder.
+
+- **`bookings.balance_deadline`** is stamped once, at the moment the downpayment webhook succeeds (`api/webhooks/paymongo.ts`): `min(now + balance_deadline_hours, pickup time)` - the same "never past pickup" cap already used for the original `payment_deadline`. `platform_settings.balance_deadline_hours` (default 24) and `balance_reminder_hours_before` (default 6) are live operational-timing settings, same category as `arrival_checkin_lead_hours` / `lister_completion_timeout_hours` (read live, never snapshotted per booking - they gate *when* something happens, not a financial promise made at booking time) - both super-admin-configurable through the existing consensus-vote flow on `/admin/platform-settings`.
+- **Expiry** (`api/expire-booking-deadlines.ts`): a `downpayment_paid` booking past its `balance_deadline` is auto-cancelled. The financial consequence reuses the **existing** late-cancellation policy - `refund_full_hours_snapshot` / `refund_late_renter_percent_snapshot`, already snapshotted per booking at `create-booking` time - via the new `api/lib/cancellationRefundPlan.ts` (`getCancellationRefundPlan`, `createManualRefundReview`, extracted so both the user-initiated `cancel` action in `api/booking-action.ts` and this cron share one calculation; `booking-action.ts` keeps its own untouched local copy for its critical payment path, importing nothing new). No new refund percentage was introduced. It is recorded in `booking_cancellations` with `cancelled_by_role='renter'`, so it counts against the renter's reliability the same way any other late cancellation does.
+- **Reminder:** a one-time notification (`bookings.balance_reminder_sent_at` dedupes it) fires once the deadline is within `balance_reminder_hours_before`.
+- **Surfaced to both sides:** `/my-bookings` and `/lister-bookings` show a live countdown to `balance_deadline` on the `downpayment_paid` guidance card.
+
 ## 9. Security Deposit: Option B (Removed)
 
 SafeDrive shipped a separate refundable-deposit workflow (deposit checkout, a

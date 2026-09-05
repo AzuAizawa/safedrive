@@ -116,6 +116,7 @@ interface ListerBooking {
   renter_completed: boolean;
   owner_response_deadline: string | null;
   payment_deadline: string | null;
+  balance_deadline: string | null;
   paymongo_checkout_id: string | null;
   paymongo_balance_checkout_id: string | null;
   pickup_time: string | null;
@@ -1172,8 +1173,12 @@ export default function ListerBookingsPage() {
       return {
         tone: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
         title: "Downpayment confirmed",
-        body: "The renter has reserved the trip. Wait for the remaining balance, then use the arrival and completion steps to document handoff.",
-        footnote: "Keep the agreement and condition photos ready before pickup.",
+        body: booking.balance_deadline
+          ? `The renter has ${formatCountdown(booking.balance_deadline)} to pay the remaining balance, or the booking auto-cancels and these dates free up.`
+          : "The renter has reserved the trip. Wait for the remaining balance, then use the arrival and completion steps to document handoff.",
+        footnote: booking.balance_deadline
+          ? `Balance deadline: ${formatDeadlineStamp(booking.balance_deadline)}`
+          : "Keep the agreement and condition photos ready before pickup.",
       };
     }
 
@@ -1223,7 +1228,9 @@ export default function ListerBookingsPage() {
       return {
         tone,
         title: "Wait for full payment",
-        body: "The renter still needs to settle the remaining balance before handoff.",
+        body: booking.balance_deadline
+          ? `${formatCountdown(booking.balance_deadline)} for the renter to settle the remaining balance before handoff.`
+          : "The renter still needs to settle the remaining balance before handoff.",
       };
     }
 

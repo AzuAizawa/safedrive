@@ -23,6 +23,8 @@ type BookingRecord = {
   paymongo_checkout_id: string | null;
   balance_amount?: number;
   paymongo_balance_checkout_id?: string | null;
+  start_date?: string;
+  pickup_time?: string | null;
 };
 
 type SubscriptionPlanDefinition = {
@@ -168,6 +170,40 @@ const getSupabaseAdmin = () => {
   return createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+};
+
+const DEFAULT_BALANCE_DEADLINE_HOURS = 24;
+
+// Same Manila-correct pattern used across booking-action.ts /
+// booking-incident-action.ts / api/lib/cancellationRefundPlan.ts -
+// start_date is a plain calendar date, pickup time is treated as Manila
+// local time (-8h from the naive UTC instant).
+const getBookingPickupMs = (booking: Pick<BookingRecord, "start_date" | "pickup_time">) => {
+  const [year, month, day] = (booking.start_date || "")
+    .split("-")
+    .map((part) => Number(part));
+  const [hour, minute] = (booking.pickup_time || "09:00")
+    .split(":")
+    .map((part) => Number(part));
+  if (!year || !month || !day) return null;
+  const asUtc = Date.UTC(year, month - 1, day, hour || 0, minute || 0);
+  return asUtc - 8 * 60 * 60 * 1000;
+};
+
+// CHAPTER 42: how long, from the moment the downpayment succeeds, the renter
+// has to pay the remaining balance - capped at pickup time, mirroring the
+// same "never past pickup" rule already used for the original
+// payment_deadline. Live setting (not snapshotted per booking).
+const fetchBalanceDeadlineHours = async (supabase: ServiceRoleSupabaseClient) => {
+  const { data } = await supabase
+    .from("platform_settings")
+    .select("balance_deadline_hours")
+    .eq("id", "default")
+    .maybeSingle();
+  const parsed = Number(data?.balance_deadline_hours);
+  return Number.isFinite(parsed) && parsed >= 1 && parsed <= 168
+    ? Math.round(parsed)
+    : DEFAULT_BALANCE_DEADLINE_HOURS;
 };
 
 const recordWebhookSecurityEvent = async (
@@ -1466,7 +1502,9 @@ export default async function handler(req: Request) {
 
     const { data: booking, error: bookingError } = await supabase
       .from("bookings")
-      .select("id, status, renter_id, owner_id, downpayment_amount, paymongo_checkout_id")
+      .select(
+        "id, status, renter_id, owner_id, downpayment_amount, paymongo_checkout_id, start_date, pickup_time",
+      )
       .eq("id", bookingId)
       .single();
 
@@ -1579,9 +1617,21 @@ export default async function handler(req: Request) {
       ),
     }, new URL(req.url).origin);
 
+    // CHAPTER 42: stamp when the remaining balance must be paid by, capped at
+    // pickup so a booking created close to pickup gets whatever time is
+    // actually left rather than a full window running past the trip start.
+    const balanceDeadlineHours = await fetchBalanceDeadlineHours(supabase);
+    const pickupMs = getBookingPickupMs(bookingRecord);
+    const balanceDeadline = new Date(
+      Math.min(
+        Date.now() + balanceDeadlineHours * 60 * 60 * 1000,
+        pickupMs ?? Date.now() + balanceDeadlineHours * 60 * 60 * 1000,
+      ),
+    ).toISOString();
+
     const { data: downpaymentStateChanged, error: updateError } = await supabase
       .from("bookings")
-      .update({ status: "downpayment_paid" })
+      .update({ status: "downpayment_paid", balance_deadline: balanceDeadline })
       .eq("id", bookingId)
       .in("status", ["confirmed", "awaiting_payment"])
       .select("id")

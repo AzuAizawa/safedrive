@@ -9,6 +9,45 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Balance-payment deadline: a downpayment-only booking can no longer sit unpaid forever (CHAPTER 42)
+
+Raised while discussing the no-show refund policy: once a booking reached
+`downpayment_paid`, nothing ever expired it if the renter never paid the
+remaining balance - the deadline cron only expired `confirmed`/
+`awaiting_payment` (pre-any-payment) bookings, and `downpayment_paid` still
+counts as an active status, so the car's dates stayed permanently blocked
+with no automatic recovery and no reminder.
+
+- **`bookings.balance_deadline`** is stamped once, when the downpayment
+  webhook succeeds: `min(now + balance_deadline_hours, pickup time)` - the
+  same "never past pickup" cap the original `payment_deadline` already uses.
+- **Two new live, super-admin-configurable settings** (consensus-vote flow on
+  `/admin/platform-settings`, same category as `arrival_checkin_lead_hours` /
+  `lister_completion_timeout_hours` - operational timings, not snapshotted
+  per booking): `balance_deadline_hours` (default 24) and
+  `balance_reminder_hours_before` (default 6).
+- **Expiry** (`api/expire-booking-deadlines.ts`): auto-cancels a
+  `downpayment_paid` booking past its deadline, reusing the **existing**
+  late-cancellation refund policy (`refund_full_hours_snapshot` /
+  `refund_late_renter_percent_snapshot`, already snapshotted per booking) -
+  no new refund percentage. Extracted the shared calculation into new
+  `api/lib/cancellationRefundPlan.ts` (`getCancellationRefundPlan`,
+  `createManualRefundReview`) so this cron and the existing user-initiated
+  `cancel` action (`api/booking-action.ts`, left untouched, its own local
+  copy) don't diverge. Counts against the renter's reliability record the
+  same way any other late cancellation does.
+- **One-time reminder** before the deadline hits (`balance_reminder_sent_at`
+  dedupes it).
+- **Countdown surfaced** on the `downpayment_paid` guidance card on both
+  `/my-bookings` and `/lister-bookings`.
+
+Files: `api/webhooks/paymongo.ts`, `api/expire-booking-deadlines.ts`,
+`api/lib/cancellationRefundPlan.ts` (new), `src/pages/MyBookingsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`, `src/pages/admin/AdminPlatformSettingsPage.tsx`,
+`src/types/database.ts`, `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql`
+(CHAPTER 42), `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`,
+`project_docs/SYSTEM_FLOWS.md`.
+
 ## 2026-09-05 — Add Vehicle: OR/CR are single-page documents, drop the front/back split
 
 Reported bug: Add Vehicle asked for "OR front", "OR back", "CR front", and

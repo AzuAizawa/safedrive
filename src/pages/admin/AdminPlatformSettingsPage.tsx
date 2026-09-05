@@ -36,6 +36,8 @@ type SettingsRow = {
   refund_late_renter_percent: number;
   arrival_checkin_lead_hours: number;
   lister_completion_timeout_hours: number;
+  balance_deadline_hours: number;
+  balance_reminder_hours_before: number;
 };
 
 type ChangeRequest = {
@@ -158,6 +160,32 @@ const FIELDS: Record<
     },
     formatStored: (s) => `${Math.round(s)} h`,
   },
+  balance_deadline_hours: {
+    label: "Balance payment window",
+    hint: "Hours from downpayment to pay the remaining balance, capped at pickup time (1-168). A renter who misses this is auto-cancelled through the short-notice refund policy above. Applies live.",
+    unit: "hours",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return Number.isFinite(n) && n >= 1 && n <= 168 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} h`,
+  },
+  balance_reminder_hours_before: {
+    label: "Balance reminder lead time",
+    hint: "How long before the balance deadline to send a one-time reminder (0-168). Applies live.",
+    unit: "hours",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return Number.isFinite(n) && n >= 0 && n <= 168 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} h`,
+  },
 };
 
 const FIELD_KEYS = Object.keys(FIELDS) as (keyof SettingsRow)[];
@@ -211,7 +239,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, lister_completion_timeout_hours",
+          "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before",
         )
         .eq("id", "default")
         .maybeSingle(),

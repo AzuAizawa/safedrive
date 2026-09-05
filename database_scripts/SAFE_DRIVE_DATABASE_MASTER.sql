@@ -8096,4 +8096,115 @@ begin
 end;
 $$;
 
+-- ============================================================================
+-- CHAPTER 42 - Balance-payment deadline (a downpayment-only booking can no
+-- longer sit unpaid forever)
+-- ============================================================================
+-- Before this chapter, the moment a booking reached downpayment_paid, no
+-- deadline of any kind applied to the remaining balance - the cron in
+-- api/expire-booking-deadlines.ts only ever expired "confirmed"/
+-- "awaiting_payment" (pre-any-payment) bookings. A renter who paid the
+-- downpayment and never paid the rest left the car's dates permanently
+-- blocked (downpayment_paid counts as an active booking status for overlap
+-- purposes) with no automatic recovery and no reminder ever sent.
+--
+-- Two new operational-timing settings, same category as
+-- arrival_checkin_lead_hours/lister_completion_timeout_hours (read live, not
+-- snapshotted per booking - these gate WHEN something happens, not a
+-- financial promise made at booking time):
+--   balance_deadline_hours          hours from downpayment success to pay the
+--                                    remaining balance, capped at pickup time
+--                                    (same "never past pickup" rule already
+--                                    used for the original payment_deadline)
+--   balance_reminder_hours_before   how long before that deadline to send a
+--                                    one-time reminder
+--
+-- bookings.balance_deadline is computed once, at the moment the downpayment
+-- webhook succeeds (api/webhooks/paymongo.ts), and stored as a concrete
+-- timestamp - the cron just compares against it, no setting lookup needed at
+-- expiry time. bookings.balance_reminder_sent_at dedupes the one-time
+-- reminder notification.
+--
+-- The actual financial consequence of missing the deadline reuses the
+-- EXISTING late-cancellation policy (refund_full_hours_snapshot /
+-- refund_late_renter_percent_snapshot, already snapshotted per booking at
+-- create-booking time) via api/lib/cancellationRefundPlan.ts - no new refund
+-- percentage was introduced. It also counts against the renter's reliability
+-- record the same way any other late cancellation does (booking_cancellations
+-- with cancelled_by_role='renter').
+
+alter table public.platform_settings
+  add column if not exists balance_deadline_hours integer not null default 24;
+alter table public.platform_settings
+  add column if not exists balance_reminder_hours_before integer not null default 6;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_balance_deadline_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_balance_deadline_hours_check
+  check (balance_deadline_hours >= 1 and balance_deadline_hours <= 168);
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_balance_reminder_hours_before_check;
+alter table public.platform_settings
+  add constraint platform_settings_balance_reminder_hours_before_check
+  check (balance_reminder_hours_before >= 0 and balance_reminder_hours_before <= 168);
+
+alter table public.bookings
+  add column if not exists balance_deadline timestamptz;
+alter table public.bookings
+  add column if not exists balance_reminder_sent_at timestamptz;
+
+create index if not exists idx_bookings_balance_deadline
+  on public.bookings (balance_deadline)
+  where balance_deadline is not null;
+
+-- Extend the consensus-vote whitelist so the two new keys are proposable and
+-- votable through the existing super-admin flow. Every existing branch is
+-- reproduced verbatim; only the two new elsif branches are added before the
+-- final "not configurable" guard.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$$;
+
 -- End of SafeDrive chaptered database master.

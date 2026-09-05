@@ -76,6 +76,7 @@ interface BookingRow {
   owner_completed: boolean;
   payment_deadline: string | null;
   owner_response_deadline: string | null;
+  balance_deadline: string | null;
   paymongo_checkout_id?: string | null;
   paymongo_balance_checkout_id?: string | null;
   pickup_time: string | null;
@@ -1322,8 +1323,12 @@ export default function MyBookingsPage() {
       return {
         tone: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
         title: "Downpayment confirmed",
-        body: "Your request is reserved. Settle the remaining balance before pickup so the rental can move into the arrival stage.",
-        footnote: "Keep your rental agreement and payment records ready for pickup day.",
+        body: booking.balance_deadline
+          ? `${formatCountdown(booking.balance_deadline)} to pay the remaining balance. Missing this auto-cancels the booking under the short-notice refund policy.`
+          : "Your request is reserved. Settle the remaining balance before pickup so the rental can move into the arrival stage.",
+        footnote: booking.balance_deadline
+          ? `Balance deadline: ${formatDeadlineStamp(booking.balance_deadline)}`
+          : "Keep your rental agreement and payment records ready for pickup day.",
       };
     }
 
@@ -1373,7 +1378,9 @@ export default function MyBookingsPage() {
       return {
         tone,
         title: "Pay the remaining balance",
-        body: "The rental can start after the balance is confirmed by PayMongo.",
+        body: booking.balance_deadline
+          ? `${formatCountdown(booking.balance_deadline)}. The rental can start after the balance is confirmed by PayMongo.`
+          : "The rental can start after the balance is confirmed by PayMongo.",
       };
     }
 

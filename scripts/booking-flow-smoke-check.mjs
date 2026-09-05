@@ -48,6 +48,8 @@ const checks = [
       "apply live to every booking",
       "set_platform_contact_email",
       "Platform contact email",
+      "balance_deadline_hours",
+      "balance_reminder_hours_before",
     ],
   },
   {
@@ -176,6 +178,7 @@ const checks = [
       "Your renter rating",
       "Message Lister",
       "openBookingConversation",
+      "balance_deadline",
     ],
     absentMarkers: [
       "booking_reviews exists in the live schema but is not part of the generated types yet",
@@ -278,6 +281,10 @@ const checks = [
       "payment_expired",
       "owner_response_deadline",
       "payment_deadline",
+      "balance_deadline_expired",
+      "balanceReminderSent",
+      "getCancellationRefundPlan",
+      "balance payment deadline missed",
     ],
   },
   {
@@ -337,6 +344,17 @@ const checks = [
       "lister-extension:${extensionId}",
       "allocationOverride",
       "Extension Payment Received",
+      "fetchBalanceDeadlineHours",
+      "balance_deadline: balanceDeadline",
+    ],
+  },
+  {
+    file: "api/lib/cancellationRefundPlan.ts",
+    markers: [
+      "getCancellationRefundPlan",
+      "createManualRefundReview",
+      "contextLabel",
+      "Manual refund review cannot be created without a captured refundable amount.",
     ],
   },
   {
@@ -430,6 +448,7 @@ const checks = [
       "Recent feedback from other listers",
       "Message Renter",
       "openBookingConversation",
+      "balance_deadline",
     ],
     absentMarkers: [
       "booking_reviews exists in the live schema but is not part of the generated types yet",
