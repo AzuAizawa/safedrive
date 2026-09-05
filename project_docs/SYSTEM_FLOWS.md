@@ -22,8 +22,9 @@ server-side. Route guards in `src/components/*Route.tsx` are cosmetic.
   seeds the first `guest_inquiry_messages` row. Validates name 2–120, email
   format, ≥1 topic, message 5–3000; rate-limits ≥5/email/hour; hashes a request
   fingerprint with `GUEST_INQUIRY_HASH_SALT`. A DB trigger notifies admins.
-- Threaded inquiry (signed-in): the person reads replies and posts follow-ups at
-  `/inquiries` (`InquiriesPage`). Admin reply = `POST /api/reply-guest-inquiry`
+- Threaded inquiry (signed-in): the person reads replies and posts follow-ups in
+  the floating `InquiryWidget` (same bottom-right button used to submit it - no
+  separate page). Admin reply = `POST /api/reply-guest-inquiry`
   `action: reply` (thread message + email + `in_progress`, not resolved) or
   `action: resolve` (close). Follow-up = `POST /api/inquiry-followup` (RLS lets
   the owner insert an `inquirer` message; the route re-opens the inquiry and
@@ -90,8 +91,9 @@ server-side. Route guards in `src/components/*Route.tsx` are cosmetic.
 
 - `/browse`: lists `approved`/`active` cars. `/cars/:id`: details, reviews, price
   preview, a calendar disabled outside **tomorrow-to-30-days** and on booked
-  ranges, the agreement PDF via a 5-minute signed URL, and a listing question →
-  `POST /api/create-car-inquiry`.
+  ranges, and the agreement PDF via a 5-minute signed URL. No pre-booking
+  question form (retired CHAPTER 41) - a renter/lister instead messages each
+  other from within an actual booking, see §20 "Booking Conversations".
 
 ## 7. Booking creation — `POST /api/create-booking`
 
@@ -295,6 +297,14 @@ sections 16-20 don't shift.
 - **Support tickets** (`/support`, `/admin/support`): authenticated cases +
   messages + attachments; RLS scoped to participants/admins; admin replies can
   trigger `POST /api/send-support-ticket-reply-email`.
+- **Booking Conversations** (CHAPTER 41, replaces the retired pre-booking "Ask
+  the lister"): `POST /api/open-booking-conversation` opens (or reuses) one
+  `support_tickets` thread per `fully_paid`/`active`/`completed` booking -
+  "Message Lister" on `/my-bookings`, "Message Renter" on `/lister-bookings`.
+  Shares the same table/RLS as Support tickets (`participant_user_id` set,
+  `booking_id` set) and shows under the **Booking Conversations** tab on
+  `/support`, which disappears client-side once the linked booking is
+  `completed`/`cancelled` (soft-archive, still readable by an admin).
 - **Privacy / retention** (`/privacy-request` → `POST /api/data-request` or RPC
   `submit_data_retention_request`): access / correction / deletion / anonymization
   / restriction → `data_retention_requests`. Super-admin workflow

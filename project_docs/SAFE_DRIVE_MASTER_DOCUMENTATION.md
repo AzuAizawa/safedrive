@@ -126,7 +126,7 @@ One account may act as a renter or lister when eligible. Registered users can co
 
 Lister mode is a deliberate in-session choice made with the "Switch to Lister" control (`profiles.is_lister`). It is a UI-context flag, not a permission - every privileged action is authorised server-side by ownership. It does not persist across a session boundary: every sign-out (explicit or the 10-minute inactivity timeout) and every fresh sign-in resets the account to renter mode, so logging in always lands in the renter UI. A plain page reload resumes the existing session and keeps the current mode.
 
-Following a notification into the other space switches context automatically (Airbnb-style) rather than showing a mismatched screen: opening a booking-request notification puts the account in lister mode, opening a trip notification puts it in renter mode. `src/lib/listerMode.ts` `portalModeForPath` classifies each destination (`/lister-bookings`, `/my-vehicles`, `/vehicle-availability`, `/car-renewals` = lister; `/my-bookings`, `/inquiries`, `/subscriptions` = renter; everything else, including Support and verification, is neutral and never switches). The notification click handler switches then hard-navigates; `src/components/ModeRoute.tsx` is a non-blocking backstop for email links and bookmarks (it renders the page immediately and flips the mode in the background). Switching into lister mode still requires a verified account.
+Following a notification into the other space switches context automatically (Airbnb-style) rather than showing a mismatched screen: opening a booking-request notification puts the account in lister mode, opening a trip notification puts it in renter mode. `src/lib/listerMode.ts` `portalModeForPath` classifies each destination (`/lister-bookings`, `/my-vehicles`, `/vehicle-availability`, `/car-renewals` = lister; `/my-bookings`, `/subscriptions` = renter; everything else, including Support and verification, is neutral and never switches). The notification click handler switches then hard-navigates; `src/components/ModeRoute.tsx` is a non-blocking backstop for email links and bookmarks (it renders the page immediately and flips the mode in the background). Switching into lister mode still requires a verified account.
 
 An account viewing its own listing in renter mode (from Browse or a direct `/cars/:id` link) sees the car with a "Your listing" badge and, on the detail page, an owner panel with the listing's live status and a link to My Vehicles - not a booking form. The booking form is only rendered for other renters; `handleBooking` and `api/create-booking.ts` still reject an owner booking their own car as a server-side backstop.
 
@@ -199,7 +199,7 @@ Opening the reply box silently claims the inquiry (`open → in_progress`, assig
 
 The admin page is **User Inquiries** (table `guest_inquiries` + thread `guest_inquiry_messages`). It is the questions channel, distinct from **Support Tickets** which carry a reference and signal "an issue to resolve".
 
-- **Signed-in submitter:** the inquiry is linked (`submitted_by_user_id`) and becomes a threaded conversation. They see it at `/inquiries` (`InquiriesPage`), read replies in-app, and post follow-ups (`api/inquiry-followup.ts`, which re-opens the inquiry in the admin queue). An admin reply (`action: reply`) adds a thread message + emails them + sets `in_progress`; it does **not** close the inquiry. An admin marks it resolved separately (`action: resolve`).
+- **Signed-in submitter:** the inquiry is linked (`submitted_by_user_id`) and becomes a threaded conversation. They see it in the floating `InquiryWidget` (the same bottom-right "Inquiry" button used to submit it - there is no separate page), read replies in-app, and post follow-ups (`api/inquiry-followup.ts`, which re-opens the inquiry in the admin queue). An admin reply (`action: reply`) adds a thread message + emails them + sets `in_progress`; it does **not** close the inquiry. An admin marks it resolved separately (`action: resolve`).
 - **Guest (no account):** no token, no link, no in-app thread - a single email reply, then the admin marks it resolved. This is the fallback for a true visitor.
 
 Inquiries do not carry a reference number - that is a Support Ticket signal.
@@ -228,7 +228,7 @@ The API validates lengths and email format, rate-limits repeated requests, hashe
 
 1. An admin receives a bell/work-center item.
 2. Opening the reply box claims the inquiry (`open → in_progress`); there is no separate "Start review" step.
-3. The admin replies from SafeDrive. Resend delivers the email (Apps Script fallback while Resend is absent); a linked account also gets the reply in its `/inquiries` thread and a notification.
+3. The admin replies from SafeDrive. Resend delivers the email (Apps Script fallback while Resend is absent); a linked account also gets the reply in its `InquiryWidget` thread and a notification.
 4. A failed delivery is not recorded and shows a specific error.
 5. Replying does not resolve the inquiry - the person can follow up. The admin clicks **Mark resolved** when the question is answered; a follow-up after that requires a new inquiry.
 
@@ -362,6 +362,15 @@ The fairness gap CHAPTER 27 left open: a renter forced to cancel because the car
 - **`bookings.dispute_status`** (`none` / `open` / `resolved`): while `open`, the renter cannot create or pay for new bookings (`api/create-booking.ts`, `api/create-checkout.ts`, `api/create-balance-checkout.ts` — each a separate defensive query) and the lister cannot re-enable that car's listing. Support clears it to `resolved` when the case closes.
 - **Take a car offline (`/my-vehicles` "Disable"):** if the car has upcoming `pending` / `confirmed` / paid bookings (excluding `dispute_status='open'` ones), a confirmation modal lists them and asks for a reason. On confirm each is cancelled through `booking-action` `cancel` (paid ones auto-refund); an `active` trip blocks the toggle. Reason **stolen/missing** or **damaged** passes `waiveStrike` so the cancellations are recorded but excluded from the completion rate and the auto-pause count, and opens a `vehicle_offline` support ticket. Reason **other** is a normal lister cancellation.
 - **`booking_cancellations.strike_waived`** (CHAPTER 31): both reliability RPCs and the `booking-action` auto-pause strike count ignore a waived row.
+
+### 8.6 Booking Conversations (CHAPTER 41)
+
+Replaces the retired pre-booking "Ask the lister" (a car detail page inquiry with no `booking_id`, permanent in the inbox, and reachable even before a renter had actually booked). Either participant of a `fully_paid` / `active` / `completed` booking can now open **one shared messaging thread** for that booking - "Message Lister" on `/my-bookings`, "Message Renter" on `/lister-bookings` - via `api/open-booking-conversation.ts`, which reuses `support_tickets` / `ticket_messages` exactly as the old conversation-ticket shape did (`participant_user_id` set, monitored but not owned by SafeDrive), just always with `booking_id` set this time.
+
+- **One thread per booking:** the endpoint looks up an existing ticket by `booking_id` + `participant_user_id is not null` before creating a new one, so either side's button opens the same conversation.
+- **Where it lives:** still `/support` (`SupportTicketsPage`), under the **Booking Conversations** tab (renamed from "Lister Messages", which read backwards to a lister viewing their own inbox). The tab is neutral on purpose - the per-message sender label (`resolveTicketSender`) is what says "Renter" or "Lister", not the tab title.
+- **Soft-archive on completion:** the moment the linked booking's status becomes `completed` or `cancelled`, the thread disappears from both dashboards' **Booking Conversations** list (`SupportTicketsPage` joins `bookings.status` and filters client-side) - not deleted, still readable by an admin (`/admin/support`, "Member conversations") for disputes. A conversation ticket with no `booking_id` (a survivor from before this chapter) is never archived.
+- **Not a new table:** no schema change was needed - `support_tickets.booking_id` already existed (added for "Report Booking").
 
 ## 9. Security Deposit: Option B (Removed)
 
@@ -1212,8 +1221,7 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | User | `/lister-bookings` | `ListerBookingsPage`; owner booking decisions and trip state |
 | User | `/notifications` | `NotificationsPage`; personal notifications |
 | User | `/car-renewals` | `ListerCarRenewalPage`; expiring document renewal |
-| User | `/support` | `SupportTicketsPage`; authenticated Support Tickets (issues, with a reference) |
-| User | `/inquiries` | `InquiriesPage`; the signed-in person's own threaded inquiries and replies |
+| User | `/support` | `SupportTicketsPage`; authenticated Support Tickets and Booking Conversations |
 | User | `/payment/success` | `PaymentSuccessPage`; provider-return waiting screen, not payment authority |
 | User | `/subscriptions` | `SubscriptionPlansPage`; hosted subscription checkout |
 | User | `/vehicle-availability` | `VehicleAvailabilityPage`; maintenance/blackout management |
@@ -1258,7 +1266,6 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/create-balance-checkout.ts` | POST; renter | Recalculate eligibility and create PayMongo balance checkout |
 | `api/create-booking.ts` | POST; eligible renter | Server-authoritative price/date/overlap validation and booking insertion |
 | `api/create-booking-extension-checkout.ts` | POST; renter | Create hosted checkout for an approved extension |
-| `api/create-car-inquiry.ts` | POST; authenticated user | Send a listing-specific inquiry to the vehicle owner |
 | `api/create-checkout.ts` | POST; renter | Create hosted downpayment/full checkout from server-calculated records |
 | `api/create-guest-inquiry.ts` | POST; public (optional bearer), rate/duplicate guarded | Validate fields/topics and enqueue an inquiry; a bearer token links it to the account and seeds the first thread message |
 | `api/inquiry-followup.ts` | POST; the inquiry's own account holder | Add a follow-up message to a non-resolved inquiry, re-open it in the queue, notify admins |
@@ -1269,6 +1276,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/flag-expiring-licenses.ts` | GET/POST; cron secret | Daily: notify a verified renter whose driver's licence expires within 30 days (or has expired); deduped weekly via `profiles.license_expiry_notified_at` |
 | `api/get-approved-rental-agreement.ts` | GET; participant | Return only the agreement version approved/snapshotted for the booking |
 | `api/mark-manual-refund.ts` | POST; super-admin | Record an actually completed manual refund with method/reference |
+| `api/open-booking-conversation.ts` | POST; a participant (renter or owner) of the booking | Open (or reuse) the one `support_tickets` conversation thread tied to a paid/active/completed booking - "Message Lister" / "Message Renter" |
 | `api/process-payout.ts` | POST; super-admin | Run payout eligibility and PayMongo/simulator automation |
 | `api/process-refund.ts` | POST; super-admin | Retry one or a controlled batch of refund automation |
 | `api/record-security-event.ts` | POST; authenticated or allow-listed login event | Sanitize and record security-relevant activity without secrets |

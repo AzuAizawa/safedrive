@@ -36,7 +36,6 @@ import {
   Loader2,
   Eye,
   Star,
-  MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import { differenceInDays, format, addDays } from "date-fns";
@@ -117,9 +116,6 @@ export default function CarDetailPage() {
   const [listerReliability, setListerReliability] = useState<Reliability | null>(
     null,
   );
-  const [showInquiry, setShowInquiry] = useState(false);
-  const [inquiryMessage, setInquiryMessage] = useState("");
-  const [sendingInquiry, setSendingInquiry] = useState(false);
   const legalReturnTo =
     `${location.pathname}${location.search}${location.hash}` || "/browse";
 
@@ -472,58 +468,6 @@ export default function CarDetailPage() {
     });
   };
 
-  const handleSendInquiry = async () => {
-    if (!user || !car || sendingInquiry) return;
-
-    const trimmedMessage = inquiryMessage.trim();
-    if (!trimmedMessage) {
-      toast.error("Write your question first");
-      return;
-    }
-
-    if (car.owner_id === user.id) {
-      toast.error("You cannot inquire about your own listing");
-      return;
-    }
-
-    setSendingInquiry(true);
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        throw new Error("Your session expired. Please sign in again.");
-      }
-
-      const response = await fetch("/api/create-car-inquiry", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ carId: car.id, message: trimmedMessage }),
-      });
-      const payload = (await response.json()) as { error?: string };
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Failed to open inquiry thread.");
-      }
-
-      toast.success("Inquiry sent", {
-        description: "The lister can reply from Support.",
-      });
-      setInquiryMessage("");
-      setShowInquiry(false);
-    } catch (error) {
-      toast.error("Failed to send inquiry", {
-        description: error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setSendingInquiry(false);
-    }
-  };
-
   // Price calculations for preview
   const isDateOverlapping = (start: Date, end: Date) => {
     if (!start || !end) return false;
@@ -785,18 +729,6 @@ export default function CarDetailPage() {
                   )}
                 </div>
               </div>
-              {user && car.owner_id !== user.id && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="mt-3 gap-2"
-                  onClick={() => setShowInquiry(true)}
-                >
-                  <MessageSquare className="h-4 w-4" />
-                  Ask lister
-                </Button>
-              )}
             </div>
           </div>
 
@@ -1509,72 +1441,6 @@ export default function CarDetailPage() {
         document.body,
       )}
 
-      {showInquiry &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-            onClick={() => {
-              if (!sendingInquiry) setShowInquiry(false);
-            }}
-          >
-            <div
-              className="w-full max-w-xl rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-2xl"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="space-y-1">
-                <h2 className="text-lg font-semibold">Ask the lister</h2>
-                <p className="text-sm text-muted-foreground">
-                  Send a question about this car before booking. The lister can reply in Support.
-                </p>
-              </div>
-
-              <div className="mt-4 rounded-xl border border-border/70 bg-muted/30 p-3 text-sm">
-                <p className="font-medium">
-                  {car.car_models.car_brands.name} {car.car_models.name}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Plate: {car.plate_number}
-                </p>
-              </div>
-
-              <label className="mt-4 block space-y-1.5 text-sm">
-                <span className="font-medium">Question</span>
-                <textarea
-                  value={inquiryMessage}
-                  onChange={(event) => setInquiryMessage(event.target.value)}
-                  rows={5}
-                  placeholder="Example: Is pickup possible near the mall entrance? Is there a child seat available?"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-              </label>
-
-              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={sendingInquiry}
-                  onClick={() => setShowInquiry(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  disabled={sendingInquiry || !inquiryMessage.trim()}
-                  onClick={() => void handleSendInquiry()}
-                  className="gap-2"
-                >
-                  {sendingInquiry ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <MessageSquare className="h-4 w-4" />
-                  )}
-                  Send Inquiry
-                </Button>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
     </div>
   );
 }

@@ -59,6 +59,7 @@ export default function SupportTicketsPage() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [bookingStatuses, setBookingStatuses] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [activeTicket, setActiveTicket] = useState<SupportTicket | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
@@ -177,6 +178,30 @@ export default function SupportTicketsPage() {
 
     if (!error && data) {
       setTickets(data);
+
+      // A booking conversation disappears from this list the moment its
+      // booking is completed or cancelled (soft-archive, not a delete - the
+      // row and its messages stay in the database for admin/dispute lookup).
+      // A legacy conversation ticket with no booking_id (from the retired
+      // pre-booking car inquiry) has nothing to check and stays visible.
+      const bookingIds = [
+        ...new Set(
+          data
+            .filter((ticket) => isConversationTicket(ticket) && ticket.booking_id)
+            .map((ticket) => ticket.booking_id as string),
+        ),
+      ];
+      if (bookingIds.length > 0) {
+        const { data: bookings } = await supabase
+          .from("bookings")
+          .select("id, status")
+          .in("id", bookingIds);
+        setBookingStatuses(
+          Object.fromEntries((bookings ?? []).map((b) => [b.id, b.status as string])),
+        );
+      } else {
+        setBookingStatuses({});
+      }
     }
     setLoading(false);
   }, [user]);
@@ -242,6 +267,20 @@ export default function SupportTicketsPage() {
     }
     void fetchMessages(ticket.id);
   };
+
+  // A "Message Lister" / "Message Renter" tap on a booking, or a notification
+  // link, arrives here as /support?ticketId=... - auto-open that ticket and
+  // switch to whichever tab actually holds it, instead of leaving the visitor
+  // to find it themselves in the list.
+  useEffect(() => {
+    const ticketId = searchParams.get("ticketId");
+    if (!ticketId || loading) return;
+    const ticket = tickets.find((item) => item.id === ticketId);
+    if (!ticket) return;
+    setTicketView(isConversationTicket(ticket) ? "messages" : "support");
+    handleOpenTicket(ticket);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, tickets, loading]);
 
   const resetCreateTicketForm = () => {
     setIsCreating(false);
@@ -498,8 +537,14 @@ export default function SupportTicketsPage() {
     [tickets],
   );
   const conversationTickets = useMemo(
-    () => tickets.filter((ticket) => isConversationTicket(ticket)),
-    [tickets],
+    () =>
+      tickets.filter((ticket) => {
+        if (!isConversationTicket(ticket)) return false;
+        if (!ticket.booking_id) return true; // legacy pre-booking conversation, never archived
+        const bookingStatus = bookingStatuses[ticket.booking_id];
+        return !["completed", "cancelled"].includes(bookingStatus ?? "");
+      }),
+    [tickets, bookingStatuses],
   );
   const visibleTickets =
     ticketView === "messages" ? conversationTickets : supportTickets;
@@ -627,7 +672,7 @@ export default function SupportTicketsPage() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                Lister Messages
+                Booking Conversations
                 {conversationTickets.length > 0
                   ? ` (${conversationTickets.length})`
                   : ""}
@@ -644,12 +689,12 @@ export default function SupportTicketsPage() {
                 <Ticket className="w-8 h-8 mx-auto mb-2" />
                 <p className="text-sm">
                   {ticketView === "messages"
-                    ? "No lister conversations yet"
+                    ? "No booking conversations yet"
                     : "No support tickets yet"}
                 </p>
                 {ticketView === "messages" ? (
                   <p className="mt-1 text-xs">
-                    Start one from a car page with &ldquo;Ask the lister&rdquo;.
+                    Open one from an active booking with &ldquo;Message Lister&rdquo; or &ldquo;Message Renter&rdquo;. It closes automatically once the trip is completed.
                   </p>
                 ) : null}
               </div>

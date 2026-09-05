@@ -46,7 +46,6 @@ const PrivacyPolicyPage = lazyWithReload(() => import("@/pages/PrivacyPolicyPage
 const TermsPage = lazyWithReload(() => import("@/pages/TermsPage"));
 const PlatformAgreementPage = lazyWithReload(() => import("@/pages/PlatformAgreementPage"));
 const SupportTicketsPage = lazyWithReload(() => import("@/pages/SupportTicketsPage"));
-const InquiriesPage = lazyWithReload(() => import("@/pages/InquiriesPage"));
 const PaymentSuccessPage = lazyWithReload(() => import("@/pages/PaymentSuccessPage"));
 const UpdatePasswordPage = lazyWithReload(() => import("@/pages/UpdatePasswordPage"));
 const SubscriptionPlansPage = lazyWithReload(() => import("@/pages/SubscriptionPlansPage"));
@@ -125,7 +124,6 @@ function App() {
                       {/* Renter space - a direct entry switches back to renter mode */}
                       <Route element={<ModeRoute mode="renter" />}>
                         <Route path="/my-bookings" element={<MyBookingsPage />} />
-                        <Route path="/inquiries" element={<InquiriesPage />} />
                         <Route path="/subscriptions" element={<SubscriptionPlansPage />} />
                       </Route>
 

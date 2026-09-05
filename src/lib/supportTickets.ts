@@ -45,8 +45,18 @@ export const parseTicketTags = (value?: string | null) =>
 export const serializeTicketTags = (values: string[]) =>
   Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).join(",");
 
+// Set on tickets by api/open-booking-conversation.ts, not offered as a
+// self-selectable option in the "New Ticket" tag picker (only the server
+// creates one, always alongside participant_user_id) - kept out of
+// ticketTags for that reason, but still needs a readable label here.
+const nonSelectableTagLabels: Record<string, string> = {
+  booking_conversation: "Booking Conversation",
+};
+
 export const getTicketTagLabel = (value: string) =>
-  ticketTags.find((tag) => tag.value === value)?.label ?? value;
+  ticketTags.find((tag) => tag.value === value)?.label ??
+  nonSelectableTagLabels[value] ??
+  value;
 
 export const getTicketTagLabels = (value?: string | null) => {
   const parsed = parseTicketTags(value);
@@ -64,10 +74,13 @@ export const ticketMatchesTagFilter = (
 
 /**
  * A ticket with a `participant_user_id` is a renter <-> lister conversation
- * (opened from a car listing's "Ask the lister"), not a SafeDrive support
- * request. The two share the `support_tickets` table but are presented
- * separately - a support request is answered by SafeDrive; a conversation is
- * between the two members and SafeDrive only monitors it.
+ * (opened from an active booking's "Message Lister" / "Message Renter", via
+ * api/open-booking-conversation.ts), not a SafeDrive support request. The
+ * two share the `support_tickets` table but are presented separately - a
+ * support request is answered by SafeDrive; a conversation is between the
+ * two members and SafeDrive only monitors it. A conversation ticket created
+ * before this chapter (the retired pre-booking "Ask the lister") has no
+ * `booking_id` and is still a conversation ticket here, just never archived.
  */
 export const isConversationTicket = (ticket: {
   participant_user_id?: string | null;

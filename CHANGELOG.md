@@ -9,6 +9,58 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Booking Conversations replace "Ask the lister"; My Inquiries folded into the floating widget (CHAPTER 41)
+
+Triggered by a real reported bug: the `/support` "Lister Messages" tab was a
+static label that read backwards for a lister viewing their own inbox (they
+appeared to be messaging "a lister", when the messages were actually from
+renters). Rather than just relabel it, this redesigns where renter<->lister
+messaging comes from at all, and separately folds a redundant nav item into
+the floating inquiry widget it duplicated.
+
+- **Retired the pre-booking "Ask the lister"** (`CarDetailPage.tsx`'s inquiry
+  modal, `api/create-car-inquiry.ts`). It had no `booking_id`, stayed in the
+  inbox forever, and was reachable before a renter had even booked.
+- **New "Message Lister" / "Message Renter"** button on an active
+  (`fully_paid`/`active`) booking, both `MyBookingsPage.tsx` and
+  `ListerBookingsPage.tsx`. Opens (or reuses) one `support_tickets` thread per
+  booking via new `api/open-booking-conversation.ts` - reuses the exact same
+  `support_tickets`/`ticket_messages` conversation shape the old flow used
+  (`participant_user_id` set), just always with `booking_id` set now, so no
+  schema change was needed beyond a notification-copy fix.
+- **`/support` tab renamed** "Lister Messages" -> **"Booking Conversations"**
+  - neutral regardless of which side is viewing, fixing the reported bug.
+  Empty-state copy updated to point at the new entry point.
+- **Soft-archive on completion:** a booking conversation disappears from both
+  dashboards' list the moment its booking is `completed`/`cancelled` (a client
+  filter joining `bookings.status`, not a delete) - still fully readable by an
+  admin in `/admin/support` "Member conversations" for disputes. A legacy
+  conversation ticket with no `booking_id` (from the retired flow) is never
+  archived.
+- **"My Inquiries" removed from the profile dropdown** (`DashboardLayout.tsx`,
+  `/inquiries` route and `InquiriesPage.tsx` deleted). Its list-and-thread view
+  was merged directly into the floating `InquiryWidget` - opening the widget
+  now shows past inquiries first (with a reply-pending badge on the closed
+  button) instead of always a blank form, so a submitted inquiry's reply is
+  never orphaned behind a nav item that no longer exists.
+- Two notification strings ("New car inquiry" / "New inquiry reply") reworded
+  to generic booking-conversation copy, since every new conversation ticket is
+  one from now on, not a pre-booking inquiry (CHAPTER 41, text-only).
+
+Files: `src/pages/CarDetailPage.tsx`, `src/pages/MyBookingsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`, `src/pages/SupportTicketsPage.tsx`,
+`src/components/InquiryWidget.tsx`, `src/components/DashboardLayout.tsx`,
+`src/lib/supportTickets.ts`, `src/lib/bookingConversation.ts` (new),
+`src/lib/listerMode.ts`, `src/pages/GuestInquiryPage.tsx`, `src/App.tsx`,
+`api/open-booking-conversation.ts` (new, replaces deleted
+`api/create-car-inquiry.ts`), `src/pages/admin/AdminSupportTicketsPage.tsx`
+(copy only), `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 41),
+`src/pages/InquiriesPage.tsx` (deleted).
+
+Deferred, not part of this batch: the idea of eventually viewing submitted
+condition-report photos inside this same booking conversation thread - raised
+by the user alongside this fix, explicitly held for later planning.
+
 ## 2026-09-05 — Add Vehicle form: required early-return dropdown, CTPL/insurance uploads, region/city dropdowns (CHAPTER 40)
 
 A batch of Add Vehicle form fixes requested after live testing: the minimum

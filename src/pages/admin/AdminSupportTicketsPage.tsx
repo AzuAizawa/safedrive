@@ -741,7 +741,7 @@ export default function AdminSupportTicketsPage() {
 
       {kindFilter === "conversation" ? (
         <p className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-          These are renter &harr; lister conversations started from a car listing.
+          These are renter &harr; lister conversations opened from an active booking.
           SafeDrive monitors them for safety and disputes - reply only if you need
           to step in.
         </p>
@@ -934,7 +934,7 @@ export default function AdminSupportTicketsPage() {
                     <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     <p className="text-muted-foreground">
                       This is a <strong>renter &harr; lister conversation</strong>{" "}
-                      about a listing, not a support request. SafeDrive monitors it
+                      about a booking, not a support request. SafeDrive monitors it
                       for safety and disputes - a reply here is posted as SafeDrive
                       Support and seen by both members, so only step in when needed.
                     </p>

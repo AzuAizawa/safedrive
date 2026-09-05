@@ -89,11 +89,15 @@ const checks = [
     ],
   },
   {
-    file: "src/pages/InquiriesPage.tsx",
+    // InquiriesPage.tsx was retired - its list+thread view was merged into
+    // this floating widget so a submitted inquiry's reply is never orphaned
+    // behind a removed nav item.
+    file: "src/components/InquiryWidget.tsx",
     markers: [
       "/api/inquiry-followup",
       "guest_inquiry_messages",
-      "My Inquiries",
+      "submitted_by_user_id",
+      "My inquiries",
     ],
   },
   {
@@ -170,6 +174,8 @@ const checks = [
       "fetchCarRatingSummaries",
       "fetchRenterReputation",
       "Your renter rating",
+      "Message Lister",
+      "openBookingConversation",
     ],
     absentMarkers: [
       "booking_reviews exists in the live schema but is not part of the generated types yet",
@@ -184,7 +190,6 @@ const checks = [
     file: "src/pages/CarDetailPage.tsx",
     markers: [
       "/api/create-booking",
-      "/api/create-car-inquiry",
       "getSession",
       "awaiting_payment",
       "fetchPublicCarReviews",
@@ -196,6 +201,11 @@ const checks = [
       '.from("bookings").insert',
       "booking_created",
       "supabase as any",
+      // "Ask the lister" was retired - messaging now opens from an active
+      // booking (MyBookingsPage/ListerBookingsPage "Message Lister/Renter"),
+      // not from the car detail page.
+      "/api/create-car-inquiry",
+      "Ask lister",
     ],
     absentRegex: [
       "\\.from\\(\"bookings\"\\)\\s*\\.\\s*insert\\s*\\(",
@@ -271,12 +281,13 @@ const checks = [
     ],
   },
   {
-    file: "api/create-car-inquiry.ts",
+    file: "api/open-booking-conversation.ts",
     markers: [
-      "You cannot inquire about your own listing",
+      "You are not part of this booking",
+      "OPENABLE_STATUSES",
       "support_tickets",
-      "ticket_messages",
-      "car_inquiry_sent",
+      "booking_conversation_opened",
+      "participant_user_id",
     ],
   },
   {
@@ -417,6 +428,8 @@ const checks = [
       "fetchRenterReputation",
       "renterReputations",
       "Recent feedback from other listers",
+      "Message Renter",
+      "openBookingConversation",
     ],
     absentMarkers: [
       "booking_reviews exists in the live schema but is not part of the generated types yet",
@@ -481,16 +494,29 @@ const checks = [
     ],
   },
   {
+    file: "src/components/DashboardLayout.tsx",
+    markers: ["Get Verified", "Switch to Renter"],
+    absentMarkers: [
+      // Merged into the InquiryWidget floating button - see that file's entry.
+      "My Inquiries",
+    ],
+  },
+  {
     file: "src/pages/SupportTicketsPage.tsx",
     markers: [
       "support_tickets",
       "ticket_messages",
       "serializeTicketTags",
+      "Booking Conversations",
+      "bookingStatuses",
     ],
     absentMarkers: [
       "SupportDb",
       "SupportTable",
       "supabase as any",
+      // Retired copy - conversations no longer start from a car page.
+      "Lister Messages",
+      "Ask the lister",
     ],
   },
   {

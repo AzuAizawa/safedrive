@@ -15,6 +15,7 @@ import {
   NON_RETURN_REASON_OPTIONS,
   type NonReturnReason,
 } from "@/lib/incidents";
+import { openBookingConversation } from "@/lib/bookingConversation";
 import {
   getExtensionDisplayStatus,
   getExtensionStatusLabel,
@@ -64,6 +65,7 @@ import {
   CircleAlert,
   CreditCard,
   Download,
+  MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -264,6 +266,7 @@ export default function ListerBookingsPage() {
   const [nonReturnReason, setNonReturnReason] =
     useState<NonReturnReason>("renter_unreachable");
   const [incidentLoading, setIncidentLoading] = useState<string | null>(null);
+  const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [ratingValue, setRatingValue] = useState<number>(5);
   const [ratingFeedback, setRatingFeedback] = useState("");
   const [submittingRating, setSubmittingRating] = useState(false);
@@ -973,6 +976,21 @@ export default function ListerBookingsPage() {
     navigate(
       `/support?bookingId=${booking.id}&tag=booking_report&subject=${subject}`,
     );
+  };
+
+  const handleMessageRenter = async (booking: ListerBooking) => {
+    if (conversationLoading) return;
+    setConversationLoading(booking.id);
+    try {
+      const ticketId = await openBookingConversation(session?.access_token, booking.id);
+      navigate(`/support?ticketId=${ticketId}`);
+    } catch (error) {
+      toast.error("Could not open the conversation", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setConversationLoading(null);
+    }
   };
 
   const runIncident = async () => {
@@ -3225,6 +3243,22 @@ export default function ListerBookingsPage() {
 
                       {["fully_paid", "active", "completed"].includes(apparentState) && (
                         <div className="mt-2 flex flex-wrap justify-end gap-2">
+                          {["fully_paid", "active"].includes(apparentState) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void handleMessageRenter(b)}
+                              disabled={conversationLoading === b.id}
+                              className="gap-1"
+                            >
+                              {conversationLoading === b.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              )}
+                              Message Renter
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="ghost"

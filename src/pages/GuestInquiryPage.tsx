@@ -65,8 +65,8 @@ export default function GuestInquiryPage() {
       if (!response.ok) throw new Error(payload.error || "Unable to submit inquiry");
 
       if (payload.linked) {
-        toast.success("Inquiry sent - continue the conversation in My Inquiries");
-        navigate("/inquiries");
+        toast.success("Inquiry sent - continue the conversation from the Inquiry button");
+        navigate("/");
         return;
       }
       setSubmitted(true);

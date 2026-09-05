@@ -57,7 +57,7 @@ const LISTER_PREFIXES = [
   "/vehicle-availability",
   "/car-renewals",
 ];
-const RENTER_PREFIXES = ["/my-bookings", "/inquiries", "/subscriptions"];
+const RENTER_PREFIXES = ["/my-bookings", "/subscriptions"];
 
 /**
  * Which portal mode a destination belongs to, or null when it is neutral

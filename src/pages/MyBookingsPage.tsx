@@ -10,6 +10,7 @@ import {
   getReturnReminderState,
 } from "@/lib/bookingLifecycle";
 import { runIncidentAction } from "@/lib/incidents";
+import { openBookingConversation } from "@/lib/bookingConversation";
 import {
   getExtensionDisplayStatus,
   getExtensionStatusLabel,
@@ -50,6 +51,7 @@ import {
   Download,
   Star,
   ChevronRight,
+  MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -246,6 +248,7 @@ export default function MyBookingsPage() {
   const [cancelTargetBooking, setCancelTargetBooking] = useState<BookingRow | null>(null);
   const [noCarTarget, setNoCarTarget] = useState<BookingRow | null>(null);
   const [incidentLoading, setIncidentLoading] = useState<string | null>(null);
+  const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [carRatingSummaries, setCarRatingSummaries] = useState<Record<string, RatingSummary>>({});
   const [listerCancelledBookingIds, setListerCancelledBookingIds] = useState<
     Set<string>
@@ -948,6 +951,21 @@ export default function MyBookingsPage() {
     navigate(
       `/support?bookingId=${booking.id}&tag=booking_report&subject=${subject}`,
     );
+  };
+
+  const handleMessageLister = async (booking: BookingRow) => {
+    if (conversationLoading) return;
+    setConversationLoading(booking.id);
+    try {
+      const ticketId = await openBookingConversation(session?.access_token, booking.id);
+      navigate(`/support?ticketId=${ticketId}`);
+    } catch (error) {
+      toast.error("Could not open the conversation", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setConversationLoading(null);
+    }
   };
 
   const handleReportNoCar = async () => {
@@ -2521,6 +2539,22 @@ export default function MyBookingsPage() {
                         "completed",
                       ].includes(apparentState) && (
                         <div className="mt-2 flex flex-wrap justify-end gap-2">
+                          {["fully_paid", "active"].includes(apparentState) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void handleMessageLister(booking)}
+                              disabled={conversationLoading === booking.id}
+                              className="gap-1"
+                            >
+                              {conversationLoading === booking.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              )}
+                              Message Lister
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="ghost"

@@ -7976,4 +7976,124 @@ alter table public.cars
   add constraint cars_min_early_return_notice_hours_check
   check (min_early_return_notice_hours is null or min_early_return_notice_hours between 1 and 24);
 
+-- ============================================================================
+-- CHAPTER 41 - Retire "Ask the lister"; conversations open from a booking
+-- ============================================================================
+-- The pre-booking "Ask the lister" car inquiry (api/create-car-inquiry.ts) is
+-- retired - a renter can no longer message a lister before booking. In its
+-- place, either side of an active booking can open a "Message Lister" /
+-- "Message Renter" conversation (api/open-booking-conversation.ts), reusing
+-- the same support_tickets/ticket_messages participant-conversation shape,
+-- always with booking_id set this time. The notification copy below still
+-- said "car inquiry" - reword it now that every new conversation ticket is a
+-- booking conversation, not a pre-booking inquiry. Behavior is unchanged,
+-- text only.
+
+create or replace function public.notify_support_ticket_created()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.participant_user_id is not null then
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      new.participant_user_id,
+      'New booking conversation',
+      'A booking participant opened a conversation. Reply from the Support page.',
+      'support',
+      '/support'
+    );
+  else
+    insert into public.notifications (user_id, title, message, type, link)
+    select
+      id,
+      'New support ticket submitted',
+      new.subject || ' needs review from the support queue.',
+      'support',
+      '/admin/support'
+    from public.profiles
+    where role in ('admin', 'super_admin')
+      and deleted_at is null;
+  end if;
+
+  return new;
+end;
+$$;
+
+create or replace function public.notify_support_message_created()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  ticket_record public.support_tickets%rowtype;
+  sender_is_admin boolean;
+begin
+  if not exists (
+    select 1 from public.ticket_messages m
+    where m.ticket_id = new.ticket_id and m.id <> new.id
+  ) then
+    return new;
+  end if;
+
+  select * into ticket_record
+  from public.support_tickets
+  where id = new.ticket_id;
+
+  select exists (
+    select 1 from public.profiles p
+    where p.id = new.sender_id and p.role in ('admin', 'super_admin')
+  ) into sender_is_admin;
+
+  if sender_is_admin then
+    if ticket_record.participant_user_id is not null then
+      -- Conversation ticket: notify both members that SafeDrive stepped in.
+      insert into public.notifications (user_id, title, message, type, link)
+      select uid,
+        'SafeDrive replied in your conversation',
+        ticket_record.subject || ' has a new message from SafeDrive Support.',
+        'support', '/support'
+      from (values (ticket_record.user_id), (ticket_record.participant_user_id)) as t(uid)
+      where uid is not null;
+    else
+      insert into public.notifications (user_id, title, message, type, link)
+      values (
+        ticket_record.user_id,
+        'Support replied to your ticket',
+        ticket_record.subject || ' has a new response from SafeDrive Support.',
+        'support',
+        '/support'
+      );
+    end if;
+  elsif ticket_record.participant_user_id is not null then
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      case
+        when new.sender_id = ticket_record.user_id then ticket_record.participant_user_id
+        else ticket_record.user_id
+      end,
+      'New conversation reply',
+      ticket_record.subject || ' has a new reply.',
+      'support',
+      '/support'
+    );
+  else
+    insert into public.notifications (user_id, title, message, type, link)
+    select
+      p.id,
+      'Support ticket reply received',
+      ticket_record.subject || ' has a new customer reply.',
+      'support',
+      '/admin/support'
+    from public.profiles p
+    where p.role in ('admin', 'super_admin') and p.deleted_at is null;
+  end if;
+
+  return new;
+end;
+$$;
+
 -- End of SafeDrive chaptered database master.
