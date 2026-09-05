@@ -9,6 +9,59 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Platform-setting votes are locked once cast + auto-expire (CHAPTER 45); license-transmission booking gate now visible before the click
+
+### Consensus-vote logic bug (CHAPTER 45)
+
+Reported: as the proposer of a platform-setting change, the user could still
+flip their own vote back and forth after posting the proposal - and any
+other super admin could do the same on someone else's proposal. Confirmed in
+`vote_platform_setting_change`: it used
+`on conflict (request_id, voter_id) do update set vote = excluded.vote` - a
+vote could always be overwritten, including the proposer's own auto-approve
+from `propose_platform_setting_change`.
+
+- `vote_platform_setting_change` now raises `"You already voted on this
+  proposal - votes cannot be changed"` instead of updating. The proposer's
+  own escape hatch stays `cancel_platform_setting_change` ("Withdraw"),
+  unaffected - that closes the whole proposal, not just their vote.
+- `/admin/platform-settings` now shows a locked "you voted X (final)" state
+  once `myVote` is set, instead of two still-clickable buttons.
+- Also asked: is there a deadline, and does it auto-reject? There already was
+  a 7-day `expires_at` and `_resolve_platform_setting_change` already flips a
+  past-deadline row to `expired` - but only reactively, inside propose/vote.
+  Nothing ever called it on a schedule, so a proposal nobody voted on again
+  stayed "pending" forever, permanently blocking the next proposal (only one
+  may be pending at a time). New daily cron
+  `api/expire-platform-setting-changes.ts` resolves every still-pending
+  request, so a stale one actually expires.
+
+### Licence-transmission booking gate wasn't visible before the click
+
+Reported: an `automatic_only`-restricted renter could still view a manual
+car and reach the booking button with no upfront indication - they could
+only view details (correct, unrestricted) but the actual block appeared too
+late for a good UX. Checked live: the server gate in `api/create-booking.ts`
+was already correct (no bad booking existed in production), and
+`CarDetailPage.tsx` already computed the same `licenceGateReason` - but
+**the pre-agreement "Review Agreement to Book" button was missing it from
+its `disabled` list** (only the later "Request to Book" button had it), and
+nothing greyed out the calendar/time inputs or said why upfront.
+
+- Added a destructive-toned banner above the calendar naming the exact
+  reason ("Your licence is not eligible for this vehicle's transmission" /
+  "Your driver's licence has expired") once verified and blocked.
+- The date-range calendar and both pickup/drop-off time inputs now grey out
+  and stop responding (`disabled`) under the same condition.
+- Fixed the missing gate on "Review Agreement to Book" so no button in the
+  flow stays clickable while blocked.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 45),
+`api/expire-platform-setting-changes.ts` (new),
+`.github/workflows/scheduled-workers.yml`,
+`src/pages/admin/AdminPlatformSettingsPage.tsx`, `src/pages/CarDetailPage.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
 ## 2026-09-05 — Replaced the Vite favicon with a car icon; KYC approval now requires licence expiry/transmission first
 
 - **Favicon**: the browser-tab icon was still the default Vite lightning-bolt

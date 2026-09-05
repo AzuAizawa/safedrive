@@ -970,6 +970,16 @@ export default function CarDetailPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+                {licenceGateReason && profile?.verified_status === "verified" && (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                    <p className="font-semibold">
+                      {transmissionBlocked
+                        ? "Your licence is not eligible for this vehicle's transmission"
+                        : "Your driver's licence has expired"}
+                    </p>
+                    <p className="mt-1 text-xs opacity-90">{licenceGateReason}</p>
+                  </div>
+                )}
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-3 space-y-2">
                   <p className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1">
                     <Calendar className="w-3 h-3" /> Availability guide
@@ -1007,14 +1017,14 @@ export default function CarDetailPage() {
                 </div>
 
               <div
-                className="booking-calendar flex justify-center overflow-x-auto overflow-y-hidden rounded-xl border border-border/60 bg-card/70 p-3 shadow-sm"
+                className={`booking-calendar flex justify-center overflow-x-auto overflow-y-hidden rounded-xl border border-border/60 bg-card/70 p-3 shadow-sm ${licenceGateReason ? "opacity-50 grayscale" : ""}`}
                 style={{ minHeight: "350px" }}
               >
                 <DayPicker
                   mode="range"
                   selected={dateRange}
                   onSelect={setDateRange}
-                  disabled={disabledDays}
+                  disabled={licenceGateReason ? true : disabledDays}
                   min={1}
                   modifiers={{
                     booked: bookedDayRanges,
@@ -1123,6 +1133,7 @@ export default function CarDetailPage() {
                     type="time"
                     value={pickupTime}
                     onChange={(e) => setPickupTime(e.target.value)}
+                    disabled={Boolean(licenceGateReason)}
                     className="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
@@ -1134,6 +1145,7 @@ export default function CarDetailPage() {
                     type="time"
                     value={dropoffTime}
                     onChange={(e) => setDropoffTime(e.target.value)}
+                    disabled={Boolean(licenceGateReason)}
                     className="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
@@ -1216,6 +1228,7 @@ export default function CarDetailPage() {
                     submitting ||
                     agreementLoading ||
                     !agreementAccess ||
+                    Boolean(licenceGateReason) ||
                     !dateRange?.from ||
                     !dateRange?.to ||
                     totalDays <= 0 ||

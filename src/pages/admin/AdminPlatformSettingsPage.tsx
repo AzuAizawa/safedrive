@@ -489,8 +489,10 @@ export default function AdminPlatformSettingsPage() {
         <h1 className="text-3xl font-bold tracking-tight">Platform Configuration</h1>
         <p className="mt-1 text-muted-foreground">
           Money and policy values used across bookings. Every change is proposed
-          by one super admin and needs {threshold} of {superAdminCount} super-admin
-          approvals (two-thirds, re-checked on each vote) before it goes live.
+          by one super admin (whose own proposal counts as an automatic approve)
+          and needs {threshold} of {superAdminCount} super-admin approvals
+          (two-thirds, re-checked on each vote) before it goes live. Each admin's
+          vote is final once cast, and an unresolved proposal expires after 7 days.
           {!isSuperAdmin && " You can view the active values; only super admins can propose or vote."}
         </p>
       </div>
@@ -539,29 +541,41 @@ export default function AdminPlatformSettingsPage() {
 
                 <p className="text-xs text-muted-foreground">
                   {approvals} approve · {rejects} reject · {superAdminCount} super
-                  admins total{myVote ? ` · your vote: ${myVote}` : ""}
+                  admins total{myVote ? ` · your vote: ${myVote} (final)` : ""}
                 </p>
 
                 {isSuperAdmin ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant={myVote === "approve" ? "default" : "outline"}
-                      onClick={() => handleVote("approve")}
-                      disabled={voting}
-                      className="gap-1"
-                    >
-                      <ThumbsUp className="h-4 w-4" /> Approve
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={myVote === "reject" ? "destructive" : "outline"}
-                      onClick={() => handleVote("reject")}
-                      disabled={voting}
-                      className="gap-1"
-                    >
-                      <ThumbsDown className="h-4 w-4" /> Reject
-                    </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {myVote ? (
+                      <p className="text-xs text-muted-foreground">
+                        You voted <strong className="text-foreground">{myVote}</strong> - a
+                        cast vote can't be changed.
+                        {isProposer
+                          ? " Withdraw the whole proposal below if you need to start over."
+                          : ""}
+                      </p>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleVote("approve")}
+                          disabled={voting}
+                          className="gap-1"
+                        >
+                          <ThumbsUp className="h-4 w-4" /> Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleVote("reject")}
+                          disabled={voting}
+                          className="gap-1"
+                        >
+                          <ThumbsDown className="h-4 w-4" /> Reject
+                        </Button>
+                      </>
+                    )}
                     {isProposer ? (
                       <Button
                         size="sm"

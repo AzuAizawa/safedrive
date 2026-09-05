@@ -12,6 +12,7 @@ on:
     - cron: "7 * * * *" # return reminders, once per hour
     - cron: "23 3 * * *" # flag vehicles with expired compliance documents, daily
     - cron: "41 3 * * *" # notify renters whose driver's licence is expiring, daily
+    - cron: "50 3 * * *" # expire stale platform-setting change proposals, daily
   workflow_dispatch: {}
 
 env:
@@ -75,5 +76,20 @@ jobs:
           echo "HTTP $code"; cat /tmp/out; echo
           if [ "$code" != "200" ]; then
             echo "::error::flag-expiring-licenses returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
+            exit 1
+          fi
+
+  expire-platform-setting-changes:
+    if: github.event.schedule == '50 3 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call expire-platform-setting-changes
+        run: |
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${SITE_URL}/api/expire-platform-setting-changes")
+          echo "HTTP $code"; cat /tmp/out; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::expire-platform-setting-changes returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
             exit 1
           fi

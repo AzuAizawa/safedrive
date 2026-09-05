@@ -8290,4 +8290,64 @@ using (
 alter table public.profiles
   add column if not exists license_rejection_reason text;
 
+-- ============================================================================
+-- CHAPTER 45 - Platform-setting consensus votes are locked once cast; a
+-- stale pending proposal auto-expires
+-- ============================================================================
+-- Reported gap #1: vote_platform_setting_change used
+-- "on conflict (request_id, voter_id) do update set vote = excluded.vote" -
+-- ANY super admin, including the proposer (whose own "approve" vote is
+-- auto-inserted by propose_platform_setting_change), could call it again on
+-- the same request and flip their own vote back and forth with no limit.
+-- Fixed to raise instead of updating: a cast vote is final. The proposer
+-- still has a separate, correct way to back out entirely -
+-- cancel_platform_setting_change ("Withdraw" in the UI) - that is unchanged.
+--
+-- Reported gap #2: platform_setting_change_requests.expires_at (7 days from
+-- proposal) was only ever re-checked reactively, inside
+-- _resolve_platform_setting_change, itself only called from propose/vote. A
+-- proposal that nobody voted on again after the deadline stayed "pending"
+-- forever - and since only one request may be pending at a time
+-- (platform_setting_change_one_pending), a stale expired-but-never-resolved
+-- row would permanently block any NEW proposal too. No new function needed -
+-- _resolve_platform_setting_change already flips status to 'expired' once
+-- past expires_at; api/expire-platform-setting-changes.ts (new daily cron)
+-- just calls it for every still-pending request, via the service role (not
+-- revoked from _resolve_platform_setting_change, unlike public/anon/
+-- authenticated below).
+
+create or replace function public.vote_platform_setting_change(
+  p_request_id uuid, p_vote text
+) returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can vote';
+  end if;
+  if p_vote not in ('approve', 'reject') then
+    raise exception 'Vote must be approve or reject';
+  end if;
+  if not exists (
+    select 1 from public.platform_setting_change_requests
+    where id = p_request_id and status = 'pending'
+  ) then
+    raise exception 'That change request is no longer open';
+  end if;
+  if exists (
+    select 1 from public.platform_setting_change_votes
+    where request_id = p_request_id and voter_id = auth.uid()
+  ) then
+    raise exception 'You already voted on this proposal - votes cannot be changed';
+  end if;
+
+  insert into public.platform_setting_change_votes (request_id, voter_id, vote)
+    values (p_request_id, auth.uid(), p_vote);
+
+  return public._resolve_platform_setting_change(p_request_id);
+end;
+$$;
+
 -- End of SafeDrive chaptered database master.

@@ -75,6 +75,9 @@ const checks = [
       "Platform contact email",
       "balance_deadline_hours",
       "balance_reminder_hours_before",
+      "cast vote can't be changed",
+      "expires after 7 days",
+      "vote: ${myVote} (final)",
     ],
   },
   {
@@ -224,6 +227,8 @@ const checks = [
       "fetchListerRatingSummaries",
       "setListerRating",
       "ratingBuckets",
+      "transmissionBlocked",
+      "licenceGateReason ? true : disabledDays",
     ],
     absentMarkers: [
       '.from("bookings").insert',
@@ -310,6 +315,14 @@ const checks = [
       "balanceReminderSent",
       "getCancellationRefundPlan",
       "balance payment deadline missed",
+    ],
+  },
+  {
+    file: "api/expire-platform-setting-changes.ts",
+    markers: [
+      "_resolve_platform_setting_change",
+      "platform_setting_change_one_pending allows at most one anyway",
+      "CRON_SECRET must be configured",
     ],
   },
   {

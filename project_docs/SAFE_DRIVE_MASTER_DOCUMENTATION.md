@@ -142,6 +142,8 @@ An administrator's access is a per-account checklist of nine operational permiss
 
 A super administrator implicitly holds every permission and cannot be restricted. In addition to all operational work they have payouts, refunds, security-deposit decisions, financial ledger, reconciliation, retention/deletion requests, platform settings, and admin management (`/admin/admins`: create admin accounts, toggle each admin's checklist, disable accounts). These routes use a server-checked super-admin guard; hiding a menu item is never treated as authorization. A super admin is created only by direct SQL against `public.profiles` (there is no in-app path).
 
+**Platform-setting consensus votes are locked once cast (CHAPTER 45).** Proposing a change (`propose_platform_setting_change`) auto-records the proposer's own vote as `approve`; before this chapter, `vote_platform_setting_change` used an upsert (`on conflict ... do update`), so any super admin - including the proposer, on their own auto-approve - could call it again and flip their vote back and forth with no limit. The function now raises `'You already voted on this proposal - votes cannot be changed'` instead of updating. A proposer who wants to back out entirely still has the separate, unaffected `cancel_platform_setting_change` ("Withdraw" in the UI) - that only they can call, and it closes the whole proposal rather than just their own vote. A proposal also auto-expires 7 days after it was proposed (`platform_setting_change_requests.expires_at`) if the 2/3 threshold is never reached either way; `_resolve_platform_setting_change` already flips a past-deadline row to `expired`, it just used to run only reactively (inside propose/vote) - `api/expire-platform-setting-changes.ts` (new daily cron) now calls it for every still-pending request, so a proposal nobody votes on again doesn't block the next one forever (only one may be pending at a time).
+
 ## 3. Architecture and Connections
 
 ### 3.1 Vite and React
@@ -272,6 +274,8 @@ The KYC review now also records two structured facts an admin reads from the lic
 
 - **Expiry:** an explicit past `license_expiry` blocks new bookings (a null value - every account verified before this chapter - is grandfathered until an admin sets it).
 - **Transmission:** an `automatic_only` renter cannot book a `manual` car. Any unset value (renter or car) is allowed and only nudged in the UI.
+
+`CarDetailPage.tsx` mirrors both gates client-side (`licenceGateReason`) so a blocked renter never reaches the server 403 unexplained: a destructive-toned banner names the exact reason ("Your licence is not eligible for this vehicle's transmission" / "Your driver's licence has expired") above the calendar, the date-range picker and the pickup/drop-off time inputs grey out and stop responding, and every booking-flow button (including the pre-agreement "Review Agreement to Book" step, not just the final "Request to Book" - a fixed gap where that first button used to stay clickable) is disabled. Viewing the car's own details, photos, and transmission badge is never restricted - only the booking controls are.
 
 For a **new** KYC approval, both fields are no longer optional at the point of approval: **Approve Identity** on `/admin/users` stays disabled until the admin has filled in the licence expiry and picked a transmission restriction, and approving saves them in the same update - there is no "approve without them, decide later" path (an older `window.confirm` bypass with that effect was removed). The grandfather clause above only ever covered accounts approved before this gate existed, never a way around it going forward.
 
@@ -1289,6 +1293,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/create-subscription-checkout.ts` | POST; user | Create hosted subscription checkout |
 | `api/data-request.ts` | GET/POST; user | List own privacy requests or submit a new request and notify super-admins |
 | `api/expire-booking-deadlines.ts` | GET/POST; cron secret | Expire ignored owner/payment deadlines without browser dependence |
+| `api/expire-platform-setting-changes.ts` | GET/POST; cron secret | Daily: resolve any platform-setting change proposal past its 7-day `expires_at` to `expired`, so a stale unresolved one doesn't block new proposals |
 | `api/flag-expired-vehicle-documents.ts` | GET/POST; cron secret | Daily: move vehicles with an expired registration/CTPL/insurance date to `renewal_required` and notify the lister |
 | `api/flag-expiring-licenses.ts` | GET/POST; cron secret | Daily: notify a verified renter whose driver's licence expires within 30 days (or has expired); deduped weekly via `profiles.license_expiry_notified_at` |
 | `api/get-approved-rental-agreement.ts` | GET; participant | Return only the agreement version approved/snapshotted for the booking |
