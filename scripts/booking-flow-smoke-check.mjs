@@ -15,6 +15,13 @@ const checks = [
       "sendLicenseDecisionEmail",
       "showLicenseRejectInput",
       "Confirm Reject",
+      "Set the licence expiry and transmission restriction first",
+    ],
+    absentMarkers: [
+      // Approving used to allow a blank licence expiry/transmission past a
+      // JS confirm() dialog - the Approve button is now disabled instead
+      // until both are filled, and approval saves them itself.
+      "No driver's licence expiry / transmission is set for this account. Approve anyway?",
     ],
   },
   {

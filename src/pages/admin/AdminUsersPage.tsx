@@ -637,19 +637,22 @@ export default function AdminUsersPage() {
   const handleApprove = async () => {
     if (!selectedUser || !adminUser) return;
     if (
-      !selectedUser.license_expiry &&
-      !licenseExpiryDraft &&
-      !window.confirm(
-        "No driver's licence expiry / transmission is set for this account. Approve anyway? The renter is grandfathered on expiry and treated as automatic-only until you set the details.",
-      )
+      !licenseExpiryDraft ||
+      !["automatic_only", "manual_and_automatic"].includes(licenseTransmissionDraft)
     ) {
+      toast.error("Set the licence expiry and transmission restriction first.");
       return;
     }
     setActionLoading(true);
 
     const { error } = await supabase
       .from("profiles")
-      .update({ verified_status: "verified", rejection_reason: null })
+      .update({
+        verified_status: "verified",
+        rejection_reason: null,
+        license_expiry: licenseExpiryDraft,
+        license_transmission: licenseTransmissionDraft,
+      })
       .eq("id", selectedUser.id);
 
     if (!error) {
@@ -1450,6 +1453,14 @@ export default function AdminUsersPage() {
                     Read the expiry and the AT / AT-MT restriction from the back
                     of the licence, then save. A past expiry blocks new bookings;
                     an &quot;automatic only&quot; renter can book automatic cars only.
+                    {selectedUser.verified_status === "pending" && (
+                      <>
+                        {" "}
+                        <strong className="text-foreground">
+                          Both fields are required before you can approve identity.
+                        </strong>
+                      </>
+                    )}
                   </p>
                   {!selectedUser.license_update_pending &&
                     selectedUser.license_rejection_reason && (
@@ -1591,7 +1602,19 @@ export default function AdminUsersPage() {
                       onClick={handleApprove}
                       disabled={
                         actionLoading ||
-                        !Object.values(checklist).every(Boolean)
+                        !Object.values(checklist).every(Boolean) ||
+                        !licenseExpiryDraft ||
+                        !["automatic_only", "manual_and_automatic"].includes(
+                          licenseTransmissionDraft,
+                        )
+                      }
+                      title={
+                        !licenseExpiryDraft ||
+                        !["automatic_only", "manual_and_automatic"].includes(
+                          licenseTransmissionDraft,
+                        )
+                          ? "Set the licence expiry and transmission restriction first"
+                          : undefined
                       }
                       className="gap-2 sm:flex-1 shadow-lg shadow-primary/20"
                     >

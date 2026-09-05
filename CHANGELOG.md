@@ -9,6 +9,25 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Replaced the Vite favicon with a car icon; KYC approval now requires licence expiry/transmission first
+
+- **Favicon**: the browser-tab icon was still the default Vite lightning-bolt
+  logo (recolored to brand purple, same bolt shape). Replaced with a car
+  silhouette (body + wheels) on a blue gradient rounded-square, matching the
+  `Car` icon already used for the in-app logo mark.
+- **KYC approval requires the licence fields**: `/admin/users`' **Approve
+  Identity** used to stay clickable with a blank licence expiry/transmission
+  - a `window.confirm()` dialog let the admin approve anyway ("grandfathered
+  ... until an admin sets it"), and even when the admin did fill the fields
+  in the form, approving never saved them (only the separate "Save licence
+  details" button did) - a plausible trap where an approved account was left
+  with no licence data despite the form looking filled in. Approve Identity
+  is now disabled until both fields have values, and approving saves them in
+  the same update as the verification decision.
+
+Files: `public/favicon.svg`, `src/pages/admin/AdminUsersPage.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
 ## 2026-09-05 — CRITICAL: ordinary accounts and guests could not actually browse cars (CHAPTER 43) + licence resubmission gets a real Reject action (CHAPTER 44)
 
 ### Cross-account profile visibility (CHAPTER 43)
