@@ -124,6 +124,9 @@ export default function AdminUsersPage() {
   const [licenseExpiryDraft, setLicenseExpiryDraft] = useState("");
   const [licenseTransmissionDraft, setLicenseTransmissionDraft] = useState("");
   const [savingLicense, setSavingLicense] = useState(false);
+  const [showLicenseRejectInput, setShowLicenseRejectInput] = useState(false);
+  const [licenseRejectReasonDraft, setLicenseRejectReasonDraft] = useState("");
+  const [rejectingLicense, setRejectingLicense] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -132,6 +135,8 @@ export default function AdminUsersPage() {
   useEffect(() => {
     setLicenseExpiryDraft(selectedUser?.license_expiry ?? "");
     setLicenseTransmissionDraft(selectedUser?.license_transmission ?? "");
+    setShowLicenseRejectInput(false);
+    setLicenseRejectReasonDraft("");
   }, [selectedUser]);
 
   useEffect(() => {
@@ -454,6 +459,38 @@ export default function AdminUsersPage() {
     }
   };
 
+  const sendLicenseDecisionEmail = async (
+    target: UserWithImages,
+    decision: "approved" | "rejected",
+    reason?: string,
+  ) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return "not_attempted";
+    try {
+      const response = await fetch("/api/send-license-decision-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ userId: target.id, decision, reason: reason ?? null }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        deliveryState?: string;
+      };
+      if (!response.ok || body.deliveryState !== "sent") {
+        console.warn("Licence decision email was not delivered", {
+          decision,
+          deliveryState: body.deliveryState ?? "unknown",
+        });
+      }
+      return body.deliveryState ?? "unknown";
+    } catch (emailError) {
+      console.warn("Licence decision email request failed", emailError);
+      return "failed";
+    }
+  };
+
   const handleSaveLicense = async () => {
     if (!selectedUser || !adminUser || savingLicense) return;
     if (
@@ -469,12 +506,16 @@ export default function AdminUsersPage() {
     }
     setSavingLicense(true);
     try {
+      const wasPending = selectedUser.license_update_pending;
       const { error } = await supabase
         .from("profiles")
         .update({
           license_expiry: licenseExpiryDraft || null,
           license_transmission: licenseTransmissionDraft || null,
           license_update_pending: false,
+          // A fresh save always supersedes any earlier rejection note - it
+          // no longer describes the licence now on file.
+          license_rejection_reason: null,
         })
         .eq("id", selectedUser.id);
       if (error) throw error;
@@ -487,9 +528,10 @@ export default function AdminUsersPage() {
           admin_email: adminUser.email,
           license_expiry: licenseExpiryDraft || null,
           license_transmission: licenseTransmissionDraft || null,
+          was_pending_resubmission: wasPending,
         },
       });
-      if (selectedUser.license_update_pending) {
+      if (wasPending) {
         await supabase.from("notifications").insert({
           user_id: selectedUser.id,
           title: "Driver's licence reviewed",
@@ -498,8 +540,17 @@ export default function AdminUsersPage() {
           type: "success",
           link: "/verify",
         });
+        const emailState = await sendLicenseDecisionEmail(selectedUser, "approved");
+        if (emailState === "not_configured") {
+          toast.warning("Licence details saved, but email is not configured yet.");
+        } else if (emailState !== "sent") {
+          toast.warning("Licence details saved, but the notification email was not delivered.");
+        } else {
+          toast.success("Driver's licence details saved and renter notified.");
+        }
+      } else {
+        toast.success("Driver's licence details saved.");
       }
-      toast.success("Driver's licence details saved.");
       setSelectedUser((prev) =>
         prev
           ? {
@@ -507,6 +558,7 @@ export default function AdminUsersPage() {
               license_expiry: licenseExpiryDraft || null,
               license_transmission: licenseTransmissionDraft || null,
               license_update_pending: false,
+              license_rejection_reason: null,
             }
           : prev,
       );
@@ -517,6 +569,68 @@ export default function AdminUsersPage() {
       });
     } finally {
       setSavingLicense(false);
+    }
+  };
+
+  // Distinct from handleSaveLicense: the resubmitted photo is still not
+  // acceptable (still expired, unreadable, wrong page, ...). Clears the
+  // pending flag WITHOUT touching license_expiry/license_transmission - the
+  // draft values in the form are never saved, since the admin is saying the
+  // submission itself doesn't count. Only reachable while a resubmission is
+  // actually pending.
+  const handleRejectLicense = async () => {
+    if (!selectedUser || !adminUser || rejectingLicense) return;
+    if (!licenseRejectReasonDraft.trim()) {
+      toast.error("Provide a reason for rejecting this licence resubmission.");
+      return;
+    }
+    setRejectingLicense(true);
+    try {
+      const reason = licenseRejectReasonDraft.trim();
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          license_update_pending: false,
+          license_rejection_reason: reason,
+        })
+        .eq("id", selectedUser.id);
+      if (error) throw error;
+      await supabase.from("audit_log").insert({
+        user_id: adminUser.id,
+        action: "admin_rejected_license_update",
+        entity_type: "profile",
+        entity_id: selectedUser.id,
+        details: { admin_email: adminUser.email, reason },
+      });
+      await supabase.from("notifications").insert({
+        user_id: selectedUser.id,
+        title: "Driver's licence resubmission rejected",
+        message: `Your resubmitted driver's licence was not accepted. Reason: ${reason}. Please resubmit a clear, valid licence photo.`,
+        type: "error",
+        link: "/verify",
+      });
+      const emailState = await sendLicenseDecisionEmail(selectedUser, "rejected", reason);
+      if (emailState === "not_configured") {
+        toast.warning("Licence resubmission rejected, but email is not configured yet.");
+      } else if (emailState !== "sent") {
+        toast.warning("Licence resubmission rejected, but the notification email was not delivered.");
+      } else {
+        toast.success("Licence resubmission rejected and renter notified.");
+      }
+      setSelectedUser((prev) =>
+        prev
+          ? { ...prev, license_update_pending: false, license_rejection_reason: reason }
+          : prev,
+      );
+      setShowLicenseRejectInput(false);
+      setLicenseRejectReasonDraft("");
+      fetchUsers();
+    } catch (err) {
+      toast.error("Could not reject licence update", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setRejectingLicense(false);
     }
   };
 
@@ -1337,6 +1451,12 @@ export default function AdminUsersPage() {
                     of the licence, then save. A past expiry blocks new bookings;
                     an &quot;automatic only&quot; renter can book automatic cars only.
                   </p>
+                  {!selectedUser.license_update_pending &&
+                    selectedUser.license_rejection_reason && (
+                      <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                        Last resubmission was rejected: {selectedUser.license_rejection_reason}
+                      </p>
+                    )}
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1.5">
                       <Label className="text-xs">Licence expiry</Label>
@@ -1344,7 +1464,7 @@ export default function AdminUsersPage() {
                         type="date"
                         value={licenseExpiryDraft}
                         onChange={(e) => setLicenseExpiryDraft(e.target.value)}
-                        disabled={savingLicense}
+                        disabled={savingLicense || rejectingLicense}
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -1354,7 +1474,7 @@ export default function AdminUsersPage() {
                         onChange={(e) =>
                           setLicenseTransmissionDraft(e.target.value)
                         }
-                        disabled={savingLicense}
+                        disabled={savingLicense || rejectingLicense}
                         className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                       >
                         <option value="">Not set</option>
@@ -1365,14 +1485,58 @@ export default function AdminUsersPage() {
                       </select>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void handleSaveLicense()}
-                    disabled={savingLicense}
-                  >
-                    {savingLicense ? "Saving…" : "Save licence details"}
-                  </Button>
+
+                  {showLicenseRejectInput && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Rejection reason *</Label>
+                      <Input
+                        value={licenseRejectReasonDraft}
+                        onChange={(e) => setLicenseRejectReasonDraft(e.target.value)}
+                        placeholder="e.g. Still shows an expired date, back of licence not photographed, image unreadable..."
+                        disabled={rejectingLicense}
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleSaveLicense()}
+                      disabled={savingLicense || rejectingLicense}
+                    >
+                      {savingLicense ? "Saving…" : "Save licence details"}
+                    </Button>
+                    {canVerify && selectedUser.license_update_pending && (
+                      !showLicenseRejectInput ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShowLicenseRejectInput(true)}
+                          disabled={savingLicense || rejectingLicense}
+                          className="gap-2 text-destructive border-destructive/20 hover:bg-destructive/10"
+                        >
+                          <XCircle className="w-4 h-4" />
+                          Reject
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => void handleRejectLicense()}
+                          disabled={rejectingLicense || !licenseRejectReasonDraft.trim()}
+                          className="gap-2"
+                        >
+                          {rejectingLicense ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <XCircle className="w-4 h-4" />
+                          )}
+                          Confirm Reject
+                        </Button>
+                      )
+                    )}
+                  </div>
                 </div>
 
                 {/* Rejection reason input */}

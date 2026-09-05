@@ -44,6 +44,7 @@ export interface Database {
           license_expiry: string | null;
           license_transmission: string | null;
           license_update_pending: boolean;
+          license_rejection_reason: string | null;
           license_expiry_notified_at: string | null;
           deleted_at: string | null;
           created_at: string;
@@ -80,6 +81,7 @@ export interface Database {
           license_expiry?: string | null;
           license_transmission?: string | null;
           license_update_pending?: boolean;
+          license_rejection_reason?: string | null;
           license_expiry_notified_at?: string | null;
           deleted_at?: string | null;
           created_at?: string;
@@ -116,6 +118,7 @@ export interface Database {
           license_expiry?: string | null;
           license_transmission?: string | null;
           license_update_pending?: boolean;
+          license_rejection_reason?: string | null;
           license_expiry_notified_at?: string | null;
           deleted_at?: string | null;
           created_at?: string;

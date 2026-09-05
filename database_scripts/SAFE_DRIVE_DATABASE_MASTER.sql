@@ -8207,4 +8207,87 @@ begin
 end;
 $$;
 
+-- ============================================================================
+-- CHAPTER 43 - Cross-account profile visibility (Browse and booking pages
+-- were silently showing nothing/blank for every ordinary account)
+-- ============================================================================
+-- Found live, empirically confirmed: the ONLY `for select` policy that has
+-- ever existed on public.profiles is "auth.uid() = id or is_admin()" - a
+-- regular (non-admin) account can read its OWN profile row and nothing
+-- else. PostgREST embeds a joined table subject to that table's own RLS, so
+-- every query anywhere in the app that embeds a DIFFERENT person's profile
+-- silently lost that embed for any non-admin viewer:
+--   - BrowseCarsPage.tsx uses `profiles!cars_owner_id_fkey!inner(...)` - an
+--     INNER join, so the blocked embed drops the whole car row. Verified
+--     against the live database: an anonymous guest's browse query returned
+--     0 cars where the service-role ground truth was 5.
+--   - CarDetailPage.tsx uses a plain (LEFT) join, so the car still shows but
+--     the lister's name/phone/email/rating block is blank.
+--   - MyBookingsPage.tsx (`owner:profiles!bookings_owner_id_fkey`) and
+--     ListerBookingsPage.tsx (`renter:profiles!bookings_renter_id_fkey`)
+--     lose the OTHER participant's name/contact info on the renter's/
+--     lister's own booking.
+-- This went unnoticed because every account used to test with this session
+-- (and likely prior sessions) was admin/super_admin, which bypasses via
+-- is_admin() - the bug only ever showed up for a genuine "user"-role account
+-- or a signed-out guest.
+--
+-- Fix: two additive EXISTS clauses on the same policy, on top of the
+-- existing self/admin clauses - RLS is row-level, not column-level, so this
+-- widens which PROFILE ROWS are visible, while every affected query above
+-- already requests an explicit column list (never `profiles(*)`), so more
+-- sensitive columns (national_id, driver_license, address, birthday, role,
+-- ...) are not newly exposed through those specific call sites merely
+-- because the row became readable - a future `select *` on profiles would
+-- still need its own review, this migration does not make that safe.
+--   - A profile that owns at least one approved/active car becomes publicly
+--     readable (including to signed-out guests, matching "Cars read access
+--     USING (true))") - this is the public marketplace listing-owner
+--     visibility Browse/CarDetail need.
+--   - A profile becomes readable to the other participant of any booking
+--     between them (either direction) - this is what MyBookingsPage/
+--     ListerBookingsPage need to show the counterparty's info on an actual
+--     booking.
+
+drop policy if exists "Users can read own profile" on public.profiles;
+create policy "Users can read own profile"
+on public.profiles
+for select
+using (
+  auth.uid() = id
+  or public.is_admin()
+  or exists (
+    select 1 from public.cars c
+    where c.owner_id = profiles.id
+      and c.status in ('approved', 'active')
+  )
+  or exists (
+    select 1 from public.bookings b
+    where (b.renter_id = profiles.id and b.owner_id = auth.uid())
+       or (b.owner_id = profiles.id and b.renter_id = auth.uid())
+  )
+);
+
+-- ============================================================================
+-- CHAPTER 44 - Driver's licence resubmission gets a real Reject action
+-- ============================================================================
+-- Reported gap: the admin licence-review panel only ever had "Save licence
+-- details" - there was no way to say a resubmission still wasn't acceptable,
+-- so a bad resubmission either sat in "pending" forever with no feedback to
+-- the renter, or an admin had to save it anyway (implying acceptance) just
+-- to clear the flag. Separately, an accepted resubmission only ever notified
+-- in-app, never by email.
+--
+-- profiles.license_rejection_reason holds the admin's note when a
+-- resubmission is rejected (api/admin/AdminUsersPage.tsx "Reject" button,
+-- mirrors the existing KYC-level reject pattern). A fresh accepted save
+-- clears it again - it only describes the most recent rejection, not a
+-- permanent history. Both the accept and reject paths now also email the
+-- renter (api/send-license-decision-email.ts, generic
+-- sendUserNotificationEmail template - same "in-app + email" shape every
+-- other admin decision in this schema already uses).
+
+alter table public.profiles
+  add column if not exists license_rejection_reason text;
+
 -- End of SafeDrive chaptered database master.

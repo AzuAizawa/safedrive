@@ -8,6 +8,24 @@ const frontendCriticalWritePattern =
 
 const checks = [
   {
+    file: "src/pages/admin/AdminUsersPage.tsx",
+    markers: [
+      "handleRejectLicense",
+      "license_rejection_reason",
+      "sendLicenseDecisionEmail",
+      "showLicenseRejectInput",
+      "Confirm Reject",
+    ],
+  },
+  {
+    file: "api/send-license-decision-email.ts",
+    markers: [
+      "sendUserNotificationEmail",
+      "users.verify",
+      "license_decision_email_attempted",
+    ],
+  },
+  {
     file: "src/components/ArrivalPhotoCapture.tsx",
     markers: ["Confirm Arrival Now", "ArrivalLocationEvidence"],
     absentMarkers: ["Confirm With Location", "navigator.geolocation.getCurrentPosition"],

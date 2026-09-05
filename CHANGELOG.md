@@ -9,6 +9,66 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — CRITICAL: ordinary accounts and guests could not actually browse cars (CHAPTER 43) + licence resubmission gets a real Reject action (CHAPTER 44)
+
+### Cross-account profile visibility (CHAPTER 43)
+
+Reported as "a new account can't see other listings"; verified live and found
+far more severe: `public.profiles` has ever had exactly one `for select`
+policy - `auth.uid() = id or is_admin()`. A non-admin account could read
+*only its own row*. Confirmed empirically against the live database: an
+anonymous guest's `BrowseCarsPage.tsx` query returned **0 cars** where the
+service-role ground truth was 5. This went unnoticed because every account
+used to test this session (and likely prior ones) was admin/super-admin,
+which bypasses the restriction via `is_admin()`.
+
+Blast radius, all from the same root cause (PostgREST enforces RLS on an
+embedded/joined table same as the base table):
+- `BrowseCarsPage.tsx` embeds `profiles!cars_owner_id_fkey!inner(...)` - an
+  INNER join, so the blocked embed dropped the whole car row. Guests and
+  every ordinary renter saw an empty Browse page.
+- `CarDetailPage.tsx` uses a plain (LEFT) join - the car still showed, but
+  the lister's name/phone/email/rating block was blank.
+- `MyBookingsPage.tsx` / `ListerBookingsPage.tsx` lost the other
+  participant's name/contact info on the renter's/lister's own booking.
+
+Fix: two additive `or exists (...)` clauses on the same policy (row-level,
+not column-level - every affected query already requests an explicit column
+list, never `profiles(*)`, so this does not expose more sensitive columns
+through those call sites):
+- A profile that owns at least one `approved`/`active` car becomes publicly
+  readable (including to signed-out guests) - the public listing-owner
+  visibility Browse/CarDetail need.
+- A profile becomes readable to the other participant of any booking
+  between them (either direction) - what My Bookings/Lister Bookings need.
+
+No frontend code changes - every affected query was already correct; RLS was
+the only blocker.
+
+### Licence resubmission Reject action + email (CHAPTER 44)
+
+Reported gap: the admin licence-review panel (`/admin/users`) only had
+"Save licence details" - no way to say a resubmission still wasn't
+acceptable, so a bad resubmission sat in "pending" forever with no feedback,
+or an admin had to save it anyway. Accepted resubmissions also only ever
+notified in-app, never by email.
+
+- New **Reject** button (shown only while a resubmission is pending),
+  requires a reason, clears `license_update_pending` **without** touching
+  `license_expiry`/`license_transmission` - the draft form values are never
+  saved on reject, since the submission itself is what's being rejected.
+- New `profiles.license_rejection_reason` column - shown on the panel until
+  the next accepted save clears it again.
+- Both accept and reject now email the renter too
+  (`api/send-license-decision-email.ts`, the generic account-notification
+  Resend template every other admin decision in this schema already uses),
+  not just an in-app notification.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 43, 44),
+`src/pages/admin/AdminUsersPage.tsx`, `api/send-license-decision-email.ts`
+(new), `src/types/database.ts`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
 ## 2026-09-05 — Fixed the dashboard's mode badge showing the wrong side after a direct link into the other portal space
 
 Reported bug: the header sometimes read "Lister Mode" (badge, nav, colors)
