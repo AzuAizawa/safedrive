@@ -6,6 +6,14 @@ export const config = {
   runtime: "edge",
 };
 
+// Same ceiling api/create-booking.ts already enforces on a brand-new
+// booking's own start-to-end window (both dates must fall within 30 days of
+// today) - reused here so a chain of extensions can't turn one booking into
+// an unbounded, indefinitely-running rental that the original 30-day design
+// never intended. Caps the TOTAL trip length (original days + every
+// approved extension), not just this one request's added days.
+const MAX_TOTAL_RENTAL_DAYS = 30;
+
 type ExtensionAction = "request" | "approve" | "reject" | "cancel";
 
 type ExtensionActionPayload = {
@@ -251,6 +259,15 @@ export default async function handler(req: Request) {
       }
 
       const requestedTotalDays = bookingRecord.total_days + extensionDays;
+      if (requestedTotalDays > MAX_TOTAL_RENTAL_DAYS) {
+        return jsonResponse(
+          {
+            error: `A single continuous rental (including every extension) can't exceed ${MAX_TOTAL_RENTAL_DAYS} days. This trip is already ${bookingRecord.total_days} day${bookingRecord.total_days === 1 ? "" : "s"}, so at most ${Math.max(0, MAX_TOTAL_RENTAL_DAYS - bookingRecord.total_days)} more day${MAX_TOTAL_RENTAL_DAYS - bookingRecord.total_days === 1 ? "" : "s"} can be requested. For a longer stay, complete this trip and book again.`,
+          },
+          422,
+        );
+      }
+
       const { data: extensionRow, error: extensionError } = await supabase
         .from("booking_extensions")
         .insert({

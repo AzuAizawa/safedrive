@@ -9,6 +9,28 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Booking extensions had no upper bound - capped at 30 days total
+
+Reported: a live test could request an extension all the way to 2028 from a
+2026 booking. Confirmed - `api/booking-extension-action.ts` only ever
+checked that the requested date was *after* the current end date, never an
+upper bound. A chain of extensions could grow one continuous rental
+indefinitely, defeating the intent behind `api/create-booking.ts`'s own
+30-day window (a new booking's start and end must both fall within 30 days
+of today).
+
+- `MAX_TOTAL_RENTAL_DAYS = 30` (same number, reused for one consistent rule)
+  now caps `requested_total_days` (already computed - `total_days +
+  extensionDays`) - a single continuous rental, original days plus every
+  approved extension, can never exceed 30 days. Anchored to the trip's own
+  `start_date`, so it doesn't get more restrictive as the trip progresses.
+- Client-side: the date input on `/my-bookings`' "Request extension" gets a
+  `max` (start_date + 30 days) plus a pre-submit check, so the native date
+  picker never offers - and typing never bypasses - an out-of-range date.
+
+Files: `api/booking-extension-action.ts`, `src/pages/MyBookingsPage.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
 ## 2026-09-05 — Early-return requests get a real response deadline (CHAPTER 46)
 
 Reported: the lister's response time on an early-return request should have

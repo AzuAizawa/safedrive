@@ -231,6 +231,7 @@ const checks = [
       "openBookingConversation",
       "balance_deadline",
       "latestEarly.response_deadline",
+      "formatExtensionMaxEndDate",
     ],
     absentMarkers: [
       "booking_reviews exists in the live schema but is not part of the generated types yet",
@@ -306,6 +307,8 @@ const checks = [
       "extensionStateChanged",
       "This extension request changed state before",
       "The new return date overlaps another booking",
+      "MAX_TOTAL_RENTAL_DAYS",
+      "can't exceed",
     ],
   },
   {

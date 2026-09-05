@@ -851,6 +851,14 @@ export default function MyBookingsPage() {
       return;
     }
 
+    const maxEndDate = formatExtensionMaxEndDate(booking.start_date);
+    if (maxEndDate && draft.requestedEndDate > maxEndDate) {
+      toast.error(`A single continuous rental can't pass ${format(new Date(maxEndDate), "MMM d, yyyy")}.`, {
+        description: "Complete this trip and book again for a longer stay.",
+      });
+      return;
+    }
+
     setExtensionActionLoading(booking.id);
     try {
       await runExtensionAction({
@@ -1266,6 +1274,18 @@ export default function MyBookingsPage() {
     const nextDay = new Date(parsed);
     nextDay.setDate(nextDay.getDate() + 1);
     return nextDay.toISOString().slice(0, 10);
+  };
+
+  // Mirrors api/booking-extension-action.ts's MAX_TOTAL_RENTAL_DAYS - a single
+  // continuous rental (original days + every extension) can't exceed this,
+  // counted from the trip's own start date, not from today.
+  const MAX_TOTAL_RENTAL_DAYS = 30;
+  const formatExtensionMaxEndDate = (startDateValue: string) => {
+    const parsed = new Date(startDateValue);
+    if (Number.isNaN(parsed.getTime())) return undefined;
+    const capped = new Date(parsed);
+    capped.setDate(capped.getDate() + MAX_TOTAL_RENTAL_DAYS);
+    return capped.toISOString().slice(0, 10);
   };
 
   const getLatestExtension = (bookingId: string) =>
@@ -3038,6 +3058,7 @@ export default function MyBookingsPage() {
                     <input
                       type="date"
                       min={formatDateInputMin(extensionRequestBooking.end_date)}
+                      max={formatExtensionMaxEndDate(extensionRequestBooking.start_date)}
                       value={extensionDraft.requestedEndDate}
                       onChange={(event) =>
                         updateExtensionDraft(extensionRequestBooking.id, {
@@ -3046,6 +3067,16 @@ export default function MyBookingsPage() {
                       }
                       className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                     />
+                    <p className="text-[11px] text-muted-foreground">
+                      A single continuous rental (extensions included) can't pass{" "}
+                      {formatExtensionMaxEndDate(extensionRequestBooking.start_date)
+                        ? format(
+                            new Date(formatExtensionMaxEndDate(extensionRequestBooking.start_date)!),
+                            "MMM d, yyyy",
+                          )
+                        : `${MAX_TOTAL_RENTAL_DAYS} days`}
+                      .
+                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

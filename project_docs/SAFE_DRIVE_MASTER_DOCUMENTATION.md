@@ -394,6 +394,15 @@ Before this chapter, a booking that reached `downpayment_paid` had no deadline o
 - **Reminder:** a one-time notification (`bookings.balance_reminder_sent_at` dedupes it) fires once the deadline is within `balance_reminder_hours_before`.
 - **Surfaced to both sides:** `/my-bookings` and `/lister-bookings` show a live countdown to `balance_deadline` on the `downpayment_paid` guidance card.
 
+### 8.8 Booking extensions - total-length cap
+
+`booking_extensions` (`api/booking-extension-action.ts`, `request`/`approve`/`reject`/`cancel`, mirrors the early-return flow's shape) is how a renter asks to keep the car **longer** - the opposite of §8.4's early return. Approving requires the added payment before the new return date is finalized (a 24-hour `payment_deadline`, same shape as the original booking's payment window); only one extension may be pending/approved at a time per booking.
+
+Reported gap: a chain of extensions had no upper bound - the requested return date could be set to any future date (a live test reached 2028 from a 2026 booking) as long as it didn't collide with another booking. This let a single continuous rental grow indefinitely, defeating the intent behind `api/create-booking.ts`'s own 30-day window (a **new** booking's start and end must both fall within 30 days of today).
+
+- **`MAX_TOTAL_RENTAL_DAYS = 30`** (same number, reused for one consistent platform-wide rule) now caps `requested_total_days` (`bookingRecord.total_days + extensionDays`, already computed and stored on every extension row) - a single continuous rental, original days plus every approved extension, can never exceed 30 days. Anchored to the trip's own `start_date`, not to "today", so it does not get more restrictive as the trip progresses. A longer stay needs a new booking after this one completes.
+- Client-side: the "Requested return date" input on `/my-bookings` gets a `max` (start_date + 30 days) so the native date picker never offers an out-of-range date, plus a pre-submit check with the same message the server would give; `api/booking-extension-action.ts` is still the authoritative check.
+
 ## 9. Security Deposit: Option B (Removed)
 
 SafeDrive shipped a separate refundable-deposit workflow (deposit checkout, a
