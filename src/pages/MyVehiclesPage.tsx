@@ -2206,19 +2206,10 @@ export default function MyVehiclesPage() {
                       placeholder="e.g. STI Novaliches, building entrance, mall pickup bay"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Transmission</Label>
-                    <select
-                      value={editTransmission}
-                      onChange={(e) => setEditTransmission(e.target.value)}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    >
-                      <option value="">Not specified</option>
-                      <option value="automatic">Automatic</option>
-                      <option value="manual">Manual</option>
-                    </select>
-                    <p className="text-[10px] text-muted-foreground">
-                      Changing this sends the listing back to admin review.
+                  <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+                    <p className="font-medium text-foreground">Transmission</p>
+                    <p className="mt-1">
+                      {editTransmission === "automatic" ? "Automatic" : editTransmission === "manual" ? "Manual" : "Not specified"} - locked after listing. This is a fixed vehicle spec, not something that changes after approval.
                     </p>
                   </div>
                   <div className="space-y-2">

@@ -9,6 +9,60 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Handover/return redesign, dashboard UI (matches the backend rework)
+
+The UI half of the handover/return redesign - makes the dashboards match
+the backend behavior reworked in the same day's earlier commit, and fixes
+several button labels/gates that the backend change made stale or outright
+wrong.
+
+- **Removed "Confirm With Location" entirely** from the shared
+  `ArrivalPhotoCapture` component (used by both dashboards) - arrival is
+  now a single "Confirm Arrival Now" button, no location capture at all.
+- **New lister-only override:** "Confirm - Renter Is Here" lets the lister
+  mark the renter's arrival on their behalf (e.g. dead phone), calling the
+  new `confirmOnBehalfOfRenter` flag on `arrive`.
+- **Trip-progress checklists redesigned** on both dashboards to the new
+  8-step lists (renter: you arrived / lister arrived / vehicle handover /
+  vehicle received / rental in progress / vehicle returned / return
+  confirmed / your rating; lister: renter arrived / you arrived / vehicle
+  verification / vehicle handover / rental in progress / vehicle return /
+  trip completed / your rating). Backed by a new lightweight
+  `trip_condition_reports` fetch on each dashboard (RLS already lets either
+  participant read either side's reports) - no schema change needed.
+- **Fixed now-stale required/optional labels and gates** from the backend
+  flip: the renter's "Return report" is relabeled from "(required)" to
+  "(optional)"; the lister's "Return photos (optional)" is relabeled to
+  "Return report (required)" (the lister is now required at both phases);
+  the lister's "Confirm - Car Received" button no longer waits on
+  `renter_return_arrived_at` (that gate no longer exists server-side) and
+  its caption now correctly says it needs both the lister's own pickup and
+  return reports, "with or without the renter's own tap."
+- **"Submitted" button state:** the pickup/return report buttons on both
+  dashboards now show a green checkmark and "(submitted)" and become
+  non-clickable once that report is on file, instead of always reading
+  "(required)"/"(optional)" regardless of status.
+- **"Report Place Limit" retired** on both dashboards - the renter side
+  already had a generic "Report Booking" button covering the same ground
+  (opens a support ticket, `booking_report` tag) throughout the whole
+  booking lifecycle; the lister side gained the same generic button in
+  Place Limit's spot. One report entry point per booking now, not two.
+- **Transmission locked** in `MyVehiclesPage.tsx`'s Edit Listing modal -
+  replaced the editable dropdown with a read-only display (same treatment
+  CHAPTER 33 already gave registration/CTPL/comprehensive insurance): it's
+  a fixed vehicle spec, not something that should need admin re-review
+  after initial listing.
+- Verified clean: `tsc -b`, lint, `check:api`, `check:alignment`,
+  `check:booking-flow` (markers updated for the retired location-capture
+  feature), and a full production build all pass.
+- **Not done in this pass, flagged as a separate follow-up:** there is
+  still no UI anywhere (participant or admin) to actually *view* a
+  submitted condition report's photos after submission - found while
+  investigating this redesign, out of scope for this specific change.
+- **Files:** `src/components/ArrivalPhotoCapture.tsx`,
+  `src/pages/MyBookingsPage.tsx`, `src/pages/ListerBookingsPage.tsx`,
+  `src/pages/MyVehiclesPage.tsx`, `scripts/booking-flow-smoke-check.mjs`.
+
 ## 2026-09-05 — Handover/return redesign, backend (superseding Phase 3's gate)
 
 Tester feedback after using the live-camera pickup flow and sequential

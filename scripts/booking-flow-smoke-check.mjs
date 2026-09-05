@@ -9,12 +9,8 @@ const frontendCriticalWritePattern =
 const checks = [
   {
     file: "src/components/ArrivalPhotoCapture.tsx",
-    markers: [
-      "Confirm Arrival Now",
-      "Confirm With Location",
-      "navigator.geolocation.getCurrentPosition",
-      "ArrivalLocationEvidence",
-    ],
+    markers: ["Confirm Arrival Now", "ArrivalLocationEvidence"],
+    absentMarkers: ["Confirm With Location", "navigator.geolocation.getCurrentPosition"],
   },
   {
     file: "api/booking-action.ts",

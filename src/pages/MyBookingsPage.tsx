@@ -250,6 +250,18 @@ export default function MyBookingsPage() {
   const [listerCancelledBookingIds, setListerCancelledBookingIds] = useState<
     Set<string>
   >(new Set());
+  // Which trip-condition-report phases the LISTER has already filed, per
+  // booking - drives the "Vehicle handover" / "Vehicle return" trip-progress
+  // checkpoints (both participants can read either side's reports; RLS
+  // scopes this to bookings the current user is actually part of).
+  const [ownerReportsByBooking, setOwnerReportsByBooking] = useState<
+    Record<string, { pickup: boolean; return: boolean }>
+  >({});
+  // The renter's (this account's) own report status per booking - both
+  // phases are optional now, this just drives the "submitted" button state.
+  const [ownReportsByBooking, setOwnReportsByBooking] = useState<
+    Record<string, { pickup: boolean; return: boolean }>
+  >({});
   const [renterReputation, setRenterReputation] = useState<
     Awaited<ReturnType<typeof fetchRenterReputation>> | null
   >(null);
@@ -348,6 +360,45 @@ export default function MyBookingsPage() {
           }
         } catch {
           setListerCancelledBookingIds(new Set());
+        }
+
+        // Separate, non-fatal query: drives the "Vehicle handover" / "Vehicle
+        // return" trip-progress checkpoints. A missing table or RLS hiccup
+        // must never break the bookings list itself.
+        try {
+          const activeIds = typedBookings
+            .filter((b) => ["fully_paid", "active", "completed"].includes(b.status))
+            .map((b) => b.id);
+          if (activeIds.length > 0) {
+            const { data: reports } = await supabase
+              .from("trip_condition_reports")
+              .select("booking_id, phase, reporter_id, reporter_role")
+              .in("booking_id", activeIds);
+            const ownerGrouped: Record<string, { pickup: boolean; return: boolean }> = {};
+            const ownGrouped: Record<string, { pickup: boolean; return: boolean }> = {};
+            for (const report of reports ?? []) {
+              if (report.reporter_role === "lister") {
+                const entry = ownerGrouped[report.booking_id] ?? { pickup: false, return: false };
+                if (report.phase === "pickup") entry.pickup = true;
+                if (report.phase === "return") entry.return = true;
+                ownerGrouped[report.booking_id] = entry;
+              }
+              if (report.reporter_id === user!.id) {
+                const entry = ownGrouped[report.booking_id] ?? { pickup: false, return: false };
+                if (report.phase === "pickup") entry.pickup = true;
+                if (report.phase === "return") entry.return = true;
+                ownGrouped[report.booking_id] = entry;
+              }
+            }
+            setOwnerReportsByBooking(ownerGrouped);
+            setOwnReportsByBooking(ownGrouped);
+          } else {
+            setOwnerReportsByBooking({});
+            setOwnReportsByBooking({});
+          }
+        } catch {
+          setOwnerReportsByBooking({});
+          setOwnReportsByBooking({});
         }
 
         setDocumentUrls(
@@ -896,15 +947,6 @@ export default function MyBookingsPage() {
     );
     navigate(
       `/support?bookingId=${booking.id}&tag=booking_report&subject=${subject}`,
-    );
-  };
-
-  const handleReportLocationViolation = (booking: BookingRow) => {
-    const subject = encodeURIComponent(
-      `Location violation report: ${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`,
-    );
-    navigate(
-      `/support?bookingId=${booking.id}&tag=location_violation&subject=${subject}`,
     );
   };
 
@@ -2444,13 +2486,20 @@ export default function MyBookingsPage() {
                             </span>
                           </div>
                           <div className="grid gap-1.5">
-                            {[
-                              { label: "You arrived", done: Boolean(booking.renter_arrived_at) },
-                              { label: "Lister arrived", done: Boolean(booking.lister_arrived_at) },
-                              { label: "You finished", done: booking.renter_completed },
-                              { label: "Lister finished", done: booking.owner_completed },
-                              { label: "Your rating", done: Boolean(reviewedByRenter) },
-                            ].map((step) => (
+                            {(() => {
+                              const bothArrived = Boolean(booking.renter_arrived_at) && Boolean(booking.lister_arrived_at);
+                              const ownerReports = ownerReportsByBooking[booking.id] ?? { pickup: false, return: false };
+                              return [
+                                { label: "You arrived", done: Boolean(booking.renter_arrived_at) },
+                                { label: "Lister arrived", done: Boolean(booking.lister_arrived_at) },
+                                { label: "Vehicle handover", done: ownerReports.pickup },
+                                { label: "Vehicle received", done: bothArrived && ownerReports.pickup },
+                                { label: "Rental in progress", done: booking.status === "active" || booking.status === "completed" },
+                                { label: "Vehicle returned", done: Boolean(booking.renter_return_arrived_at) },
+                                { label: "Return confirmed", done: booking.owner_completed },
+                                { label: "Your rating", done: Boolean(reviewedByRenter) },
+                              ];
+                            })().map((step) => (
                               <div key={step.label} className="flex items-center gap-2">
                                 {step.done ? (
                                   <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-600" />
@@ -2480,15 +2529,6 @@ export default function MyBookingsPage() {
                           >
                             <AlertCircle className="w-3.5 h-3.5" />
                             Report Booking
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleReportLocationViolation(booking)}
-                            className="gap-1 text-muted-foreground"
-                          >
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            Report Place Limit
                           </Button>
                         </div>
                       )}
@@ -2561,8 +2601,26 @@ export default function MyBookingsPage() {
                           ) : (
                             <div className="space-y-1.5">
                               <div className="flex flex-wrap justify-end gap-2">
-                                <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/return`)}>Return report (required)</Button>
-                                <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>Pickup photos (optional)</Button>
+                                <Button
+                                  size="sm"
+                                  variant={ownReportsByBooking[booking.id]?.return ? "ghost" : "outline"}
+                                  className={ownReportsByBooking[booking.id]?.return ? "gap-1 text-green-600" : undefined}
+                                  onClick={() => navigate(`/trip-report/${booking.id}/return`)}
+                                  disabled={Boolean(ownReportsByBooking[booking.id]?.return)}
+                                >
+                                  {ownReportsByBooking[booking.id]?.return && <CheckCircle2 className="w-3.5 h-3.5" />}
+                                  {ownReportsByBooking[booking.id]?.return ? "Return report (submitted)" : "Return report (optional)"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className={ownReportsByBooking[booking.id]?.pickup ? "gap-1 text-green-600" : "text-muted-foreground"}
+                                  onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}
+                                  disabled={Boolean(ownReportsByBooking[booking.id]?.pickup)}
+                                >
+                                  {ownReportsByBooking[booking.id]?.pickup && <CheckCircle2 className="w-3.5 h-3.5" />}
+                                  {ownReportsByBooking[booking.id]?.pickup ? "Pickup photos (submitted)" : "Pickup photos (optional)"}
+                                </Button>
                                 {!booking.renter_return_arrived_at ? (
                                   <Button
                                     size="sm"
@@ -2595,8 +2653,9 @@ export default function MyBookingsPage() {
                               </div>
                               {!booking.renter_return_arrived_at ? (
                                 <p className="text-[10px] text-muted-foreground text-right leading-tight">
-                                  As the renter you must submit the return ("after") report with photos, then tap
-                                  "I've Returned the Car" once you're back with the lister. Your pickup photos are optional.
+                                  Tap "I've Returned the Car" once you're back with the lister - the lister carries the
+                                  required evidence at pickup and return, so your own reports are optional but recommended
+                                  for your own protection.
                                 </p>
                               ) : booking.owner_completed ? (
                                 <div className="flex flex-col items-end gap-1">

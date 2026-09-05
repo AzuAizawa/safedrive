@@ -238,6 +238,12 @@ export default function ListerBookingsPage() {
   const [bookings, setBookings] = useState<ListerBooking[]>([]);
   const [verificationImageUrls, setVerificationImageUrls] = useState<Record<string, string>>({});
   const [agreementUrls, setAgreementUrls] = useState<Record<string, string>>({});
+  // Which trip-condition-report phases the LISTER (this account) has already
+  // filed for each booking - drives the "Vehicle verification" / "Vehicle
+  // handover" / "Vehicle return" trip-progress checkpoints.
+  const [ownReportsByBooking, setOwnReportsByBooking] = useState<
+    Record<string, { pickup: boolean; return: boolean }>
+  >({});
   const [loading, setLoading] = useState(true);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [arrivalLeadHours, setArrivalLeadHours] = useState(
@@ -415,6 +421,35 @@ export default function ListerBookingsPage() {
           "vehicle-documents",
         ),
       );
+
+      // Separate, non-fatal query: drives the "Vehicle verification" /
+      // "Vehicle handover" / "Vehicle return" trip-progress checkpoints. A
+      // missing table or RLS hiccup must never break the bookings list.
+      try {
+        const activeIds = bookingRows
+          .filter((b) => ["fully_paid", "active", "completed"].includes(b.status))
+          .map((b) => b.id);
+        if (activeIds.length > 0) {
+          const { data: reports } = await supabase
+            .from("trip_condition_reports")
+            .select("booking_id, phase")
+            .in("booking_id", activeIds)
+            .eq("reporter_id", user!.id)
+            .eq("reporter_role", "lister");
+          const grouped: Record<string, { pickup: boolean; return: boolean }> = {};
+          for (const report of reports ?? []) {
+            const entry = grouped[report.booking_id] ?? { pickup: false, return: false };
+            if (report.phase === "pickup") entry.pickup = true;
+            if (report.phase === "return") entry.return = true;
+            grouped[report.booking_id] = entry;
+          }
+          setOwnReportsByBooking(grouped);
+        } else {
+          setOwnReportsByBooking({});
+        }
+      } catch {
+        setOwnReportsByBooking({});
+      }
     } catch (err) {
       console.error("Error fetching lister bookings:", err);
       toast.error("Failed to load lister bookings", {
@@ -699,6 +734,7 @@ export default function ListerBookingsPage() {
     arrivalPhotoUrl?: string | null,
     arrivalLocation?: ArrivalLocationEvidence | null,
     note?: string | null,
+    confirmOnBehalfOfRenter?: boolean,
   ) => {
     const res = await fetch("/api/booking-action", {
       method: "POST",
@@ -712,6 +748,7 @@ export default function ListerBookingsPage() {
         arrivalPhotoUrl,
         arrivalLocation,
         note,
+        confirmOnBehalfOfRenter,
       }),
     });
 
@@ -838,6 +875,23 @@ export default function ListerBookingsPage() {
     }
   };
 
+  const handleConfirmRenterArrived = async (bookingId: string) => {
+    setActionLoading(bookingId);
+    const toastId = toast.loading("Confirming renter's arrival...");
+    try {
+      await runBookingAction(bookingId, "arrive", null, null, null, true);
+      toast.success("Renter's arrival recorded.", { id: toastId });
+      fetchBookings();
+    } catch (err) {
+      toast.error("Could not confirm the renter's arrival", {
+        id: toastId,
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleComplete = async (booking: ListerBooking) => {
     setActionLoading(booking.id);
     try {
@@ -912,12 +966,12 @@ export default function ListerBookingsPage() {
     setRatingFeedback("");
   };
 
-  const handleReportLocationViolation = (booking: ListerBooking) => {
+  const handleReportBooking = (booking: ListerBooking) => {
     const subject = encodeURIComponent(
-      `Location violation report: ${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`,
+      `Report booking: ${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`,
     );
     navigate(
-      `/support?bookingId=${booking.id}&tag=location_violation&subject=${subject}`,
+      `/support?bookingId=${booking.id}&tag=booking_report&subject=${subject}`,
     );
   };
 
@@ -3022,6 +3076,30 @@ export default function ListerBookingsPage() {
                         </div>
                       )}
 
+                      {(apparentState === "fully_paid" || apparentState === "active") &&
+                        !b.renter_arrived_at &&
+                        arrivalCheckinOpen && (
+                          <div className="mt-2 text-right">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5"
+                              disabled={actionLoading === b.id}
+                              onClick={() => handleConfirmRenterArrived(b.id)}
+                            >
+                              {actionLoading === b.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                              )}
+                              Confirm - Renter Is Here
+                            </Button>
+                            <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
+                              Only if needed - e.g. the renter's phone is dead. Prefer letting them confirm it themselves.
+                            </p>
+                          </div>
+                        )}
+
                       {showTripProgress && (
                         <div className="mt-3 w-full rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed">
                           <div className="mb-2 flex items-center justify-between gap-2">
@@ -3031,13 +3109,19 @@ export default function ListerBookingsPage() {
                             </span>
                           </div>
                           <div className="grid gap-1.5">
-                            {[
-                              { label: "You arrived", done: Boolean(b.lister_arrived_at) },
-                              { label: "Renter arrived", done: Boolean(b.renter_arrived_at) },
-                              { label: "You finished", done: b.owner_completed },
-                              { label: "Renter finished", done: b.renter_completed },
-                              { label: "Your rating", done: Boolean(reviewedByOwner) },
-                            ].map((step) => (
+                            {(() => {
+                              const ownReports = ownReportsByBooking[b.id] ?? { pickup: false, return: false };
+                              return [
+                                { label: "Renter arrived", done: Boolean(b.renter_arrived_at) },
+                                { label: "You arrived", done: Boolean(b.lister_arrived_at) },
+                                { label: "Vehicle verification", done: ownReports.pickup },
+                                { label: "Vehicle handover", done: ownReports.pickup },
+                                { label: "Rental in progress", done: b.status === "active" || b.status === "completed" },
+                                { label: "Vehicle return", done: ownReports.return },
+                                { label: "Trip completed", done: b.status === "completed" },
+                                { label: "Your rating", done: Boolean(reviewedByOwner) },
+                              ];
+                            })().map((step) => (
                               <div key={step.label} className="flex items-center gap-2">
                                 {step.done ? (
                                   <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-600" />
@@ -3144,11 +3228,11 @@ export default function ListerBookingsPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => handleReportLocationViolation(b)}
+                            onClick={() => handleReportBooking(b)}
                             className="gap-1 text-muted-foreground"
                           >
                             <CircleAlert className="w-3.5 h-3.5" />
-                            Report Place Limit
+                            Report Booking
                           </Button>
                         </div>
                       )}
@@ -3174,30 +3258,41 @@ export default function ListerBookingsPage() {
                           ) : (
                             <div className="space-y-1.5">
                               <div className="flex flex-wrap justify-end gap-2">
-                                <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>Pickup report (required)</Button>
-                                <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/trip-report/${b.id}/return`)}>Return photos (optional)</Button>
-                                {(b.renter_return_arrived_at || b.renter_completed) && (
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleComplete(b)}
-                                    disabled={actionLoading === b.id}
-                                    className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
-                                  >
-                                    <CheckCircle2 className="w-3.5 h-3.5" />
-                                    Confirm - Car Received
-                                  </Button>
-                                )}
+                                <Button
+                                  size="sm"
+                                  variant={ownReportsByBooking[b.id]?.pickup ? "ghost" : "outline"}
+                                  className={ownReportsByBooking[b.id]?.pickup ? "gap-1 text-green-600" : undefined}
+                                  onClick={() => navigate(`/trip-report/${b.id}/pickup`)}
+                                  disabled={Boolean(ownReportsByBooking[b.id]?.pickup)}
+                                >
+                                  {ownReportsByBooking[b.id]?.pickup && <CheckCircle2 className="w-3.5 h-3.5" />}
+                                  {ownReportsByBooking[b.id]?.pickup ? "Pickup report (submitted)" : "Pickup report (required)"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant={ownReportsByBooking[b.id]?.return ? "ghost" : "outline"}
+                                  className={ownReportsByBooking[b.id]?.return ? "gap-1 text-green-600" : undefined}
+                                  onClick={() => navigate(`/trip-report/${b.id}/return`)}
+                                  disabled={Boolean(ownReportsByBooking[b.id]?.return)}
+                                >
+                                  {ownReportsByBooking[b.id]?.return && <CheckCircle2 className="w-3.5 h-3.5" />}
+                                  {ownReportsByBooking[b.id]?.return ? "Return report (submitted)" : "Return report (required)"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleComplete(b)}
+                                  disabled={actionLoading === b.id}
+                                  className="gap-1 whitespace-nowrap shadow-lg shadow-primary/20"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  Confirm - Car Received
+                                </Button>
                               </div>
-                              {b.renter_return_arrived_at || b.renter_completed ? (
-                                <p className="text-[10px] text-muted-foreground text-right leading-tight">
-                                  As the lister you must have filed the pickup ("before") report before finishing the trip.
-                                  Inspect the car, then tap "Confirm - Car Received".
-                                </p>
-                              ) : (
-                                <p className="text-[10px] text-amber-600 text-right font-medium leading-tight">
-                                  Waiting for the renter to confirm they've returned the car before you can confirm receipt.
-                                </p>
-                              )}
+                              <p className="text-[10px] text-muted-foreground text-right leading-tight">
+                                As the lister you must file both the pickup ("before") and return ("after") reports with
+                                at least one live photo each before you can confirm receipt - with or without the renter's
+                                own "I've Returned the Car" tap.
+                              </p>
                             </div>
                           )}
                         </div>
