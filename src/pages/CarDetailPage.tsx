@@ -3,12 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { supabase } from "@/lib/supabase";
 import {
-  calculateCommissionAmount,
   calculateProcessingFee,
-  DEFAULT_COMMISSION_RATE,
   DEFAULT_DOWNPAYMENT_RATE,
   fetchPlatformPricingSettings,
-  formatCommissionPercent,
 } from "@/lib/platformSettings";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -95,7 +92,6 @@ export default function CarDetailPage() {
   const [pickupTime, setPickupTime] = useState("");
   const [dropoffTime, setDropoffTime] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [commissionRate, setCommissionRate] = useState(DEFAULT_COMMISSION_RATE);
   const [processingFeeRate, setProcessingFeeRate] = useState(0);
   const [processingFixedCentavos, setProcessingFixedCentavos] = useState(0);
   const [downpaymentRate, setDownpaymentRate] = useState(DEFAULT_DOWNPAYMENT_RATE);
@@ -227,7 +223,6 @@ export default function CarDetailPage() {
   useEffect(() => {
     void (async () => {
       const settings = await fetchPlatformPricingSettings();
-      setCommissionRate(settings.commissionRate);
       setProcessingFeeRate(settings.processingFeeRate);
       setProcessingFixedCentavos(settings.processingFixedCentavos);
       setDownpaymentRate(settings.downpaymentRate);
@@ -401,10 +396,12 @@ export default function CarDetailPage() {
     const requestedDays = differenceInDays(end, start);
     const pricePerDay = Number(car.price_per_day);
     const basePrice = pricePerDay * requestedDays;
-    const commission = calculateCommissionAmount(basePrice, commissionRate);
-    const subtotal = basePrice + commission;
-    const processingFee = calculateProcessingFee(subtotal, processingFeeRate, processingFixedCentavos);
-    const totalPrice = subtotal + processingFee;
+    // SafeDrive's commission comes out of the lister's earnings now, not
+    // added to what the renter pays - only the payment-processing fee
+    // (a real PayMongo transaction cost, tied to the renter's payment
+    // method) is grossed up on top of the base price.
+    const processingFee = calculateProcessingFee(basePrice, processingFeeRate, processingFixedCentavos);
+    const totalPrice = basePrice + processingFee;
 
     if (totalPrice > MAX_BOOKING_TOTAL) {
       toast.error("Booking total exceeds online payment limit", {
@@ -525,9 +522,8 @@ export default function CarDetailPage() {
   const pricePerDay = car ? Number(car.price_per_day) : 0;
   const isOwnListing = Boolean(user && car && car.owner_id === user.id);
   const basePrice = pricePerDay * totalDays;
-  const commissionAmount = calculateCommissionAmount(basePrice, commissionRate);
-  const processingFee = calculateProcessingFee(basePrice + commissionAmount, processingFeeRate, processingFixedCentavos);
-  const totalPrice = basePrice + commissionAmount + processingFee;
+  const processingFee = calculateProcessingFee(basePrice, processingFeeRate, processingFixedCentavos);
+  const totalPrice = basePrice + processingFee;
   const exceedsPaymentLimit = totalPrice > MAX_BOOKING_TOTAL;
   const isOverlapping =
     dateRange?.from && dateRange?.to
@@ -1094,12 +1090,6 @@ export default function CarDetailPage() {
                     <span>₱{basePrice.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">
-                      Service fee ({formatCommissionPercent(commissionRate)})
-                    </span>
-                    <span>₱{commissionAmount.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
                     <span className="text-muted-foreground">Payment processing fee</span>
                     <span>₱{processingFee.toLocaleString()}</span>
                   </div>
@@ -1125,7 +1115,7 @@ export default function CarDetailPage() {
                     </p>
                   )}
                   <p className="text-[11px] text-muted-foreground">
-                    The renter pays this separately disclosed processing fee. It is never deducted from the lister's base rental.
+                    This total is exactly the listed price plus the disclosed payment-processing fee - no other fee is added for you.
                   </p>
                   {showDailyPricingClarifier && (
                     <p className="text-[11px] text-muted-foreground">
@@ -1386,7 +1376,9 @@ export default function CarDetailPage() {
                 check-ins) to support either party in a dispute, but does not
                 hold a refundable security deposit and is not obligated to
                 compensate either party for a damaged, lost, or unreturned
-                vehicle.
+                vehicle. If the Lister requires a security deposit, its amount,
+                collection, and return are arranged directly and independently
+                between the Lister and Renter, entirely outside the Platform.
               </p>
             </div>
 

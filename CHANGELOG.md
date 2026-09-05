@@ -9,6 +9,254 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Dynamic legal content (Terms, Privacy, Platform Agreement) + security-deposit disclosure
+
+Thesis-panel requirement, two parts. Part 1: make it unmistakable that any
+security deposit is arranged directly between Renter and Owner, outside
+SafeDrive - the deposit *feature* itself was already removed earlier today
+(CHAPTER 34) and a defensive disclaimer ("SafeDrive doesn't hold one") was
+already added to `PlatformAgreementPage.tsx` §8 and `CarDetailPage.tsx`'s
+rental-agreement summary; what was still missing was the proactive half -
+telling users to arrange it directly with each other. Part 2: SafeDrive's own
+legal documents (Terms & Conditions, Privacy Policy, Platform Agreement) were
+fully hardcoded JSX - any wording change needed a code deploy. Made dynamic:
+a super admin edits and publishes new content from a dedicated admin page,
+reached from Platform Settings.
+
+**Part 1 - security-deposit language added to four places:**
+- `TermsPage.tsx` - new §5.5 (Terms had none since the old clause was deleted
+  in CHAPTER 34).
+- `PlatformAgreementPage.tsx` §8 and `CarDetailPage.tsx`'s rental-agreement
+  summary clause 5 - extended the existing disclaimer with "arranged directly
+  between the Lister and Renter, outside the Platform."
+- `MyVehiclesPage.tsx` - a guidance note next to the "Rental Agreement (PDF)"
+  upload field (Add and Edit forms): SafeDrive cannot edit a Lister's own
+  uploaded PDF, so this sets expectations rather than checking compliance.
+
+**Part 2 - `legal_document_versions` (CHAPTER 53):**
+- New table, one row per published/superseded version per document
+  (`terms_of_service` / `privacy_policy` / `platform_agreement`), mirroring
+  `car_agreement_versions`' "one active row" partial-unique-index pattern.
+  Every version is kept permanently for the audit trail.
+- `publish_legal_document_version(p_document_key, p_content_html)` - a
+  `SECURITY DEFINER` RPC, same governance as `set_platform_contact_email` /
+  `set_verification_eta_messages`: a single super admin can publish directly,
+  no multi-admin vote (legal content changes were judged closer to "display
+  text a single admin should be able to fix quickly" than "a money/policy
+  value that needs a supermajority," matching precedent already set for
+  those two settings).
+- Seeded version 1 for each document with today's exact text, including the
+  Part 1 security-deposit clauses, so the first dynamic version already
+  reflects the requirement instead of needing an immediate follow-up edit.
+- **New admin page**, `AdminLegalContentPage.tsx` (`/admin/legal-content`,
+  linked from a new card on `/admin/platform-settings`): a document-tab
+  selector, a `contentEditable` rich-text area with a small toolbar (Bold /
+  Italic / Underline / Bullet list / Numbered list / Heading, via
+  `document.execCommand` - browser-native, no new library) reusing and
+  extending the sanitizer pattern from `src/lib/richText.ts` (used today for
+  support-ticket chat messages) rather than adopting a full editor framework,
+  a read-only version-history list, and a publish confirmation step.
+- `src/lib/richText.ts` gained `sanitizeLegalDocumentHtml` - a wider allowlist
+  (adds headings) than chat's `sanitizeRichText`, kept as a separate function
+  so chat-message rendering is untouched. Sanitized on both save (the admin
+  editor) and render (the public pages), defense in depth.
+- `TermsPage.tsx`, `PrivacyPolicyPage.tsx`, `PlatformAgreementPage.tsx`
+  converted from static JSX to a fetch-and-render of the published row for
+  each page's `document_key`; page chrome (title, back button, footer)
+  unchanged. "Last Updated" now shows the real `published_at` instead of a
+  hardcoded date. `PrivacyPolicyPage.tsx`'s contact-email interpolation
+  (`usePlatformContactEmail()`) is preserved via a `{{CONTACT_EMAIL}}` token
+  left in the stored content, replaced with the live value right before
+  rendering - no general templating system, just this one token.
+- Verified clean: `tsc -b`, `tsc -p tsconfig.api.json`, lint,
+  `check:booking-flow` (the `PrivacyPolicyPage.tsx` marker updated for the
+  token move), `check:alignment` (new route documented), `check:api-boundaries`,
+  and a full production build.
+
+**Not done in this pass, flagged as a follow-up:** per the master doc's own
+standing instruction, legal/policy wording changes like these should still
+get a real Philippine legal and accounting review before public launch - this
+pass makes the content technically dynamic and internally consistent, it
+does not certify the wording itself.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 53),
+`src/lib/richText.ts`, `src/pages/admin/AdminLegalContentPage.tsx` (new),
+`src/pages/admin/AdminPlatformSettingsPage.tsx`, `src/pages/TermsPage.tsx`,
+`src/pages/PrivacyPolicyPage.tsx`, `src/pages/PlatformAgreementPage.tsx`,
+`src/pages/CarDetailPage.tsx`, `src/pages/MyVehiclesPage.tsx`, `src/App.tsx`,
+`src/types/database.ts`, `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`,
+`scripts/booking-flow-smoke-check.mjs`.
+
+---
+
+## 2026-09-05 — Commission flip: renter pays listed price, lister absorbs it
+
+Flips who bears SafeDrive's commission. Previously a lister listing a car at
+₱1,000/day meant the renter was charged ₱1,000 + 10% commission (₱1,100,
+before the payment-processing fee), while the lister received the full,
+undiminished ₱1,000. Now the renter pays exactly the listed price
+(₱1,000 + the disclosed payment-processing fee only), and the lister's
+payout is ₱900 - the commission comes out of the lister's earnings, not on
+top of what the renter pays. The payment-processing fee is untouched by this
+change - it stays charged to the renter, since it's tied to the renter's
+chosen payment method, a deliberately separate decision from the commission.
+
+This also resolves a pre-existing mismatch: the Terms of Service and master
+documentation already *described* commission as something SafeDrive "deducts
+from the agreed base" / lister earnings "net of commission," but the actual
+code paid the lister the full base price and charged the difference to the
+renter instead. The code now matches what was already promised.
+
+- **`api/create-booking.ts`**: `total_price` is now `base_price + payment
+  processing fee` only - `commission` is still computed and stored (needed
+  for ledger/payout math and revenue reporting) but no longer contributes to
+  what the renter is charged.
+- **`api/booking-extension-action.ts` / `api/webhooks/paymongo.ts`**: paid
+  trip extensions mirror the same change - the renter's extension charge
+  drops the commission slice; `booking_extensions` gains an explicit
+  `extension_commission` column (CHAPTER 52) since it can no longer be
+  derived as a residual of what the renter paid (that would always be zero
+  now).
+- **`api/lib/ledger.ts`**: `calculatePaymentLedgerAllocation`'s owner-share
+  formula becomes `(base_price - commission)`'s proportional share of the
+  payment, instead of `base_price` alone.
+- **`api/lib/payoutAutomation.ts`** (the highest-risk change - real PayMongo
+  transfers): the payout amount is now `base_price - commission` (+ any fuel
+  reimbursement), fixed at the single point where it's first computed so
+  every downstream use in the function (the pending payout record, the
+  actual transfer payload, every notification/email/audit-log line) picks up
+  the corrected amount automatically.
+- **New: upfront lister earnings disclosure** (`MyVehiclesPage.tsx`, both
+  Add and Edit Listing forms) - a live note next to the price field ("You'll
+  earn approximately ₱X/day after SafeDrive's Y% commission") so a lister
+  knows their real take-home the moment they set a price, not just when the
+  payout receipt arrives.
+- **Renter-facing checkout** (`CarDetailPage.tsx`): removed the "Service fee
+  (X%)" line item entirely - the renter's breakdown is now just price +
+  processing fee + total, no commission line to show.
+- **Payout receipt email** (`api/lib/email.ts`): used to tell the lister the
+  commission was "retained separately and is not part of this amount" - now
+  itemizes it as an actual deduction from the base rental shown in the
+  receipt.
+- **Admin dashboard** (`AdminPayoutsPage.tsx`) and **lister revenue
+  analytics** (`ListerBookingsPage.tsx`): all payout/earnings figures that
+  previously equaled `base_price` now correctly show `base_price -
+  commission`.
+- **Legal copy updated** to match: `TermsPage.tsx` §5.4, `PlatformAgreementPage.tsx`,
+  `SignUpPage.tsx`. Per the master doc's own standing instruction, wording
+  like this should still get a real legal/accounting review before public
+  launch - not something this pass can certify alone.
+- Existing/in-flight bookings are unaffected - `base_price`/`commission`/
+  `total_price` are snapshotted per booking at creation time, so only
+  bookings created after this change use the new formula.
+- Verified clean: `tsc -b`, `tsc -p tsconfig.api.json`, lint,
+  `check:financial-logic` (two hardcoded allocation assertions updated to
+  the new formula), `check:booking-flow` (payout-receipt marker updated),
+  `check:api-boundaries`, `check:alignment`, `check:reconciliation-logic`,
+  and a full production build.
+
+Files: `api/create-booking.ts`, `api/booking-extension-action.ts`,
+`api/webhooks/paymongo.ts`, `api/lib/ledger.ts`, `api/lib/payoutAutomation.ts`,
+`api/lib/email.ts`, `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql`
+(CHAPTER 52), `src/pages/CarDetailPage.tsx`, `src/pages/MyVehiclesPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`, `src/pages/MyBookingsPage.tsx`,
+`src/pages/admin/AdminPayoutsPage.tsx`, `src/pages/TermsPage.tsx`,
+`src/pages/PlatformAgreementPage.tsx`, `src/pages/SignUpPage.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`, `src/types/database.ts`,
+`scripts/financial-logic.test.mjs`, `scripts/booking-flow-smoke-check.mjs`.
+
+---
+
+## 2026-09-05 — Mandatory handover gate, mutual return arrival, fraud hardening
+
+Redesigns the pickup and return legs to add an explicit, deliberately
+minimal-tap handover handshake, and closes several fraud/no-deadline gaps
+found while designing it. Backend and frontend in one pass.
+
+**Pickup: handover now gates `active`.** Previously "arrive" auto-flipped
+`fully_paid → active` the instant both sides checked in, with no
+verification the vehicle was actually handed over. Now `status` stays
+`fully_paid` through a mandatory handover sub-sequence: lister submits their
+required pickup condition report (unchanged system) and taps
+`handover_confirm` ("Hand Over the Car"); only then can the renter tap the
+new `handover_receive` ("I Have Received the Car"), which is the one and
+only place `status` becomes `active`. No new `bookings.status` value - kept
+every existing `.in("status", [...])` gate elsewhere untouched. New columns:
+`lister_handover_confirmed_at`, `renter_handover_received_at` (CHAPTER 47).
+
+**Return: mutual arrival, mirroring pickup.** `return_arrive` was renter-only
+(a one-way "I've returned it" announcement); it's now role-dispatched like
+`arrive`; the lister calls it too (`lister_return_arrived_at`, CHAPTER 48).
+The lister's `complete` now additionally requires both return-arrival flags
+set before it can finish the trip. A new incident action,
+`lister_no_show_return`, lets the renter flag a lister who never shows to
+receive the return - unlike pickup no-show this never cancels or refunds
+(the rental was already fully delivered), it only flags `dispute_status` for
+visibility; the existing `lister_completion_timeout_hours` safety net still
+auto-completes (and pays out) if the lister stays unresponsive.
+
+**New cron sweeps** (`api/expire-booking-deadlines.ts`): a 2-hour handover
+stuck-state timeout (auto-activates on the renter's behalf if the lister
+already handed over and the renter is merely silent; otherwise flags the
+lister-fault stall for both sides); a return-leg no-show reminder (advisory
+only, dedup'd, never auto-cancels); extension response-deadline expiry and
+approved-but-unpaid expiry (`booking_extensions.response_deadline`, CHAPTER
+49 - the same gap CHAPTER 46 had already fixed for early-return requests).
+
+**Fraud hardening, found while designing the above:**
+- Arrival check-in silently captures device location again
+  (`ArrivalPhotoCapture.tsx` calls `navigator.geolocation` on the existing
+  single button - no new UI, permission denial never blocks the tap). This
+  was removed in the 2026-09-05 handover/return redesign for simplicity when
+  it had nothing to verify against; it's back because a car listing can now
+  carry a pickup pin.
+- **New: car listings can pin their exact pickup location**
+  (`cars.pickup_latitude/longitude`, CHAPTER 51) via "Use My Current
+  Location" in both the Add and Edit Listing forms (`MyVehiclesPage.tsx`) -
+  no geocoding API, the lister just drops themselves there once.
+- A `renter_no_car` no-show claim now only gets an instant automatic full
+  refund if the reporter's arrival location is within 500m of the car's
+  pickup pin; otherwise it's routed to the same manual-refund-review queue
+  `renter_no_show` already used (extracted into a shared
+  `queueManualRefundReview` helper), still recommending a full refund -
+  just pending a human's confirmation of the claim.
+- `cars.min_early_return_notice_hours` was shown to renters but never
+  enforced - `api/booking-early-return-action.ts` now rejects a request
+  that doesn't give the configured notice.
+- `api/booking-extension-action.ts`: overlap is now re-validated at
+  `approve` time too (previously only at `request` time - the calendar
+  could change in between), plus a 30-minute cooldown between a
+  cancelled/rejected/expired request and a new one on the same booking.
+- Trip-condition-report submissions now require the reporter's own arrival
+  (or return-arrival) check-in first, and are auto-posted into the
+  booking's conversation thread (attributed to the real submitter, not a
+  system identity) so photos actually show up where both parties can see
+  them - needed a new `ticket_messages.attachment_bucket` column (CHAPTER
+  50) since that evidence lives in a different storage bucket than normal
+  ticket attachments.
+
+Verified clean: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `check:booking-flow`
+(markers updated for all of the above), `check:api-boundaries`,
+`check:alignment`, `check:financial-logic`, `check:process-logic`,
+`check:reconciliation-logic`, and a full production build.
+
+**Not done in this pass, flagged as a follow-up:** the pickup pin is a
+manual lat/lng entry or a "stand there and tap" capture, not an interactive
+map picker - fine for now (zero cost, no new dependency), but a visual map
+would be a nicer lister experience later.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 47-51),
+`api/booking-action.ts`, `api/submit-trip-condition-report.ts`,
+`api/booking-incident-action.ts`, `api/booking-early-return-action.ts`,
+`api/booking-extension-action.ts`, `api/expire-booking-deadlines.ts`,
+`src/components/ArrivalPhotoCapture.tsx`, `src/pages/MyBookingsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`, `src/pages/MyVehiclesPage.tsx`,
+`src/lib/bookingLifecycle.ts`, `src/lib/incidents.ts`,
+`src/lib/supportTickets.ts`, `src/types/database.ts`,
+`scripts/booking-flow-smoke-check.mjs`.
+
+---
+
 ## 2026-09-05 — Advance-booking window and trip-length cap decoupled (60 / 30 days)
 
 Follow-up to the extension cap above. `api/create-booking.ts` had checked a

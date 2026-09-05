@@ -978,7 +978,7 @@ export default async function handler(req: Request) {
       const { data: extension, error: extensionError } = await supabase
         .from("booking_extensions")
         .select(
-          "id, booking_id, renter_id, owner_id, status, total_additional_amount, paymongo_checkout_id, requested_end_date, extension_days, extension_amount, fuel_top_up_amount",
+          "id, booking_id, renter_id, owner_id, status, total_additional_amount, paymongo_checkout_id, requested_end_date, extension_days, extension_amount, extension_commission, fuel_top_up_amount",
         )
         .eq("id", extensionId)
         .single();
@@ -1090,12 +1090,10 @@ export default async function handler(req: Request) {
 
       const extensionRentalAmount = Number(extension.extension_amount);
       const extensionFuelTopUp = Math.max(0, Number(extension.fuel_top_up_amount));
-      const extensionCommission = Math.max(
-        0,
-        Number(extension.total_additional_amount) -
-          extensionRentalAmount -
-          extensionFuelTopUp,
-      );
+      // Stored directly by api/booking-extension-action.ts at request time -
+      // total_additional_amount no longer includes it as a residual (the
+      // renter isn't charged commission), so it must be read, not derived.
+      const extensionCommission = Math.max(0, Number(extension.extension_commission));
 
       // Claim the extension row first - this is the idempotency gate. A retried
       // webhook that finds it already `paid` returns before touching the booking
@@ -1167,7 +1165,7 @@ export default async function handler(req: Request) {
           paymongoPaymentMetadata,
         ),
         allocationOverride: {
-          ownerPesos: extensionRentalAmount + extensionFuelTopUp,
+          ownerPesos: extensionRentalAmount + extensionFuelTopUp - extensionCommission,
           commissionPesos: extensionCommission,
           feePesos: 0,
         },

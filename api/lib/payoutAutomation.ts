@@ -596,7 +596,15 @@ export const processAutomaticPayoutForBooking = async ({
   }
 
   const payoutBooking = booking as unknown as BookingForPayout;
-  let payoutAmount = Number(payoutBooking.base_price);
+  // Commission now comes out of the lister's earnings (it's no longer
+  // additional cash collected from the renter - see api/create-booking.ts
+  // and api/lib/ledger.ts). Mutate payoutBooking.base_price immediately and
+  // unconditionally, not just inside the fuel-reimbursement branch below -
+  // every later line in this function (the pending payout record, the
+  // actual PayMongo transfer payload, every notification/email/audit-log
+  // line, and the ledger debit) reads payoutBooking.base_price directly.
+  let payoutAmount = Number(payoutBooking.base_price) - Number(payoutBooking.commission);
+  payoutBooking.base_price = payoutAmount;
 
   if (payoutBooking.status !== "completed" || !payoutBooking.owner_completed || !payoutBooking.renter_completed) {
     return { state: "skipped", bookingId, reason: "Booking is not fully completed yet." };

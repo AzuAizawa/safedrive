@@ -506,6 +506,312 @@ export default async function handler(req: Request) {
       listerCompletionAuto += 1;
     }
 
+    // --- Handover stuck-state timeout (2 hours): both sides arrived for
+    // pickup, but the mandatory handover sub-sequence (lister required
+    // photos + "hand over", renter "received") never finished. If the
+    // lister already handed over and only the renter is silent, assume
+    // good faith and auto-activate on the renter's behalf - same philosophy
+    // as the lister-completion-timeout above, zero new taps for the renter.
+    // If the lister never even confirmed the handover, this is a
+    // lister-fault stall - notify both sides once (deduped via
+    // handover_stall_notified_at) rather than repeating every 15 minutes.
+    const HANDOVER_STALL_TIMEOUT_HOURS = 2;
+    const handoverStallCutoff = new Date(
+      Date.now() - HANDOVER_STALL_TIMEOUT_HOURS * 60 * 60 * 1000,
+    ).toISOString();
+
+    const { data: stuckHandovers, error: stuckHandoverError } = await supabase
+      .from("bookings")
+      .select(
+        "id, renter_id, owner_id, lister_handover_confirmed_at, handover_stall_notified_at, cars(plate_number, car_models(name, car_brands(name)))",
+      )
+      .eq("status", "fully_paid")
+      .not("renter_arrived_at", "is", null)
+      .not("lister_arrived_at", "is", null)
+      .is("renter_handover_received_at", null)
+      .lte("renter_arrived_at", handoverStallCutoff)
+      .lte("lister_arrived_at", handoverStallCutoff)
+      .limit(200);
+    if (stuckHandoverError) throw stuckHandoverError;
+
+    let handoverAutoActivated = 0;
+    let handoverStallFlagged = 0;
+    for (const booking of (stuckHandovers ?? []) as unknown as Array<{
+      id: string;
+      renter_id: string;
+      owner_id: string;
+      lister_handover_confirmed_at: string | null;
+      handover_stall_notified_at: string | null;
+      cars: { plate_number: string; car_models: { name: string; car_brands: { name: string } } } | null;
+    }>) {
+      const vehicleLabel = getVehicleLabel(booking as unknown as RefundableBooking);
+
+      if (booking.lister_handover_confirmed_at) {
+        const { data: activated, error: activateError } = await supabase
+          .from("bookings")
+          .update({
+            renter_handover_received_at: new Date().toISOString(),
+            status: "active",
+          })
+          .eq("id", booking.id)
+          .eq("status", "fully_paid")
+          .is("renter_handover_received_at", null)
+          .select("id")
+          .maybeSingle();
+        if (activateError) throw activateError;
+        if (!activated) continue;
+
+        await supabase.from("audit_log").insert({
+          user_id: null,
+          action: "handover_receipt_auto_after_timeout",
+          entity_type: "booking",
+          entity_id: booking.id,
+          details: { timeout_hours: HANDOVER_STALL_TIMEOUT_HOURS, automated: true },
+        });
+        await supabase.from("notifications").insert([
+          {
+            user_id: booking.renter_id,
+            title: "Trip Started",
+            message: `Your trip for ${vehicleLabel} was started automatically after ${HANDOVER_STALL_TIMEOUT_HOURS} hours since the lister handed over the car.`,
+            type: "info",
+            link: "/my-bookings",
+          },
+          {
+            user_id: booking.owner_id,
+            title: "Trip Started",
+            message: `The rental for ${vehicleLabel} started automatically because the renter did not confirm receipt in time.`,
+            type: "info",
+            link: "/lister-bookings",
+          },
+        ]);
+        handoverAutoActivated += 1;
+      } else if (!booking.handover_stall_notified_at) {
+        const { data: claimedNotice, error: claimNoticeError } = await supabase
+          .from("bookings")
+          .update({ handover_stall_notified_at: new Date().toISOString() })
+          .eq("id", booking.id)
+          .is("handover_stall_notified_at", null)
+          .select("id")
+          .maybeSingle();
+        if (claimNoticeError) throw claimNoticeError;
+        if (!claimedNotice) continue;
+
+        await supabase.from("notifications").insert([
+          {
+            user_id: booking.owner_id,
+            title: "Complete the handover",
+            message: `You and the renter both arrived for ${vehicleLabel} over ${HANDOVER_STALL_TIMEOUT_HOURS} hours ago, but the car hasn't been handed over yet. Submit your pickup photos and tap "Hand Over the Car."`,
+            type: "warning",
+            link: "/lister-bookings",
+          },
+          {
+            user_id: booking.renter_id,
+            title: "Waiting on the lister",
+            message: `You and the lister both arrived for ${vehicleLabel} over ${HANDOVER_STALL_TIMEOUT_HOURS} hours ago, but the lister hasn't handed over the car yet.`,
+            type: "warning",
+            link: "/my-bookings",
+          },
+        ]);
+        await supabase.from("audit_log").insert({
+          user_id: null,
+          action: "handover_stall_notified",
+          entity_type: "booking",
+          entity_id: booking.id,
+          details: { timeout_hours: HANDOVER_STALL_TIMEOUT_HOURS, automated: true },
+        });
+        handoverStallFlagged += 1;
+      }
+    }
+
+    // --- Return-leg no-show reminder: never auto-cancels - the rental
+    // period is already consumed by this point, so unlike pickup no-show
+    // there is no refund-eligible outcome the same way; this is purely
+    // advisory, pointing the arrived party at the incident-report actions.
+    const RETURN_NO_SHOW_GRACE_MINUTES = 30;
+    const { data: returnNoShowCandidates, error: returnNoShowError } = await supabase
+      .from("bookings")
+      .select(
+        "id, renter_id, owner_id, end_date, dropoff_time, renter_return_arrived_at, lister_return_arrived_at, cars(plate_number, car_models(name, car_brands(name)))",
+      )
+      .eq("status", "active")
+      .is("return_no_show_reminder_sent_at", null)
+      .or("renter_return_arrived_at.not.is.null,lister_return_arrived_at.not.is.null")
+      .limit(200);
+    if (returnNoShowError) throw returnNoShowError;
+
+    let returnNoShowReminderSent = 0;
+    for (const booking of (returnNoShowCandidates ?? []) as unknown as Array<{
+      id: string;
+      renter_id: string;
+      owner_id: string;
+      end_date: string;
+      dropoff_time: string | null;
+      renter_return_arrived_at: string | null;
+      lister_return_arrived_at: string | null;
+      cars: { plate_number: string; car_models: { name: string; car_brands: { name: string } } } | null;
+    }>) {
+      const onlyOneArrived =
+        Boolean(booking.renter_return_arrived_at) !== Boolean(booking.lister_return_arrived_at);
+      if (!onlyOneArrived) continue;
+
+      const [y, m, d] = booking.end_date.split("-").map(Number);
+      const [hh, mm] = (booking.dropoff_time || "18:00").split(":").map(Number);
+      if (!y || !m || !d) continue;
+      const dropoffMs = Date.UTC(y, m - 1, d, hh || 0, mm || 0) - 8 * 60 * 60 * 1000;
+      if (Date.now() < dropoffMs + RETURN_NO_SHOW_GRACE_MINUTES * 60_000) continue;
+
+      const { data: claimed, error: claimError } = await supabase
+        .from("bookings")
+        .update({ return_no_show_reminder_sent_at: new Date().toISOString() })
+        .eq("id", booking.id)
+        .is("return_no_show_reminder_sent_at", null)
+        .select("id")
+        .maybeSingle();
+      if (claimError) throw claimError;
+      if (!claimed) continue;
+
+      const vehicleLabel = getVehicleLabel(booking as unknown as RefundableBooking);
+      const arrivedIsRenter = Boolean(booking.renter_return_arrived_at);
+      await supabase.from("notifications").insert({
+        user_id: arrivedIsRenter ? booking.renter_id : booking.owner_id,
+        title: "The other party hasn't shown up",
+        message: arrivedIsRenter
+          ? `You arrived to return ${vehicleLabel}, but the lister hasn't shown up yet. If they don't arrive, you can report a no-show from the booking.`
+          : `You arrived to receive ${vehicleLabel}, but the renter hasn't shown up yet. If they don't arrive, you can report this from the booking.`,
+        type: "warning",
+        link: arrivedIsRenter ? "/my-bookings" : "/lister-bookings",
+      });
+      await supabase.from("audit_log").insert({
+        user_id: null,
+        action: "return_no_show_reminder_sent",
+        entity_type: "booking",
+        entity_id: booking.id,
+        details: { automated: true, arrived_side: arrivedIsRenter ? "renter" : "lister" },
+      });
+      returnNoShowReminderSent += 1;
+    }
+
+    // --- Extension response deadline: the lister never approved or rejected
+    // a pending extension request within its response window
+    // (booking_extensions.response_deadline, stamped at request time in
+    // api/booking-extension-action.ts). No response is treated the same as
+    // a decline - the booking is untouched, so the current end date stands.
+    const { data: staleExtensionRequests, error: staleExtensionRequestsError } =
+      await supabase
+        .from("booking_extensions")
+        .select("id, renter_id, owner_id, requested_end_date, current_end_date")
+        .eq("status", "pending")
+        .not("response_deadline", "is", null)
+        .lte("response_deadline", nowIso)
+        .limit(200);
+    if (staleExtensionRequestsError) throw staleExtensionRequestsError;
+
+    let extensionRequestExpired = 0;
+    for (const ext of (staleExtensionRequests ?? []) as Array<{
+      id: string;
+      renter_id: string;
+      owner_id: string;
+      requested_end_date: string;
+      current_end_date: string;
+    }>) {
+      const { data: claimedExt, error: claimExtError } = await supabase
+        .from("booking_extensions")
+        .update({ status: "expired" })
+        .eq("id", ext.id)
+        .eq("status", "pending")
+        .select("id")
+        .maybeSingle();
+      if (claimExtError) throw claimExtError;
+      if (!claimedExt) continue;
+
+      await supabase.from("notifications").insert([
+        {
+          user_id: ext.renter_id,
+          title: "Extension request expired",
+          message: `The lister did not respond to your extension request in time. The current return date (${ext.current_end_date}) stands.`,
+          type: "warning",
+          link: "/my-bookings",
+        },
+        {
+          user_id: ext.owner_id,
+          title: "Extension request expired",
+          message: `You did not respond to a renter's extension request in time, so it expired. The current return date (${ext.current_end_date}) stands.`,
+          type: "warning",
+          link: "/lister-bookings",
+        },
+      ]);
+      await supabase.from("audit_log").insert({
+        user_id: null,
+        action: "booking_extension_response_expired",
+        entity_type: "booking_extension",
+        entity_id: ext.id,
+        details: {
+          automated: true,
+          requested_end_date: ext.requested_end_date,
+          current_end_date: ext.current_end_date,
+        },
+      });
+      extensionRequestExpired += 1;
+    }
+
+    // --- Extension approved-but-unpaid expiry: the renter never completed
+    // the added payment within the window stamped at approve time
+    // (booking_extensions.payment_deadline). The booking itself is
+    // untouched - end_date only ever changes on successful payment
+    // (api/webhooks/paymongo.ts).
+    const { data: staleUnpaidExtensions, error: staleUnpaidExtensionsError } =
+      await supabase
+        .from("booking_extensions")
+        .select("id, renter_id, owner_id, current_end_date")
+        .eq("status", "approved")
+        .not("payment_deadline", "is", null)
+        .lte("payment_deadline", nowIso)
+        .limit(200);
+    if (staleUnpaidExtensionsError) throw staleUnpaidExtensionsError;
+
+    let extensionPaymentExpired = 0;
+    for (const ext of (staleUnpaidExtensions ?? []) as Array<{
+      id: string;
+      renter_id: string;
+      owner_id: string;
+      current_end_date: string;
+    }>) {
+      const { data: claimedExt, error: claimExtError } = await supabase
+        .from("booking_extensions")
+        .update({ status: "expired" })
+        .eq("id", ext.id)
+        .eq("status", "approved")
+        .select("id")
+        .maybeSingle();
+      if (claimExtError) throw claimExtError;
+      if (!claimedExt) continue;
+
+      await supabase.from("notifications").insert([
+        {
+          user_id: ext.renter_id,
+          title: "Extension payment window expired",
+          message: `You did not complete the extension payment in time, so the approved extension expired. The current return date (${ext.current_end_date}) stands.`,
+          type: "warning",
+          link: "/my-bookings",
+        },
+        {
+          user_id: ext.owner_id,
+          title: "Extension payment window expired",
+          message: `The renter did not pay for the approved extension in time, so it expired. The current return date (${ext.current_end_date}) stands.`,
+          type: "warning",
+          link: "/lister-bookings",
+        },
+      ]);
+      await supabase.from("audit_log").insert({
+        user_id: null,
+        action: "booking_extension_payment_expired",
+        entity_type: "booking_extension",
+        entity_id: ext.id,
+        details: { automated: true, current_end_date: ext.current_end_date },
+      });
+      extensionPaymentExpired += 1;
+    }
+
     return jsonResponse({
       success: true,
       ownerResponseExpired,
@@ -514,6 +820,11 @@ export default async function handler(req: Request) {
       balanceReminderSent,
       earlyReturnExpired,
       listerCompletionAuto,
+      handoverAutoActivated,
+      handoverStallFlagged,
+      returnNoShowReminderSent,
+      extensionRequestExpired,
+      extensionPaymentExpired,
     });
   } catch (error) {
     return jsonResponse(

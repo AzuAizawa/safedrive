@@ -495,13 +495,20 @@ export default async function handler(req: Request) {
     const totalDays = Math.round((endDate.utcMs - startDate.utcMs) / DAY_MS);
     const commissionRate = normalizeCommissionRate(settingData?.commission_rate);
     const basePrice = pricePerDay * totalDays;
+    // Commission is SafeDrive's cut of the LISTER's earnings, not a charge
+    // added to the renter - it's still computed and stored here (needed for
+    // ledger/payout math and revenue reporting via api/lib/payoutAutomation.ts
+    // and api/lib/ledger.ts), but it no longer contributes to what the renter
+    // pays. Only the payment-processing fee (a real PayMongo transaction
+    // cost, tied to the renter's chosen payment method) is grossed up on top
+    // of the base price - that's an intentionally separate decision from the
+    // commission and is unchanged here.
     const commission = basePrice * commissionRate;
-    const subtotal = basePrice + commission;
     const processingRate = Math.min(0.25, Math.max(0, Number(settingData?.payment_processing_fee_rate ?? 0)));
     const processingFixed = Math.max(0, Number(settingData?.payment_processing_fixed_centavos ?? 0)) / 100;
-    const grossTotal = processingRate < 1 ? (subtotal + processingFixed) / (1 - processingRate) : subtotal;
-    const paymentProcessingFee = Math.max(0, Math.round((grossTotal - subtotal) * 100) / 100);
-    const totalPrice = subtotal + paymentProcessingFee;
+    const grossTotal = processingRate < 1 ? (basePrice + processingFixed) / (1 - processingRate) : basePrice;
+    const paymentProcessingFee = Math.max(0, Math.round((grossTotal - basePrice) * 100) / 100);
+    const totalPrice = basePrice + paymentProcessingFee;
     const downpayment = Math.ceil(totalPrice * downpaymentRate);
     const balance = totalPrice - downpayment;
 

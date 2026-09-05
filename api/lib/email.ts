@@ -388,6 +388,7 @@ export const sendPayoutReceiptEmail = async (
     ]);
   }
   if (fuel > 0) rows.push(["Fuel / charge reimbursement", peso(fuel)]);
+  if (commission > 0) rows.push(["SafeDrive commission", `-${peso(commission)}`]);
   rows.push(["Total released", peso(input.amount)]);
   rows.push([destinationLabel, destinationValue]);
   rows.push(["Reference", reference]);
@@ -405,7 +406,7 @@ export const sendPayoutReceiptEmail = async (
 
   const commissionNote =
     commission > 0
-      ? ` SafeDrive's ${peso(commission)} commission was retained separately and is not part of this amount.`
+      ? ` SafeDrive's ${peso(commission)} commission was deducted from your base rental before this payout.`
       : "";
   const intro =
     `SafeDrive released your lister payout for ${vehicle}.` +

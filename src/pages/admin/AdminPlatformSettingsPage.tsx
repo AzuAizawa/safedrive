@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Clock,
+  FileText,
   Info,
   Loader2,
   Mail,
@@ -11,6 +12,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useNavigate } from "react-router";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -207,6 +209,7 @@ const formatStamp = (value: string) => {
 
 export default function AdminPlatformSettingsPage() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const isSuperAdmin = profile?.role === "super_admin";
 
   const [loading, setLoading] = useState(true);
@@ -793,6 +796,35 @@ export default function AdminPlatformSettingsPage() {
                   Save messages
                 </Button>
               ) : null}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary" />
+                Legal content
+              </CardTitle>
+              <CardDescription>
+                Terms and Conditions, Privacy Policy, and the Platform Agreement shown to
+                users. A single super admin can edit and publish a new version directly -
+                every past version is kept for the audit trail.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => navigate("/admin/legal-content")}
+              >
+                <FileText className="h-4 w-4" />
+                Edit Legal Content
+              </Button>
+              {!isSuperAdmin && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  You can view published content there; only a super admin can publish changes.
+                </p>
+              )}
             </CardContent>
           </Card>
 

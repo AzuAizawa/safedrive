@@ -7,6 +7,7 @@ import { createPrivateStorageUrlMap } from "@/lib/privateStorage";
 import {
   ensureReturnReminderNotifications,
   getNoShowWindowState,
+  getReturnNoShowWindowState,
   getReturnReminderState,
 } from "@/lib/bookingLifecycle";
 import { runIncidentAction } from "@/lib/incidents";
@@ -101,6 +102,9 @@ interface BookingRow {
   } | null;
   renter_arrived_at: string | null;
   renter_return_arrived_at: string | null;
+  lister_return_arrived_at: string | null;
+  lister_handover_confirmed_at: string | null;
+  renter_handover_received_at: string | null;
   renter_arrival_photo_url: string | null;
   renter_arrival_latitude: number | null;
   renter_arrival_longitude: number | null;
@@ -248,19 +252,13 @@ export default function MyBookingsPage() {
   const [paymentLogsLoading, setPaymentLogsLoading] = useState(false);
   const [cancelTargetBooking, setCancelTargetBooking] = useState<BookingRow | null>(null);
   const [noCarTarget, setNoCarTarget] = useState<BookingRow | null>(null);
+  const [listerNoShowReturnTarget, setListerNoShowReturnTarget] = useState<BookingRow | null>(null);
   const [incidentLoading, setIncidentLoading] = useState<string | null>(null);
   const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [carRatingSummaries, setCarRatingSummaries] = useState<Record<string, RatingSummary>>({});
   const [listerCancelledBookingIds, setListerCancelledBookingIds] = useState<
     Set<string>
   >(new Set());
-  // Which trip-condition-report phases the LISTER has already filed, per
-  // booking - drives the "Vehicle handover" / "Vehicle return" trip-progress
-  // checkpoints (both participants can read either side's reports; RLS
-  // scopes this to bookings the current user is actually part of).
-  const [ownerReportsByBooking, setOwnerReportsByBooking] = useState<
-    Record<string, { pickup: boolean; return: boolean }>
-  >({});
   // The renter's (this account's) own report status per booking - both
   // phases are optional now, this just drives the "submitted" button state.
   const [ownReportsByBooking, setOwnReportsByBooking] = useState<
@@ -378,15 +376,8 @@ export default function MyBookingsPage() {
               .from("trip_condition_reports")
               .select("booking_id, phase, reporter_id, reporter_role")
               .in("booking_id", activeIds);
-            const ownerGrouped: Record<string, { pickup: boolean; return: boolean }> = {};
             const ownGrouped: Record<string, { pickup: boolean; return: boolean }> = {};
             for (const report of reports ?? []) {
-              if (report.reporter_role === "lister") {
-                const entry = ownerGrouped[report.booking_id] ?? { pickup: false, return: false };
-                if (report.phase === "pickup") entry.pickup = true;
-                if (report.phase === "return") entry.return = true;
-                ownerGrouped[report.booking_id] = entry;
-              }
               if (report.reporter_id === user!.id) {
                 const entry = ownGrouped[report.booking_id] ?? { pickup: false, return: false };
                 if (report.phase === "pickup") entry.pickup = true;
@@ -394,14 +385,11 @@ export default function MyBookingsPage() {
                 ownGrouped[report.booking_id] = entry;
               }
             }
-            setOwnerReportsByBooking(ownerGrouped);
             setOwnReportsByBooking(ownGrouped);
           } else {
-            setOwnerReportsByBooking({});
             setOwnReportsByBooking({});
           }
         } catch {
-          setOwnerReportsByBooking({});
           setOwnReportsByBooking({});
         }
 
@@ -626,7 +614,7 @@ export default function MyBookingsPage() {
 
   const runBookingAction = async (
     bookingId: string,
-    action: "arrive" | "return_arrive" | "complete" | "cancel",
+    action: "arrive" | "handover_receive" | "return_arrive" | "complete" | "cancel",
     arrivalPhotoUrl?: string | null,
     arrivalLocation?: ArrivalLocationEvidence | null,
     note?: string | null,
@@ -788,10 +776,28 @@ export default function MyBookingsPage() {
     setPayingFor(booking.id);
     try {
       await runBookingAction(booking.id, "return_arrive");
-      toast.success("Return recorded. Waiting for the lister to confirm receipt.");
+      toast.success("Arrival recorded. Please wait for the lister to arrive too.");
       fetchBookings();
     } catch (error) {
-      toast.error("Could not record the return", {
+      toast.error("Could not record your arrival at the return", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setPayingFor(null);
+    }
+  };
+
+  const handleHandoverReceive = async (
+    bookingId: string,
+    arrivalLocation?: ArrivalLocationEvidence | null,
+  ) => {
+    setPayingFor(bookingId);
+    try {
+      await runBookingAction(bookingId, "handover_receive", null, arrivalLocation ?? null);
+      toast.success("Trip started! You can now use the car.");
+      fetchBookings();
+    } catch (error) {
+      toast.error("Could not confirm receipt", {
         description: error instanceof Error ? error.message : "Please try again.",
       });
     } finally {
@@ -989,6 +995,28 @@ export default function MyBookingsPage() {
         description: "Your reliability record is not affected. You can rebook another car now.",
       });
       setNoCarTarget(null);
+      fetchBookings();
+    } catch (err) {
+      toast.error("Could not file the report", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setIncidentLoading(null);
+    }
+  };
+
+  const handleReportListerNoShowReturn = async () => {
+    if (!listerNoShowReturnTarget) return;
+    setIncidentLoading(listerNoShowReturnTarget.id);
+    try {
+      await runIncidentAction(session?.access_token, {
+        bookingId: listerNoShowReturnTarget.id,
+        action: "lister_no_show_return",
+      });
+      toast.success("Reported. SafeDrive will follow up.", {
+        description: "The trip will complete automatically if the lister stays unresponsive.",
+      });
+      setListerNoShowReturnTarget(null);
       fetchBookings();
     } catch (err) {
       toast.error("Could not file the report", {
@@ -1421,6 +1449,22 @@ export default function MyBookingsPage() {
         };
       }
 
+      if (!booking.lister_handover_confirmed_at) {
+        return {
+          tone,
+          title: "Waiting for the lister to hand over the car",
+          body: "You're both here. The lister needs to submit pickup photos and tap \"Hand Over the Car.\"",
+        };
+      }
+
+      if (!booking.renter_handover_received_at) {
+        return {
+          tone,
+          title: "Confirm you received the car",
+          body: 'Tap "I Have Received the Car" to start your trip.',
+        };
+      }
+
       if (extensionBlocksCompletion) {
         return {
           tone,
@@ -1433,15 +1477,22 @@ export default function MyBookingsPage() {
         if (!booking.renter_return_arrived_at) {
           return {
             tone,
-            title: "Confirm you've returned the car",
-            body: 'Submit your return report, then tap "I\'ve Returned the Car" once you\'re back with the lister.',
+            title: "Confirm your arrival at the return",
+            body: 'Tap "I Have Arrived" once you\'re at the agreed return location.',
+          };
+        }
+        if (!booking.lister_return_arrived_at) {
+          return {
+            tone,
+            title: "Wait for the lister to arrive at the return",
+            body: "Your check-in is recorded. If they do not arrive after the grace window, report a no-show.",
           };
         }
         if (!booking.owner_completed) {
           return {
             tone,
             title: "Waiting for the lister to confirm receipt",
-            body: "Your return is recorded. The lister needs to inspect the car and confirm receipt before you can finish.",
+            body: "You're both at the return point. The lister needs to submit their return photos and confirm receipt before you can finish.",
           };
         }
         return {
@@ -1834,14 +1885,6 @@ export default function MyBookingsPage() {
             const apparentExtensionStatus = latestExtension
               ? getExtensionDisplayStatus(latestExtension, new Date(clockNow))
               : null;
-            const extensionServiceFee = latestExtension
-              ? Math.max(
-                  0,
-                  Number(latestExtension.total_additional_amount) -
-                    Number(latestExtension.extension_amount) -
-                    Number(latestExtension.fuel_top_up_amount),
-                )
-              : 0;
             const extensionBlocksCompletion =
               apparentExtensionStatus === "pending" || apparentExtensionStatus === "approved";
             const latestEarly = latestEarlyReturn(earlyReturnsByBooking[booking.id]);
@@ -1852,6 +1895,11 @@ export default function MyBookingsPage() {
               !extensionBlocksCompletion &&
               (!latestEarly || latestEarly.status !== "pending");
             const noShowState = getNoShowWindowState(
+              booking,
+              "renter",
+              new Date(clockNow),
+            );
+            const returnNoShowState = getReturnNoShowWindowState(
               booking,
               "renter",
               new Date(clockNow),
@@ -2181,9 +2229,6 @@ export default function MyBookingsPage() {
                           <p className="mt-1">
                             Added: {formatDayCount(latestExtension.extension_days)} | Extension:
                             {" "}{formatCurrency(Number(latestExtension.extension_amount))}
-                            {extensionServiceFee > 0
-                              ? ` | Service fee: ${formatCurrency(extensionServiceFee)}`
-                              : ""}
                             {Number(latestExtension.fuel_top_up_amount) > 0
                               ? ` | Fuel top-up: ${formatCurrency(Number(latestExtension.fuel_top_up_amount))}`
                               : ""}
@@ -2466,15 +2511,8 @@ export default function MyBookingsPage() {
                       {(apparentState === "fully_paid" || apparentState === "active") && !booking.renter_arrived_at && arrivalCheckinOpen && (
                         <div className="mt-2 text-right">
                           <p className="mb-2 text-xs font-medium text-foreground">
-                            {booking.lister_arrived_at
-                              ? "The lister confirmed the handover - confirm you have the car"
-                              : "Confirm you have the car"}
+                            Confirm you have arrived
                           </p>
-                          {!booking.lister_arrived_at && (
-                            <p className="mb-2 text-[10px] text-muted-foreground leading-tight">
-                              The lister confirms the handover first. You can also confirm now if you have the car.
-                            </p>
-                          )}
                           <ArrivalPhotoCapture
                             loading={payingFor === booking.id}
                             disabled={payingFor === booking.id}
@@ -2492,10 +2530,40 @@ export default function MyBookingsPage() {
                             </span>
                           </div>
                           <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                            Confirm arrival first. Your own pickup photos are optional - the lister files the "before" report. Arrival location is optional and stored only with your consent.
+                            Your own pickup photos are optional - the lister files the required "before" report. Arrival location is optional and stored only with your consent.
                           </p>
                         </div>
                       )}
+
+                      {apparentState === "fully_paid" &&
+                        booking.renter_arrived_at &&
+                        booking.lister_arrived_at &&
+                        !booking.renter_handover_received_at && (
+                          <div className="mt-2 text-right">
+                            {booking.lister_handover_confirmed_at ? (
+                              <>
+                                <p className="mb-2 text-xs font-medium text-foreground">
+                                  The lister handed over the car - confirm you received it
+                                </p>
+                                <ArrivalPhotoCapture
+                                  label="I Have Received the Car"
+                                  loading={payingFor === booking.id}
+                                  disabled={payingFor === booking.id}
+                                  onConfirmArrival={(location) => handleHandoverReceive(booking.id, location)}
+                                />
+                                <div className="mt-2 flex items-center justify-end gap-1.5">
+                                  <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>
+                                    Add pickup photos (optional)
+                                  </Button>
+                                </div>
+                              </>
+                            ) : (
+                              <p className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                                You've both arrived. Please wait for the lister to submit pickup photos and hand over the car.
+                              </p>
+                            )}
+                          </div>
+                        )}
 
                       {noShowState ? (
                         <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
@@ -2539,14 +2607,23 @@ export default function MyBookingsPage() {
                           <div className="grid gap-1.5">
                             {(() => {
                               const bothArrived = Boolean(booking.renter_arrived_at) && Boolean(booking.lister_arrived_at);
-                              const ownerReports = ownerReportsByBooking[booking.id] ?? { pickup: false, return: false };
+                              // Bookings that went active before this handover
+                              // gate existed will never have these two new
+                              // timestamps set - treat that as vacuously done
+                              // rather than showing a permanently stuck step.
+                              const legacyActivation =
+                                bothArrived &&
+                                !booking.lister_handover_confirmed_at &&
+                                !booking.renter_handover_received_at &&
+                                booking.status !== "fully_paid";
                               return [
                                 { label: "You arrived", done: Boolean(booking.renter_arrived_at) },
                                 { label: "Lister arrived", done: Boolean(booking.lister_arrived_at) },
-                                { label: "Vehicle handover", done: ownerReports.pickup },
-                                { label: "Vehicle received", done: bothArrived && ownerReports.pickup },
+                                { label: "Lister handed over the car", done: Boolean(booking.lister_handover_confirmed_at) || legacyActivation },
+                                { label: "You confirmed receipt", done: Boolean(booking.renter_handover_received_at) || legacyActivation },
                                 { label: "Rental in progress", done: booking.status === "active" || booking.status === "completed" },
-                                { label: "Vehicle returned", done: Boolean(booking.renter_return_arrived_at) },
+                                { label: "You arrived for return", done: Boolean(booking.renter_return_arrived_at) },
+                                { label: "Lister arrived for return", done: Boolean(booking.lister_return_arrived_at) },
                                 { label: "Return confirmed", done: booking.owner_completed },
                                 { label: "Your rating", done: Boolean(reviewedByRenter) },
                               ];
@@ -2700,7 +2777,7 @@ export default function MyBookingsPage() {
                                     ) : (
                                       <CheckCircle2 className="w-3.5 h-3.5" />
                                     )}
-                                    I've Returned the Car
+                                    I Have Arrived
                                   </Button>
                                 ) : booking.owner_completed ? (
                                   <Button
@@ -2720,10 +2797,27 @@ export default function MyBookingsPage() {
                               </div>
                               {!booking.renter_return_arrived_at ? (
                                 <p className="text-[10px] text-muted-foreground text-right leading-tight">
-                                  Tap "I've Returned the Car" once you're back with the lister - the lister carries the
+                                  Tap "I Have Arrived" once you're at the agreed return location - the lister carries the
                                   required evidence at pickup and return, so your own reports are optional but recommended
                                   for your own protection.
                                 </p>
+                              ) : !booking.lister_return_arrived_at ? (
+                                <div className="flex flex-col items-end gap-1.5">
+                                  <p className="text-[10px] text-amber-500 text-right font-medium leading-tight">
+                                    Please wait for the lister to arrive too.
+                                  </p>
+                                  {returnNoShowState?.canReport && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setListerNoShowReturnTarget(booking)}
+                                      className="gap-1"
+                                    >
+                                      <AlertCircle className="w-3.5 h-3.5" />
+                                      Lister no-show at return
+                                    </Button>
+                                  )}
+                                </div>
                               ) : booking.owner_completed ? (
                                 <div className="flex flex-col items-end gap-1">
                                   <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
@@ -2735,7 +2829,7 @@ export default function MyBookingsPage() {
                                 </div>
                               ) : (
                                 <p className="text-[10px] text-amber-500 text-right font-medium leading-tight">
-                                  Return recorded - waiting for the lister to confirm they received the car.
+                                  You're both at the return point - waiting for the lister to submit their return photos and confirm receipt.
                                 </p>
                               )}
                             </div>
@@ -3367,6 +3461,30 @@ export default function MyBookingsPage() {
           <p>
             SafeDrive support opens a case automatically so the lister can
             respond.
+          </p>
+        </div>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={Boolean(listerNoShowReturnTarget)}
+        title="Lister no-show at the return?"
+        description={
+          listerNoShowReturnTarget
+            ? `This flags your booking for ${listerNoShowReturnTarget.cars.car_models.car_brands.name} ${listerNoShowReturnTarget.cars.car_models.name} (${listerNoShowReturnTarget.cars.plate_number}) for SafeDrive support. Only do this if you checked in at the return point and the lister did not arrive.`
+            : ""
+        }
+        confirmText="Report No-Show"
+        isLoading={
+          Boolean(listerNoShowReturnTarget && incidentLoading === listerNoShowReturnTarget.id)
+        }
+        onCancel={() => setListerNoShowReturnTarget(null)}
+        onConfirm={handleReportListerNoShowReturn}
+      >
+        <div className="space-y-2 rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+          <p>
+            You already used the car for the full trip, so there is no refund
+            involved here - this just puts your report on file. If the lister
+            stays unresponsive, the trip completes automatically and you are
+            not penalized.
           </p>
         </div>
       </ConfirmDialog>

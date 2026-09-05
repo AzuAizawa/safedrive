@@ -322,6 +322,8 @@ export interface Database {
           mileage: number | null;
           price_per_day: number;
           min_early_return_notice_hours: number | null;
+          pickup_latitude: number | null;
+          pickup_longitude: number | null;
           location: string | null;
           fuel_category: string | null;
           fuel_subtype: string | null;
@@ -348,6 +350,8 @@ export interface Database {
           mileage?: number | null;
           price_per_day: number;
           min_early_return_notice_hours?: number | null;
+          pickup_latitude?: number | null;
+          pickup_longitude?: number | null;
           location?: string | null;
           fuel_category?: string | null;
           fuel_subtype?: string | null;
@@ -374,6 +378,8 @@ export interface Database {
           mileage?: number | null;
           price_per_day?: number;
           min_early_return_notice_hours?: number | null;
+          pickup_latitude?: number | null;
+          pickup_longitude?: number | null;
           location?: string | null;
           fuel_category?: string | null;
           fuel_subtype?: string | null;
@@ -615,7 +621,12 @@ export interface Database {
           dropoff_time: string | null;
           lister_arrived_at: string | null;
           renter_return_arrived_at: string | null;
+          lister_return_arrived_at: string | null;
           renter_arrived_at: string | null;
+          lister_handover_confirmed_at: string | null;
+          renter_handover_received_at: string | null;
+          handover_stall_notified_at: string | null;
+          return_no_show_reminder_sent_at: string | null;
           lister_arrival_photo_url: string | null;
           renter_arrival_photo_url: string | null;
           lister_arrival_latitude: number | null;
@@ -663,7 +674,12 @@ export interface Database {
           dropoff_time?: string | null;
           lister_arrived_at?: string | null;
           renter_return_arrived_at?: string | null;
+          lister_return_arrived_at?: string | null;
           renter_arrived_at?: string | null;
+          lister_handover_confirmed_at?: string | null;
+          renter_handover_received_at?: string | null;
+          handover_stall_notified_at?: string | null;
+          return_no_show_reminder_sent_at?: string | null;
           lister_arrival_photo_url?: string | null;
           renter_arrival_photo_url?: string | null;
           lister_arrival_latitude?: number | null;
@@ -711,7 +727,12 @@ export interface Database {
           dropoff_time?: string | null;
           lister_arrived_at?: string | null;
           renter_return_arrived_at?: string | null;
+          lister_return_arrived_at?: string | null;
           renter_arrived_at?: string | null;
+          lister_handover_confirmed_at?: string | null;
+          renter_handover_received_at?: string | null;
+          handover_stall_notified_at?: string | null;
+          return_no_show_reminder_sent_at?: string | null;
           lister_arrival_photo_url?: string | null;
           renter_arrival_photo_url?: string | null;
           lister_arrival_latitude?: number | null;
@@ -813,10 +834,12 @@ export interface Database {
           reason: string;
           fuel_top_up_amount: number;
           extension_amount: number;
+          extension_commission: number;
           total_additional_amount: number;
           status: string;
           owner_decision_note: string | null;
           payment_deadline: string | null;
+          response_deadline: string | null;
           paymongo_checkout_id: string | null;
           requested_at: string;
           approved_at: string | null;
@@ -837,10 +860,12 @@ export interface Database {
           reason: string;
           fuel_top_up_amount?: number;
           extension_amount?: number;
+          extension_commission?: number;
           total_additional_amount?: number;
           status?: string;
           owner_decision_note?: string | null;
           payment_deadline?: string | null;
+          response_deadline?: string | null;
           paymongo_checkout_id?: string | null;
           requested_at?: string;
           approved_at?: string | null;
@@ -861,10 +886,12 @@ export interface Database {
           reason?: string;
           fuel_top_up_amount?: number;
           extension_amount?: number;
+          extension_commission?: number;
           total_additional_amount?: number;
           status?: string;
           owner_decision_note?: string | null;
           payment_deadline?: string | null;
+          response_deadline?: string | null;
           paymongo_checkout_id?: string | null;
           requested_at?: string;
           approved_at?: string | null;
@@ -1418,6 +1445,21 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      legal_document_versions: {
+        Row: {
+          id: string;
+          document_key: "terms_of_service" | "privacy_policy" | "platform_agreement";
+          version_number: number;
+          content_html: string;
+          status: "published" | "superseded";
+          published_by: string | null;
+          published_at: string;
+          created_at: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       subscriptions: {
         Row: {
           id: string;
@@ -1538,6 +1580,7 @@ export interface Database {
           attachment_name: string | null;
           attachment_mime_type: string | null;
           attachment_storage_path: string | null;
+          attachment_bucket: string | null;
           created_at: string;
         };
         Insert: {
@@ -1548,6 +1591,7 @@ export interface Database {
           attachment_name?: string | null;
           attachment_mime_type?: string | null;
           attachment_storage_path?: string | null;
+          attachment_bucket?: string | null;
           created_at?: string;
         };
         Update: {
@@ -1558,6 +1602,7 @@ export interface Database {
           attachment_name?: string | null;
           attachment_mime_type?: string | null;
           attachment_storage_path?: string | null;
+          attachment_bucket?: string | null;
           created_at?: string;
         };
         Relationships: [
@@ -1719,6 +1764,10 @@ export interface Database {
         Args: { p_email: string };
         Returns: string;
       };
+      publish_legal_document_version: {
+        Args: { p_document_key: string; p_content_html: string };
+        Returns: Database["public"]["Tables"]["legal_document_versions"]["Row"];
+      };
       admin_can: {
         Args: { p_key: string };
         Returns: boolean;
@@ -1770,6 +1819,8 @@ export type AdminPermissionRow =
   Database["public"]["Tables"]["admin_permissions"]["Row"];
 export type AdminPermissionTemplateRow =
   Database["public"]["Tables"]["admin_permission_templates"]["Row"];
+export type LegalDocumentVersionRow =
+  Database["public"]["Tables"]["legal_document_versions"]["Row"];
 
 /**
  * The 9 operational permission keys an admin's checklist can hold.

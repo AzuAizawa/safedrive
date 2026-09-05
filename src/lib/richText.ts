@@ -16,6 +16,29 @@ const ALLOWED_TAGS = new Set([
   "a",
 ]);
 
+// Wider than chat's ALLOWED_TAGS - legal documents (Terms, Privacy Policy,
+// Platform Agreement) are long and structured, so headings are allowed here.
+// Kept as a separate set rather than widening ALLOWED_TAGS so chat-message
+// rendering behavior is untouched.
+const LEGAL_DOCUMENT_ALLOWED_TAGS = new Set([
+  "p",
+  "br",
+  "h2",
+  "h3",
+  "h4",
+  "strong",
+  "b",
+  "em",
+  "i",
+  "u",
+  "s",
+  "ul",
+  "ol",
+  "li",
+  "blockquote",
+  "a",
+]);
+
 const HTML_TAG_PATTERN = /<\/?[a-z][\s\S]*>/i;
 
 const escapeHtml = (value: string) =>
@@ -26,7 +49,7 @@ const escapeHtml = (value: string) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
-const sanitizeNode = (node: Node) => {
+const sanitizeNode = (node: Node, allowedTags: Set<string>) => {
   if (node.nodeType === Node.TEXT_NODE) return;
   if (node.nodeType !== Node.ELEMENT_NODE) {
     node.parentNode?.removeChild(node);
@@ -36,13 +59,13 @@ const sanitizeNode = (node: Node) => {
   const element = node as HTMLElement;
   const tagName = element.tagName.toLowerCase();
 
-  if (!ALLOWED_TAGS.has(tagName)) {
+  if (!allowedTags.has(tagName)) {
     const fragment = document.createDocumentFragment();
     while (element.firstChild) {
       fragment.appendChild(element.firstChild);
     }
     element.replaceWith(fragment);
-    Array.from(fragment.childNodes).forEach(sanitizeNode);
+    Array.from(fragment.childNodes).forEach((child) => sanitizeNode(child, allowedTags));
     return;
   }
 
@@ -62,18 +85,26 @@ const sanitizeNode = (node: Node) => {
     }
   }
 
-  Array.from(element.childNodes).forEach(sanitizeNode);
+  Array.from(element.childNodes).forEach((child) => sanitizeNode(child, allowedTags));
 };
 
-export const sanitizeRichText = (value: string) => {
+const sanitizeWithAllowlist = (value: string, allowedTags: Set<string>) => {
   if (!value.trim()) return "";
   if (typeof window === "undefined") return value.trim();
 
   const parser = new DOMParser();
   const documentNode = parser.parseFromString(value, "text/html");
-  Array.from(documentNode.body.childNodes).forEach(sanitizeNode);
+  Array.from(documentNode.body.childNodes).forEach((child) => sanitizeNode(child, allowedTags));
   return documentNode.body.innerHTML.trim();
 };
+
+export const sanitizeRichText = (value: string) => sanitizeWithAllowlist(value, ALLOWED_TAGS);
+
+// For admin-authored legal documents (Terms, Privacy Policy, Platform
+// Agreement) - wider allowlist than chat, sanitized on both save (the admin
+// editor) and render (the public pages) as defense in depth.
+export const sanitizeLegalDocumentHtml = (value: string) =>
+  sanitizeWithAllowlist(value, LEGAL_DOCUMENT_ALLOWED_TAGS);
 
 export const normalizeRichTextInput = (value: string) => {
   const sanitized = sanitizeRichText(value);

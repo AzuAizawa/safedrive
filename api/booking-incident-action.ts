@@ -6,7 +6,11 @@ export const config = {
   runtime: "edge",
 };
 
-type IncidentAction = "renter_no_car" | "renter_no_show" | "report_non_return";
+type IncidentAction =
+  | "renter_no_car"
+  | "renter_no_show"
+  | "report_non_return"
+  | "lister_no_show_return";
 
 // Structured reason for report_non_return (CHAPTER 37) - kept in sync with
 // NON_RETURN_REASON_OPTIONS in src/lib/incidents.ts and the check constraint
@@ -55,17 +59,30 @@ type BookingRow = {
   dropoff_time: string | null;
   renter_arrived_at: string | null;
   lister_arrived_at: string | null;
+  renter_arrival_latitude: number | string | null;
+  renter_arrival_longitude: number | string | null;
+  lister_arrival_latitude: number | string | null;
+  lister_arrival_longitude: number | string | null;
+  renter_return_arrived_at: string | null;
+  lister_return_arrived_at: string | null;
   renter_completed: boolean;
   owner_completed: boolean;
   refund_late_renter_percent_snapshot: number | string | null;
   payments: PaymentRow[];
   cars: {
     plate_number: string;
+    pickup_latitude: number | string | null;
+    pickup_longitude: number | string | null;
     car_models: { name: string; car_brands: { name: string } };
   } | null;
 };
 
 const GRACE_MINUTES = 30;
+// How far (in meters) a reporting party's stored arrival location may be
+// from the car listing's pickup pin before a no-show refund claim is
+// diverted from instant automatic to manual admin review. Generous enough
+// to cover typical GPS accuracy plus a short walk from parking.
+const LOCATION_MISMATCH_THRESHOLD_METERS = 500;
 const REFUNDABLE = ["downpayment", "balance"];
 // Renter no-show forfeit share. Snapshot per booking on the same field the
 // short-notice cancellation policy uses (Terms 6.2) - one admin-configurable
@@ -116,6 +133,46 @@ const manilaMs = (date: string, time: string | null, fallback: string) => {
   return Date.UTC(y, m - 1, d, hh || 0, mm || 0) - 8 * 60 * 60 * 1000;
 };
 
+// Haversine distance in meters between two lat/lng points.
+const distanceMeters = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+) => {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const earthRadiusMeters = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * earthRadiusMeters * Math.asin(Math.sqrt(a));
+};
+
+// Compares the reporting party's own stored arrival coordinates against the
+// car listing's pickup pin. Returns true only when both exist and are within
+// LOCATION_MISMATCH_THRESHOLD_METERS - anything else (no pin set on the
+// listing, no location captured, permission denied, or a real mismatch) is
+// treated the same: not enough evidence for an instant automatic refund, so
+// the claim is routed to manual admin review instead. This never blocks the
+// underlying report/cancellation itself, only which refund path it takes.
+const isReporterLocationVerified = (
+  reporterLat: number | string | null,
+  reporterLon: number | string | null,
+  pickupLat: number | string | null,
+  pickupLon: number | string | null,
+) => {
+  const rLat = Number(reporterLat);
+  const rLon = Number(reporterLon);
+  const pLat = Number(pickupLat);
+  const pLon = Number(pickupLon);
+  if (![rLat, rLon, pLat, pLon].every(Number.isFinite)) return false;
+  return (
+    distanceMeters(rLat, rLon, pLat, pLon) <= LOCATION_MISMATCH_THRESHOLD_METERS
+  );
+};
+
 const capturedTotal = (b: BookingRow) =>
   b.payments
     .filter(
@@ -125,6 +182,55 @@ const capturedTotal = (b: BookingRow) =>
         Number(p.amount) > 0,
     )
     .reduce((sum, p) => sum + Number(p.amount), 0);
+
+// Shared manual-refund-review queue: inserts a pending refund payment row
+// and alerts super-admins to confirm it in Financial Reviews. Used whenever
+// a no-show claim's fault attribution or evidence needs a human to release
+// money rather than an instant automatic refund.
+const queueManualRefundReview = async (
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  b: BookingRow,
+  recommendedAmount: number,
+  note: string,
+) => {
+  const captured = capturedTotal(b);
+  if (captured <= 0) return null;
+  const amount =
+    Math.round(Math.min(Math.max(recommendedAmount, 0), captured) * 100) / 100;
+
+  const { data: refundRow } = await supabase
+    .from("payments")
+    .insert({
+      booking_id: b.id,
+      amount: -Math.abs(amount),
+      payment_type: "refund",
+      status: "pending",
+      payment_method: "manual_review",
+      transaction_id: null,
+      notes: note.slice(0, 450),
+    })
+    .select("id")
+    .single();
+  const refundPaymentId = (refundRow?.id as string | undefined) ?? null;
+
+  const { data: superAdmins } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("role", "super_admin")
+    .is("deleted_at", null);
+  if (superAdmins?.length) {
+    await supabase.from("notifications").insert(
+      superAdmins.map((admin) => ({
+        user_id: admin.id,
+        title: "Refund needs manual review",
+        message: `A booking incident needs refund review. Confirm PHP ${amount.toLocaleString()} of PHP ${captured.toLocaleString()} captured in Financial Reviews.`,
+        type: "warning",
+        link: "/admin/financial-reviews?view=refunds",
+      })),
+    );
+  }
+  return refundPaymentId;
+};
 
 const openIncidentTicket = async (
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -194,10 +300,14 @@ export default async function handler(req: Request) {
         `
         id, car_id, renter_id, owner_id, status, dispute_status,
         start_date, end_date, pickup_time, dropoff_time,
-        renter_arrived_at, lister_arrived_at, renter_completed, owner_completed,
+        renter_arrived_at, lister_arrived_at,
+        renter_arrival_latitude, renter_arrival_longitude,
+        lister_arrival_latitude, lister_arrival_longitude,
+        renter_return_arrived_at, lister_return_arrived_at,
+        renter_completed, owner_completed,
         refund_late_renter_percent_snapshot,
         payments ( payment_type, status, amount ),
-        cars ( plate_number, car_models ( name, car_brands ( name ) ) )
+        cars ( plate_number, pickup_latitude, pickup_longitude, car_models ( name, car_brands ( name ) ) )
       `,
       )
       .eq("id", payload.bookingId)
@@ -268,16 +378,37 @@ export default async function handler(req: Request) {
       }
 
       const hadPayment = capturedTotal(b) > 0;
+      const arrivalLocationVerified = isReporterLocationVerified(
+        b.renter_arrival_latitude,
+        b.renter_arrival_longitude,
+        b.cars?.pickup_latitude ?? null,
+        b.cars?.pickup_longitude ?? null,
+      );
       if (hadPayment) {
-        await processAutomaticRefundForBooking({
-          supabase,
-          bookingId: b.id,
-          initiatedByUserId: user.id,
-          reason: "others",
-          note: `Renter reported no vehicle available at pickup${overstay ? " (previous renter overstayed)" : " (lister did not deliver)"}. Full refund.`,
-          allowedPaymentTypes: REFUNDABLE,
-          baseOrigin,
-        });
+        if (arrivalLocationVerified) {
+          await processAutomaticRefundForBooking({
+            supabase,
+            bookingId: b.id,
+            initiatedByUserId: user.id,
+            reason: "others",
+            note: `Renter reported no vehicle available at pickup${overstay ? " (previous renter overstayed)" : " (lister did not deliver)"}. Full refund.`,
+            allowedPaymentTypes: REFUNDABLE,
+            baseOrigin,
+          });
+        } else {
+          // The renter's arrival location doesn't match the car's pickup
+          // pin closely enough (or no pin/location is on file) - not enough
+          // evidence to release an automatic full refund. Route to the same
+          // manual-review path instead, still recommending the full amount
+          // since the claimed fault (lister no-show) would earn one - an
+          // admin just needs to confirm the claim first.
+          await queueManualRefundReview(
+            supabase,
+            b,
+            capturedTotal(b),
+            `Renter reported no vehicle at pickup${overstay ? " (previous renter overstayed)" : " (lister did not deliver)"}, but their arrival location could not be verified against the car's pickup pin. Recommend a full refund pending admin confirmation of the claim.`,
+          );
+        }
       }
 
       await supabase.from("booking_cancellations").upsert(
@@ -416,40 +547,15 @@ export default async function handler(req: Request) {
       );
       const renterShare =
         Math.round(captured * (noShowRefundPercent / 100) * 100) / 100;
-      let refundPaymentId: string | null = null;
-      if (captured > 0) {
-        const { data: refundRow } = await supabase
-          .from("payments")
-          .insert({
-            booking_id: b.id,
-            amount: -Math.abs(renterShare),
-            payment_type: "refund",
-            status: "pending",
-            payment_method: "manual_review",
-            transaction_id: null,
-            notes: `Renter no-show at pickup. Policy: renter keeps ${noShowRefundPercent}% forfeit — refund PHP ${renterShare.toLocaleString()} of PHP ${captured.toLocaleString()} captured; the rest is lister compensation. Admin confirms the return method.`,
-          })
-          .select("id")
-          .single();
-        refundPaymentId = (refundRow?.id as string | undefined) ?? null;
-
-        const { data: superAdmins } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("role", "super_admin")
-          .is("deleted_at", null);
-        if (superAdmins?.length) {
-          await supabase.from("notifications").insert(
-            superAdmins.map((admin) => ({
-              user_id: admin.id,
-              title: "Renter no-show refund to review",
-              message: `A renter no-showed. Confirm the ${noShowRefundPercent}% refund (PHP ${renterShare.toLocaleString()}) in Financial Reviews.`,
-              type: "warning",
-              link: "/admin/financial-reviews?view=refunds",
-            })),
-          );
-        }
-      }
+      const refundPaymentId =
+        captured > 0
+          ? await queueManualRefundReview(
+              supabase,
+              b,
+              renterShare,
+              `Renter no-show at pickup. Policy: renter keeps ${noShowRefundPercent}% forfeit — refund PHP ${renterShare.toLocaleString()} of PHP ${captured.toLocaleString()} captured; the rest is lister compensation. Admin confirms the return method.`,
+            )
+          : null;
 
       await supabase.from("booking_cancellations").upsert(
         {
@@ -593,6 +699,85 @@ export default async function handler(req: Request) {
         entity_type: "booking",
         entity_id: b.id,
         details: { end_date: b.end_date, reason: nonReturnReason, note },
+      });
+
+      return jsonResponse({ success: true, state: "flagged" });
+    }
+
+    // ------------------------------------------------ lister_no_show_return
+    // Unlike a pickup no-show, the rental was already fully delivered by
+    // this point - there is nothing to refund. This only flags the trip for
+    // admin visibility and a paper trail; the renter is not penalized, and
+    // the existing lister-completion-timeout safety net
+    // (api/expire-booking-deadlines.ts) already auto-completes the trip and
+    // releases the lister's payout if the lister stays unresponsive.
+    if (payload.action === "lister_no_show_return") {
+      if (!isRenter) {
+        return jsonResponse({ error: "Only the renter can report this" }, 403);
+      }
+      if (b.status !== "active") {
+        return jsonResponse(
+          { error: "This booking is not at the return stage." },
+          409,
+        );
+      }
+      if (!b.renter_return_arrived_at || b.lister_return_arrived_at) {
+        return jsonResponse(
+          { error: "Confirm your own arrival at the return first." },
+          409,
+        );
+      }
+      const returnMs = manilaMs(b.end_date, b.dropoff_time, "18:00");
+      if (returnMs === null || Date.now() < returnMs + GRACE_MINUTES * 60_000) {
+        return jsonResponse(
+          { error: "Wait until the return grace window has passed." },
+          409,
+        );
+      }
+      if (b.dispute_status === "open") {
+        return jsonResponse(
+          { error: "This booking is already flagged." },
+          409,
+        );
+      }
+
+      const { error: flagError } = await supabase
+        .from("bookings")
+        .update({ dispute_status: "open", dispute_reason: "lister_no_show_at_return" })
+        .eq("id", b.id)
+        .eq("status", "active");
+      if (flagError) throw flagError;
+
+      await openIncidentTicket(
+        supabase,
+        b,
+        user.id,
+        `Lister no-show at return: ${label(b)}`,
+        `The renter checked in at the return point and waited past the ${GRACE_MINUTES}-minute grace window, but the lister never arrived to receive ${label(b)}. The booking is flagged for admin visibility; the renter is not penalized, and the trip will auto-complete with payout if the lister remains unresponsive. ${note ?? ""}`.trim(),
+      );
+
+      await supabase.from("notifications").insert({
+        user_id: b.owner_id,
+        title: "You missed the return handover",
+        message: `The renter reported that you did not show up to receive ${label(b)} at the return. Complete the trip as soon as possible to receive your payout.`,
+        type: "error",
+        link: "/lister-bookings",
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: b.owner_id,
+        title: "You missed the return handover",
+        message: `The renter reported that you did not show up to receive ${label(b)} at the return.`,
+        link: "/lister-bookings",
+        baseOrigin,
+        eventKey: `no-show-return:${b.id}`,
+      });
+
+      await supabase.from("audit_log").insert({
+        user_id: user.id,
+        action: "renter_reported_lister_no_show_return",
+        entity_type: "booking",
+        entity_id: b.id,
+        details: { note },
       });
 
       return jsonResponse({ success: true, state: "flagged" });

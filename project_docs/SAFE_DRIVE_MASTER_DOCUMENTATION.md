@@ -453,6 +453,8 @@ Seed accounts include PayMongo clearing, cash/bank, lister payable, refund payab
 
 SafeDrive currently supports a transparently disclosed renter processing charge calculated from configurable percentage/fixed settings. The checkout total is grossed up so the lister’s base rental amount is not reduced by that charge. This is a SafeDrive pricing decision, not a general rule that consumers always inherit transfer fees.
 
+This is a deliberately separate decision from the platform commission (§11): the processing charge is tied to the renter's chosen payment method and stays on the renter's side of the ledger; the commission is SafeDrive's cut of the lister's earnings for providing the marketplace service and is deducted from the lister's payout instead. The renter never pays the commission; the lister never absorbs the processing charge.
+
 Before public launch, confirm the chosen surcharge wording and method with PayMongo and Philippine counsel. Show base rental, SafeDrive/platform fee, payment-processing charge, and final total before acceptance. Do not hide a fee after checkout begins. Use **PHP 100 only as a controlled test amount**, not as a permanent production fee.
 
 ## 11. Payout Timing
@@ -1282,6 +1284,7 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | Admin | `/admin/security-logs` | `AdminSecurityLogsPage`; authentication/security events |
 | Super-admin | `/admin/admins` | `AdminAdminsPage`; create admin accounts, toggle each admin's permission checklist, disable/re-enable accounts |
 | Super-admin | `/admin/platform-settings` | `AdminPlatformSettingsPage`; super-admin only (view and edit) |
+| Super-admin | `/admin/legal-content` | `AdminLegalContentPage`; edit and publish Terms and Conditions, Privacy Policy, and the Platform Agreement (`legal_document_versions`, `publish_legal_document_version`; super-admin direct publish, no vote, every past version kept) |
 | Super-admin | `/admin/payouts` | Legacy redirect to the payout tab in `/admin/financial-reviews` |
 | Super-admin | `/admin/refunds` | Legacy redirect to the refund tab in `/admin/financial-reviews` |
 | Super-admin | `/admin/financial-reviews` | `AdminFinancialReviewsPage`; combined lister payout and renter refund review workspace |

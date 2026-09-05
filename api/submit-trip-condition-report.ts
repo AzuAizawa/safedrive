@@ -92,7 +92,7 @@ export default async function handler(req: Request) {
     const odometer = odometerInput.provided && odometerInput.valid ? odometerInput.value : null;
     const level = levelInput.provided && levelInput.valid ? levelInput.value : null;
 
-    const { data: booking, error: bookingError } = await supabase.from("bookings").select("id, renter_id, owner_id, status").eq("id", payload.bookingId).single();
+    const { data: booking, error: bookingError } = await supabase.from("bookings").select("id, renter_id, owner_id, status, renter_arrived_at, lister_arrived_at, renter_return_arrived_at, lister_return_arrived_at").eq("id", payload.bookingId).single();
     if (bookingError || !booking) return respond({ error: "Booking not found" }, 404);
     const reporterRole = booking.renter_id === user.id ? "renter" : booking.owner_id === user.id ? "lister" : null;
     if (!reporterRole) return respond({ error: "Only booking participants can submit this report" }, 403);
@@ -101,6 +101,24 @@ export default async function handler(req: Request) {
     }
     if (payload.phase === "return" && booking.status !== "active") {
       return respond({ error: "Return evidence is accepted only after both parties complete arrival check-in" }, 409);
+    }
+    // Live-camera photos are meant to prove the reporter was physically
+    // present at that moment - require their own arrival check-in for the
+    // relevant phase before accepting the report, so evidence can't be filed
+    // before anyone has actually shown up. Only checks the reporter's own
+    // flag, never the counterparty's, so it never blocks the other side.
+    const ownArrivedForPhase = payload.phase === "pickup"
+      ? (reporterRole === "lister" ? booking.lister_arrived_at : booking.renter_arrived_at)
+      : (reporterRole === "lister" ? booking.lister_return_arrived_at : booking.renter_return_arrived_at);
+    if (!ownArrivedForPhase) {
+      return respond(
+        {
+          error: payload.phase === "pickup"
+            ? "Confirm your own arrival at the pickup before submitting this report"
+            : "Confirm your own arrival at the return before submitting this report",
+        },
+        409,
+      );
     }
 
     // The lister carries the evidentiary burden at both ends of the trip
@@ -200,6 +218,70 @@ export default async function handler(req: Request) {
       }
     }
     await supabase.from("audit_log").insert({ user_id: user.id, action: "trip_condition_report_submitted", entity_type: "booking", entity_id: booking.id, details: { report_id: report.id, phase: payload.phase, reporter_role: reporterRole, photo_categories: [...categories], photos_required: photosRequiredForRole, evidence_waived: waivedThisReport } });
+
+    // Post the report + photos into the booking's conversation thread,
+    // attributed to the reporter themselves (service-role insert on their
+    // behalf, same pattern used elsewhere for system-triggered messages).
+    // Never let a chat hiccup fail an already-saved report.
+    try {
+      let ticketId: string | null = null;
+      const { data: existingTicket } = await supabase
+        .from("support_tickets")
+        .select("id")
+        .eq("booking_id", booking.id)
+        .not("participant_user_id", "is", null)
+        .maybeSingle();
+      if (existingTicket?.id) {
+        ticketId = existingTicket.id;
+      } else {
+        const { data: newTicket, error: newTicketError } = await supabase
+          .from("support_tickets")
+          .insert({
+            user_id: booking.renter_id,
+            participant_user_id: booking.owner_id,
+            booking_id: booking.id,
+            subject: `Booking conversation: ${booking.id}`,
+            tag: "booking_conversation",
+            status: "open",
+          })
+          .select("id")
+          .single();
+        if (!newTicketError && newTicket) ticketId = newTicket.id;
+      }
+
+      if (ticketId) {
+        const roleLabel = reporterRole === "lister" ? "Lister" : "Renter";
+        const phaseLabel = payload.phase === "pickup" ? "pickup" : "return";
+        const summaryParts = [`${roleLabel} submitted the ${phaseLabel} condition report.`];
+        if (odometer !== null) summaryParts.push(`Odometer: ${odometer}.`);
+        if (level !== null) summaryParts.push(`Fuel/battery: ${level}%.`);
+        if (waivedThisReport) summaryParts.push("(Photo evidence waived.)");
+        const damageNotes = String(payload.damageNotes || "").trim();
+        if (damageNotes) summaryParts.push(`Notes: ${damageNotes.slice(0, 500)}`);
+
+        await supabase.from("ticket_messages").insert({
+          ticket_id: ticketId,
+          sender_id: user.id,
+          message: summaryParts.join(" "),
+        });
+
+        for (const photo of photos) {
+          const fileName = photo.storagePath.slice(photo.storagePath.lastIndexOf("/") + 1);
+          await supabase.from("ticket_messages").insert({
+            ticket_id: ticketId,
+            sender_id: user.id,
+            message: `${roleLabel} ${phaseLabel} photo`,
+            attachment_name: fileName,
+            attachment_mime_type: "image/jpeg",
+            attachment_storage_path: photo.storagePath,
+            attachment_bucket: "trip-condition-evidence",
+          });
+        }
+      }
+    } catch (chatError) {
+      console.error("Failed to post trip condition report to booking conversation", chatError);
+    }
+
     return respond({ success: true, reportId: report.id, submittedAt: report.submitted_at }, 201);
   } catch (error) {
     console.error("Trip condition report failed", error);

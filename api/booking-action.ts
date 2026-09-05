@@ -13,6 +13,8 @@ type BookingAction =
   | "reject"
   | "cancel"
   | "arrive"
+  | "handover_confirm"
+  | "handover_receive"
   | "return_arrive"
   | "complete";
 
@@ -56,7 +58,10 @@ type BookingRecord = {
   owner_completed: boolean;
   renter_arrived_at: string | null;
   lister_arrived_at: string | null;
+  lister_handover_confirmed_at: string | null;
+  renter_handover_received_at: string | null;
   renter_return_arrived_at: string | null;
+  lister_return_arrived_at: string | null;
   payments: Array<{
     id: string;
     payment_type: string;
@@ -476,7 +481,10 @@ export default async function handler(req: Request) {
         owner_completed,
         renter_arrived_at,
         lister_arrived_at,
+        lister_handover_confirmed_at,
+        renter_handover_received_at,
         renter_return_arrived_at,
+        lister_return_arrived_at,
         payments (
           id,
           payment_type,
@@ -1078,10 +1086,11 @@ export default async function handler(req: Request) {
         }
       }
 
-      // Arrival is a quick, unconditional presence check for both sides now -
-      // vehicle verification (live photos) and handover confirmation are
-      // separate steps that happen afterward, checked at "complete" instead
-      // of gating arrival itself.
+      // Arrival is a quick, unconditional presence check for both sides -
+      // it never changes booking status on its own. Once both have arrived,
+      // the lister must submit required pickup photos and confirm handover
+      // ("handover_confirm"), then the renter must confirm receipt
+      // ("handover_receive") - only that last step activates the trip.
       const onBehalfOfRenter = owner && payload.confirmOnBehalfOfRenter === true;
 
       const arrivalTime = new Date().toISOString();
@@ -1099,6 +1108,8 @@ export default async function handler(req: Request) {
           arrivalLocation.capturedAt;
       };
 
+      let bothArrivedAfterThis = false;
+
       if (renter || onBehalfOfRenter) {
         if (bookingRecord.renter_arrived_at) {
           return jsonResponse(
@@ -1111,9 +1122,8 @@ export default async function handler(req: Request) {
           updatePayload.renter_arrival_photo_url = payload.arrivalPhotoUrl ?? null;
           addLocationEvidence("renter");
         }
-        if (bookingRecord.lister_arrived_at && bookingRecord.status === "fully_paid") {
-          nextStatus = "active";
-          updatePayload.status = nextStatus;
+        if (bookingRecord.lister_arrived_at) {
+          bothArrivedAfterThis = true;
         }
       } else if (owner) {
         if (bookingRecord.lister_arrived_at) {
@@ -1125,9 +1135,8 @@ export default async function handler(req: Request) {
         updatePayload.lister_arrived_at = arrivalTime;
         updatePayload.lister_arrival_photo_url = payload.arrivalPhotoUrl ?? null;
         addLocationEvidence("lister");
-        if (bookingRecord.renter_arrived_at && bookingRecord.status === "fully_paid") {
-          nextStatus = "active";
-          updatePayload.status = nextStatus;
+        if (bookingRecord.renter_arrived_at) {
+          bothArrivedAfterThis = true;
         }
       }
 
@@ -1182,37 +1191,6 @@ export default async function handler(req: Request) {
         );
       }
 
-      let activatedByThisRequest = nextStatus === "active";
-      if (!activatedByThisRequest) {
-        const { data: refreshedBooking, error: refreshError } = await supabase
-          .from("bookings")
-          .select("status, renter_arrived_at, lister_arrived_at")
-          .eq("id", bookingRecord.id)
-          .single();
-
-        if (refreshError) throw refreshError;
-
-        if (
-          refreshedBooking?.status === "fully_paid" &&
-          refreshedBooking.renter_arrived_at &&
-          refreshedBooking.lister_arrived_at
-        ) {
-          const { data: activatedBooking, error: activationError } = await supabase
-            .from("bookings")
-            .update({ status: "active" })
-            .eq("id", bookingRecord.id)
-            .eq("status", "fully_paid")
-            .select("id")
-            .maybeSingle();
-
-          if (activationError) throw activationError;
-          if (activatedBooking) {
-            nextStatus = "active";
-            activatedByThisRequest = true;
-          }
-        }
-      }
-
       await supabase.from("audit_log").insert({
         user_id: user.id,
         action: onBehalfOfRenter
@@ -1229,7 +1207,7 @@ export default async function handler(req: Request) {
           arrival_location_stored: arrivalLocationStored,
           arrival_location_accuracy_meters:
             arrivalLocation?.accuracyMeters ?? null,
-          transitioned_to: nextStatus,
+          both_arrived: bothArrivedAfterThis,
         },
       });
 
@@ -1238,34 +1216,52 @@ export default async function handler(req: Request) {
         : bookingRecord.renter_id;
 
       if (!onBehalfOfRenter) {
+        const arrivalTitle = renter ? "Renter Arrived for Pickup" : "Lister Arrived for Pickup";
+        const arrivalMessage = renter
+          ? `The renter arrived for the pickup of ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`
+          : `The lister arrived for the pickup of ${getVehicleLabel(bookingRecord)}. Confirm your own arrival so the lister can hand over the car.`;
         await supabase.from("notifications").insert({
           user_id: counterpartyId,
-          title: renter ? "Renter Confirmed Pickup" : "Handover Confirmed by Lister",
-          message: renter
-            ? `The renter confirmed they have the car for ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`
-            : `The lister confirmed the handover for ${getVehicleLabel(bookingRecord)}. Open the booking and tap "Confirm - I have the car" to start your trip.`,
+          title: arrivalTitle,
+          message: arrivalMessage,
           type: "info",
           link: renter ? "/lister-bookings" : "/my-bookings",
         });
+        await sendUserNotificationEmail(supabase, {
+          userId: counterpartyId,
+          title: arrivalTitle,
+          message: arrivalMessage,
+          link: renter ? "/lister-bookings" : "/my-bookings",
+          baseOrigin: new URL(req.url).origin,
+          eventKey: `arrive:${renter ? "renter" : "lister"}:${bookingRecord.id}`,
+        });
       }
 
-      if (activatedByThisRequest) {
+      if (bothArrivedAfterThis) {
         await supabase.from("notifications").insert([
           {
             user_id: bookingRecord.renter_id,
-            title: "Trip Check-in Complete",
-            message: `Both parties have arrived for ${getVehicleLabel(bookingRecord)}. Your booking is now active.`,
+            title: "Both Parties Arrived",
+            message: `You and the lister have both arrived for ${getVehicleLabel(bookingRecord)}. Please wait for the lister to submit pickup photos and hand over the car.`,
             type: "success",
             link: "/my-bookings",
           },
           {
             user_id: bookingRecord.owner_id,
-            title: "Trip Check-in Complete",
-            message: `Both parties have arrived for ${getVehicleLabel(bookingRecord)}. The rental is now active.`,
+            title: "Both Parties Arrived",
+            message: `You and the renter have both arrived for ${getVehicleLabel(bookingRecord)}. Submit your pickup condition report, then tap "Hand Over the Car."`,
             type: "success",
             link: "/lister-bookings",
           },
         ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: bookingRecord.owner_id,
+          title: "Both Parties Arrived",
+          message: `You and the renter have both arrived for ${getVehicleLabel(bookingRecord)}. Submit your pickup condition report, then tap "Hand Over the Car."`,
+          link: "/lister-bookings",
+          baseOrigin: new URL(req.url).origin,
+          eventKey: `both-arrived:${bookingRecord.id}`,
+        });
       }
 
       return jsonResponse({
@@ -1276,15 +1272,208 @@ export default async function handler(req: Request) {
       });
     }
 
-    // The renter's lightweight "I've returned the car" announcement at the
-    // return point. Purely an optional courtesy notification to the lister -
-    // it does not gate anything below. The lister can complete the trip
-    // (backed by their own required return-phase live-photo report) with or
-    // without the renter ever calling this.
-    if (payload.action === "return_arrive") {
+    if (payload.action === "handover_confirm") {
+      if (!owner) {
+        return jsonResponse(
+          { error: "Only the lister can hand over the car" },
+          403,
+        );
+      }
+      if (bookingRecord.status !== "fully_paid") {
+        return jsonResponse(
+          { error: "This booking is not ready for handover" },
+          409,
+        );
+      }
+      if (!bookingRecord.renter_arrived_at || !bookingRecord.lister_arrived_at) {
+        return jsonResponse(
+          {
+            error:
+              "Both you and the renter must confirm arrival before handing over the car",
+          },
+          409,
+        );
+      }
+      if (bookingRecord.lister_handover_confirmed_at) {
+        return jsonResponse(
+          { error: "You already confirmed the handover" },
+          409,
+        );
+      }
+
+      const { data: pickupReport, error: pickupReportError } = await supabase
+        .from("trip_condition_reports")
+        .select("id, evidence_waived, trip_condition_photos(category)")
+        .eq("booking_id", bookingRecord.id)
+        .eq("reporter_id", user.id)
+        .eq("phase", "pickup")
+        .maybeSingle();
+      if (pickupReportError) throw pickupReportError;
+      if (!pickupReport || !hasRequiredTripPhotos(pickupReport, "pickup")) {
+        return jsonResponse(
+          {
+            error:
+              "Submit your pickup condition report with live photos before handing over the car.",
+          },
+          409,
+        );
+      }
+
+      const handoverTime = new Date().toISOString();
+      const { data: handoverChanged, error: handoverError } = await supabase
+        .from("bookings")
+        .update({ lister_handover_confirmed_at: handoverTime })
+        .eq("id", bookingRecord.id)
+        .eq("status", "fully_paid")
+        .is("lister_handover_confirmed_at", null)
+        .select("id")
+        .maybeSingle();
+      if (handoverError) throw handoverError;
+      if (!handoverChanged) {
+        return jsonResponse(
+          {
+            error:
+              "This booking changed state before the handover could be recorded. Please refresh and try again.",
+          },
+          409,
+        );
+      }
+
+      await supabase.from("audit_log").insert({
+        user_id: user.id,
+        action: "owner_confirmed_handover",
+        entity_type: "booking",
+        entity_id: bookingRecord.id,
+        details: { handover_time: handoverTime },
+      });
+
+      const handoverTitle = "Car Handed Over";
+      const handoverMessage = `The lister handed over ${getVehicleLabel(bookingRecord)}. Open the booking and tap "I Have Received the Car" to start your trip.`;
+      await supabase.from("notifications").insert({
+        user_id: bookingRecord.renter_id,
+        title: handoverTitle,
+        message: handoverMessage,
+        type: "info",
+        link: "/my-bookings",
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: bookingRecord.renter_id,
+        title: handoverTitle,
+        message: handoverMessage,
+        link: "/my-bookings",
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `handover-confirmed:${bookingRecord.id}`,
+      });
+
+      return jsonResponse({
+        success: true,
+        bookingId: bookingRecord.id,
+        state: "handover_confirmed",
+        status: nextStatus,
+      });
+    }
+
+    if (payload.action === "handover_receive") {
       if (!renter) {
         return jsonResponse(
-          { error: "Only the renter can confirm returning the car" },
+          { error: "Only the renter can confirm receiving the car" },
+          403,
+        );
+      }
+      if (bookingRecord.status !== "fully_paid") {
+        return jsonResponse(
+          { error: "This booking is not ready for receipt confirmation" },
+          409,
+        );
+      }
+      if (!bookingRecord.lister_handover_confirmed_at) {
+        return jsonResponse(
+          { error: "Wait for the lister to hand over the car first" },
+          409,
+        );
+      }
+      if (bookingRecord.renter_handover_received_at) {
+        return jsonResponse(
+          { error: "You already confirmed receiving the car" },
+          409,
+        );
+      }
+
+      const receiptTime = new Date().toISOString();
+      nextStatus = "active";
+      const { data: receiptChanged, error: receiptError } = await supabase
+        .from("bookings")
+        .update({
+          renter_handover_received_at: receiptTime,
+          status: nextStatus,
+        })
+        .eq("id", bookingRecord.id)
+        .eq("status", "fully_paid")
+        .is("renter_handover_received_at", null)
+        .select("id")
+        .maybeSingle();
+      if (receiptError) throw receiptError;
+      if (!receiptChanged) {
+        return jsonResponse(
+          {
+            error:
+              "This booking changed state before receipt could be recorded. Please refresh and try again.",
+          },
+          409,
+        );
+      }
+
+      await supabase.from("audit_log").insert({
+        user_id: user.id,
+        action: "renter_confirmed_handover_receipt",
+        entity_type: "booking",
+        entity_id: bookingRecord.id,
+        details: { receipt_time: receiptTime },
+      });
+
+      await supabase.from("notifications").insert([
+        {
+          user_id: bookingRecord.renter_id,
+          title: "Trip Started",
+          message: `You confirmed receiving ${getVehicleLabel(bookingRecord)}. Your trip is now active.`,
+          type: "success",
+          link: "/my-bookings",
+        },
+        {
+          user_id: bookingRecord.owner_id,
+          title: "Trip Started",
+          message: `The renter confirmed receiving ${getVehicleLabel(bookingRecord)}. The rental is now active.`,
+          type: "success",
+          link: "/lister-bookings",
+        },
+      ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: bookingRecord.owner_id,
+        title: "Trip Started",
+        message: `The renter confirmed receiving ${getVehicleLabel(bookingRecord)}. The rental is now active.`,
+        link: "/lister-bookings",
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `handover-received:${bookingRecord.id}`,
+      });
+
+      return jsonResponse({
+        success: true,
+        bookingId: bookingRecord.id,
+        state: "handover_received",
+        status: nextStatus,
+      });
+    }
+
+    // Mutual "I have arrived" at the return point, mirroring pickup arrival.
+    // Each side confirms independently; once both have, the lister submits
+    // their required return-phase live-photo report and taps "Confirm - Car
+    // Received" (the "complete" action) to finish the trip.
+    if (payload.action === "return_arrive") {
+      if (!renter && !owner) {
+        return jsonResponse(
+          {
+            error: "You are not allowed to confirm return arrival for this booking",
+          },
           403,
         );
       }
@@ -1294,17 +1483,20 @@ export default async function handler(req: Request) {
           409,
         );
       }
-      if (bookingRecord.renter_return_arrived_at) {
+
+      const ownReturnField: "renter_return_arrived_at" | "lister_return_arrived_at" =
+        renter ? "renter_return_arrived_at" : "lister_return_arrived_at";
+      if (bookingRecord[ownReturnField]) {
         return jsonResponse(
-          { error: "You already confirmed the car has been returned" },
+          { error: "You already confirmed arrival at the return" },
           409,
         );
       }
 
       // Mirrors the pickup arrival-check-in window: opens the same
-      // configured number of hours before the scheduled return instant, so a
-      // renter can't prematurely announce a return far ahead of the agreed
-      // time (that's what "request an early return" is for instead).
+      // configured number of hours before the scheduled return instant, so
+      // neither side can prematurely announce a return far ahead of the
+      // agreed time (that's what "request an early return" is for instead).
       // end_date/dropoff_time already reflect an approved early return.
       const dropoffMs = getBookingDropoffMs(bookingRecord);
       if (dropoffMs !== null) {
@@ -1313,7 +1505,7 @@ export default async function handler(req: Request) {
         if (Date.now() < opensAtMs) {
           return jsonResponse(
             {
-              error: `You can confirm the return ${leadHours} hour${leadHours === 1 ? "" : "s"} before the agreed return time (from ${formatManilaStamp(opensAtMs)}). Returning earlier than that? Use "Request early return" instead.`,
+              error: `You can confirm arrival at the return ${leadHours} hour${leadHours === 1 ? "" : "s"} before the agreed return time (from ${formatManilaStamp(opensAtMs)}).${renter ? ' Returning earlier than that? Use "Request early return" instead.' : ""}`,
             },
             409,
           );
@@ -1321,13 +1513,16 @@ export default async function handler(req: Request) {
       }
 
       const returnArrivalTime = new Date().toISOString();
+      const returnUpdatePayload: Record<string, string> = {
+        [ownReturnField]: returnArrivalTime,
+      };
       const { data: returnArrivalChanged, error: returnArrivalError } =
         await supabase
           .from("bookings")
-          .update({ renter_return_arrived_at: returnArrivalTime })
+          .update(returnUpdatePayload)
           .eq("id", bookingRecord.id)
           .eq("status", "active")
-          .is("renter_return_arrived_at", null)
+          .is(ownReturnField, null)
           .select("id")
           .maybeSingle();
       if (returnArrivalError) throw returnArrivalError;
@@ -1341,21 +1536,69 @@ export default async function handler(req: Request) {
         );
       }
 
+      const bothArrivedForReturn = renter
+        ? Boolean(bookingRecord.lister_return_arrived_at)
+        : Boolean(bookingRecord.renter_return_arrived_at);
+
       await supabase.from("audit_log").insert({
         user_id: user.id,
-        action: "renter_return_arrived",
+        action: renter ? "renter_return_arrived" : "owner_return_arrived",
         entity_type: "booking",
         entity_id: bookingRecord.id,
-        details: { return_arrival_time: returnArrivalTime },
+        details: { return_arrival_time: returnArrivalTime, both_arrived: bothArrivedForReturn },
       });
 
+      const returnCounterpartyId = renter
+        ? bookingRecord.owner_id
+        : bookingRecord.renter_id;
+      const returnArrivalTitle = renter
+        ? "Renter Arrived for Return"
+        : "Lister Arrived for Return";
+      const returnArrivalMessage = renter
+        ? `The renter arrived to return ${getVehicleLabel(bookingRecord)}. Confirm your own arrival, then inspect the vehicle and submit your return photos.`
+        : `The lister arrived to receive ${getVehicleLabel(bookingRecord)}. Confirm your own arrival so the return can proceed.`;
       await supabase.from("notifications").insert({
-        user_id: bookingRecord.owner_id,
-        title: "Renter returned the car",
-        message: `The renter has returned ${getVehicleLabel(bookingRecord)}. Inspect the vehicle, then tap "Confirm - Car Received" to finish your side.`,
+        user_id: returnCounterpartyId,
+        title: returnArrivalTitle,
+        message: returnArrivalMessage,
         type: "info",
-        link: "/lister-bookings",
+        link: renter ? "/lister-bookings" : "/my-bookings",
       });
+      await sendUserNotificationEmail(supabase, {
+        userId: returnCounterpartyId,
+        title: returnArrivalTitle,
+        message: returnArrivalMessage,
+        link: renter ? "/lister-bookings" : "/my-bookings",
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `return-arrive:${renter ? "renter" : "lister"}:${bookingRecord.id}`,
+      });
+
+      if (bothArrivedForReturn) {
+        await supabase.from("notifications").insert([
+          {
+            user_id: bookingRecord.renter_id,
+            title: "Both Parties Arrived for Return",
+            message: `You and the lister are both at the return point for ${getVehicleLabel(bookingRecord)}. The lister will inspect the vehicle and submit return photos.`,
+            type: "success",
+            link: "/my-bookings",
+          },
+          {
+            user_id: bookingRecord.owner_id,
+            title: "Both Parties Arrived for Return",
+            message: `You and the renter are both at the return point for ${getVehicleLabel(bookingRecord)}. Submit your return condition report, then tap "Confirm - Car Received."`,
+            type: "success",
+            link: "/lister-bookings",
+          },
+        ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: bookingRecord.owner_id,
+          title: "Both Parties Arrived for Return",
+          message: `You and the renter are both at the return point for ${getVehicleLabel(bookingRecord)}. Submit your return condition report, then tap "Confirm - Car Received."`,
+          link: "/lister-bookings",
+          baseOrigin: new URL(req.url).origin,
+          eventKey: `both-arrived-return:${bookingRecord.id}`,
+        });
+      }
 
       return jsonResponse({
         success: true,
@@ -1430,6 +1673,18 @@ export default async function handler(req: Request) {
       // blocker. The renter can complete any time after arrival with no
       // report requirement at all.
       if (owner) {
+        if (
+          bookingRecord.status === "active" &&
+          (!bookingRecord.renter_return_arrived_at || !bookingRecord.lister_return_arrived_at)
+        ) {
+          return jsonResponse(
+            {
+              error:
+                "Both you and the renter must confirm arrival at the return before you can confirm receipt.",
+            },
+            409,
+          );
+        }
         const pickupReport = (conditionReports ?? []).find((r) => r.phase === "pickup");
         if (!pickupReport || !hasRequiredTripPhotos(pickupReport, "pickup")) {
           return jsonResponse(

@@ -311,7 +311,7 @@ export default function SignUpPage() {
 
                   <div>
                     <h4 className="font-semibold text-foreground mb-1">4. Payments & Commission</h4>
-                    <p>After a booking is approved, the renter may pay the required reservation downpayment or settle the full amount within 24 hours. Any remaining balance must be paid before the rental starts. SafeDrive charges the active platform commission configured in the system. All payments must go through PayMongo - off-platform cash payments are strictly prohibited.</p>
+                    <p>After a booking is approved, the renter may pay the required reservation downpayment or settle the full amount within 24 hours. Any remaining balance must be paid before the rental starts. Renters pay exactly the listed rental price plus a disclosed payment-processing fee - SafeDrive's active platform commission is deducted from the lister's payout instead, never added to the renter's total. All payments must go through PayMongo - off-platform cash payments are strictly prohibited.</p>
                   </div>
 
                   <div>

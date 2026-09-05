@@ -3,16 +3,20 @@ import test from "node:test";
 
 import { calculatePaymentLedgerAllocation } from "../api/lib/ledger.ts";
 
-test("a full renter payment allocates owner, commission, and disclosed processing fee", () => {
+// Commission is deducted from the LISTER's earnings, not added to what the
+// renter pays (api/create-booking.ts) - so totalPrice is basePrice + the
+// payment-processing fee only, and ownerShare is (basePrice - commission)'s
+// proportional share of whatever was paid.
+test("a full renter payment allocates owner (net of commission), commission, and disclosed processing fee", () => {
   const allocation = calculatePaymentLedgerAllocation({
-    amountCentavos: 112_000,
+    amountCentavos: 102_000,
     basePrice: 1_000,
     commission: 100,
-    totalPrice: 1_120,
+    totalPrice: 1_020,
   });
 
   assert.deepEqual(allocation, {
-    ownerShare: 100_000,
+    ownerShare: 90_000,
     commissionShare: 10_000,
     processingFeeShare: 2_000,
   });
@@ -20,14 +24,14 @@ test("a full renter payment allocates owner, commission, and disclosed processin
 
 test("a partial payment uses the same proportional allocation", () => {
   const allocation = calculatePaymentLedgerAllocation({
-    amountCentavos: 56_000,
+    amountCentavos: 51_000,
     basePrice: 1_000,
     commission: 100,
-    totalPrice: 1_120,
+    totalPrice: 1_020,
   });
 
   assert.deepEqual(allocation, {
-    ownerShare: 50_000,
+    ownerShare: 45_000,
     commissionShare: 5_000,
     processingFeeShare: 1_000,
   });

@@ -125,6 +125,9 @@ interface ListerBooking {
   agreement_storage_path_snapshot: string | null;
   renter_arrived_at: string | null;
   renter_return_arrived_at: string | null;
+  lister_return_arrived_at: string | null;
+  lister_handover_confirmed_at: string | null;
+  renter_handover_received_at: string | null;
   renter_arrival_photo_url: string | null;
   renter_arrival_latitude: number | null;
   renter_arrival_longitude: number | null;
@@ -207,6 +210,7 @@ interface BookingExtensionRow {
   reason: string;
   fuel_top_up_amount: number;
   extension_amount: number;
+  extension_commission: number;
   total_additional_amount: number;
   status: string;
   owner_decision_note: string | null;
@@ -734,7 +738,7 @@ export default function ListerBookingsPage() {
 
   const runBookingAction = async (
     bookingId: string,
-    action: "accept" | "reject" | "arrive" | "complete" | "cancel",
+    action: "accept" | "reject" | "arrive" | "handover_confirm" | "return_arrive" | "complete" | "cancel",
     arrivalPhotoUrl?: string | null,
     arrivalLocation?: ArrivalLocationEvidence | null,
     note?: string | null,
@@ -890,6 +894,40 @@ export default function ListerBookingsPage() {
       toast.error("Could not confirm the renter's arrival", {
         id: toastId,
         description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleHandoverConfirm = async (bookingId: string) => {
+    setActionLoading(bookingId);
+    const toastId = toast.loading("Confirming handover...");
+    try {
+      await runBookingAction(bookingId, "handover_confirm");
+      toast.success("Handover confirmed. Waiting for the renter to confirm receipt.", {
+        id: toastId,
+      });
+      fetchBookings();
+    } catch (err) {
+      toast.error("Could not confirm the handover", {
+        id: toastId,
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleListerReturnArrive = async (bookingId: string) => {
+    setActionLoading(bookingId);
+    try {
+      await runBookingAction(bookingId, "return_arrive");
+      toast.success("Arrival recorded. Please wait for the renter to arrive too.");
+      fetchBookings();
+    } catch (error) {
+      toast.error("Could not record your arrival at the return", {
+        description: error instanceof Error ? error.message : "Please try again.",
       });
     } finally {
       setActionLoading(null);
@@ -1251,6 +1289,22 @@ export default function ListerBookingsPage() {
         };
       }
 
+      if (!booking.lister_handover_confirmed_at) {
+        return {
+          tone,
+          title: "Hand over the car",
+          body: 'Submit your pickup condition report with live photos, then tap "Hand Over the Car."',
+        };
+      }
+
+      if (!booking.renter_handover_received_at) {
+        return {
+          tone,
+          title: "Waiting for the renter to confirm receipt",
+          body: "You handed over the car. The trip starts once the renter confirms they received it.",
+        };
+      }
+
       if (extensionBlocksCompletion) {
         return {
           tone,
@@ -1260,17 +1314,24 @@ export default function ListerBookingsPage() {
       }
 
       if (!booking.owner_completed) {
-        if (!booking.renter_return_arrived_at && !booking.renter_completed) {
+        if (!booking.lister_return_arrived_at) {
           return {
             tone,
-            title: "Waiting for the renter to return the car",
-            body: "You'll be notified once the renter confirms they've returned it - then inspect the car and confirm receipt.",
+            title: "Confirm your arrival at the return",
+            body: 'Tap "I Have Arrived" once you\'re at the agreed return location.',
+          };
+        }
+        if (!booking.renter_return_arrived_at) {
+          return {
+            tone,
+            title: "Wait for the renter to arrive at the return",
+            body: "Your check-in is recorded. You'll be notified once the renter arrives.",
           };
         }
         return {
           tone,
           title: "Confirm the car was received",
-          body: 'The renter reported returning the car. Inspect it, then tap "Confirm - Car Received".',
+          body: 'You\'re both at the return point. Submit your return report with live photos, then tap "Confirm - Car Received".',
         };
       }
 
@@ -1467,7 +1528,7 @@ export default function ListerBookingsPage() {
       if (!bucket) return;
       bucket.bookings += 1;
       if (getApparentStatus(booking) === "completed") {
-        bucket.revenue += Number(booking.base_price || 0);
+        bucket.revenue += Number(booking.base_price || 0) - Number(booking.commission || 0);
       }
     });
 
@@ -1481,7 +1542,7 @@ export default function ListerBookingsPage() {
       };
       current.count += 1;
       if (getApparentStatus(booking) === "completed") {
-        current.revenue += Number(booking.base_price || 0);
+        current.revenue += Number(booking.base_price || 0) - Number(booking.commission || 0);
       }
       vehicleMap.set(booking.car_id, current);
     });
@@ -1496,7 +1557,10 @@ export default function ListerBookingsPage() {
       : 0;
     const totalRevenue = bookings
       .filter((booking) => getApparentStatus(booking) === "completed")
-      .reduce((sum, booking) => sum + Number(booking.base_price || 0), 0);
+      .reduce(
+        (sum, booking) => sum + Number(booking.base_price || 0) - Number(booking.commission || 0),
+        0,
+      );
     const maxMonthlyRevenue = Math.max(1, ...monthBuckets.map((bucket) => bucket.revenue));
     const maxVehicleCount = Math.max(1, ...topVehicles.map((vehicle) => vehicle.count));
 
@@ -2517,13 +2581,11 @@ export default function ListerBookingsPage() {
                 : apparentState === "completed"
                   ? "Eligible payout"
                   : "Payout after completion";
-            const extensionServiceFee = latestExtension
-              ? Math.max(
-                  0,
-                  Number(latestExtension.total_additional_amount) -
-                    Number(latestExtension.extension_amount) -
-                    Number(latestExtension.fuel_top_up_amount),
-                )
+            // Commission is deducted from the lister's own extension earnings
+            // now, not charged to the renter - total_additional_amount no
+            // longer includes it, so it's read from its own stored column.
+            const extensionCommissionAmount = latestExtension
+              ? Math.max(0, Number(latestExtension.extension_commission || 0))
               : 0;
             const apparentExtensionStatus = latestExtension
               ? getExtensionDisplayStatus(latestExtension, new Date(clockNow))
@@ -2763,8 +2825,9 @@ export default function ListerBookingsPage() {
                         <p className="text-xs text-muted-foreground">
                           {payoutLabel}:{" "}
                           <span className="text-green-600 font-semibold">
-                            PHP {Number(b.base_price).toLocaleString()}
-                          </span>
+                            PHP {(Number(b.base_price) - Number(b.commission)).toLocaleString()}
+                          </span>{" "}
+                          <span className="text-[10px]">(after SafeDrive's commission)</span>
                         </p>
                       ) : null}
 
@@ -2819,8 +2882,8 @@ export default function ListerBookingsPage() {
                           <p className="mt-1">
                             Added: {formatDayCount(latestExtension.extension_days)} | Extension:
                             {" "}PHP {Number(latestExtension.extension_amount).toLocaleString()}
-                            {extensionServiceFee > 0
-                              ? ` | Service fee: PHP ${extensionServiceFee.toLocaleString()}`
+                            {extensionCommissionAmount > 0
+                              ? ` | SafeDrive commission: -PHP ${extensionCommissionAmount.toLocaleString()}`
                               : ""}
                             {Number(latestExtension.fuel_top_up_amount) > 0
                               ? ` | Fuel top-up: PHP ${Number(latestExtension.fuel_top_up_amount).toLocaleString()}`
@@ -3084,7 +3147,7 @@ export default function ListerBookingsPage() {
 
                       {(apparentState === "fully_paid" || apparentState === "active") && !b.lister_arrived_at && arrivalCheckinOpen && (
                         <div className="mt-2 text-right">
-                          <p className="mb-2 text-xs font-medium text-foreground">Handover complete - renter has the car</p>
+                          <p className="mb-2 text-xs font-medium text-foreground">Confirm you have arrived</p>
                           <ArrivalPhotoCapture
                             loading={actionLoading === b.id}
                             disabled={actionLoading === b.id}
@@ -3102,7 +3165,7 @@ export default function ListerBookingsPage() {
                             </span>
                           </div>
                           <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                            Confirm arrival first, then the renter confirms they have the car. Arrival location is optional and stored only with your consent.
+                            Arrival location is optional and stored only with your consent.
                           </p>
                         </div>
                       )}
@@ -3131,6 +3194,55 @@ export default function ListerBookingsPage() {
                           </div>
                         )}
 
+                      {apparentState === "fully_paid" &&
+                        b.lister_arrived_at &&
+                        b.renter_arrived_at &&
+                        !b.lister_handover_confirmed_at && (
+                          <div className="mt-2 text-right">
+                            {ownReportsByBooking[b.id]?.pickup ? (
+                              <>
+                                <p className="mb-2 text-xs font-medium text-foreground">
+                                  You're both here - hand over the car
+                                </p>
+                                <Button
+                                  size="sm"
+                                  disabled={actionLoading === b.id}
+                                  onClick={() => handleHandoverConfirm(b.id)}
+                                  className="gap-1.5 shadow-lg shadow-primary/20"
+                                >
+                                  {actionLoading === b.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                  )}
+                                  Hand Over the Car
+                                </Button>
+                              </>
+                            ) : (
+                              <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                                <p className="mb-1.5">
+                                  You're both here. Submit your pickup condition report with live photos before you can hand over the car.
+                                </p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => navigate(`/trip-report/${b.id}/pickup`)}
+                                >
+                                  Submit pickup report
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                      {apparentState === "fully_paid" &&
+                        b.lister_handover_confirmed_at &&
+                        !b.renter_handover_received_at && (
+                          <p className="mt-2 text-[10px] text-amber-500 text-right font-medium leading-tight">
+                            Waiting for the renter to confirm they received the car.
+                          </p>
+                        )}
+
                       {showTripProgress && (
                         <div className="mt-3 w-full rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed">
                           <div className="mb-2 flex items-center justify-between gap-2">
@@ -3142,12 +3254,24 @@ export default function ListerBookingsPage() {
                           <div className="grid gap-1.5">
                             {(() => {
                               const ownReports = ownReportsByBooking[b.id] ?? { pickup: false, return: false };
+                              const bothArrived = Boolean(b.renter_arrived_at) && Boolean(b.lister_arrived_at);
+                              // Bookings that went active before this handover
+                              // gate existed will never have these two new
+                              // timestamps set - treat that as vacuously done
+                              // rather than showing a permanently stuck step.
+                              const legacyActivation =
+                                bothArrived &&
+                                !b.lister_handover_confirmed_at &&
+                                !b.renter_handover_received_at &&
+                                b.status !== "fully_paid";
                               return [
                                 { label: "Renter arrived", done: Boolean(b.renter_arrived_at) },
                                 { label: "You arrived", done: Boolean(b.lister_arrived_at) },
-                                { label: "Vehicle verification", done: ownReports.pickup },
-                                { label: "Vehicle handover", done: ownReports.pickup },
+                                { label: "You handed over the car", done: Boolean(b.lister_handover_confirmed_at) || legacyActivation },
+                                { label: "Renter confirmed receipt", done: Boolean(b.renter_handover_received_at) || legacyActivation },
                                 { label: "Rental in progress", done: b.status === "active" || b.status === "completed" },
+                                { label: "You arrived for return", done: Boolean(b.lister_return_arrived_at) },
+                                { label: "Renter arrived for return", done: Boolean(b.renter_return_arrived_at) },
                                 { label: "Vehicle return", done: ownReports.return },
                                 { label: "Trip completed", done: b.status === "completed" },
                                 { label: "Your rating", done: Boolean(reviewedByOwner) },
@@ -3301,6 +3425,41 @@ export default function ListerBookingsPage() {
                             <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
                               You can finish the trip once it starts - pickup is{" "}
                               {format(new Date(bookingPickupMs), "MMM d, yyyy h:mm a")}.
+                            </div>
+                          ) : apparentState === "active" && !b.lister_return_arrived_at ? (
+                            <div className="space-y-1.5">
+                              <Button
+                                size="sm"
+                                onClick={() => handleListerReturnArrive(b.id)}
+                                disabled={actionLoading === b.id}
+                                className="gap-1.5 shadow-lg shadow-primary/20"
+                              >
+                                {actionLoading === b.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                )}
+                                I Have Arrived
+                              </Button>
+                              <p className="text-[10px] text-muted-foreground text-right leading-tight">
+                                Tap "I Have Arrived" once you're at the agreed return location.
+                              </p>
+                            </div>
+                          ) : apparentState === "active" && !b.renter_return_arrived_at ? (
+                            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
+                              <p>Waiting for the renter to arrive at the return point. You can still submit your return report while you wait.</p>
+                              <div className="mt-1.5 text-right">
+                                <Button
+                                  size="sm"
+                                  variant={ownReportsByBooking[b.id]?.return ? "ghost" : "outline"}
+                                  className={ownReportsByBooking[b.id]?.return ? "gap-1 text-green-600" : undefined}
+                                  onClick={() => navigate(`/trip-report/${b.id}/return`)}
+                                  disabled={Boolean(ownReportsByBooking[b.id]?.return)}
+                                >
+                                  {ownReportsByBooking[b.id]?.return && <CheckCircle2 className="w-3.5 h-3.5" />}
+                                  {ownReportsByBooking[b.id]?.return ? "Return report (submitted)" : "Submit return report"}
+                                </Button>
+                              </div>
                             </div>
                           ) : (
                             <div className="space-y-1.5">

@@ -50,9 +50,14 @@ export function calculatePaymentLedgerAllocation(input: {
     throw new Error("Ledger booking allocation is invalid");
   }
 
+  // Commission comes out of the OWNER's share now (renter pays basePrice,
+  // not basePrice+commission) - the owner's ledger credit is the base price
+  // net of commission, proportional to how much of totalPrice this payment
+  // covers. commissionShare stays the same formula: it's still a genuine
+  // revenue line, just no longer additional cash collected on top.
   const ownerShare = Math.min(
     input.amountCentavos,
-    Math.max(0, Math.round((input.amountCentavos * basePrice) / totalPrice)),
+    Math.max(0, Math.round((input.amountCentavos * (basePrice - commission)) / totalPrice)),
   );
   const commissionShare = Math.min(
     input.amountCentavos - ownerShare,

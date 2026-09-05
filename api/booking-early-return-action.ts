@@ -25,11 +25,13 @@ type BookingRecord = {
   status: string;
   start_date: string;
   end_date: string;
+  dropoff_time: string | null;
   base_price: number | string;
   renter_completed: boolean;
   owner_completed: boolean;
   cars: {
     plate_number: string;
+    min_early_return_notice_hours: number | string | null;
     car_models: { name: string; car_brands: { name: string } };
   } | null;
 };
@@ -96,6 +98,15 @@ const manilaEndOfDayMs = (dateOnly: string) => {
   return Date.UTC(y, m - 1, d, 23, 59, 59) - 8 * 60 * 60 * 1000;
 };
 
+// Manila-local wall time -> epoch ms, same -8h-from-naive-UTC pattern used
+// across booking-action.ts / booking-incident-action.ts.
+const manilaInstant = (dateOnly: string, time: string | null, fallback: string) => {
+  const [y, m, d] = dateOnly.split("-").map(Number);
+  const [hh, mm] = (time || fallback).split(":").map(Number);
+  if (!y || !m || !d) return null;
+  return Date.UTC(y, m - 1, d, hh || 0, mm || 0) - 8 * 60 * 60 * 1000;
+};
+
 export default async function handler(req: Request) {
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
@@ -133,9 +144,9 @@ export default async function handler(req: Request) {
         .from("bookings")
         .select(
           `
-          id, car_id, renter_id, owner_id, status, start_date, end_date,
+          id, car_id, renter_id, owner_id, status, start_date, end_date, dropoff_time,
           base_price, renter_completed, owner_completed,
-          cars ( plate_number, car_models ( name, car_brands ( name ) ) )
+          cars ( plate_number, min_early_return_notice_hours, car_models ( name, car_brands ( name ) ) )
         `,
         )
         .eq("id", payload.bookingId)
@@ -187,6 +198,30 @@ export default async function handler(req: Request) {
           { error: "The new return date cannot be in the past." },
           422,
         );
+      }
+
+      // The car's configured minimum early-return notice was shown to the
+      // renter but never actually enforced - a renter could request an
+      // effectively same-day early return, giving the lister no real time
+      // to prepare for the impromptu meetup.
+      const minNoticeHours = Number(b.cars?.min_early_return_notice_hours);
+      if (Number.isFinite(minNoticeHours) && minNoticeHours > 0) {
+        const requestedReturnMs = manilaInstant(
+          payload.requestedEndDate,
+          null,
+          "18:00",
+        );
+        if (
+          requestedReturnMs !== null &&
+          requestedReturnMs - Date.now() < minNoticeHours * 60 * 60 * 1000
+        ) {
+          return jsonResponse(
+            {
+              error: `This car requires at least ${minNoticeHours} hour${minNoticeHours === 1 ? "" : "s"} of notice for an early return. Choose a later date.`,
+            },
+            422,
+          );
+        }
       }
 
       const { data: existingEarly } = await supabase

@@ -56,9 +56,21 @@ const checks = [
     ],
   },
   {
+    // 2026-09-05's redesign removed location capture entirely for
+    // simplicity - arrival became a single unconditional presence tap with
+    // nothing to verify it against. This session's fraud-hardening pass
+    // reintroduces it silently on that same button (no new UI) now that a
+    // car listing can carry a pickup pin (cars.pickup_latitude/longitude,
+    // MyVehiclesPage.tsx) - a reference point to check arrival location
+    // against that didn't exist before, which is exactly why capturing it
+    // wasn't worth the complexity back then.
     file: "src/components/ArrivalPhotoCapture.tsx",
-    markers: ["Confirm Arrival Now", "ArrivalLocationEvidence"],
-    absentMarkers: ["Confirm With Location", "navigator.geolocation.getCurrentPosition"],
+    markers: [
+      "ArrivalLocationEvidence",
+      "navigator.geolocation.getCurrentPosition",
+      "captureLocationEvidence",
+    ],
+    absentMarkers: ["Confirm With Location"],
   },
   {
     file: "api/booking-action.ts",
@@ -78,7 +90,6 @@ const checks = [
       "reusedExistingTicket",
       "ticket?.id && !reusedExistingTicket",
       "bookingStateChanged",
-      "activatedByThisRequest",
       "completedByThisRequest",
       "Claim the cancellable booking row before starting refund work",
       "This booking changed state before arrival could be recorded",
@@ -86,6 +97,15 @@ const checks = [
       "fetchArrivalCheckinLeadHours",
       "Arrival check-in opens",
       "You can't finish a trip before it starts",
+      // Handover redesign (this session): arrival never activates a trip on
+      // its own anymore - a mandatory handover_confirm (lister)/
+      // handover_receive (renter) pair sits between "both arrived" and
+      // "active". See CHAPTER 47 in the database master file.
+      "bothArrivedAfterThis",
+      "handover_confirm",
+      "handover_receive",
+      "lister_handover_confirmed_at",
+      "renter_handover_received_at",
     ],
   },
   {
@@ -118,8 +138,13 @@ const checks = [
     absentMarkers: ["admin.no.reply.360@gmail.com"],
   },
   {
+    // Dynamic legal content (this session): the contact email mention moved
+    // out of static JSX into the admin-editable content (legal_document_versions,
+    // document_key='privacy_policy') as a {{CONTACT_EMAIL}} token, substituted
+    // with the live value at render time - it's no longer a literal
+    // "mailto:${contactEmail}" string in this file.
     file: "src/pages/PrivacyPolicyPage.tsx",
-    markers: ["usePlatformContactEmail", "mailto:${contactEmail}"],
+    markers: ["usePlatformContactEmail", "{{CONTACT_EMAIL}}", "sanitizeLegalDocumentHtml"],
     absentMarkers: ["admin.no.reply.360@gmail.com"],
   },
   {
@@ -205,20 +230,32 @@ const checks = [
     absentMarkers: ["isLiveLisPickup", "optionalPhotos"],
   },
   {
+    // "Handover Confirmed by Lister" was renamed - arrival no longer implies
+    // a handover happened (that's now its own gated step, see the
+    // handover_confirm/handover_receive entry above). return_arrive became
+    // mutual (both roles call it) in this session's redesign, mirroring
+    // pickup arrival, instead of a renter-only one-way announcement.
     file: "api/booking-action.ts",
     markers: [
-      "Handover Confirmed by Lister",
+      "Lister Arrived for Pickup",
       "confirmOnBehalfOfRenter",
       "return_arrive",
       "renter_return_arrived_at",
+      "lister_return_arrived_at",
+      "bothArrivedForReturn",
     ],
   },
   {
+    // "I've Returned the Car" was renamed to "I Have Arrived" - the return
+    // leg's renter tap is now a presence check mirroring pickup arrival
+    // (mutual with the lister), not a one-way "the car is back" claim.
     file: "src/pages/MyBookingsPage.tsx",
     markers: [
       "Next step",
       "Trip progress",
-      "I've Returned the Car",
+      "I Have Arrived",
+      "handleHandoverReceive",
+      "getReturnNoShowWindowState",
       "Car Confirm",
       "handleReturnArrive",
       "Skip for now",
@@ -448,12 +485,17 @@ const checks = [
     ],
   },
   {
+    // Commission flip (this session): the payout receipt used to tell the
+    // lister the commission was "retained separately and not part of this
+    // amount" - now it's deducted from their base rental before payout, so
+    // the receipt itemizes it as a real deduction instead.
     file: "api/lib/email.ts",
     markers: [
       "sendAdminAlertEmail",
       "Trip extension",
       "Fuel / charge reimbursement",
-      "commission was retained separately",
+      "commission was deducted from your base rental",
+      "SafeDrive commission",
       "admin-alert:${input.eventKey}",
     ],
   },

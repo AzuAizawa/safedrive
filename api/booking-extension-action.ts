@@ -14,6 +14,17 @@ export const config = {
 // approved extension), not just this one request's added days.
 const MAX_TOTAL_RENTAL_DAYS = 30;
 
+// Same "never past the moment that matters" deadline pattern as
+// booking_early_returns' response_deadline (CHAPTER 46): the lister must
+// decide within 24h, capped at the end of the CURRENT return day - deciding
+// after the original return date has already passed is moot.
+const RESPONSE_WINDOW_HOURS = 24;
+
+// Minimum wait between a cancelled/rejected/expired extension request and a
+// new one for the same booking, so a renter can't grief the lister with a
+// rapid request-cancel-request notification loop.
+const REQUEST_COOLDOWN_MINUTES = 30;
+
 type ExtensionAction = "request" | "approve" | "reject" | "cancel";
 
 type ExtensionActionPayload = {
@@ -53,6 +64,7 @@ type BookingExtensionRecord = {
   renter_id: string;
   owner_id: string;
   status: string;
+  current_end_date: string;
   requested_end_date: string;
   extension_days: number;
   requested_total_days: number;
@@ -60,6 +72,7 @@ type BookingExtensionRecord = {
   fuel_top_up_amount: number;
   extension_amount: number;
   total_additional_amount: number;
+  response_deadline: string | null;
 };
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
@@ -103,6 +116,52 @@ const diffDays = (fromDate: string, toDate: string) => {
   if (!from || !to) return null;
   const ms = to.getTime() - from.getTime();
   return Math.round(ms / 86_400_000);
+};
+
+// Manila-local end-of-day, epoch ms - same pattern used for the early-return
+// response_deadline (CHAPTER 46).
+const manilaEndOfDayMs = (dateOnly: string) => {
+  const [y, m, d] = dateOnly.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return Date.UTC(y, m - 1, d, 23, 59, 59) - 8 * 60 * 60 * 1000;
+};
+
+// The extra days must not collide with another active booking: another
+// renter's trip on this same car, or another trip of this renter on any car
+// (one trip at a time - the account holder is the driver). Shared between
+// request time and approve time, since the calendar can change in between.
+const findExtensionCollision = async (
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  carId: string,
+  renterId: string,
+  bookingId: string,
+  windowStart: Date,
+  windowEnd: Date,
+) => {
+  const { data: activeBookings, error } = await supabase
+    .from("bookings")
+    .select("id, car_id, renter_id, start_date, end_date")
+    .in("status", [
+      "pending",
+      "confirmed",
+      "awaiting_payment",
+      "downpayment_paid",
+      "fully_paid",
+      "active",
+    ])
+    .neq("id", bookingId);
+  if (error) throw error;
+
+  return (activeBookings ?? []).some((other) => {
+    const otherStart = parseDateOnly(other.start_date);
+    const otherEnd = parseDateOnly(other.end_date);
+    if (!otherStart || !otherEnd) return false;
+    const datesOverlap =
+      windowStart.getTime() <= otherEnd.getTime() &&
+      windowEnd.getTime() >= otherStart.getTime();
+    if (!datesOverlap) return false;
+    return other.car_id === carId || other.renter_id === renterId;
+  });
 };
 
 export default async function handler(req: Request) {
@@ -193,9 +252,12 @@ export default async function handler(req: Request) {
       const dailyCommission =
         Number(bookingRecord.commission) / Math.max(1, bookingRecord.total_days);
       const extensionAmount = Math.round(dailyRate * extensionDays * 100) / 100;
+      // Commission is still tracked (needed to recognize platform revenue and
+      // to reduce the lister's payout, api/lib/payoutAutomation.ts) but is no
+      // longer charged to the renter - mirrors api/create-booking.ts.
       const extensionCommission = Math.round(dailyCommission * extensionDays * 100) / 100;
       const totalAdditionalAmount =
-        Math.round((extensionAmount + extensionCommission + fuelTopUpAmount) * 100) / 100;
+        Math.round((extensionAmount + fuelTopUpAmount) * 100) / 100;
 
       const { data: existingPending } = await supabase
         .from("booking_extensions")
@@ -213,40 +275,39 @@ export default async function handler(req: Request) {
         );
       }
 
-      // The extra days must not collide with another active booking: another
-      // renter's trip on this same car, or another trip of this renter on any
-      // car (one trip at a time - the account holder is the driver).
+      // Cooldown against a rapid request-cancel-request loop grieving the
+      // lister with repeated notifications - measured from the most recent
+      // extension row for this booking regardless of its status.
+      const { data: recentExtension } = await supabase
+        .from("booking_extensions")
+        .select("created_at")
+        .eq("booking_id", bookingRecord.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (recentExtension?.created_at) {
+        const elapsedMs = Date.now() - new Date(recentExtension.created_at).getTime();
+        if (elapsedMs < REQUEST_COOLDOWN_MINUTES * 60 * 1000) {
+          return jsonResponse(
+            {
+              error: `Please wait a few minutes before submitting another extension request for this booking.`,
+            },
+            429,
+          );
+        }
+      }
+
       const extWindowStart = parseDateOnly(bookingRecord.end_date);
       const extWindowEnd = parseDateOnly(payload.requestedEndDate);
       if (extWindowStart && extWindowEnd) {
-        const { data: activeBookings, error: activeBookingError } = await supabase
-          .from("bookings")
-          .select("id, car_id, renter_id, start_date, end_date")
-          .in("status", [
-            "pending",
-            "confirmed",
-            "awaiting_payment",
-            "downpayment_paid",
-            "fully_paid",
-            "active",
-          ])
-          .neq("id", bookingRecord.id);
-        if (activeBookingError) throw activeBookingError;
-
-        const collides = (activeBookings ?? []).some((other) => {
-          const otherStart = parseDateOnly(other.start_date);
-          const otherEnd = parseDateOnly(other.end_date);
-          if (!otherStart || !otherEnd) return false;
-          const datesOverlap =
-            extWindowStart.getTime() <= otherEnd.getTime() &&
-            extWindowEnd.getTime() >= otherStart.getTime();
-          if (!datesOverlap) return false;
-          return (
-            other.car_id === bookingRecord.car_id ||
-            other.renter_id === bookingRecord.renter_id
-          );
-        });
-
+        const collides = await findExtensionCollision(
+          supabase,
+          bookingRecord.car_id,
+          bookingRecord.renter_id,
+          bookingRecord.id,
+          extWindowStart,
+          extWindowEnd,
+        );
         if (collides) {
           return jsonResponse(
             {
@@ -268,6 +329,14 @@ export default async function handler(req: Request) {
         );
       }
 
+      const currentEndOfDayMs = manilaEndOfDayMs(bookingRecord.end_date);
+      const responseDeadline = new Date(
+        Math.min(
+          Date.now() + RESPONSE_WINDOW_HOURS * 60 * 60 * 1000,
+          currentEndOfDayMs ?? Date.now() + RESPONSE_WINDOW_HOURS * 60 * 60 * 1000,
+        ),
+      ).toISOString();
+
       const { data: extensionRow, error: extensionError } = await supabase
         .from("booking_extensions")
         .insert({
@@ -281,8 +350,10 @@ export default async function handler(req: Request) {
           reason: payload.reason.trim(),
           fuel_top_up_amount: fuelTopUpAmount,
           extension_amount: extensionAmount,
+          extension_commission: extensionCommission,
           total_additional_amount: totalAdditionalAmount,
           status: "pending",
+          response_deadline: responseDeadline,
         })
         .select("*")
         .single();
@@ -346,12 +417,65 @@ export default async function handler(req: Request) {
 
     const extensionRecord = extension as BookingExtensionRecord;
 
+    // Defensive freshness check, same idiom as booking-early-return-action.ts:
+    // the cron (api/expire-booking-deadlines.ts) is the primary path that
+    // flips a stale pending request to 'expired' with full notifications -
+    // this just closes the narrow race window between the deadline passing
+    // and the next cron tick, for whichever action arrives first.
+    if (
+      extensionRecord.status === "pending" &&
+      extensionRecord.response_deadline &&
+      Date.now() > new Date(extensionRecord.response_deadline).getTime()
+    ) {
+      await supabase
+        .from("booking_extensions")
+        .update({ status: "expired" })
+        .eq("id", extensionRecord.id)
+        .eq("status", "pending");
+      return jsonResponse(
+        { error: "This extension request expired before it was decided." },
+        409,
+      );
+    }
+
     if (payload.action === "approve") {
       if (extensionRecord.owner_id !== user.id) {
         return jsonResponse({ error: "Only the lister can approve this extension" }, 403);
       }
       if (extensionRecord.status !== "pending") {
         return jsonResponse({ error: "Only pending extensions can be approved." }, 409);
+      }
+
+      // Re-validate calendar availability - the calendar could have changed
+      // since the renter first submitted this request.
+      const { data: parentBooking, error: parentBookingError } = await supabase
+        .from("bookings")
+        .select("car_id")
+        .eq("id", extensionRecord.booking_id)
+        .single();
+      if (parentBookingError || !parentBooking) {
+        throw parentBookingError ?? new Error("Booking not found for this extension");
+      }
+      const approveWindowStart = parseDateOnly(extensionRecord.current_end_date);
+      const approveWindowEnd = parseDateOnly(extensionRecord.requested_end_date);
+      if (approveWindowStart && approveWindowEnd) {
+        const collides = await findExtensionCollision(
+          supabase,
+          parentBooking.car_id,
+          extensionRecord.renter_id,
+          extensionRecord.booking_id,
+          approveWindowStart,
+          approveWindowEnd,
+        );
+        if (collides) {
+          return jsonResponse(
+            {
+              error:
+                "This extension can no longer be approved - the new dates now overlap another booking. Ask the renter to submit a new request.",
+            },
+            409,
+          );
+        }
       }
 
       const paymentDeadline = addDays(new Date(), 1).toISOString();

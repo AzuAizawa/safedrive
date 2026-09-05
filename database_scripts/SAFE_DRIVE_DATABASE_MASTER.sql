@@ -8380,4 +8380,441 @@ create index if not exists idx_booking_early_returns_response_deadline
   on public.booking_early_returns (response_deadline)
   where response_deadline is not null;
 
+-- ============================================================================
+-- CHAPTER 47 - Mandatory pickup handover before a trip goes active
+-- ============================================================================
+-- Reported gap: "arrive" auto-flipped a booking straight to active the
+-- instant both sides checked in, with no verification that a handover of the
+-- actual vehicle (and its condition) ever happened in between. status stays
+-- 'fully_paid' through the whole handover dance - no new enum value - so
+-- every existing status-based gate elsewhere (extensions, early-return, the
+-- booking-conversation open check, incident actions) keeps working
+-- untouched. Only the renter's own "handover_receive" confirmation flips
+-- status to 'active' now (api/booking-action.ts).
+
+alter table public.bookings
+  add column if not exists lister_handover_confirmed_at timestamptz,
+  add column if not exists renter_handover_received_at timestamptz,
+  add column if not exists handover_stall_notified_at timestamptz;
+
+create index if not exists idx_bookings_pending_handover
+  on public.bookings (id)
+  where status = 'fully_paid'
+    and renter_arrived_at is not null
+    and lister_arrived_at is not null
+    and renter_handover_received_at is null;
+
+-- ============================================================================
+-- CHAPTER 48 - Mutual return arrival, mirroring pickup
+-- ============================================================================
+-- Reported gap: the return leg was one-way - only the renter had an
+-- "I've returned the car" announcement, with no matching "the lister is here
+-- to receive it" check-in the way pickup already had for both sides.
+-- lister_return_arrived_at mirrors the existing renter_return_arrived_at
+-- (CHAPTER 39). return_no_show_reminder_sent_at dedupes the new return-leg
+-- no-show reminder sweep in api/expire-booking-deadlines.ts. The dispute
+-- reason list gains a value for a renter reporting a lister who never showed
+-- to receive the return (mirrors the existing renter_no_car/renter_no_show
+-- pickup-side pair, handled in api/booking-incident-action.ts).
+
+alter table public.bookings
+  add column if not exists lister_return_arrived_at timestamptz,
+  add column if not exists return_no_show_reminder_sent_at timestamptz;
+
+alter table public.bookings
+  drop constraint if exists bookings_dispute_reason_check,
+  add constraint bookings_dispute_reason_check
+  check (
+    dispute_reason is null
+    or dispute_reason in (
+      'renter_unreachable', 'stolen_or_missing', 'accident_or_breakdown', 'other',
+      'lister_no_show_at_return'
+    )
+  );
+
+create index if not exists idx_bookings_return_no_show_watch
+  on public.bookings (id)
+  where status = 'active'
+    and return_no_show_reminder_sent_at is null
+    and (renter_return_arrived_at is not null or lister_return_arrived_at is not null);
+
+-- ============================================================================
+-- CHAPTER 49 - Extension response deadline + approved-unpaid expiry
+-- ============================================================================
+-- Reported gap: unlike booking_early_returns (CHAPTER 46), a pending
+-- booking_extensions request had no deadline - a lister could leave it
+-- unanswered forever. And once approved, booking_extensions.payment_deadline
+-- was stamped (api/booking-extension-action.ts) but nothing ever swept an
+-- approved-but-unpaid row - it could sit forever instead of expiring like
+-- every other payment deadline in the system. status already allows
+-- 'expired' from day one, same as early-return before CHAPTER 46.
+
+alter table public.booking_extensions
+  add column if not exists response_deadline timestamptz;
+
+create index if not exists idx_booking_extensions_response_deadline
+  on public.booking_extensions (response_deadline)
+  where response_deadline is not null;
+
+create index if not exists idx_booking_extensions_payment_deadline
+  on public.booking_extensions (payment_deadline)
+  where payment_deadline is not null;
+
+-- ============================================================================
+-- CHAPTER 50 - Chat attachment bucket fix
+-- ============================================================================
+-- Trip-condition photos (pickup/return evidence) live in the private
+-- 'trip-condition-evidence' bucket, but ticket_messages / getTicketAttachmentUrl
+-- hardcoded 'support-attachments'. Auto-posting trip-condition photos into a
+-- booking's conversation thread (api/submit-trip-condition-report.ts) needs a
+-- per-message bucket override so the frontend signs against the right one.
+-- Nullable and defaults to the legacy behavior for every existing row.
+
+alter table public.ticket_messages
+  add column if not exists attachment_bucket text;
+
+-- ============================================================================
+-- CHAPTER 51 - Car listing pickup pin (fake-arrival fraud hardening)
+-- ============================================================================
+-- Reported gap: arrival check-in accepts an optional device location
+-- (bookings.renter_arrival_latitude/longitude, lister_arrival_latitude/
+-- longitude - already existed, unused until CHAPTER 47/48's revived
+-- capture), but there was nothing to compare it against - cars.location is
+-- free text only. A renter could tap "I have arrived" without being there,
+-- then file a no-show claim for an automatic full refund with zero way to
+-- verify the claim. Rather than geocode the free-text address (imprecise,
+-- needs an external API call), the lister drops a pin once when creating or
+-- editing their listing (src/pages/MyVehiclesPage.tsx) - zero ongoing cost,
+-- more accurate than a geocoded address, and a nicer renter experience too
+-- (a real pin instead of just a text address). api/booking-incident-action.ts
+-- compares an arrival's stored coordinates against this pin before deciding
+-- whether a no-show refund can be automatic or needs manual review.
+
+alter table public.cars
+  add column if not exists pickup_latitude numeric(9,6),
+  add column if not exists pickup_longitude numeric(9,6);
+
+-- ============================================================================
+-- CHAPTER 52 - Commission flip: renter pays listed price, lister absorbs it
+-- ============================================================================
+-- Reported gap/model change: commission used to be added ON TOP of what the
+-- renter pays (api/create-booking.ts computed total_price = base_price +
+-- commission + processing fee, and api/lib/payoutAutomation.ts paid the
+-- lister the full undiminished base_price). This contradicted the Terms of
+-- Service and master documentation, which already described commission as
+-- coming out of the lister's payout. Flipped so the renter pays exactly
+-- base_price (+ the unrelated, unchanged payment-processing fee), and the
+-- lister's payout becomes base_price - commission.
+--
+-- booking_extensions.extension_commission: previously the extension's
+-- commission slice was never stored - it was derived as a residual
+-- (total_additional_amount - extension_amount - fuel_top_up_amount) in
+-- api/webhooks/paymongo.ts, which only worked because total_additional_amount
+-- (what the renter pays) used to include it. Now that renters aren't charged
+-- the extension's commission either, that residual would always be zero, so
+-- it must be stored explicitly at request time (api/booking-extension-action.ts)
+-- and read back at payment confirmation instead of re-derived.
+
+alter table public.booking_extensions
+  add column if not exists extension_commission numeric not null default 0;
+
+-- ============================================================================
+-- CHAPTER 53 - Dynamic legal content (Terms, Privacy Policy, Platform Agreement)
+-- ============================================================================
+-- Reported requirement: SafeDrive's own legal documents were fully hardcoded
+-- JSX (TermsPage.tsx, PrivacyPolicyPage.tsx, PlatformAgreementPage.tsx) - any
+-- change needed a code deploy. Made dynamic: a super admin edits and
+-- publishes new content from a dedicated admin page, reached from Platform
+-- Settings; the public pages render whatever is currently published.
+--
+-- Mirrors car_agreement_versions' "one active row" pattern (a partial unique
+-- index on the active status), not the heavier platform_setting_change_requests
+-- supermajority-voting workflow - a single super admin can publish directly
+-- (same governance as set_platform_contact_email / set_verification_eta_messages),
+-- but every published version is kept permanently, never overwritten, for a
+-- full audit trail. content_html is sanitized both on save (the admin editor,
+-- src/lib/richText.ts sanitizeLegalDocumentHtml) and again on render (the
+-- public pages) as defense in depth.
+--
+-- Seeded with today's exact Terms/Privacy/Platform-Agreement text as version 1
+-- for each document, including the new security-deposit disclosure clauses
+-- (the deposit feature itself was removed in CHAPTER 34; this pass adds the
+-- proactive "arrange it directly with each other, outside SafeDrive" half
+-- that was still missing next to the existing defensive "SafeDrive doesn't
+-- hold one" language).
+
+create table if not exists public.legal_document_versions (
+  id uuid primary key default gen_random_uuid(),
+  document_key text not null check (document_key in ('terms_of_service','privacy_policy','platform_agreement')),
+  version_number integer not null,
+  content_html text not null,
+  status text not null default 'published' check (status in ('published','superseded')),
+  published_by uuid references public.profiles(id),
+  published_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  unique (document_key, version_number)
+);
+
+create unique index if not exists legal_document_one_published_version
+  on public.legal_document_versions (document_key)
+  where status = 'published';
+
+alter table public.legal_document_versions enable row level security;
+
+-- Public/anonymous read of the published version only - Terms/Privacy are
+-- viewed before signup. Super admins can also read superseded rows (version
+-- history in the admin editor).
+drop policy if exists "Anyone reads published legal documents" on public.legal_document_versions;
+create policy "Anyone reads published legal documents" on public.legal_document_versions
+  for select using (status = 'published' or public.is_super_admin());
+
+create or replace function public.publish_legal_document_version(p_document_key text, p_content_html text)
+returns public.legal_document_versions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  next_version integer;
+  result public.legal_document_versions;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can publish legal document changes';
+  end if;
+  if p_document_key not in ('terms_of_service','privacy_policy','platform_agreement') then
+    raise exception 'Unknown document key';
+  end if;
+  if char_length(trim(p_content_html)) = 0 then
+    raise exception 'Content cannot be empty';
+  end if;
+
+  select coalesce(max(version_number), 0) + 1 into next_version
+    from public.legal_document_versions where document_key = p_document_key;
+
+  update public.legal_document_versions
+    set status = 'superseded'
+    where document_key = p_document_key and status = 'published';
+
+  insert into public.legal_document_versions (document_key, version_number, content_html, status, published_by)
+    values (p_document_key, next_version, p_content_html, 'published', auth.uid())
+    returning * into result;
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'legal_document_published', 'legal_document_versions', result.id::text,
+      jsonb_build_object('document_key', p_document_key, 'version_number', next_version));
+
+  return result;
+end;
+$$;
+revoke all on function public.publish_legal_document_version(text, text) from public, anon;
+grant execute on function public.publish_legal_document_version(text, text) to authenticated;
+
+-- Seed version 1 for each document - only if this document has never been
+-- published before, so re-running this migration is safe and never clobbers
+-- a real admin edit made after the initial rollout.
+insert into public.legal_document_versions (document_key, version_number, content_html, status)
+select 'terms_of_service', 1, $tos$<h2>1. Introduction and Acceptance of Terms</h2>
+<p>Welcome to SafeDrive (the "Platform"). These terms describe the rules and current software workflow for users of the peer-to-peer vehicle-rental marketplace. They must receive Philippine legal, consumer, privacy, insurance, and tax review before SafeDrive accepts real-money public transactions.</p>
+<p>By creating an account or using a protected service, you acknowledge the version shown to you and agree to follow these rules. The Platform Terms are separate from the lister's vehicle-specific rental agreement, which the renter must review and accept before a booking request is created.</p>
+
+<h2>2. Definitions</h2>
+<ul>
+<li><strong>"Platform"</strong>: The SafeDrive web application, server handlers, and related services.</li>
+<li><strong>"Owner" / "Lister"</strong>: A verified user who lists a vehicle for rent on the Platform.</li>
+<li><strong>"Renter"</strong>: A verified user who requests to rent a vehicle from a Lister.</li>
+<li><strong>"Vehicle"</strong>: Any automobile listed for rent on the Platform.</li>
+<li><strong>"Booking"</strong>: A confirmed rental arrangement between a Lister and a Renter.</li>
+</ul>
+
+<h2>3. User Registration and Verification</h2>
+<h3>3.1 Eligibility</h3>
+<p>You must be at least 18 years of age and possess the legal capacity to enter into a binding contract. <em>Legal Basis: In accordance with Republic Act No. 6809 (lowering the age of majority to 18 years), Article 1327 of the Civil Code of the Philippines, and Article 236 of the Family Code, unemancipated minors cannot give consent to a contract.</em></p>
+<h3>3.2 Verification</h3>
+<p>To access listing or booking features, users must complete the identity-review process and provide the evidence requested by the current verification form, including:</p>
+<ul>
+<li>Full legal name and contact information.</li>
+<li>A valid Professional or Non-Professional Driver's License (Front and Back) in compliance with the Land Transportation and Traffic Code (Republic Act No. 4136).</li>
+<li>The accepted secondary identification evidence shown by the form.</li>
+<li>Selfies used for manual identity comparison and anti-fraud review.</li>
+</ul>
+<h3>3.3 Accuracy</h3>
+<p>You must provide truthful and current information. Suspected falsification is reviewed, may lead to restriction or termination under the documented process, and may be reported when SafeDrive has a lawful basis or duty to do so.</p>
+
+<h2>4. Vehicle Listing and Requirements</h2>
+<ul>
+<li><strong>4.1 Registration and authority:</strong> Listers must provide current OR/CR evidence and must have lawful authority to list the vehicle.</li>
+<li><strong>4.2 Condition and insurance disclosure:</strong> Vehicles must be roadworthy and selected from the approved catalogue. Current registration and CTPL evidence are required. The lister must disclose the intended rental use to the insurer; optional comprehensive-policy information creates an admin warning when missing or expired. SafeDrive does not promise that any policy covers peer-to-peer rental.</li>
+<li><strong>4.3 Pricing limits:</strong> The current listing form accepts PHP 500 to PHP 100,000 per day, but the server rejects a booking total above PHP 100,000. A lower operational or provider limit may be shown before checkout.</li>
+<li><strong>4.4 Reapproval:</strong> A material listing, image, ownership, insurance, pricing, or rental-agreement change returns the vehicle to admin review before public availability.</li>
+</ul>
+
+<h2>5. Booking Process and Payments</h2>
+<h3>5.1 Booking Windows &amp; Duration Limits</h3>
+<ul>
+<li>The earliest a trip can start is the day after the request; same-day starts are not accepted.</li>
+<li>The 24-hour owner-response and 24-hour reservation-payment windows both apply, but neither can run past the scheduled pickup time. A request that is not accepted and paid before pickup is cancelled automatically.</li>
+<li>Bookings cannot be made more than 30 days in advance.</li>
+<li>The end date must be after the start date and must remain inside the same 30-day booking horizon.</li>
+</ul>
+<p><strong>5.2 Reservation Payment:</strong> Upon an Owner's approval of a request (within a 24-hour response window), the Renter has 24 hours to either pay the required reservation downpayment or settle the full booking amount via our secure payment gateway (PayMongo).</p>
+<p><strong>5.3 Final Balance:</strong> If the Renter chooses the partial reservation downpayment option (its current percentage is shown on the vehicle page before booking), the remaining balance must be settled through the Platform before the designated rental start time.</p>
+<p><strong>5.4 Fees:</strong> The Renter's displayed total is the base rental price plus the disclosed payment-processing recovery only - the platform commission is never added to what the Renter pays. SafeDrive calculates its active commission from the base rental price and deducts it from the eligible Lister payout.</p>
+<p><strong>5.5 Security Deposits:</strong> SafeDrive does not collect, hold, or process any refundable security deposit. If a Lister requires one, its amount, collection, and return are arranged directly and independently between the Lister and Renter, entirely outside the Platform. SafeDrive is not a party to, and assumes no responsibility for, any dispute over a security deposit arranged this way.</p>
+
+<h2>6. Cancellation, Refund, and No-Show Policy</h2>
+<p><strong>6.1 Renter Cancellation (Full-Refund Window):</strong> A paid booking cancelled at least a set number of hours before the scheduled pickup time (currently shown on the vehicle page and in My Bookings, default 24 hours) is refunded in full, handled automatically. Cancelling an unpaid request is always free.</p>
+<p><strong>6.2 Short-Notice Renter Cancellation:</strong> A paid booking cancelled inside the full-refund window (or after the pickup time has passed) is not refunded automatically. A policy share of the captured amount (default 50%) is recommended back to the Renter, with the remainder recorded as short-notice compensation to the Lister; the exact amount and return method are confirmed by SafeDrive support review against provider evidence. The system does not apply any penalty beyond this published share.</p>
+<p><strong>6.3 Lister Cancellation:</strong> A lister may cancel before the trip starts. If booking money was captured, SafeDrive attempts a full provider refund and creates super-admin manual review when automation cannot confirm it.</p>
+<p><strong>6.4 No-Show and Disputes:</strong> After the 30-minute pickup grace period, either participant may open a booking-linked no-show support report. Admin review may use arrival timestamps, optional consented location/photos, messages, payment records, and other lawful evidence. A no-show allegation does not automatically decide a refund or payout.</p>
+
+<h2>7. Insurance and Liability</h2>
+<p><strong>7.1 No Platform Insurance:</strong> SafeDrive DOES NOT provide any insurance coverage for vehicles, users, or third parties.</p>
+<p><strong>7.2 Required review:</strong> CTPL/CMVLI is connected to vehicle registration and does not by itself prove peer-to-peer rental, own-damage, theft, passenger, or commercial-use coverage. Listers must confirm intended use directly with the insurer and provide current evidence requested by SafeDrive.</p>
+<p><strong>7.3 Responsibility and non-waivable rights:</strong> Renters and listers remain responsible for lawful driving, roadworthiness, truthful disclosure, and the vehicle-specific agreement. Any limitation of SafeDrive responsibility applies only to the extent Philippine law permits and cannot waive mandatory consumer or statutory rights.</p>
+
+<h2>8. User Conduct</h2>
+<p>Users agree NOT to:</p>
+<ul>
+<li>Use the vehicle for illegal activities or transportation of prohibited substances.</li>
+<li>Sub-rent or lend the vehicle to any third party (the registered Renter is the sole authorized driver).</li>
+<li>Tamper with or modify the vehicle in any way.</li>
+<li>Bypass the platform to pay for rentals in cash.</li>
+</ul>
+
+<h2>9. Account Security and Termination</h2>
+<p>The browser applies a progressive five-attempt sign-in throttle in five-minute steps and records supported security events; Supabase remains the authentication authority. This browser control can be cleared with browser storage and is not represented as an account-wide server lock. SafeDrive may restrict or terminate an account after authorized review of fraud, safety, security, or repeated Terms violations, with reasons and audit evidence where appropriate.</p>
+
+<h2>10. Governing Law</h2>
+<p>These Terms are intended to be governed by Philippine law. Venue, dispute-resolution, consumer-redress, and enforceability language must be finalized by Philippine counsel before public real-money launch; nothing here removes a remedy or forum that applicable law makes mandatory.</p>$tos$, 'published'
+where not exists (select 1 from public.legal_document_versions where document_key = 'terms_of_service');
+
+insert into public.legal_document_versions (document_key, version_number, content_html, status)
+select 'privacy_policy', 1, $priv$<h2>1. Introduction</h2>
+<p>SafeDrive ("we," "our," or "us") is a peer-to-peer car-rental platform. This notice explains the personal data the current system is designed to collect, why it is used, who may receive it, and how you may exercise your rights under Republic Act No. 10173 (the Data Privacy Act of 2012) and its implementing rules. Technical controls support compliance, but they do not replace the privacy, legal, and vendor reviews required before a public launch.</p>
+<p>Our data processing is bound by the DPA's core principles:</p>
+<ul>
+<li><strong>Transparency:</strong> We describe the data and purposes before or as soon as reasonably practical after collection.</li>
+<li><strong>Legitimate purpose:</strong> Processing must have a declared, specific, and lawful platform purpose.</li>
+<li><strong>Proportionality:</strong> Collection and use should be adequate, relevant, and not excessive for that purpose.</li>
+</ul>
+
+<h2>2. Data We Collect</h2>
+<p>To provide our peer-to-peer car rental services and deter fraud, we distinguish between standard Personal Information and highly protected Sensitive Personal Information (SPI):</p>
+<ul>
+<li><strong>Contact and identity information:</strong> Name, address, phone number, email address, date of birth, and the verification fields requested by the current form.</li>
+<li><strong>Verification and vehicle documents:</strong> Driver's-license and other accepted identity evidence, selfies used for identity comparison, OR/CR images, insurance declarations, and rental-agreement files.</li>
+<li><strong>Transaction Data:</strong> Records of PayMongo payments, refunds, and booking history.</li>
+<li><strong>Trip and evidence data:</strong> Condition photos, odometer and fuel/battery readings, support records, and optional browser location only when you actively consent to location-backed evidence.</li>
+<li><strong>Contact inquiry data:</strong> Name, email, optional phone, selected topics, message, reply status, and a salted anti-abuse fingerprint submitted through the public contact form.</li>
+<li><strong>Device and usage data:</strong> Timestamped security, audit, and login-related events used for account security, fraud review, and dispute handling.</li>
+</ul>
+
+<h2>3. Data Security and Technical Safeguards</h2>
+<p>The repository includes technical controls intended to reduce unauthorized access, alteration, disclosure, or destruction. Their live effectiveness must be verified after each database migration and deployment.</p>
+<p><strong>Encryption at Rest:</strong> The database master defines pgcrypto protection for designated identity fields. This claim applies only after the reviewed chapter and its key-management procedure are proven in the live database.</p>
+<p><strong>Encryption in Transit:</strong> Supabase and payment-provider traffic uses HTTPS. The selected production host must also enforce HTTPS before public use.</p>
+<p><strong>Row-Level Security:</strong> Row-Level Security, role checks, private storage, and short-lived signed URLs restrict ordinary access. Service-role operations run only in server handlers.</p>
+<p><strong>Audit and review:</strong> Security events, privileged actions, agreement acceptance, and financial corrections are recorded for review. Logs are evidence inputs, not a guarantee that every incident is prevented.</p>
+
+<h2>4. Purpose of Data Processing</h2>
+<p>Depending on the data and activity, processing must rely on an applicable lawful basis, such as steps necessary to provide the requested service, compliance with a legal obligation, a properly assessed legitimate interest, or consent where consent is required. Current purposes include:</p>
+<ul>
+<li>To verify your identity, driving eligibility, and legal age to contract. A reviewer's browser may run on-device text recognition on the ID images you upload and decode the digital-licence QR code screenshot to help cross-check the details you submitted. This processing happens locally in the reviewer's browser and is not sent to any third party; a human reviewer always makes the final decision.</li>
+<li>To preserve the approved lister agreement version and the renter's recorded acceptance for later evidentiary review.</li>
+<li>To create hosted payments, confirm provider events, process refunds and payouts, and reconcile transaction records through PayMongo. SafeDrive does not describe this arrangement as regulated escrow.</li>
+<li>To monitor platform integrity and resolve disputes using timestamped check-in evidence, including optional location data only when you choose the location-backed arrival button.</li>
+</ul>
+
+<h2>5. Third-Party Disclosures</h2>
+<p>SafeDrive does not sell personal data. Data may be disclosed to service providers or authorities only for a declared purpose, with appropriate contracts, safeguards, and legal authority. The current integrations are:</p>
+<ul>
+<li><strong>Supabase:</strong> Database, authentication, and object-storage infrastructure.</li>
+<li><strong>PayMongo:</strong> Hosted checkout and approved payment, refund, or money-movement services. SafeDrive does not receive or store full card credentials entered on the hosted checkout.</li>
+<li><strong>Google Apps Script and Gmail:</strong> Delivery of guest-inquiry replies and configured reminder emails.</li>
+<li><strong>Selected application host:</strong> Hosting is not yet selected. This notice and the vendor register must be updated before production deployment.</li>
+</ul>
+
+<h2>6. Data Retention and Account Deletion</h2>
+<p><strong>6.1 Schedule:</strong> Data is retained only for the declared purpose, a documented legal or operational requirement, establishment or defense of legal claims, or another lawful basis. Category-specific periods in the internal retention schedule are provisional until privacy, legal, tax, and accounting review is complete.</p>
+<p><strong>6.2 Requests:</strong> An account-closure or deletion request starts an identity and scope review; it is not a promise of instant blanket deletion. Approved deletion may use erasure, blocking, restricted archival, or anonymization depending on the record and applicable obligation.</p>
+<p><strong>6.3 Holds:</strong> SafeDrive may preserve limited records while they are required for an active booking, payment, refund, payout, dispute, fraud/security investigation, accounting/tax record, or legal claim. The decision and reason must be recorded and communicated where required.</p>
+<p><strong>6.4 Disposal:</strong> When retention is no longer justified, the approved procedure must cover live records, storage objects, derived copies, and backups. A super-admin completion record is operational evidence; it does not by itself prove every provider copy was erased.</p>
+
+<h2>7. Your Data Privacy Rights</h2>
+<p>As a Filipino citizen or resident acting within the Philippines, the Data Privacy Act of 2012 grants you the following rights:</p>
+<ul>
+<li><strong>Right to be Informed:</strong> To know how your data is being collected and processed.</li>
+<li><strong>Right to Access:</strong> To request copies of your personal data held by us.</li>
+<li><strong>Right to Rectification:</strong> To correct inaccurate, false, or outdated information.</li>
+<li><strong>Right to Erasure/Blocking:</strong> To request the suspension, withdrawal, or removal of your data from our systems.</li>
+<li><strong>Right to Object:</strong> To object to the processing of your data, including processing for direct marketing or automated profiling.</li>
+<li><strong>Right to Data Portability:</strong> To obtain covered electronically processed data in an appropriate format when the statutory conditions apply.</li>
+<li><strong>Right to File a Complaint and Claim Damages:</strong> To raise a complaint with the National Privacy Commission and pursue remedies available under applicable law.</li>
+</ul>
+
+<h2>8. Privacy Contact and Requests</h2>
+<p>For a privacy question or security concern, use the contact below. Registered users may also submit and track an access, correction, restriction, anonymization, or deletion request from the Data Requests page. SafeDrive's formal DPO/responsible-person designation and any required NPC registration remain launch requirements and must not be inferred from this contact address.</p>
+<p><strong>Email:</strong> <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a></p>
+<p>Using the platform acknowledges receipt of this notice. It does not convert every processing purpose into consent or waive any statutory privacy right. Where consent is the applicable lawful basis, SafeDrive must request it specifically and allow withdrawal subject to other lawful grounds.</p>$priv$, 'published'
+where not exists (select 1 from public.legal_document_versions where document_key = 'privacy_policy');
+
+insert into public.legal_document_versions (document_key, version_number, content_html, status)
+select 'platform_agreement', 1, $pa$<h2>1. Purpose and Acceptance of Terms</h2>
+<p>This Platform Agreement explains the SafeDrive web application's marketplace rules and is read together with the Terms and Privacy Policy. SafeDrive is designed to connect verified vehicle listers with verified renters; its final legal classification and required marketplace disclosures remain subject to Philippine legal and consumer review. This agreement is separate from the approved vehicle-specific rental agreement supplied by the Lister and accepted by the Renter before booking.</p>
+
+<h2>2. Account Verification &amp; Eligibility</h2>
+<p>To ensure the safety of all users and vehicles on the platform, SafeDrive enforces strict identity verification protocols:</p>
+<ul>
+<li><strong>Mandatory Identification:</strong> Users must submit a valid Philippine Driver's License, a valid Secondary Government ID, and a Driver's License Digital QR code tied to the Land Transportation Office Land Transportation Management System portal.</li>
+<li><strong>Acceptable Restrictions:</strong> Renters must possess a Land Transportation Office Restriction Code of B or B1, or the old Restriction Code 2, authorizing them to operate light passenger vehicles.</li>
+<li><strong>Manual Verification:</strong> No user may list a vehicle or book a reservation until their identity and documents have been manually reviewed and approved by SafeDrive Administration.</li>
+<li><strong>Ongoing Licence Validity:</strong> A current, unexpired driver's licence is required to <em>book</em> (rent) a vehicle. SafeDrive records the licence expiry and the licence's transmission restriction (Automatic-only or Automatic/Manual) during review; a renter whose licence is automatic-only may only book automatic vehicles. An expired licence places new bookings and checkout on hold until an updated licence is reviewed. Listing and managing your own vehicles relies on your verified identity only and is not affected by licence expiry.</li>
+</ul>
+
+<h2>3. Booking &amp; Reservation Policies</h2>
+<p>To maintain fairness and ensure legal contract performance, all bookings are subject to strict scheduling rules:</p>
+<ul>
+<li><strong>Maximum Advance Booking:</strong> Users may only book a vehicle up to a maximum of 30 days in advance. This prevents unjustified holding of funds and helps preserve vehicle availability and condition.</li>
+<li><strong>Minimum Lead Time:</strong> A trip may start as early as the day after the request is made; same-day starts are not accepted. After a request, the lister has 24 hours to accept and the renter then has 24 hours to pay the reservation. Both steps must be completed before the scheduled pickup time. If they are not, the request is automatically cancelled and the vehicle is released.</li>
+<li><strong>Vehicle Turnover:</strong> Both parties must strictly observe the agreed pickup time. A 30-minute grace period is provided. During pickup, each party must complete the in-app arrival confirmation flow, and if only one party checks in while the other does not appear, the waiting party may submit an in-app no-show report after the grace period.</li>
+</ul>
+
+<h2>4. Fees, Payments, and Cancellations</h2>
+<p>All financial transactions are processed securely through our authorized payment gateway, PayMongo.</p>
+<ul>
+<li><strong>Payment Options:</strong> Once a booking is accepted, the Renter may either settle the required reservation downpayment or pay the full booking amount through the platform. Any remaining balance must be completed before the rental starts.</li>
+<li><strong>Platform Commission:</strong> SafeDrive deducts the active platform commission configured in the system from the Lister's own earnings on each booking - it is never added to the renter's payment - to maintain the platform, server infrastructure, and security verifications.</li>
+<li><strong>Cancellation Policy:</strong> A renter who cancels a paid booking at least the configured number of hours before pickup (default 24) gets an automatic full refund. Inside that window, or after pickup time, only a published share of the captured amount (default 50% to the renter) is recommended, the rest is short-notice lister compensation, and the exact figure is confirmed by support review. A pre-trip lister cancellation always starts a full refund attempt, with super-admin review if provider confirmation is unavailable.</li>
+<li><strong>Early Return:</strong> A renter may request, through the booking, to return the vehicle before the booked end date. The booked rental period belongs to the renter, so an early return does <em>not</em> entitle the renter to any refund for the unused days. If the lister approves the early return, the lister may - at their sole discretion - grant a goodwill refund of an amount they choose; any such goodwill refund is released only after SafeDrive support review. The lister may also decline the request, in which case the original return date and full booking amount stand.</li>
+<li><strong>No Car at Pickup:</strong> If the Renter completes their arrival check-in and the Lister fails to hand over the vehicle within the 30-minute grace period, the Renter may cancel the booking through the app and receive a <em>full</em> automatic refund. The cancellation is recorded against the Lister and does not affect the Renter's reliability record.</li>
+<li><strong>Renter No-Show:</strong> If the Lister completes their arrival check-in and the Renter fails to appear within the 30-minute grace period, the Lister may cancel the booking through the app. The Renter forfeits the same published share of the amount captured (default 50%) as short-notice compensation to the Lister; the remainder is refunded to the Renter only after SafeDrive support confirms the return method. The no-show is recorded against the Renter.</li>
+</ul>
+
+<h2>5. Vehicle Listing Standards</h2>
+<p>Car Owners or Listers must adhere to strict vehicle standards to list their cars on SafeDrive:</p>
+<ul>
+<li><strong>Accepted Vehicles:</strong> Only models and body types present in the admin-approved catalogue may be submitted. Approval also requires current ownership/registration evidence, roadworthiness, insurance declarations, images, and a vehicle-specific rental agreement.</li>
+<li><strong>No unimplemented age promise:</strong> The current schema does not enforce a vehicle-age limit. SafeDrive therefore does not claim that an LTFRB passenger-transport age rule automatically governs this peer-to-peer marketplace. Any future age rule requires an applicability review and matching server/database validation before it appears in these terms.</li>
+<li><strong>Annual Renewals:</strong> Listers must submit updated Land Transportation Office Official Receipt and Certificate of Registration and emission testing documents annually. Failure to do so will result in the immediate suspension of the vehicle's listing.</li>
+</ul>
+
+<h2>6. Dispute Resolution and Anti-Carnapping Policy</h2>
+<p>SafeDrive acts as a neutral third-party digital witness in the event of disputes or criminal activity:</p>
+<ul>
+<li><strong>No-Show Disputes:</strong> In the event of a no-show, disputes are resolved objectively using server-timestamped arrival check-ins, any submitted arrival evidence, and the in-app no-show report created after the 30-minute pickup window.</li>
+<li><strong>Failure to return a vehicle:</strong> The Lister should use the booking-linked support and emergency process. Authorized admins may preserve relevant account, agreement, trip, support, audit, and payment records and may restrict the account. Disclosure to law enforcement requires a lawful, documented basis; SafeDrive does not promise automatic disclosure or call every record immutable.</li>
+</ul>
+
+<h2>7. Permitted Use of Platform and Brand Identity</h2>
+<ul>
+<li>Users may access SafeDrive only for lawful renting, listing, and support-related activities.</li>
+<li>Users, Listers, and Admins may not misrepresent themselves as acting on behalf of SafeDrive or imply ownership of the platform unless explicitly authorized in writing.</li>
+<li>The SafeDrive name, logo, or public trust language may not be reused in misleading advertisements, fake off-platform listings, or independent transactions outside the system.</li>
+</ul>
+
+<h2>8. Limitation of Liability and Legal Position</h2>
+<p>SafeDrive does not provide vehicle insurance. Users remain responsible for lawful driving, roadworthiness, truthful disclosure, the approved vehicle-specific agreement, and insurer confirmation of intended use. Any description of SafeDrive as a marketplace or intermediary, and any limitation of responsibility, applies only to the extent allowed by Philippine law and cannot remove mandatory consumer or statutory rights. Obtain legal and insurance review before real-money public use.</p>
+<p>SafeDrive does not hold a refundable security deposit and is not a party to vehicle condition, damage, theft, or loss disputes between a Lister and Renter - those are governed by the vehicle-specific rental agreement described in Section 4 and the anti-carnapping policy in Section 6. SafeDrive's role is limited to keeping a neutral, timestamped record (pickup/return condition reports, arrival check-ins) that either party may use to support their case; it is not obligated to compensate either party for a damaged, lost, or unreturned vehicle. If a Lister requires a security deposit, its amount, collection, and return are arranged directly and independently between the Lister and Renter, entirely outside the Platform - SafeDrive provides no collection, escrow, or dispute-resolution service for such arrangements.</p>$pa$, 'published'
+where not exists (select 1 from public.legal_document_versions where document_key = 'platform_agreement');
+
 -- End of SafeDrive chaptered database master.

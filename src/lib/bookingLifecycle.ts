@@ -16,6 +16,14 @@ type NoShowBooking = {
   lister_arrived_at: string | null;
 };
 
+type ReturnNoShowBooking = {
+  status: string;
+  end_date: string;
+  dropoff_time: string | null;
+  renter_return_arrived_at: string | null;
+  lister_return_arrived_at: string | null;
+};
+
 type ReturnReminderState = {
   kind: "due_soon" | "overdue";
   deadline: Date;
@@ -69,6 +77,41 @@ export const getNoShowWindowState = (
 
   return {
     pickupAt,
+    reportReadyAt,
+    canReport: msRemaining <= 0,
+    minutesRemaining: Math.max(0, Math.ceil(msRemaining / 60000)),
+  };
+};
+
+// Mirrors getNoShowWindowState above, but for the return/drop-off leg -
+// kept as its own function rather than parameterizing the pickup one, to
+// keep the pickup path (used elsewhere) untouched.
+export const getReturnNoShowWindowState = (
+  booking: ReturnNoShowBooking,
+  actor: "renter" | "owner",
+  now = new Date(),
+) => {
+  if (booking.status !== "active") return null;
+
+  const actorArrived =
+    actor === "renter"
+      ? booking.renter_return_arrived_at
+      : booking.lister_return_arrived_at;
+  const counterpartyArrived =
+    actor === "renter"
+      ? booking.lister_return_arrived_at
+      : booking.renter_return_arrived_at;
+
+  if (!actorArrived || counterpartyArrived) return null;
+
+  const dropoffAt = getBookingReturnDeadline(booking.end_date, booking.dropoff_time);
+  const reportReadyAt = new Date(
+    dropoffAt.getTime() + NO_SHOW_GRACE_WINDOW_MINUTES * 60 * 1000,
+  );
+  const msRemaining = reportReadyAt.getTime() - now.getTime();
+
+  return {
+    dropoffAt,
     reportReadyAt,
     canReport: msRemaining <= 0,
     minutesRemaining: Math.max(0, Math.ceil(msRemaining / 60000)),

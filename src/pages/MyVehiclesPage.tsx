@@ -45,7 +45,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import AdminSectionTabs from "@/components/AdminSectionTabs";
-import { useVerificationEtaMessages } from "@/lib/platformSettings";
+import {
+  calculateCommissionAmount,
+  DEFAULT_COMMISSION_RATE,
+  fetchPlatformCommissionRate,
+  formatCommissionPercent,
+  useVerificationEtaMessages,
+} from "@/lib/platformSettings";
 import type { CarBrand, CarModel } from "@/types/database";
 import {
   PLATE_NUMBER_PATTERN,
@@ -141,6 +147,8 @@ interface VehicleRow {
   price_per_day: number;
   min_early_return_notice_hours: number | null;
   location: string | null;
+  pickup_latitude: number | null;
+  pickup_longitude: number | null;
   fuel_category: string | null;
   fuel_subtype: string | null;
   gps_available: boolean;
@@ -332,6 +340,8 @@ export default function MyVehiclesPage() {
   const [editLocation, setEditLocation] = useState("");
   const [editCity, setEditCity] = useState("");
   const [editSpecificLocation, setEditSpecificLocation] = useState("");
+  const [editPickupLatitude, setEditPickupLatitude] = useState("");
+  const [editPickupLongitude, setEditPickupLongitude] = useState("");
   const [editFuelCategory, setEditFuelCategory] = useState("");
   const [editTransmission, setEditTransmission] = useState("");
   const [editFuelSubtype, setEditFuelSubtype] = useState("");
@@ -363,6 +373,8 @@ export default function MyVehiclesPage() {
     location: "",
     city: "",
     specific_location: "",
+    pickup_latitude: "",
+    pickup_longitude: "",
     fuel_category: "",
     fuel_subtype: "",
     transmission: "",
@@ -388,6 +400,15 @@ export default function MyVehiclesPage() {
     status: "idle" | "checking" | "available" | "taken";
     message: string;
   }>({ status: "idle", message: "" });
+  // Drives the live "you'll earn approximately..." note next to the price
+  // field, so a lister sees their real take-home the moment they set a
+  // price - SafeDrive's commission is deducted from their payout, not added
+  // to what the renter pays (see api/create-booking.ts).
+  const [commissionRate, setCommissionRate] = useState(DEFAULT_COMMISSION_RATE);
+
+  useEffect(() => {
+    void fetchPlatformCommissionRate().then(setCommissionRate);
+  }, []);
 
   const insertCarDocument = async (
     carId: string,
@@ -689,6 +710,8 @@ export default function MyVehiclesPage() {
             form.city || null,
             form.specific_location || null,
           ].filter(Boolean).join(" - ") : null,
+          pickup_latitude: form.pickup_latitude ? Number(form.pickup_latitude) : null,
+          pickup_longitude: form.pickup_longitude ? Number(form.pickup_longitude) : null,
           fuel_category: form.fuel_category || null,
           fuel_subtype: form.fuel_subtype || null,
           transmission: form.transmission || null,
@@ -777,6 +800,8 @@ export default function MyVehiclesPage() {
         location: "",
         city: "",
         specific_location: "",
+        pickup_latitude: "",
+        pickup_longitude: "",
         fuel_category: "",
         fuel_subtype: "",
         transmission: "",
@@ -896,6 +921,8 @@ export default function MyVehiclesPage() {
             [editLocation, editCity, editSpecificLocation]
               .filter(Boolean)
               .join(" - ") || null,
+          pickup_latitude: editPickupLatitude ? Number(editPickupLatitude) : null,
+          pickup_longitude: editPickupLongitude ? Number(editPickupLongitude) : null,
           fuel_category: editFuelCategory || null,
           fuel_subtype: editFuelSubtype || null,
           transmission: editTransmission || null,
@@ -1504,6 +1531,17 @@ export default function MyVehiclesPage() {
                         {validateListingPrice(form.price_per_day)}
                       </p>
                     )}
+                  {form.price_per_day !== "" && !validateListingPrice(form.price_per_day) && (
+                    <p className="text-xs text-muted-foreground">
+                      Renters pay ₱{Number(form.price_per_day).toLocaleString()}/day. You'll earn
+                      approximately ₱
+                      {(
+                        Number(form.price_per_day) -
+                        calculateCommissionAmount(Number(form.price_per_day), commissionRate)
+                      ).toLocaleString()}
+                      /day after SafeDrive's {formatCommissionPercent(commissionRate)} commission.
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>Minimum early-return notice (hours) *</Label>
@@ -1663,6 +1701,63 @@ export default function MyVehiclesPage() {
                       onChange={(e) => setForm({ ...form, specific_location: e.target.value })}
                       placeholder="e.g. SM Megamall Building A entrance"
                       required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Pickup Location Pin (optional, recommended)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Used to verify arrival check-ins and protect against fraudulent no-show claims. Stand at the pickup spot and tap the button below, or enter coordinates manually.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (!navigator.geolocation) {
+                          toast.error("Location is not supported on this device/browser.");
+                          return;
+                        }
+                        navigator.geolocation.getCurrentPosition(
+                          (position) => {
+                            setForm((prev) => ({
+                              ...prev,
+                              pickup_latitude: position.coords.latitude.toFixed(6),
+                              pickup_longitude: position.coords.longitude.toFixed(6),
+                            }));
+                            toast.success("Pickup pin set to your current location.");
+                          },
+                          () =>
+                            toast.error(
+                              "Could not get your location. Enter coordinates manually instead.",
+                            ),
+                          { enableHighAccuracy: true, timeout: 8000 },
+                        );
+                      }}
+                    >
+                      Use My Current Location
+                    </Button>
+                    {form.pickup_latitude && form.pickup_longitude && (
+                      <span className="text-xs text-muted-foreground">
+                        Pin set: {form.pickup_latitude}, {form.pickup_longitude}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      type="number"
+                      step="any"
+                      placeholder="Latitude"
+                      value={form.pickup_latitude}
+                      onChange={(e) => setForm({ ...form, pickup_latitude: e.target.value })}
+                    />
+                    <Input
+                      type="number"
+                      step="any"
+                      placeholder="Longitude"
+                      value={form.pickup_longitude}
+                      onChange={(e) => setForm({ ...form, pickup_longitude: e.target.value })}
                     />
                   </div>
                 </div>
@@ -1867,6 +1962,9 @@ export default function MyVehiclesPage() {
                     />
                   </label>
                 )}
+                <p className="text-xs text-muted-foreground">
+                  If you require a security deposit from renters, state its terms directly in this agreement - SafeDrive does not collect, hold, or mediate security deposits between you and the renter.
+                </p>
               </div>
 
               <div className="flex gap-3">
@@ -2089,6 +2187,12 @@ export default function MyVehiclesPage() {
                         setEditLocation(parsedLocation.region);
                         setEditCity(parsedLocation.city);
                         setEditSpecificLocation(parsedLocation.specificLocation);
+                        setEditPickupLatitude(
+                          v.pickup_latitude != null ? String(v.pickup_latitude) : "",
+                        );
+                        setEditPickupLongitude(
+                          v.pickup_longitude != null ? String(v.pickup_longitude) : "",
+                        );
                         setEditFuelCategory(v.fuel_category || "");
                         setEditFuelSubtype(v.fuel_subtype || "");
                         setEditTransmission(v.transmission || "");
@@ -2204,6 +2308,17 @@ export default function MyVehiclesPage() {
                         {validateListingPrice(editPrice)}
                       </p>
                     )}
+                    {editPrice !== "" && !validateListingPrice(editPrice) && (
+                      <p className="text-xs text-muted-foreground">
+                        Renters pay ₱{Number(editPrice).toLocaleString()}/day. You'll earn
+                        approximately ₱
+                        {(
+                          Number(editPrice) -
+                          calculateCommissionAmount(Number(editPrice), commissionRate)
+                        ).toLocaleString()}
+                        /day after SafeDrive's {formatCommissionPercent(commissionRate)} commission.
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Minimum early-return notice (hours) *</Label>
@@ -2302,6 +2417,60 @@ export default function MyVehiclesPage() {
                       onChange={(e) => setEditSpecificLocation(e.target.value)}
                       placeholder="e.g. STI Novaliches, building entrance, mall pickup bay"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Pickup Location Pin (optional, recommended)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Used to verify arrival check-ins and protect against fraudulent no-show claims. Stand at the pickup spot and tap the button below, or enter coordinates manually.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (!navigator.geolocation) {
+                            toast.error("Location is not supported on this device/browser.");
+                            return;
+                          }
+                          navigator.geolocation.getCurrentPosition(
+                            (position) => {
+                              setEditPickupLatitude(position.coords.latitude.toFixed(6));
+                              setEditPickupLongitude(position.coords.longitude.toFixed(6));
+                              toast.success("Pickup pin set to your current location.");
+                            },
+                            () =>
+                              toast.error(
+                                "Could not get your location. Enter coordinates manually instead.",
+                              ),
+                            { enableHighAccuracy: true, timeout: 8000 },
+                          );
+                        }}
+                      >
+                        Use My Current Location
+                      </Button>
+                      {editPickupLatitude && editPickupLongitude && (
+                        <span className="text-xs text-muted-foreground">
+                          Pin set: {editPickupLatitude}, {editPickupLongitude}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="Latitude"
+                        value={editPickupLatitude}
+                        onChange={(e) => setEditPickupLatitude(e.target.value)}
+                      />
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="Longitude"
+                        value={editPickupLongitude}
+                        onChange={(e) => setEditPickupLongitude(e.target.value)}
+                      />
+                    </div>
                   </div>
                   <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
                     <p className="font-medium text-foreground">Transmission</p>
@@ -2416,6 +2585,9 @@ export default function MyVehiclesPage() {
                         />
                       </label>
                     </div>
+                    <p className="text-xs text-muted-foreground">
+                      If you require a security deposit from renters, state its terms directly in this agreement - SafeDrive does not collect, hold, or mediate security deposits between you and the renter.
+                    </p>
                   </div>
                   <div className="space-y-2 pb-2">
                     <Label>Update Car Images</Label>

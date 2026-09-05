@@ -3,7 +3,8 @@ import { getBookingReturnDeadline, NO_SHOW_GRACE_WINDOW_MINUTES } from "@/lib/bo
 export type IncidentAction =
   | "renter_no_car"
   | "renter_no_show"
-  | "report_non_return";
+  | "report_non_return"
+  | "lister_no_show_return";
 
 // Structured reason for report_non_return (CHAPTER 37), kept in sync with
 // NON_RETURN_REASONS in api/booking-incident-action.ts and the check

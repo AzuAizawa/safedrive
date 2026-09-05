@@ -356,12 +356,15 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
     [bookings],
   );
   const payoutStats = useMemo(() => {
+    // The lister's payout is base_price net of SafeDrive's commission (see
+    // api/lib/payoutAutomation.ts) - commission is no longer additional cash
+    // collected from the renter, so it must be subtracted here too.
     const released = completed.reduce(
-      (total, booking) => total + Number(booking.base_price || 0),
+      (total, booking) => total + Number(booking.base_price || 0) - Number(booking.commission || 0),
       0,
     );
     const waiting = queue.reduce(
-      (total, booking) => total + Number(booking.base_price || 0),
+      (total, booking) => total + Number(booking.base_price || 0) - Number(booking.commission || 0),
       0,
     );
     const platformFees = bookings.reduce(
@@ -593,7 +596,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                       </div>
                       <div className="text-left sm:text-right">
                         <p className="text-lg font-bold text-green-600">
-                          {formatCurrency(Number(booking.base_price))}
+                          {formatCurrency(Number(booking.base_price) - Number(booking.commission))}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Platform fee kept: {formatCurrency(Number(booking.commission))}
@@ -768,7 +771,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                           </TableCell>
                           <TableCell>{booking.owner.full_name || booking.owner.email}</TableCell>
                           <TableCell className="font-medium">
-                            {formatCurrency(Number(booking.base_price))}
+                            {formatCurrency(Number(booking.base_price) - Number(booking.commission))}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {describePayoutRelease(payout)}

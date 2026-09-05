@@ -20,8 +20,16 @@ export const ticketAttachmentAccept = ".png,.jpg,.jpeg,.webp,.pdf";
 export const isTicketAttachmentImage = (mimeType?: string | null) =>
   Boolean(mimeType && mimeType.startsWith("image/"));
 
-export const getTicketAttachmentUrl = async (storagePath?: string | null) => {
+export const getTicketAttachmentUrl = async (
+  storagePath?: string | null,
+  bucket?: string | null,
+) => {
   if (!storagePath) return null;
+
+  // A message can carry an explicit bucket override (e.g. trip-condition
+  // photos auto-posted from a booking's pickup/return report, which live in
+  // the private 'trip-condition-evidence' bucket, not the default one).
+  if (bucket) return createPrivateStorageUrl(bucket, storagePath);
 
   const privateUrl = await createPrivateStorageUrl(ticketAttachmentBucket, storagePath);
   if (privateUrl) return privateUrl;
