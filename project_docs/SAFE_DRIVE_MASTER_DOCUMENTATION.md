@@ -398,10 +398,21 @@ Before this chapter, a booking that reached `downpayment_paid` had no deadline o
 
 `booking_extensions` (`api/booking-extension-action.ts`, `request`/`approve`/`reject`/`cancel`, mirrors the early-return flow's shape) is how a renter asks to keep the car **longer** - the opposite of §8.4's early return. Approving requires the added payment before the new return date is finalized (a 24-hour `payment_deadline`, same shape as the original booking's payment window); only one extension may be pending/approved at a time per booking.
 
-Reported gap: a chain of extensions had no upper bound - the requested return date could be set to any future date (a live test reached 2028 from a 2026 booking) as long as it didn't collide with another booking. This let a single continuous rental grow indefinitely, defeating the intent behind `api/create-booking.ts`'s own 30-day window (a **new** booking's start and end must both fall within 30 days of today).
+Reported gap: a chain of extensions had no upper bound - the requested return date could be set to any future date (a live test reached 2028 from a 2026 booking) as long as it didn't collide with another booking. This let a single continuous rental grow indefinitely, defeating the intent behind `api/create-booking.ts`'s own trip-length cap (see §8.9).
 
 - **`MAX_TOTAL_RENTAL_DAYS = 30`** (same number, reused for one consistent platform-wide rule) now caps `requested_total_days` (`bookingRecord.total_days + extensionDays`, already computed and stored on every extension row) - a single continuous rental, original days plus every approved extension, can never exceed 30 days. Anchored to the trip's own `start_date`, not to "today", so it does not get more restrictive as the trip progresses. A longer stay needs a new booking after this one completes.
 - Client-side: the "Requested return date" input on `/my-bookings` gets a `max` (start_date + 30 days) so the native date picker never offers an out-of-range date, plus a pre-submit check with the same message the server would give; `api/booking-extension-action.ts` is still the authoritative check.
+
+### 8.9 Advance-booking window vs. trip-length cap (decoupled)
+
+`api/create-booking.ts` used to check a **new** booking's start date AND end date against one shared ceiling, `today + 30 days`. That conflated two separate concerns a standard car-rental business reasons about independently, and squeezed a trip booked near the edge of the window into far less than 30 days (a trip starting 25 days out could only run 5 more days before hitting the same ceiling).
+
+No single "official" number is universal across car-rental platforms (traditional agencies included), but the common pattern - and the basis used here - is:
+
+- **Advance-booking window** (how far ahead a trip can be reserved) protects against pricing/availability drift and the renter's licence or verification lapsing before a trip that far out even starts. Platform-appropriate for SafeDrive's current scale: **`MAX_ADVANCE_BOOKING_DAYS = 60`**.
+- **Trip-length cap** (how long a single continuous rental can run, regardless of how far ahead it was booked) protects the insurance/liability boundary between a short-term P2P rental and what starts to look like an informal long-term lease - a distinct legal/insurance category. This is the same **`MAX_TOTAL_RENTAL_DAYS = 30`** already established in §8.8's extension cap, now anchored to the trip's own `start_date` on the *initial* booking too, not to "today".
+
+Both numbers are enforced server-side in `api/create-booking.ts` (the authoritative check) and mirrored client-side in `src/pages/CarDetailPage.tsx`'s calendar: before a start date is picked, dates beyond the 60-day advance window are disabled; once a start date is picked, the ceiling switches to that start date + 30 days for the return date.
 
 ## 9. Security Deposit: Option B (Removed)
 

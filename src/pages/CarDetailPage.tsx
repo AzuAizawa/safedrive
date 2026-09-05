@@ -57,6 +57,14 @@ import {
 import { carTransmissionLabel, isLicenseExpired } from "@/lib/driversLicense";
 
 const MAX_BOOKING_TOTAL = 100000;
+// Two independent policy limits, mirrored from api/create-booking.ts (kept in
+// sync manually - this project duplicates policy constants per API/page
+// rather than sharing an import): how far ahead a trip can be reserved, and
+// how long a single continuous trip can run once it starts. These used to
+// share one "today + 30 days" ceiling, which squeezed trips booked near the
+// edge of the advance window into far less than 30 days - see CHANGELOG.
+const MAX_ADVANCE_BOOKING_DAYS = 60;
+const MAX_TOTAL_RENTAL_DAYS = 30;
 
 type AgreementAccess = {
   agreementVersionId: string;
@@ -578,7 +586,14 @@ export default function CarDetailPage() {
   }
 
   const minDate = addDays(new Date(), 1);
-  const maxDate = addDays(new Date(), 30);
+  // Before a start date is picked, the ceiling is the advance-booking window.
+  // Once a start date is picked, the ceiling switches to that trip's own
+  // 30-day length allowance (independent of how far out the start date is) -
+  // mirrors the two separate checks in api/create-booking.ts.
+  const maxStartDate = addDays(new Date(), MAX_ADVANCE_BOOKING_DAYS);
+  const maxDate = dateRange?.from
+    ? addDays(dateRange.from, MAX_TOTAL_RENTAL_DAYS)
+    : maxStartDate;
 
   const agreementUrl = agreementAccess?.url ?? null;
 
@@ -612,7 +627,7 @@ export default function CarDetailPage() {
     after: maxDate,
   };
   const disabledDays = [
-    availabilityWindow, // Keep requests between tomorrow and 30 days out
+    availabilityWindow, // Keep requests within the advance-booking / trip-length ceilings
     ...bookedDayRanges,
     ...blackoutDayRanges,
   ];
@@ -1024,7 +1039,7 @@ export default function CarDetailPage() {
                       <span className="mt-0.5 h-3 w-3 rounded-sm bg-primary/20 ring-1 ring-primary/30" />
                       <div>
                         <p className="font-medium text-primary">Selectable dates</p>
-                        <p className="text-muted-foreground">Trips can start as early as tomorrow and up to 30 days out.</p>
+                        <p className="text-muted-foreground">Trips can start as early as tomorrow and up to {MAX_ADVANCE_BOOKING_DAYS} days out. A single trip can run up to {MAX_TOTAL_RENTAL_DAYS} days.</p>
                       </div>
                     </div>
                   </div>
@@ -1129,7 +1144,7 @@ export default function CarDetailPage() {
                 )}
                 {!isOverlapping && dateRange?.from && !dateRange?.to && (
                   <p className="text-sm text-muted-foreground bg-muted/40 p-2 rounded text-center">
-                    Pick a return date next. Only dates from tomorrow through 30 days out can be selected.
+                    Pick a return date next. This trip can run up to {MAX_TOTAL_RENTAL_DAYS} days from your start date.
                   </p>
                 )}
                 {exceedsPaymentLimit && (

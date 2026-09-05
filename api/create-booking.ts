@@ -8,6 +8,19 @@ export const config = {
 const DEFAULT_COMMISSION_RATE = 0.1;
 const MAX_BOOKING_TOTAL = 100000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Two independent policy limits - kept separate on purpose:
+// - MAX_ADVANCE_BOOKING_DAYS: how far into the future a trip can be reserved
+//   (pricing/availability drift, and the renter's licence/verification could
+//   lapse before a trip that far out even starts).
+// - MAX_TOTAL_RENTAL_DAYS: how long a single continuous trip can be, counted
+//   from its own start date - not from today. Same number and name as
+//   api/booking-extension-action.ts's cap on the same trip (original days +
+//   every extension combined), so the two enforce one consistent rule.
+// These used to share one "today + 30 days" clock, which meant a trip booked
+// near the edge of the advance window got squeezed to a much shorter trip
+// than 30 days. Decoupling them fixes that without loosening either limit.
+const MAX_ADVANCE_BOOKING_DAYS = 60;
+const MAX_TOTAL_RENTAL_DAYS = 30;
 const MANILA_TIME_ZONE = "Asia/Manila";
 const ACTIVE_BOOKING_STATUSES = [
   "pending",
@@ -219,7 +232,7 @@ export default async function handler(req: Request) {
     // auto-cancels through api/expire-booking-deadlines.ts. Same-day starts stay
     // disabled pending transport/insurance/handover review (see master doc K.2).
     const minStartUtcMs = todayUtcMs + 1 * DAY_MS;
-    const maxStartUtcMs = todayUtcMs + 30 * DAY_MS;
+    const maxStartUtcMs = todayUtcMs + MAX_ADVANCE_BOOKING_DAYS * DAY_MS;
 
     if (startDate.utcMs < minStartUtcMs) {
       return jsonResponse(
@@ -230,14 +243,24 @@ export default async function handler(req: Request) {
 
     if (startDate.utcMs > maxStartUtcMs) {
       return jsonResponse(
-        { error: "Bookings can only be requested up to 30 days in advance" },
+        {
+          error: `Bookings can only be requested up to ${MAX_ADVANCE_BOOKING_DAYS} days in advance`,
+        },
         400,
       );
     }
 
-    if (endDate.utcMs > maxStartUtcMs) {
+    // Trip length is capped independently of the advance-booking window above,
+    // and anchored to this trip's own start date (not "today") - so a trip
+    // booked near the edge of the advance window still gets the full length
+    // allowance, matching how api/booking-extension-action.ts caps extensions
+    // on an already-existing booking.
+    const maxEndUtcMs = startDate.utcMs + MAX_TOTAL_RENTAL_DAYS * DAY_MS;
+    if (endDate.utcMs > maxEndUtcMs) {
       return jsonResponse(
-        { error: "Booking dates must stay within the next 30 days" },
+        {
+          error: `A single continuous rental can't exceed ${MAX_TOTAL_RENTAL_DAYS} days. For a longer stay, book multiple trips.`,
+        },
         400,
       );
     }

@@ -90,17 +90,22 @@ server-side. Route guards in `src/components/*Route.tsx` are cosmetic.
 ## 6. Browse / car detail
 
 - `/browse`: lists `approved`/`active` cars. `/cars/:id`: details, reviews, price
-  preview, a calendar disabled outside **tomorrow-to-30-days** and on booked
-  ranges, and the agreement PDF via a 5-minute signed URL. No pre-booking
-  question form (retired CHAPTER 41) - a renter/lister instead messages each
-  other from within an actual booking, see §20 "Booking Conversations".
+  preview, a calendar disabled outside **tomorrow-to-60-days for the start
+  date, then start-date-plus-30-days for the return date** (advance-booking
+  window and trip-length cap are independent, see master doc §8.9) and on
+  booked ranges, and the agreement PDF via a 5-minute signed URL. No
+  pre-booking question form (retired CHAPTER 41) - a renter/lister instead
+  messages each other from within an actual booking, see §20 "Booking
+  Conversations".
 
 ## 7. Booking creation — `POST /api/create-booking`
 
 Server recalculates everything:
 
-- Dates: **start must be tomorrow-to-30-days** (same-day blocked); end after
-  start; drop-off after pickup.
+- Dates: **start must be tomorrow-to-60-days out** (same-day blocked); the
+  trip itself (end minus start) **can't exceed 30 days**, counted from the
+  trip's own start date, not from today; end after start; drop-off after
+  pickup.
 - Eligibility: renter `verified`, not a lister/admin; car `approved`/`active`;
   renter ≠ owner; agreement accepted and `agreementVersionId` still matches the
   current approved version.

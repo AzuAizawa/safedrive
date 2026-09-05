@@ -9,6 +9,35 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-05 — Advance-booking window and trip-length cap decoupled (60 / 30 days)
+
+Follow-up to the extension cap above. `api/create-booking.ts` had checked a
+NEW booking's start date AND end date against the same `today + 30 days`
+ceiling - meaning "how far ahead can you book" and "how long can the trip
+be" were really one shared rule, not two. That squeezed a trip booked near
+the edge of the window into far less than 30 days (e.g. a trip starting 25
+days out could only run 5 more days before hitting the ceiling), and
+conflated two different concerns that a standard car-rental business
+reasons about separately: advance-booking risk (pricing/availability
+drift, licence/verification possibly lapsing before a far-out trip even
+starts) versus trip-length risk (a single rental that runs too long starts
+looking like an informal long-term lease, with different insurance/
+liability implications than a short-term P2P rental - the same basis
+already used for the extension cap).
+
+- `MAX_ADVANCE_BOOKING_DAYS = 60` - how far in the future a trip's start
+  date can be, counted from today.
+- `MAX_TOTAL_RENTAL_DAYS = 30` (same name/value as the extension cap) - how
+  long a single trip can run, counted from its OWN start date, independent
+  of how far ahead it was booked.
+- `src/pages/CarDetailPage.tsx`'s calendar mirrors both: dates beyond 60
+  days out are disabled before a start date is picked; once a start date is
+  picked, the ceiling switches to that start date + 30 days for the return
+  date. Copy on the page updated to state both numbers.
+
+Files: `api/create-booking.ts`, `src/pages/CarDetailPage.tsx`,
+`scripts/booking-flow-smoke-check.mjs`.
+
 ## 2026-09-05 — Car photo not showing on some listings (stale carousel index)
 
 Reported: opening a car's detail page sometimes showed the no-photo
