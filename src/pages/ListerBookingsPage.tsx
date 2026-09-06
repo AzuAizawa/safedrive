@@ -3552,7 +3552,7 @@ export default function ListerBookingsPage() {
       {rejectingBooking &&
         createPortal(
           <div
-            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[120] overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
             onClick={() => {
               if (actionLoading !== rejectingBooking.id) {
                 setRejectingBooking(null);
@@ -3560,8 +3560,9 @@ export default function ListerBookingsPage() {
               }
             }}
           >
+            <div className="flex min-h-full items-center justify-center">
             <div
-              className="w-full max-w-md rounded-xl border border-border bg-background p-6 shadow-2xl"
+              className="my-4 max-h-[calc(100vh-4rem)] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-background p-6 shadow-2xl sm:my-8"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="mb-4 flex items-start justify-between gap-4">
@@ -3620,6 +3621,7 @@ export default function ListerBookingsPage() {
                   )}
                 </Button>
               </div>
+            </div>
             </div>
           </div>,
           document.body,

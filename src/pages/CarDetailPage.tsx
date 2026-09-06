@@ -929,7 +929,7 @@ export default function CarDetailPage() {
         {/* Right: Booking Card */}
         <div className="lg:col-span-2">
           {isOwnListing ? (
-            <Card className="sticky top-24 shadow-lg border-border/50">
+            <Card className="lg:sticky lg:top-24 shadow-lg border-border/50">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <CarFront className="h-5 w-5 text-primary" />
@@ -978,7 +978,7 @@ export default function CarDetailPage() {
               </CardContent>
             </Card>
           ) : (
-          <Card className="sticky top-24 shadow-lg border-border/50">
+          <Card className="lg:sticky lg:top-24 shadow-lg border-border/50">
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
                 <span>Book this car</span>
@@ -1042,8 +1042,7 @@ export default function CarDetailPage() {
                 </div>
 
               <div
-                className={`booking-calendar flex justify-center overflow-x-auto overflow-y-hidden rounded-xl border border-border/60 bg-card/70 p-3 shadow-sm ${licenceGateReason ? "opacity-50 grayscale" : ""}`}
-                style={{ minHeight: "350px" }}
+                className={`booking-calendar flex min-h-[300px] justify-center overflow-x-auto overflow-y-hidden rounded-xl border border-border/60 bg-card/70 p-3 shadow-sm sm:min-h-[350px] ${licenceGateReason ? "opacity-50 grayscale" : ""}`}
               >
                 <DayPicker
                   mode="range"

@@ -643,6 +643,27 @@ The following manual/authenticated checks remain after Chapter 14 is applied and
 
 Chrome/Edge-compatible automation is passing locally. Firefox, Safari/WebKit, screen-reader behavior, authenticated role workflows, real Android/iOS camera/location permissions, 200%/400% zoom, and full keyboard/modal focus behavior remain evidence tasks; no claim of WCAG conformance is made yet.
 
+### 18.1 Progressive Web App (installable, renter/lister pages)
+
+Thesis-panel requirement: mobile users should be able to install SafeDrive and use it directly instead of always going through the browser, with no regression to responsiveness or existing functionality. Scope is intentionally limited to the renter/lister-facing app (everything under `DashboardLayout`) - `/admin/*` is untouched and stays desktop-oriented.
+
+**What was added** (additive layer, no booking/payment logic changed):
+- `vite-plugin-pwa` (Workbox) in `vite.config.ts`, `registerType: 'autoUpdate'` - a new service worker takes over promptly on each deploy rather than leaving an old one in control, matching this codebase's existing "recover automatically" philosophy already used for stale-build chunk failures (`src/lib/lazyWithReload.ts`, the `vite:preloadError` listener in `src/main.tsx`). Explicit `NetworkOnly` runtime-caching rules for `*.supabase.co` and `/api/*` make the "never serve live data from cache" guarantee visible in config.
+- `public/manifest.webmanifest` (hand-authored, `manifest: false` in the plugin config), `public/icons/icon-192.png` / `icon-512.png` / `icon-512-maskable.png`, and `public/apple-touch-icon.png` - generated from `public/favicon.svg` (the actual logo; `public/icons.svg` is an unrelated third-party sprite sheet, never a logo source) via the one-off `scripts/generate-pwa-icons.mjs` (`sharp`, devDependency only, never runs on Vercel).
+- `index.html`: `viewport-fit=cover`, `<link rel="manifest">`, Apple PWA meta tags (`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style: "default"`), `apple-touch-icon` link.
+- `src/index.css`: `--safe-top`/`--safe-bottom` (`env(safe-area-inset-*)`, `0px` fallback) so notch/gesture-bar devices are handled without affecting ordinary browser tabs; applied to `InquiryWidget.tsx`'s floating button and the `sonner` `Toaster`'s offset.
+- `src/components/ThemeColorMeta.tsx` (new) - keeps `<meta name="theme-color">` synced to the app's actual light/dark toggle (not the OS `prefers-color-scheme`, since the two can disagree).
+- `src/components/InstallPrompt.tsx` (new, mounted in `DashboardLayout.tsx` only) - a dismissible "Install SafeDrive" banner: captures `beforeinstallprompt` on Android/Chrome, shows an "Add to Home Screen" instructional variant on iOS Safari (no install-prompt API exists there), never renders if already running standalone, 14-day dismiss cooldown in `localStorage`.
+- Five pre-existing responsive bugs fixed as part of this pass (all renter/lister pages): `CarDetailPage.tsx`'s booking card was unconditionally `sticky` (now `lg:sticky`, so it doesn't pin mid-scroll on a collapsed mobile layout) and its date-range calendar shrank via `react-day-picker`'s own CSS variables below `sm:` (`src/index.css`) instead of a fixed 350px `minHeight`; four modals with no scroll handling (`ConfirmDialog.tsx` plus one inline modal each in `MyBookingsPage.tsx` x2 and `ListerBookingsPage.tsx`) were standardized onto the scrollable-overlay pattern already used correctly elsewhere in the codebase; long filenames in the Add Vehicle form's document-upload rows now truncate/wrap instead of overflowing; `SupportTicketsPage.tsx`'s three-pane layout no longer forces a 600px minimum height below `md:`.
+
+**Verified**: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build` (confirmed `dist/manifest.webmanifest`, `dist/sw.js`, `dist/workbox-*.js`, and all icon files are actually emitted, and that the built service worker's runtime-caching rules correctly resolve to `NetworkOnly` for Supabase and `/api/*`), `check:alignment`, `check:booking-flow`.
+
+**Not yet verified - requires a real deployment and physical devices, flagged rather than assumed**:
+- That Vercel serves `manifest.webmanifest`/`sw.js` as static files ahead of the SPA catch-all rewrite in `vercel.json` (expected, since Vercel resolves static files before rewrites, but not curl-confirmed against a live deployment yet).
+- A Lighthouse PWA audit against a deployed URL.
+- On-device install on Android Chrome and iOS Safari, and a full regression pass of every integration point specifically inside an installed/standalone window: the PayMongo checkout redirect (`window.location.href` to `checkout.paymongo.com` and back to `/payment/success`) on both platforms, camera capture (`VerificationPage.tsx`, `TripConditionReportPage.tsx`), geolocation capture (`ArrivalPhotoCapture.tsx`, `MyVehiclesPage.tsx` pickup pin), the PDF receipt download fallback path (`src/lib/receiptPdf.ts`), and that a second deploy while a PWA is installed and open either auto-updates cleanly or still triggers `lazyWithReload`'s existing recovery path rather than getting stuck on a stale shell.
+- iOS's storage-eviction behavior for an installed Home-Screen web app's Supabase session (`localStorage`-persisted) after a week or more of not opening the app.
+
 ## 19. Hosting-Only Work (Deferred)
 
 When the owner selects a host, it must support Vite static output, Node-compatible API handlers, encrypted server secrets, HTTPS callbacks, SPA fallback without rewriting `/api/*`, logs, and scheduled jobs or an external scheduler.

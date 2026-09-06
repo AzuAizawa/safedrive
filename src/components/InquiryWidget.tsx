@@ -493,7 +493,7 @@ export default function InquiryWidget() {
 
       <Button
         type="button"
-        className="fixed bottom-5 right-5 z-[81] h-12 gap-2 rounded-full px-4 shadow-xl sm:bottom-6 sm:right-6"
+        className="fixed bottom-[calc(1.25rem_+_var(--safe-bottom))] right-5 z-[81] h-12 gap-2 rounded-full px-4 shadow-xl sm:bottom-[calc(1.5rem_+_var(--safe-bottom))] sm:right-6"
         aria-label={open ? "Close inquiry form" : "Open inquiry form"}
         aria-expanded={open}
         onClick={() => {

@@ -4,6 +4,7 @@ import { fileURLToPath } from "url"
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { VitePWA } from 'vite-plugin-pwa'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -101,7 +102,53 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [localApiPlugin(), react(), tailwindcss()],
+    plugins: [
+      localApiPlugin(),
+      react(),
+      tailwindcss(),
+      // Renter/lister-facing PWA support. The manifest is a hand-authored
+      // static file (public/manifest.webmanifest) rather than plugin-
+      // generated, so `manifest: false` here and the <link rel="manifest">
+      // + Apple meta tags are added by hand in index.html.
+      //
+      // Supabase (*.supabase.co) and this app's own /api/* edge functions
+      // must NEVER be served from the service-worker cache - both carry live
+      // booking/payment/account data. Workbox already passes any request
+      // that matches no route straight to the network, so these two rules
+      // are belt-and-suspenders: they make that "never cached" guarantee
+      // visible in config instead of relying on the absence of a rule.
+      //
+      // registerType: 'autoUpdate' (+ skipWaiting/clientsClaim) matches this
+      // codebase's existing "recover automatically, don't ask the user to
+      // manually refresh" philosophy already used for stale-chunk recovery
+      // (see src/lib/lazyWithReload.ts and the vite:preloadError listener in
+      // src/main.tsx) - a new service worker takes over promptly instead of
+      // leaving an old one in control indefinitely.
+      VitePWA({
+        registerType: 'autoUpdate',
+        injectRegister: 'auto',
+        manifest: false,
+        includeAssets: ['favicon.svg', 'icons.svg', 'apple-touch-icon.png', 'icons/*.png'],
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+          navigateFallback: '/index.html',
+          navigateFallbackDenylist: [/^\/api\//],
+          cleanupOutdatedCaches: true,
+          skipWaiting: true,
+          clientsClaim: true,
+          runtimeCaching: [
+            {
+              urlPattern: ({ url }) => url.hostname.endsWith('.supabase.co'),
+              handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/api/'),
+              handler: 'NetworkOnly',
+            },
+          ],
+        },
+      }),
+    ],
     // Use one deterministic local listener. This prevents separate IPv4 and
     // IPv6 Vite processes from serving different optimized React runtimes.
     server: {

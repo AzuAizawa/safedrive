@@ -15,6 +15,7 @@ import AdminLayout from "@/components/AdminLayout";
 import ScrollToTop from "@/components/ScrollToTop";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InquiryWidget from "@/components/InquiryWidget";
+import ThemeColorMeta from "@/components/ThemeColorMeta";
 import { lazyWithReload } from "@/lib/lazyWithReload";
 
 // Deployment marker: refund review now uses admin-side release details.
@@ -194,6 +195,7 @@ function App() {
               </Suspense>
               <InquiryWidget />
               <Toaster position="top-right" richColors />
+              <ThemeColorMeta />
             </AuthProvider>
           </BrowserRouter>
         </ThemeProvider>

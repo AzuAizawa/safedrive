@@ -9,6 +9,26 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-06 — PWA: SafeDrive is now installable (renter/lister pages)
+
+Thesis-panel requirement: mobile users should be able to install SafeDrive and use it like a native app instead of always going through the browser - responsive, no broken UI, no lost functionality. Scope confirmed with the user: renter/lister-facing pages only; `/admin/*` stays desktop-oriented.
+
+Added as a layer on top of the existing app (no booking/payment logic touched):
+- `vite-plugin-pwa` (Workbox) - `registerType: 'autoUpdate'`, explicit `NetworkOnly` rules for `*.supabase.co` and `/api/*` so live data is never served from the service-worker cache. Matches the existing "recover automatically" philosophy already used for stale-build chunk failures (`src/lib/lazyWithReload.ts`).
+- `public/manifest.webmanifest` (hand-authored) + generated icons (`scripts/generate-pwa-icons.mjs`, `sharp`, dev-only, from `public/favicon.svg`) - 192/512/maskable PNGs plus an Apple touch icon.
+- `index.html`: manifest link, `viewport-fit=cover`, Apple PWA meta tags.
+- Safe-area CSS (`--safe-top`/`--safe-bottom`) applied to the floating inquiry widget and toast notifications so they clear a notch/gesture-bar in standalone mode; a no-op on ordinary devices.
+- New `ThemeColorMeta.tsx` (keeps the OS chrome color synced to the app's actual light/dark toggle) and `InstallPrompt.tsx` (dismissible install banner - `beforeinstallprompt` capture on Android, an "Add to Home Screen" instructional variant on iOS, mounted only in the renter/lister shell).
+- Fixed five pre-existing responsive bugs found during the audit: an unconditionally `sticky` booking card and an oversized fixed-height date picker on `CarDetailPage.tsx`; four modals with no scroll/keyboard handling (`ConfirmDialog.tsx` plus one each in `MyBookingsPage.tsx` and `ListerBookingsPage.tsx`) standardized onto the scrollable-overlay pattern already used correctly elsewhere; overflowing filenames in the Add Vehicle document-upload rows; an oversized fixed minimum height on the Support page's mobile layout.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build` (confirmed `dist/manifest.webmanifest`, `dist/sw.js`, and all icons are actually emitted; confirmed the built service worker's caching rules resolve to `NetworkOnly` for Supabase/`/api/*`), `check:alignment`, `check:booking-flow`.
+
+**Not yet verified - flagged, not assumed**: Vercel serving the manifest/SW as static files ahead of the SPA rewrite on a real deployment; a Lighthouse PWA audit; on-device install and a full integration-point regression pass (PayMongo checkout redirect, camera/geolocation capture, PDF download, update/reload behavior) on Android Chrome and iOS Safari specifically in standalone mode; iOS session-persistence behavior for an installed Home-Screen app after an extended idle period. See master doc §18.1.
+
+Files: `vite.config.ts`, `index.html`, `src/index.css`, `src/App.tsx`, `src/components/InstallPrompt.tsx` (new), `src/components/ThemeColorMeta.tsx` (new), `src/components/InquiryWidget.tsx`, `src/components/ConfirmDialog.tsx`, `src/components/DashboardLayout.tsx`, `src/components/ui/sonner.tsx`, `src/pages/CarDetailPage.tsx`, `src/pages/MyBookingsPage.tsx`, `src/pages/ListerBookingsPage.tsx`, `src/pages/MyVehiclesPage.tsx`, `src/pages/SupportTicketsPage.tsx`, `scripts/generate-pwa-icons.mjs` (new), `public/manifest.webmanifest` (new), `public/icons/*` (new), `public/apple-touch-icon.png` (new), `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-06 — One-time reset script: clear all booking history, payments, and ledger (CHAPTER 55)
 
 Reported need: the booking lifecycle changed materially this session

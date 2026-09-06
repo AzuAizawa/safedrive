@@ -16,6 +16,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
       closeButton
+      // Keeps toasts clear of a notch/status bar in a standalone PWA window
+      // (--safe-top resolves to 0px in a normal browser tab, so this is a
+      // no-op there - see src/index.css).
+      offset={{ top: "calc(1rem + var(--safe-top))" }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,

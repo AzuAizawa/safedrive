@@ -40,42 +40,46 @@ export default function ConfirmDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[120] overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
       onClick={onCancel}
     >
-      <Card
-        className="w-full max-w-md animate-scale-in shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardHeader>
-        {children ? <CardContent>{children}</CardContent> : <CardContent />}
-        <CardFooter className="gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            className="flex-1"
-            onClick={onCancel}
-            disabled={isLoading}
-          >
-            {cancelText}
-          </Button>
-          <Button
-            type="button"
-            variant={destructive ? "destructive" : "default"}
-            className="flex-1"
-            onClick={() => {
-              void onConfirm();
-            }}
-            disabled={isLoading}
-          >
-            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {confirmText}
-          </Button>
-        </CardFooter>
-      </Card>
+      <div className="flex min-h-full items-center justify-center">
+        <Card
+          className="my-4 w-full max-w-md animate-scale-in shadow-2xl sm:my-8"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <CardHeader>
+            <CardTitle>{title}</CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </CardHeader>
+          <div className="max-h-[calc(100vh-4rem)] overflow-y-auto">
+            {children ? <CardContent>{children}</CardContent> : <CardContent />}
+          </div>
+          <CardFooter className="gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={onCancel}
+              disabled={isLoading}
+            >
+              {cancelText}
+            </Button>
+            <Button
+              type="button"
+              variant={destructive ? "destructive" : "default"}
+              className="flex-1"
+              onClick={() => {
+                void onConfirm();
+              }}
+              disabled={isLoading}
+            >
+              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {confirmText}
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
     </div>,
     document.body,
   );

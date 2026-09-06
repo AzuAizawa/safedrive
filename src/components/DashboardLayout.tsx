@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
+import InstallPrompt from "@/components/InstallPrompt";
 
 export default function DashboardLayout() {
   const { user, profile, signOut, refreshProfile } = useAuth();
@@ -581,6 +582,7 @@ export default function DashboardLayout() {
           </div>
         </div>
       </footer>
+      <InstallPrompt />
     </div>
   );
 }

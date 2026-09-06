@@ -3009,14 +3009,15 @@ export default function MyBookingsPage() {
       {earlyReturnModalBooking &&
         createPortal(
           <div
-            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[110] overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
             onClick={() => setEarlyReturnModalBooking(null)}
           >
+            <div className="flex min-h-full items-center justify-center">
             <div
-              className="w-full max-w-md rounded-xl border border-border bg-background shadow-2xl"
+              className="my-4 flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl sm:my-8"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="border-b border-border px-5 py-4">
+              <div className="shrink-0 border-b border-border px-5 py-4">
                 <h2 className="text-lg font-semibold">Request early return</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Ask the lister to move the return date earlier. There is no
@@ -3032,7 +3033,7 @@ export default function MyBookingsPage() {
                   </p>
                 )}
               </div>
-              <div className="space-y-3 px-5 py-4">
+              <div className="max-h-[calc(100vh-16rem)] space-y-3 overflow-y-auto px-5 py-4">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">New return date</label>
                   <input
@@ -3075,7 +3076,7 @@ export default function MyBookingsPage() {
                   />
                 </div>
               </div>
-              <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-4">
                 <Button
                   variant="ghost"
                   onClick={() => setEarlyReturnModalBooking(null)}
@@ -3098,6 +3099,7 @@ export default function MyBookingsPage() {
                 </Button>
               </div>
             </div>
+            </div>
           </div>,
           document.body,
         )}
@@ -3112,14 +3114,15 @@ export default function MyBookingsPage() {
 
           return createPortal(
             <div
-              className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+              className="fixed inset-0 z-[110] overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
               onClick={() => setExtensionRequestBooking(null)}
             >
+              <div className="flex min-h-full items-center justify-center">
               <div
-                className="w-full max-w-md rounded-xl border border-border bg-background shadow-2xl"
+                className="my-4 flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl sm:my-8"
                 onClick={(event) => event.stopPropagation()}
               >
-                <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
                   <div>
                     <h2 className="text-lg font-semibold">Request extension</h2>
                     <p className="text-sm text-muted-foreground">
@@ -3135,7 +3138,7 @@ export default function MyBookingsPage() {
                     <XCircle className="h-4 w-4" />
                   </Button>
                 </div>
-                <div className="space-y-4 px-5 py-4">
+                <div className="max-h-[calc(100vh-16rem)] space-y-4 overflow-y-auto px-5 py-4">
                   <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 px-3 py-2 text-xs text-muted-foreground">
                     <p className="font-medium text-orange-700 dark:text-orange-300">
                       {extensionRequestBooking.cars.car_models.car_brands.name}{" "}
@@ -3206,7 +3209,7 @@ export default function MyBookingsPage() {
                     />
                   </div>
                 </div>
-                <div className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
+                <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
                   <Button
                     type="button"
                     variant="ghost"
@@ -3225,6 +3228,7 @@ export default function MyBookingsPage() {
                     Send extension request
                   </Button>
                 </div>
+              </div>
               </div>
             </div>,
             document.body,

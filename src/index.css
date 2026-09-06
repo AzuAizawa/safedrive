@@ -25,6 +25,11 @@
   --radius: 0.625rem;
   --success: oklch(0.55 0.2 145);
   --warning: oklch(0.7 0.18 80);
+  /* PWA standalone-mode safe areas (notch / gesture bar). Resolve to 0 on
+     ordinary devices and in a normal browser tab - only non-zero once
+     index.html's viewport meta carries viewport-fit=cover. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .dark {
@@ -229,4 +234,18 @@ input[type="number"] {
 
 .dark .booking-calendar .rdp-day_button:hover:not([disabled]) {
   background: color-mix(in oklab, var(--muted) 95%, black 5%);
+}
+
+/* Below Tailwind's `sm` (640px): shrink the day-cell size so a full 7-column
+   month fits ~320-360px phone widths without horizontal scroll. Library
+   defaults (react-day-picker v9) are --rdp-day-width/-height: 44px and
+   --rdp-day_button-width/-height: 42px - a 7-column row at 44px is 308px
+   plus the calendar card's own border/padding, tight on the smallest phones. */
+@media (max-width: 639px) {
+  .booking-calendar .rdp-root {
+    --rdp-day-width: 38px;
+    --rdp-day-height: 38px;
+    --rdp-day_button-width: 36px;
+    --rdp-day_button-height: 36px;
+  }
 }

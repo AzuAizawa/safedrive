@@ -1,0 +1,15 @@
+{
+  "name": "SafeDrive - Peer-to-Peer Car Rental",
+  "short_name": "SafeDrive",
+  "description": "SafeDrive - Peer-to-peer car rental platform. Rent cars from verified owners or list your vehicle to earn.",
+  "theme_color": "#1a1a2e",
+  "background_color": "#1a1a2e",
+  "display": "standalone",
+  "start_url": "/",
+  "scope": "/",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -647,7 +647,7 @@ export default function SupportTicketsPage() {
         ) : null}
       </div>
 
-      <div className="order-2 grid min-h-[600px] gap-6 md:h-[600px] md:grid-cols-3">
+      <div className="order-2 grid gap-6 md:h-[600px] md:min-h-[600px] md:grid-cols-3">
         <div className="border border-border/50 rounded-xl bg-card overflow-hidden flex flex-col">
           <div className="border-b border-border/30 bg-muted/20">
             <div className="grid grid-cols-2">

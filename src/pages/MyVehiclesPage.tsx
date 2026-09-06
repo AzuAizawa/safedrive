@@ -1605,7 +1605,7 @@ export default function MyVehiclesPage() {
                 <div className="space-y-2">
                   <Label>CTPL expiry *</Label>
                   <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.ctpl_expiry} onChange={(event) => setForm({ ...form, ctpl_expiry: event.target.value })} required />
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
                       <Upload className="h-3.5 w-3.5" />
                       {ctplFile ? "Change CTPL" : "Upload CTPL *"}
@@ -1628,9 +1628,9 @@ export default function MyVehiclesPage() {
                       />
                     </label>
                     {ctplFile && (
-                      <div className="flex items-center gap-2 rounded-lg border bg-secondary p-2">
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                        <span className="text-xs font-medium">{ctplFile.name}</span>
+                      <div className="flex min-w-0 items-center gap-2 rounded-lg border bg-secondary p-2">
+                        <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-xs font-medium">{ctplFile.name}</span>
                       </div>
                     )}
                   </div>
@@ -1639,7 +1639,7 @@ export default function MyVehiclesPage() {
                   <Label>Comprehensive insurance expiry</Label>
                   <Input type="date" value={form.comprehensive_insurance_expiry} onChange={(event) => setForm({ ...form, comprehensive_insurance_expiry: event.target.value })} />
                   <p className="text-xs text-muted-foreground">Optional for the thesis build, but a missing or expired policy creates an admin warning.</p>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
                       <Upload className="h-3.5 w-3.5" />
                       {comprehensiveInsuranceFile ? "Change policy" : "Upload policy"}
@@ -1662,9 +1662,9 @@ export default function MyVehiclesPage() {
                       />
                     </label>
                     {comprehensiveInsuranceFile && (
-                      <div className="flex items-center gap-2 rounded-lg border bg-secondary p-2">
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                        <span className="text-xs font-medium">{comprehensiveInsuranceFile.name}</span>
+                      <div className="flex min-w-0 items-center gap-2 rounded-lg border bg-secondary p-2">
+                        <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-xs font-medium">{comprehensiveInsuranceFile.name}</span>
                       </div>
                     )}
                   </div>
@@ -1891,7 +1891,7 @@ export default function MyVehiclesPage() {
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Official Receipt (OR) *</Label>
-                  <div className="flex gap-4 items-start">
+                  <div className="flex flex-wrap gap-4 items-start">
                     <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
                       <Upload className="w-5 h-5 text-muted-foreground mb-1" />
                       <span className="text-xs text-muted-foreground text-center px-1">
@@ -1916,9 +1916,9 @@ export default function MyVehiclesPage() {
                       />
                     </label>
                     {orFile && (
-                      <div className="flex items-center gap-2 p-3 bg-secondary rounded-lg border">
-                        <CheckCircle className="w-5 h-5 text-green-500" />
-                        <span className="text-sm font-medium">{orFile.name}</span>
+                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
+                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-sm font-medium">{orFile.name}</span>
                       </div>
                     )}
                   </div>
@@ -1926,7 +1926,7 @@ export default function MyVehiclesPage() {
 
                 <div className="space-y-2">
                   <Label>Certificate of Registration (CR) *</Label>
-                  <div className="flex gap-4 items-start">
+                  <div className="flex flex-wrap gap-4 items-start">
                     <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
                       <Upload className="w-5 h-5 text-muted-foreground mb-1" />
                       <span className="text-xs text-muted-foreground text-center px-1">
@@ -1951,9 +1951,9 @@ export default function MyVehiclesPage() {
                       />
                     </label>
                     {crFile && (
-                      <div className="flex items-center gap-2 p-3 bg-secondary rounded-lg border">
-                        <CheckCircle className="w-5 h-5 text-green-500" />
-                        <span className="text-sm font-medium">{crFile.name}</span>
+                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
+                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-sm font-medium">{crFile.name}</span>
                       </div>
                     )}
                   </div>
