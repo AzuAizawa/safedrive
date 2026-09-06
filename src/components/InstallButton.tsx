@@ -10,32 +10,32 @@ import { usePwaInstall } from "@/lib/pwaInstall";
 // header, so it's reachable from both a first-time visitor's very first
 // screen and every logged-in page afterward, always in the same place.
 //
-// Reported bug: the button disappeared after repeated page refreshes.
-// Root cause - `beforeinstallprompt` is a one-shot-ish browser event;
-// Chrome throttles/suppresses re-firing it on repeated loads within one
-// session once it's fired and gone unused, so `canInstall` can legitimately
-// be false on any given page load even on an installable browser. An
-// earlier fix stopped hiding it for that reason, but still hid it whenever
-// `isStandalone` (already installed) was true - reported as still wrong:
-// if a user later uninstalls the app and needs to reinstall, they'd have no
-// way back to an install control (isStandalone is a live, per-view check of
-// the CURRENT tab, not a permanent "ever installed" flag, so it would
-// actually already un-hide itself once they're back in a normal browser
-// tab post-uninstall - but relying on that distinction being obvious, or on
-// the browser API being consistent at all, is exactly the kind of fragility
-// that caused the original bug). Simplest and most robust: never hide the
-// button for any reason. It always renders, on every page, always in the
-// same place - matching how an install control behaves on other sites.
+// Reported bug (round 1): the button disappeared after repeated page
+// refreshes. Root cause - `beforeinstallprompt` is a one-shot-ish browser
+// event; Chrome throttles/suppresses re-firing it on repeated loads within
+// one session once it's fired and gone unused, so `canInstall` can
+// legitimately be false on any given page load even on an installable
+// browser. Fixed by never gating visibility on `canInstall`/`showIosHint`.
+//
+// Reported bug (round 2, over-correction): a fix at that point also
+// stopped hiding the button when `isStandalone` (already installed) was
+// true, worried that an uninstalled user would have no way back to an
+// install control - but that then showed the button even while browsing
+// FROM WITHIN the already-installed, running app, which is genuinely
+// redundant (there's nothing left to install). `isStandalone` is a live,
+// per-view check of the CURRENT tab/window, not a persistent "ever
+// installed" flag - it already reads `false` again the moment the same
+// site is opened in a normal browser tab (e.g. after the app was later
+// uninstalled), so hiding on it does not strand anyone; it only hides the
+// button in the one context where showing it would be confusing.
 export default function InstallButton({ className }: { className?: string }) {
   const { canInstall, showIosHint, isStandalone, promptInstall } = usePwaInstall();
+
+  if (isStandalone) return null;
 
   const handleClick = () => {
     if (canInstall) {
       void promptInstall();
-      return;
-    }
-    if (isStandalone) {
-      toast.info("SafeDrive is already installed on this device.");
       return;
     }
     if (showIosHint) {

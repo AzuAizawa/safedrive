@@ -46,6 +46,8 @@ export interface Database {
           license_update_pending: boolean;
           license_rejection_reason: string | null;
           license_expiry_notified_at: string | null;
+          active_session_token: string | null;
+          active_session_started_at: string | null;
           deleted_at: string | null;
           created_at: string;
           updated_at: string;
@@ -83,6 +85,8 @@ export interface Database {
           license_update_pending?: boolean;
           license_rejection_reason?: string | null;
           license_expiry_notified_at?: string | null;
+          active_session_token?: string | null;
+          active_session_started_at?: string | null;
           deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -120,6 +124,8 @@ export interface Database {
           license_update_pending?: boolean;
           license_rejection_reason?: string | null;
           license_expiry_notified_at?: string | null;
+          active_session_token?: string | null;
+          active_session_started_at?: string | null;
           deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;

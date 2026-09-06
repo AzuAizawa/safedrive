@@ -15,6 +15,7 @@ import {
   registerAuthFailure,
 } from "@/lib/authLockout";
 import { recordSecurityEvent } from "@/lib/securityLog";
+import { finalizeSingleSession } from "@/lib/singleSession";
 import { qrCodeSrc } from "@/lib/qrCode";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import TurnstileWidget, { captchaConfigured } from "@/components/TurnstileWidget";
@@ -127,6 +128,11 @@ export default function AdminLoginPage() {
         toast.info("Admin session expired", {
           description:
             "You were signed out after 10 minutes of inactivity. Please sign in again.",
+        });
+      } else if (parsed.reason === "superseded" && parsed.portal === "admin") {
+        toast.info("Admin session ended", {
+          description:
+            "This admin account was signed in on another device, so this session was ended for your security.",
         });
       }
     } catch {
@@ -475,6 +481,9 @@ export default function AdminLoginPage() {
       clearAdminAuthPending();
       toast.success("System Access Granted");
       sessionStorage.setItem("admin_auth_portal", "verified");
+      // Login is fully complete here (password + authenticator) -
+      // CHAPTER 57 single active session per account.
+      await finalizeSingleSession(verifiedUser?.id);
       navigate("/admin");
       setIsLoading(false);
       return;
@@ -515,6 +524,9 @@ export default function AdminLoginPage() {
     clearAuthFailures("admin", normalizedEmail);
     clearAdminAuthPending();
     sessionStorage.setItem("admin_auth_portal", "verified");
+    // Login is fully complete here (password + email code) - CHAPTER 57
+    // single active session per account.
+    await finalizeSingleSession(data.user?.id);
 
     const { factorId: staleFactorId } = await getAuthenticatorFactor();
     if (staleFactorId) {
@@ -621,6 +633,9 @@ export default function AdminLoginPage() {
     clearAdminAuthPending();
     toast.success("Authenticator connected. System Access Granted.");
     sessionStorage.setItem("admin_auth_portal", "verified");
+    // Login is fully complete here (password + first-time authenticator
+    // enrollment) - CHAPTER 57 single active session per account.
+    await finalizeSingleSession(verifiedUser?.id);
     navigate("/admin");
     setIsLoading(false);
   };

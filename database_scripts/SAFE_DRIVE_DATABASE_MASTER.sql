@@ -9079,4 +9079,78 @@ alter table public.booking_early_returns
     < (current_end_date + coalesce(current_dropoff_time, '18:00')::time)
   );
 
+-- ============================================================================
+-- CHAPTER 57 - Single active session per account (newest login wins)
+-- ============================================================================
+-- Reported: logging into the same account from a second device left the
+-- first device's session silently still valid, indefinitely - both stayed
+-- signed in at once, and there was no way for the older one to notice.
+--
+-- The actual revoke happens via a native Supabase Auth call
+-- (supabase.auth.signOut({scope:"others"})) made by src/lib/singleSession.ts
+-- every time a login FULLY completes (password + whichever 2FA step
+-- applies), on both the user and admin portals - it kills every other
+-- session's refresh token server-side immediately. active_session_token
+-- below is NOT itself a security boundary (RLS still only restricts by
+-- row, not by column - the owning user can write any value here) - it
+-- exists purely so an older, already-revoked session notices and signs
+-- itself out promptly instead of silently waiting for its own token to
+-- next need a refresh (which could otherwise take up to an hour).
+--
+-- active_session_started_at is a plain audit timestamp, unread by any
+-- check - same idea as the current_end_date/current_dropoff_time snapshot
+-- columns added in CHAPTER 56.
+
+alter table public.profiles
+  add column if not exists active_session_token text,
+  add column if not exists active_session_started_at timestamptz;
+
+-- Realtime push so a signed-in tab notices within seconds instead of only
+-- on its 45s poll fallback - mirrors CHAPTER 21's identical opt-in for
+-- public.admin_permissions exactly.
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (
+       select 1 from pg_publication_tables
+       where pubname = 'supabase_realtime'
+         and schemaname = 'public'
+         and tablename = 'profiles'
+     )
+  then
+    execute 'alter publication supabase_realtime add table public.profiles';
+  end if;
+end $$;
+
+-- New security_logs event type for a forced "signed in elsewhere" sign-out
+-- (api/record-security-event.ts's actionMap gains a matching entry).
+alter table public.security_logs
+  drop constraint if exists security_logs_event_type_check;
+
+alter table public.security_logs
+  add constraint security_logs_event_type_check
+  check (
+    event_type in (
+      'login_success',
+      'login_failed',
+      'logout',
+      'otp_sent',
+      'otp_verified',
+      'otp_failed',
+      'authenticator_challenge_started',
+      'authenticator_verified',
+      'authenticator_failed',
+      'lockout_started',
+      'lockout_ended',
+      'password_changed',
+      'password_reset_requested',
+      'password_reset_completed',
+      'session_timeout',
+      'session_superseded',
+      'suspicious_activity',
+      'webhook_signature_verified',
+      'webhook_signature_failed'
+    )
+  );
+
 -- End of SafeDrive chaptered database master.

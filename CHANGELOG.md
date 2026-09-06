@@ -9,6 +9,74 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-06 — Single active session per account (newest login wins)
+
+Reported: logging into the same account from a second device (e.g. a
+laptop, while still signed in on a phone) left both sessions valid at
+once, indefinitely - going back to the older device later found it still
+logged in.
+
+Two layers, CHAPTER 57:
+1. **The actual revoke.** Every login that fully completes (password +
+   whichever 2FA step applies), on either portal, now calls the native
+   `supabase.auth.signOut({ scope: "others" })` - this immediately revokes
+   the refresh token of every other session on the same account at the
+   Supabase Auth server level. The new device's own session is untouched.
+2. **Fast, visible detection on the older device**, reusing the
+   poll+realtime pattern `AuthContext.tsx` already uses for admin
+   permissions: a new `profiles.active_session_token` column is
+   overwritten at every finalized login; every signed-in tab compares its
+   own `localStorage` copy against it via a realtime subscription, a
+   check when the tab regains focus (covers "left the device, came back to
+   it later"), and a 45s poll backstop. A mismatch force-signs the tab out
+   locally with a "signed in on another device" message, via the same
+   session-timeout-notice flow already used for inactivity.
+
+Also fixed while touching this code: `AuthContext.tsx`'s inactivity
+timeout and the manual "Sign Out" button both called
+`supabase.auth.signOut()` with no `scope`, which defaults to `'global'` -
+an idle phone was silently signing out an actively-used laptop too. Both
+now use `{ scope: "local" }`. The four account-status forced sign-outs in
+`fetchProfile` (deleted / blocked / inactive / admin disabled) correctly
+keep the default global scope - those really should end every session on
+the account.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:api-boundaries`.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 57),
+`src/lib/singleSession.ts` (new), `src/contexts/AuthContext.tsx`,
+`src/pages/LoginPage.tsx`, `src/pages/admin/AdminLoginPage.tsx`,
+`api/record-security-event.ts`, `src/types/database.ts`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
+## 2026-09-06 — Install button was showing even from inside the installed app itself
+
+Immediate correction to the entry directly below. That fix made the button
+never hide, including when `isStandalone` (already installed) was true -
+reported as wrong the moment it shipped: opening the installed app and
+logging in both still showed "Install," which is genuinely confusing (there
+is nothing left to install from inside it).
+
+Re-added `if (isStandalone) return null;`. This does not reintroduce the
+"stranded after uninstall" problem the previous entry was trying to avoid -
+`isStandalone` is a live check of the CURRENT tab/window's display mode,
+not a persistent "this device has installed it before" flag. The instant
+the same site is opened in a normal browser tab again (e.g. after later
+uninstalling the app), `isStandalone` reads `false` and the button is back.
+It only ever hides the button in the one context where showing it would be
+confusing: while already running inside the installed app.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/components/InstallButton.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-06 — Install button never hides itself, period
 
 Immediate follow-up to the entry directly below. That fix still hid the

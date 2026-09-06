@@ -20,6 +20,7 @@ const actionMap: Record<string, string> = {
   password_reset_requested: "password_reset_requested",
   password_reset_completed: "password_reset_completed",
   session_timeout: "session_timeout",
+  session_superseded: "session_superseded",
 };
 
 const anonymousActions = new Set([

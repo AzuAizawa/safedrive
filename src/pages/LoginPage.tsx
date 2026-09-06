@@ -17,6 +17,7 @@ import {
 } from "@/lib/authLockout";
 import { recordSecurityEvent } from "@/lib/securityLog";
 import { resetToRenterMode } from "@/lib/listerMode";
+import { finalizeSingleSession } from "@/lib/singleSession";
 import { qrCodeSrc } from "@/lib/qrCode";
 import TurnstileWidget, { captchaConfigured } from "@/components/TurnstileWidget";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -136,6 +137,10 @@ export default function LoginPage() {
   // stale flag (session ended without a sign-out), do a hard navigation so the
   // freshly reset profile loads with no flash of the lister UI.
   const goToRenterHome = async (userId: string | null | undefined) => {
+    // A login is only ever fully complete once execution reaches here
+    // (password + whichever 2FA step applied) - CHAPTER 57 single active
+    // session per account.
+    await finalizeSingleSession(userId);
     const changed = await resetToRenterMode(userId);
     if (changed) window.location.href = "/browse";
     else navigate("/browse");
@@ -172,6 +177,11 @@ export default function LoginPage() {
         toast.info("Session expired", {
           description:
             "You were signed out after 25 minutes of inactivity. Please sign in again.",
+        });
+      } else if (parsed.reason === "superseded" && parsed.portal === "user") {
+        toast.info("Signed out", {
+          description:
+            "This account was signed in on another device, so this session was ended for your security.",
         });
       }
     } catch {

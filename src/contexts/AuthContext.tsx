@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase";
 import { clearAllAuthPending } from "@/lib/authPending";
 import { signInWithTransientJwtRetry } from "@/lib/authRetry";
 import { recordSecurityEvent } from "@/lib/securityLog";
+import { startSingleSessionGuard } from "@/lib/singleSession";
 import { hasPermission } from "@/lib/permissions";
 import { resetToRenterMode } from "@/lib/listerMode";
 import type { User, Session, AuthResponse } from "@supabase/supabase-js";
@@ -318,54 +319,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const handleSessionTimeout = useCallback(async () => {
-    if (sessionTimeoutInFlightRef.current) return;
-    sessionTimeoutInFlightRef.current = true;
+  // Shared shell for every "force this device out, right now" path.
+  // "inactivity" is the original idle-timeout case; "superseded" fires when
+  // a newer login on another device wins (CHAPTER 57 - single active
+  // session per account). Both redirect through the same
+  // SESSION_TIMEOUT_NOTICE_KEY flow so the login page can show the right
+  // toast on arrival.
+  const forceSignOut = useCallback(
+    async (reason: "inactivity" | "superseded") => {
+      if (sessionTimeoutInFlightRef.current) return;
+      sessionTimeoutInFlightRef.current = true;
 
-    const isAdminSession =
-      profile?.role === "admin" ||
-      profile?.role === "super_admin" ||
-      sessionStorage.getItem("admin_auth_portal") === "verified" ||
-      window.location.pathname.startsWith("/admin");
+      const isAdminSession =
+        profile?.role === "admin" ||
+        profile?.role === "super_admin" ||
+        sessionStorage.getItem("admin_auth_portal") === "verified" ||
+        window.location.pathname.startsWith("/admin");
 
-    clearAllAuthPending();
-    sessionStorage.removeItem("admin_auth_portal");
-    sessionStorage.setItem(
-      SESSION_TIMEOUT_NOTICE_KEY,
-      JSON.stringify({
-        portal: isAdminSession ? "admin" : "user",
-        reason: "inactivity",
-      }),
-    );
-
-    try {
-      await recordSecurityEvent(
-        "session_timeout",
-        {
-          email: session?.user.email,
-          method: "system",
+      clearAllAuthPending();
+      sessionStorage.removeItem("admin_auth_portal");
+      sessionStorage.setItem(
+        SESSION_TIMEOUT_NOTICE_KEY,
+        JSON.stringify({
           portal: isAdminSession ? "admin" : "user",
-          reason: isAdminSession
-            ? "Signed out after 10 minutes without activity."
-            : "Signed out after 25 minutes without activity.",
-        },
-        session?.user.id ?? user?.id ?? null,
+          reason,
+        }),
       );
-      await resetToRenterMode(session?.user.id ?? user?.id);
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.error("Error during session timeout sign out:", error);
-    } finally {
-      setUser(null);
-      setProfile(null);
-      setSession(null);
-      setLoading(false);
-      sessionTimeoutInFlightRef.current = false;
-      window.location.replace(
-        isAdminSession ? "/Safedriveadminlogin" : "/login",
-      );
-    }
-  }, [profile?.role, session?.user.email, session?.user.id, user?.id]);
+
+      try {
+        await recordSecurityEvent(
+          reason === "superseded" ? "session_superseded" : "session_timeout",
+          {
+            email: session?.user.email,
+            method: "system",
+            portal: isAdminSession ? "admin" : "user",
+            reason:
+              reason === "superseded"
+                ? "Signed out - this account was signed in on another device."
+                : isAdminSession
+                  ? "Signed out after 10 minutes without activity."
+                  : "Signed out after 25 minutes without activity.",
+          },
+          session?.user.id ?? user?.id ?? null,
+        );
+        await resetToRenterMode(session?.user.id ?? user?.id);
+        // Local scope only - this device's own session ending (whether from
+        // idle timeout or being superseded) must never also sign out a
+        // different, still-active device. Supabase's own signOut() defaults
+        // to 'global' (every device), which is wrong for both cases here.
+        await supabase.auth.signOut({ scope: "local" });
+      } catch (error) {
+        console.error("Error during forced sign out:", error);
+      } finally {
+        setUser(null);
+        setProfile(null);
+        setSession(null);
+        setLoading(false);
+        sessionTimeoutInFlightRef.current = false;
+        window.location.replace(
+          isAdminSession ? "/Safedriveadminlogin" : "/login",
+        );
+      }
+    },
+    [profile?.role, session?.user.email, session?.user.id, user?.id],
+  );
+
+  const handleSessionTimeout = useCallback(
+    () => forceSignOut("inactivity"),
+    [forceSignOut],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -473,6 +495,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session?.user,
     profile?.role,
   ]);
+
+  // CHAPTER 57 - single active session per account. Every signed-in tab
+  // (any role) watches for a newer login elsewhere and force-signs itself
+  // out the moment it notices - see src/lib/singleSession.ts for the
+  // detection details (realtime + tab-focus + 45s poll).
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId) return;
+    return startSingleSessionGuard(userId, () => {
+      void forceSignOut("superseded");
+    });
+  }, [session?.user?.id, forceSignOut]);
 
   const signUp = async (
     email: string,
@@ -657,7 +691,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAllAuthPending();
       sessionStorage.removeItem("admin_auth_portal");
       await resetToRenterMode(user?.id);
-      await supabase.auth.signOut();
+      // Local scope - a deliberate "Sign Out" click on this device must not
+      // also end a session this same account has open on another device.
+      await supabase.auth.signOut({ scope: "local" });
     } catch (error) {
       console.error("Error signing out:", error);
     } finally {
