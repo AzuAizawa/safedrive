@@ -224,6 +224,22 @@ export default async function handler(req: Request) {
       );
     }
 
+    // total_days below is a pure calendar-date difference, independent of
+    // time-of-day - without this, a renter could pick e.g. pickup 11:59 PM
+    // and drop-off 12:01 AM the next calendar day and be charged a full
+    // day's price for a few minutes of actual use (or the inverse: pickup
+    // 12:01 AM / drop-off 11:59 PM for nearly 48 hours at a 1-day price).
+    // Requiring the same clock time for both makes every paid day a real,
+    // consistent 24 hours. The client (CarDetailPage.tsx) already derives
+    // drop-off from pickup and never lets them differ - this mirrors that
+    // rule server-side so a direct API call can't bypass it.
+    if (pickupMinutes !== dropoffMinutes) {
+      return jsonResponse(
+        { error: "Drop-off time must match pickup time" },
+        400,
+      );
+    }
+
     const todayUtcMs = getTodayInManila();
     // A car left idle is wasted, so a trip may start as soon as the next day.
     // The 24-hour owner-response and 24-hour payment windows below still apply,

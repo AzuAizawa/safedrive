@@ -10,6 +10,8 @@ type ReminderBooking = {
   status: string;
   end_date: string;
   dropoff_time: string | null;
+  renter_return_arrived_at: string | null;
+  lister_return_arrived_at: string | null;
   renter_id: string;
   owner_id: string;
   renter: { email: string; full_name: string | null };
@@ -22,6 +24,30 @@ type ReminderBooking = {
     };
   };
 };
+
+type ApprovedEarlyReturnRow = {
+  booking_id: string;
+  requested_end_date: string;
+  requested_end_time: string;
+  approved_at: string | null;
+};
+
+const BOOKING_SELECT = `
+  id,
+  status,
+  end_date,
+  dropoff_time,
+  renter_return_arrived_at,
+  lister_return_arrived_at,
+  renter_id,
+  owner_id,
+  renter:profiles!bookings_renter_id_fkey(email, full_name),
+  owner:profiles!bookings_owner_id_fkey(email, full_name),
+  cars(plate_number, car_models(name, car_brands(name)))
+`;
+
+// Mirrors NO_SHOW_GRACE_WINDOW_MINUTES in src/lib/bookingLifecycle.ts.
+const RETURN_NO_SHOW_GRACE_MINUTES = 30;
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -44,8 +70,36 @@ const getReturnDeadline = (endDate: string, dropoffTime: string | null) => {
 const getVehicleLabel = (booking: ReminderBooking) =>
   `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`;
 
-const getReminderState = (booking: ReminderBooking, now = new Date()) => {
-  const deadline = getReturnDeadline(booking.end_date, booking.dropoff_time);
+// Approving an early return never rewrites bookings.end_date/dropoff_time
+// (see api/booking-early-return-action.ts) - those permanently mean "the
+// ORIGINAL agreed return date+time." This falls back to the original once
+// an approved early return has been missed by both parties (mirrors
+// getOperativeReturnDeadline in src/lib/bookingLifecycle.ts).
+const getOperativeReturnDeadline = (
+  booking: Pick<
+    ReminderBooking,
+    "end_date" | "dropoff_time" | "renter_return_arrived_at" | "lister_return_arrived_at"
+  >,
+  approvedEarly: ApprovedEarlyReturnRow | undefined,
+  now: Date,
+) => {
+  const original = getReturnDeadline(booking.end_date, booking.dropoff_time);
+  if (!approvedEarly) return original;
+  const early = getReturnDeadline(approvedEarly.requested_end_date, approvedEarly.requested_end_time);
+  const anyArrived = Boolean(
+    booking.renter_return_arrived_at || booking.lister_return_arrived_at,
+  );
+  const missed =
+    !anyArrived && now.getTime() >= early.getTime() + RETURN_NO_SHOW_GRACE_MINUTES * 60_000;
+  return missed ? original : early;
+};
+
+const getReminderState = (
+  booking: ReminderBooking,
+  approvedEarly: ApprovedEarlyReturnRow | undefined,
+  now = new Date(),
+) => {
+  const deadline = getOperativeReturnDeadline(booking, approvedEarly, now);
   const diffMinutes = Math.round((deadline.getTime() - now.getTime()) / 60000);
 
   if (diffMinutes > 24 * 60) return null;
@@ -135,29 +189,55 @@ export default async function handler(req: Request) {
 
     const { data, error } = await supabase
       .from("bookings")
-      .select(
-        `
-        id,
-        status,
-        end_date,
-        dropoff_time,
-        renter_id,
-        owner_id,
-        renter:profiles!bookings_renter_id_fkey(email, full_name),
-        owner:profiles!bookings_owner_id_fkey(email, full_name),
-        cars(plate_number, car_models(name, car_brands(name)))
-      `,
-      )
+      .select(BOOKING_SELECT)
       .in("status", ["fully_paid", "active"])
       .gte("end_date", floor)
       .lte("end_date", horizon);
 
     if (error) throw error;
 
-    const candidates = ((data ?? []) as unknown as ReminderBooking[])
+    const baseBookings = (data ?? []) as unknown as ReminderBooking[];
+
+    // Supplementary: a booking whose APPROVED, not-yet-missed early-return
+    // date falls in this reminder window even though its original end_date
+    // (the query above) doesn't - e.g. a 5-day booking with an approved
+    // same-day early return. An active early deadline is by definition
+    // close to now (otherwise it would already have fallen back to the
+    // original), so bounding this query by the same [floor, horizon] window
+    // carries no risk of missing a genuinely-active one.
+    const { data: earlyReturnRows, error: earlyReturnError } = await supabase
+      .from("booking_early_returns")
+      .select("booking_id, requested_end_date, requested_end_time, approved_at")
+      .eq("status", "approved")
+      .gte("requested_end_date", floor)
+      .lte("requested_end_date", horizon);
+    if (earlyReturnError) throw earlyReturnError;
+
+    const approvedEarlyByBooking = new Map<string, ApprovedEarlyReturnRow>();
+    for (const row of (earlyReturnRows ?? []) as ApprovedEarlyReturnRow[]) {
+      if (!approvedEarlyByBooking.has(row.booking_id)) {
+        approvedEarlyByBooking.set(row.booking_id, row);
+      }
+    }
+
+    const baseIds = new Set(baseBookings.map((booking) => booking.id));
+    const missingIds = [...approvedEarlyByBooking.keys()].filter((id) => !baseIds.has(id));
+
+    let supplementalBookings: ReminderBooking[] = [];
+    if (missingIds.length) {
+      const { data: supplementalData, error: supplementalError } = await supabase
+        .from("bookings")
+        .select(BOOKING_SELECT)
+        .in("status", ["fully_paid", "active"])
+        .in("id", missingIds);
+      if (supplementalError) throw supplementalError;
+      supplementalBookings = (supplementalData ?? []) as unknown as ReminderBooking[];
+    }
+
+    const candidates = [...baseBookings, ...supplementalBookings]
       .map((booking) => ({
         booking,
-        reminder: getReminderState(booking, now),
+        reminder: getReminderState(booking, approvedEarlyByBooking.get(booking.id), now),
       }))
       .filter(
         (item): item is { booking: ReminderBooking; reminder: NonNullable<ReturnType<typeof getReminderState>> } =>

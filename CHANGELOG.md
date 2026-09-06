@@ -9,6 +9,270 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-06 — Fixed a client/server mismatch: incident actions ignored approved early returns
+
+Caught while explaining the "renter arrived early, lister didn't" scenario:
+the client-side eligibility check for reporting a no-show/non-return
+(`src/lib/incidents.ts`'s `canReportNonReturn`, updated in an earlier entry
+today to use the new operative-deadline helper) had no server-side
+counterpart - `api/booking-incident-action.ts`'s actual `report_non_return`
+and `lister_no_show_return` handlers still computed the return deadline
+directly from `bookings.end_date`/`dropoff_time`, completely ignoring any
+approved early return. For `lister_no_show_return` specifically (the renter
+reporting that the lister never showed up to receive an early return) this
+was a real, confirmed bug: the client would show the report button as
+available 30 minutes after the *early* time, but the server would reject
+the request until 30 minutes after the *original* time - hours later.
+`report_non_return` turned out to converge with the client in every case in
+practice (its neither-side-arrived precondition means the early return's own
+grace always elapses, and triggers the fallback to the original instant,
+before the original instant's own grace could ever be reached) but is now
+computed the same way regardless, rather than relying on that being true by
+coincidence.
+
+Added `getOperativeReturnMs`/`fetchApprovedEarlyReturn` to
+`api/booking-incident-action.ts` (mirrors `getOperativeReturnDeadline` in
+`src/lib/bookingLifecycle.ts`) and used them in both handlers. No refund
+logic changes - `lister_no_show_return` was already refund-free by design
+(the trip was already delivered by this point, so there's nothing to give
+back), this only fixes *when* the report becomes available, not what
+happens once it's filed.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:api-boundaries`.
+
+Files: `api/booking-incident-action.ts`.
+
+---
+
+## 2026-09-06 — Once approved, an early return can't be re-requested if it's missed
+
+Follow-up to the entry directly below. Reported rule: once a lister approves
+an early return, that's the one shot at it - if it doesn't happen, the
+renter waits for the original deadline (the fallback already built), not
+send another early-return request for the same trip. The `request` action's
+duplicate-request guard (`api/booking-early-return-action.ts`) only ever
+checked for an existing `pending` row - an already-`approved` row didn't
+block a new request at all. Extended the guard to also reject when the
+latest row for the booking is `approved`, with a clear explanation in the
+error. Mirrored client-side in `MyBookingsPage.tsx`'s `canRequestEarlyReturn`
+so the "Request early return" button doesn't invite a request that would
+just be rejected. A `rejected`/`cancelled`/`expired` prior request still
+does not block a new one - only `pending`/`approved` do.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`.
+
+Files: `api/booking-early-return-action.ts`, `src/pages/MyBookingsPage.tsx`.
+
+---
+
+## 2026-09-06 — Time-aware early returns, with a fallback to the original deadline if missed (CHAPTER 56)
+
+Two related asks after reviewing the return handshake. First: early-return
+requests only ever let a renter pick an earlier calendar *day* - never an
+earlier *time* on the same day (e.g. original agreed drop-off 10 AM, wanting
+to hand the car back 6 AM that same day was impossible to request at all).
+Second: approving an early return has always destructively overwritten
+`bookings.end_date`, so if both parties then missed that new, earlier
+window entirely, the original deadline was gone - no safety net. Requested:
+let the renter pick a real date+time, and if both sides miss it, fall back
+to letting the handoff still happen up through the *original* agreed
+date+time rather than a permanently harder deadline. A related smaller ask:
+the "overdue" label on the return reminder banner should only appear a
+3-hour grace period after the deadline actually in force, not immediately.
+
+**Design**: `bookings.end_date`/`dropoff_time` now permanently mean "the
+ORIGINAL agreed return date+time," never touched by early-return approval -
+they stay the sole input to every availability/overlap check elsewhere (the
+`bookings_no_active_date_overlap` exclusion constraint, `create-booking.ts`'s
+overlap check, `booking-extension-action.ts`'s day-math anchor, both
+calendars), so none of those needed to change. The approved early date+time
+lives only on its own `booking_early_returns` row. Two distinct deadline
+concepts, not one, because a single "falls back after a miss" value can't
+also gate the arrival button (it would flicker shut right when the missed
+party needs it most): **operative deadline** (can fall back to the
+original once both sides miss the early one, past its own 30-minute grace)
+drives the reminder/overdue banner and no-show-report eligibility;
+**check-in eligible from** (never re-closes once an early return is
+approved) drives only the "I Have Arrived" button's lead-time gate. The
+fallback is stateless - recomputed fresh from live arrival timestamps each
+time, not persisted once triggered.
+
+**CHAPTER 56**: `booking_early_returns` gains `requested_end_time` (required
+on every new row) and `current_dropoff_time` (a snapshot, same idea as the
+existing `current_end_date`); the earlier-than check constraint now compares
+full date+time instants instead of bare dates, so a same-day request is
+valid as long as it's genuinely earlier.
+
+**`api/booking-early-return-action.ts`**: `request` validates the real
+instant instead of just the date; `approve` no longer writes to `bookings`
+at all - notification/refund-note text explains the new date+time and that
+a missed window falls back automatically.
+
+**Shared helpers** (`src/lib/bookingLifecycle.ts`): `getOperativeReturnDeadline`,
+`getReturnCheckinEligibleDeadline`, `getEffectiveReturnDateTime`,
+`RETURN_OVERDUE_LABEL_GRACE_MINUTES` (180, independent of the existing
+30-minute `NO_SHOW_GRACE_WINDOW_MINUTES`, which still only gates no-show-
+*report* eligibility). Propagated to every other place that computed a
+return deadline this session found: `src/lib/incidents.ts`,
+`api/booking-action.ts`'s `return_arrive` gate, `api/expire-booking-deadlines.ts`'s
+return no-show sweep (batch-fetches approved early returns once per sweep,
+not per booking), and `api/send-return-reminders.ts` (plus a supplementary
+query so a booking with a far-off original `end_date` but a near, still-active
+approved early return isn't missed by the reminder cron).
+
+**UI**: `TIME_OPTIONS`/`formatTimeLabel` extracted from `CarDetailPage.tsx`
+into shared `src/lib/timeOptions.ts` (now a 3rd consumer). Both booking
+pages' early-return request modal gained a time `<select>` and now allow a
+same-day date; both pages' `returnCheckinOpen` gating and reminder calls
+were updated to the new helpers; the lister-side approval card shows the
+requested time alongside the date.
+
+**Note**: the overdue-label grace change (0 → 180 minutes) is an intentional
+behavior change, not a regression - a booking that's 1 minute past its
+return deadline no longer immediately shows "overdue."
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow` (one stale marker fixed -
+`manilaEndOfDayMs` was removed from `booking-early-return-action.ts` in
+favor of capping the response deadline against the real requested instant),
+`check:api-boundaries`, `check:financial-logic`. Hand-traced the plain,
+on-time, and missed-early-return scenarios against the exact instant math
+before implementing (see the approved plan).
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 56),
+`api/booking-early-return-action.ts`, `api/booking-action.ts`,
+`api/expire-booking-deadlines.ts`, `api/send-return-reminders.ts`,
+`src/lib/bookingLifecycle.ts`, `src/lib/earlyReturns.ts`,
+`src/lib/incidents.ts`, `src/lib/timeOptions.ts` (new),
+`src/pages/CarDetailPage.tsx`, `src/pages/MyBookingsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`, `src/types/database.ts`,
+`scripts/booking-flow-smoke-check.mjs`.
+
+---
+
+## 2026-09-06 — Return "I Have Arrived" now waits for its own check-in window, matching pickup
+
+Reported (while reviewing the return handshake): the return-leg "I Have
+Arrived" button rendered the instant a booking went active, even for a
+multi-day trip whose drop-off was days away - confusing, since nothing
+explained why a return button was showing up on day one. The pickup leg
+already handled this correctly (`arrivalCheckinOpen`, computed from
+`getBookingPickupMs` minus `arrival_checkin_lead_hours`, gates the pickup
+button and shows a "check-in opens ..." note otherwise) - the return leg
+had no equivalent, even though the server (`api/booking-action.ts`'s
+`return_arrive` handler) already enforced the same lead-time rule and would
+just reject an early tap with an error.
+
+Added the missing mirror in both `MyBookingsPage.tsx` and
+`ListerBookingsPage.tsx`: a `getBookingDropoffMs` helper (mirrors
+`getBookingPickupMs`) and `returnCheckinOpen`/`returnCheckinOpensMs`
+(mirrors `arrivalCheckinOpen`/`arrivalCheckinOpensMs`). The return button
+now only renders once inside its lead-time window; before that, both
+dashboards show "Return check-in opens N hour(s) before drop-off - [date]"
+instead - exactly the pickup leg's existing pattern, just applied to
+return.
+
+No server-side change needed - `api/booking-action.ts` already enforced
+this correctly; only the client-side UI was missing the gate.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/MyBookingsPage.tsx`, `src/pages/ListerBookingsPage.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
+## 2026-09-06 — Removed the dismissible install banner - one entry point only
+
+Immediate follow-up to the entry directly below: on reflection, having both
+a one-time dismissible banner (`InstallPrompt.tsx`) and a permanent button
+(`InstallButton.tsx`) was one surface too many for what should be a single,
+unambiguous place to install. Deleted `InstallPrompt.tsx` and its mount in
+`App.tsx`; `InstallButton.tsx` (landing page header + `DashboardLayout`
+header) is now the only install entry point. `src/lib/pwaInstall.ts`'s
+`usePwaInstall()` is unchanged - it only ever had one consumer now.
+
+Verified: `tsc -b`, lint.
+
+Files: `src/App.tsx`, `src/components/InstallButton.tsx`,
+`src/lib/pwaInstall.ts`, `src/components/InstallPrompt.tsx` (deleted),
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
+## 2026-09-06 — A permanent Install button, alongside the one-time banner
+
+Reported: a renter saw the "Install SafeDrive" banner, dismissed it, then
+later wanted to install and had no idea where to find that option again -
+`InstallPrompt.tsx` was a one-time nudge with a 14-day dismiss cooldown and
+nothing else offered installability.
+
+Extracted the shared install-detection logic (`beforeinstallprompt` capture,
+iOS Safari detection, already-standalone detection) into
+`src/lib/pwaInstall.ts`'s `usePwaInstall()`, and added a second, permanent
+surface on top of it: `InstallButton.tsx`, a small button mounted in the
+landing page header (`LandingPage.tsx`) and in `DashboardLayout.tsx`'s
+header - reachable from a first-time visitor's very first screen and every
+logged-in page afterward, regardless of whether the one-time banner was ever
+seen or dismissed. `InstallPrompt.tsx` itself is otherwise unchanged (still
+one-time, still dismissible) and now also tells the user where to find the
+permanent button if they dismiss it.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Also verified per a separate question: the pickup/drop-off-time change above
+does not affect the return handshake/grace-period logic at all -
+`getReturnNoShowWindowState()`/`getBookingReturnDeadline()`
+(`src/lib/bookingLifecycle.ts`) and the return-arrival lead-time gate
+(`arrival_checkin_lead_hours`, default 3h, in `api/booking-action.ts`'s
+`return_arrive` handler) all just read whatever `dropoff_time` ends up
+stored on the booking - unaffected by how that value gets set at booking
+creation. Confirmed by reading both, not assumed.
+
+Files: `src/lib/pwaInstall.ts` (new), `src/components/InstallButton.tsx`
+(new), `src/components/InstallPrompt.tsx`, `src/pages/LandingPage.tsx`,
+`src/components/DashboardLayout.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
+## 2026-09-06 — Drop-off time now always matches pickup time (1 paid day = a real 24 hours)
+
+Reported gap: `total_days` (and so the base price) is a pure calendar-date
+difference - Sept 5 to Sept 6 is always "1 day," regardless of time of day.
+Pickup and drop-off time were previously chosen independently, so a renter
+could pick pickup 11:59 PM / drop-off 12:01 AM the next day - a few minutes
+of actual use, billed as a full day - or the inverse (pickup 12:01 AM /
+drop-off 11:59 PM) for nearly 48 hours at a 1-day price. Neither is what
+"price per day" is supposed to mean.
+
+Fixed by locking drop-off to the same clock time as pickup, so every paid
+day is a real, consistent 24 hours from pickup to drop-off:
+- `CarDetailPage.tsx`: drop-off time is no longer an independent `<select>` -
+  it's a read-only display that mirrors whatever pickup time is chosen
+  (`useEffect` keeps `dropoffTime` in sync with `pickupTime`), with a note
+  explaining why.
+- `api/create-booking.ts`: rejects a request where `dropoffTime !==
+  pickupTime` (400), enforcing the same rule server-side so a direct API
+  call can't recreate the old mismatch.
+
+Early return and extension flows are unaffected - neither touches
+`pickup_time`/`dropoff_time` at all, so this only changes booking
+*creation*. No historical data to reconcile (CHAPTER 55 already cleared all
+booking history this session).
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:api-boundaries`,
+`check:financial-logic`.
+
+Files: `src/pages/CarDetailPage.tsx`, `api/create-booking.ts`.
+
+---
+
 ## 2026-09-06 — Install prompt was invisible on the landing/login/signup pages
 
 Reported: the "Install SafeDrive" banner never appeared on the landing page.

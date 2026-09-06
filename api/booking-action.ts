@@ -256,10 +256,12 @@ const getBookingPickupMs = (booking: BookingRecord) => {
   return asUtc - 8 * 60 * 60 * 1000;
 };
 
-// Same Manila-correct pattern as getBookingPickupMs, for the scheduled
-// return instant. end_date already reflects an approved early return (the
-// approval flow moves it earlier), so no separate early-return handling is
-// needed here.
+// Same Manila-correct pattern as getBookingPickupMs, for the ORIGINAL
+// scheduled return instant. api/booking-early-return-action.ts's "approve"
+// action deliberately never rewrites bookings.end_date/dropoff_time - those
+// columns permanently mean "the original agreed return date+time" - so this
+// always returns the original instant. Approved-early-return awareness is
+// layered on top via getOperativeDropoffMs/getReturnCheckinEligibleMs below.
 const getBookingDropoffMs = (booking: BookingRecord) => {
   const [year, month, day] = (booking.end_date || "")
     .split("-")
@@ -270,6 +272,30 @@ const getBookingDropoffMs = (booking: BookingRecord) => {
   if (!year || !month || !day) return null;
   const asUtc = Date.UTC(year, month - 1, day, hour || 0, minute || 0);
   return asUtc - 8 * 60 * 60 * 1000;
+};
+
+type ApprovedEarlyReturn = {
+  status: string;
+  requested_end_date: string;
+  requested_end_time: string;
+} | null;
+
+const getInstantMs = (dateOnly: string, time: string | null, fallback = "18:00") => {
+  const [year, month, day] = (dateOnly || "").split("-").map((part) => Number(part));
+  const [hour, minute] = (time || fallback).split(":").map((part) => Number(part));
+  if (!year || !month || !day) return null;
+  return Date.UTC(year, month - 1, day, hour || 0, minute || 0) - 8 * 60 * 60 * 1000;
+};
+
+// Concept B (server) - mirrors getReturnCheckinEligibleDeadline; never
+// re-closes once an early return is approved, even after a missed-early-
+// return fallback makes the original instant operative again (concept A).
+const getReturnCheckinEligibleMs = (booking: BookingRecord, approvedEarly: ApprovedEarlyReturn) => {
+  if (approvedEarly?.status === "approved") {
+    const earlyMs = getInstantMs(approvedEarly.requested_end_date, approvedEarly.requested_end_time);
+    if (earlyMs !== null) return earlyMs;
+  }
+  return getBookingDropoffMs(booking);
 };
 
 /**
@@ -1497,11 +1523,24 @@ export default async function handler(req: Request) {
       // configured number of hours before the scheduled return instant, so
       // neither side can prematurely announce a return far ahead of the
       // agreed time (that's what "request an early return" is for instead).
-      // end_date/dropoff_time already reflect an approved early return.
-      const dropoffMs = getBookingDropoffMs(bookingRecord);
-      if (dropoffMs !== null) {
+      // Once an approved early return exists, this permanently uses ITS
+      // instant instead of the original (getReturnCheckinEligibleMs,
+      // "concept B") - it must never re-close even if both sides later miss
+      // that early window and the return deadline shown elsewhere falls
+      // back to the original instant for labeling purposes.
+      const { data: approvedEarly } = await supabase
+        .from("booking_early_returns")
+        .select("status, requested_end_date, requested_end_time")
+        .eq("booking_id", bookingRecord.id)
+        .eq("status", "approved")
+        .order("approved_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const checkinEligibleMs = getReturnCheckinEligibleMs(bookingRecord, approvedEarly ?? null);
+      if (checkinEligibleMs !== null) {
         const leadHours = await fetchArrivalCheckinLeadHours(supabase);
-        const opensAtMs = dropoffMs - leadHours * 60 * 60 * 1000;
+        const opensAtMs = checkinEligibleMs - leadHours * 60 * 60 * 1000;
         if (Date.now() < opensAtMs) {
           return jsonResponse(
             {

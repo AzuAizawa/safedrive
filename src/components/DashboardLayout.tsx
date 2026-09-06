@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
+import InstallButton from "@/components/InstallButton";
 
 export default function DashboardLayout() {
   const { user, profile, signOut, refreshProfile } = useAuth();
@@ -295,6 +296,8 @@ export default function DashboardLayout() {
                   {isLister ? "Lister Mode" : "Renter Mode"}
                 </div>
               </div>
+
+              <InstallButton className="rounded-xl" />
 
               <Button
                 variant="ghost"

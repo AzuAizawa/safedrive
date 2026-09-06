@@ -5,7 +5,18 @@ type ReminderBooking = {
   status: string;
   end_date: string;
   dropoff_time: string | null;
+  renter_return_arrived_at: string | null;
+  lister_return_arrived_at: string | null;
   label: string;
+};
+
+// An approved early-return request's date+time - the only fields the
+// deadline math below needs. Matches the shape of a row from
+// booking_early_returns (see src/lib/earlyReturns.ts).
+export type EarlyReturnDeadlineInput = {
+  status: string;
+  requested_end_date: string;
+  requested_end_time: string;
 };
 
 type NoShowBooking = {
@@ -53,6 +64,79 @@ export const getBookingPickupTime = (
   return new Date(year, (month || 1) - 1, day || 1, hour || 9, minute || 0, 0, 0);
 };
 
+// Approving an early return never rewrites bookings.end_date/dropoff_time -
+// those columns permanently mean "the ORIGINAL agreed return date+time" (see
+// api/booking-early-return-action.ts). The approved early date+time lives
+// only on its own booking_early_returns row. That split needs two different
+// deadline concepts, not one - a single "falls back after a miss" value
+// cannot also gate the arrival button, or the button would flicker shut
+// right when the missed party needs it most (early 6 AM missed by 6:30 AM ->
+// if the button's own open time were recomputed from the now-fallen-back
+// 10 AM deadline minus a 3h lead, it would vanish from 6:30-7:00 AM).
+//
+// Concept A - "operative deadline" (can fall back): drives the reminder/
+// overdue-label banner, no-show-*report* eligibility, and "return by"
+// display text.
+export const getOperativeReturnDeadline = (
+  booking: {
+    end_date: string;
+    dropoff_time: string | null;
+    renter_return_arrived_at: string | null;
+    lister_return_arrived_at: string | null;
+  },
+  approvedEarlyReturn: EarlyReturnDeadlineInput | null | undefined,
+  now = new Date(),
+): { deadline: Date; source: "early" | "original" } => {
+  const original = getBookingReturnDeadline(booking.end_date, booking.dropoff_time);
+  if (!approvedEarlyReturn || approvedEarlyReturn.status !== "approved") {
+    return { deadline: original, source: "original" };
+  }
+  const early = getBookingReturnDeadline(
+    approvedEarlyReturn.requested_end_date,
+    approvedEarlyReturn.requested_end_time,
+  );
+  const anyArrived = Boolean(
+    booking.renter_return_arrived_at || booking.lister_return_arrived_at,
+  );
+  const missed =
+    !anyArrived &&
+    now.getTime() >= early.getTime() + NO_SHOW_GRACE_WINDOW_MINUTES * 60 * 1000;
+  return missed ? { deadline: original, source: "original" } : { deadline: early, source: "early" };
+};
+
+// Concept B - "check-in eligible from" (never re-closes): once an early
+// return is approved this always opens against the (earlier) early instant,
+// permanently - it must never re-close, even after a missed-early-return
+// fallback (above) makes the ORIGINAL instant operative again for labeling
+// purposes. Drives only the "I Have Arrived" button's lead-time gate.
+export const getReturnCheckinEligibleDeadline = (
+  booking: { end_date: string; dropoff_time: string | null },
+  approvedEarlyReturn: EarlyReturnDeadlineInput | null | undefined,
+): Date =>
+  approvedEarlyReturn?.status === "approved"
+    ? getBookingReturnDeadline(approvedEarlyReturn.requested_end_date, approvedEarlyReturn.requested_end_time)
+    : getBookingReturnDeadline(booking.end_date, booking.dropoff_time);
+
+// Display-only helper (distinct from both concepts above, but derived from
+// concept A with no duplicated logic): which raw date/time strings to show
+// a user as "the return date," given the same fallback rule.
+export const getEffectiveReturnDateTime = (
+  booking: Parameters<typeof getOperativeReturnDeadline>[0],
+  approvedEarlyReturn: EarlyReturnDeadlineInput | null | undefined,
+  now = new Date(),
+): { date: string; time: string | null; source: "early" | "original" } => {
+  const { source } = getOperativeReturnDeadline(booking, approvedEarlyReturn, now);
+  if (source === "early" && approvedEarlyReturn) {
+    return { date: approvedEarlyReturn.requested_end_date, time: approvedEarlyReturn.requested_end_time, source };
+  }
+  return { date: booking.end_date, time: booking.dropoff_time, source };
+};
+
+// Independent of NO_SHOW_GRACE_WINDOW_MINUTES (30, below) - that constant
+// gates no-show-*report* eligibility; this one only delays the cosmetic
+// "overdue" label on the reminder banner (getReturnReminderState).
+export const RETURN_OVERDUE_LABEL_GRACE_MINUTES = 180;
+
 export const NO_SHOW_GRACE_WINDOW_MINUTES = 30;
 
 export const getNoShowWindowState = (
@@ -89,6 +173,7 @@ export const getNoShowWindowState = (
 export const getReturnNoShowWindowState = (
   booking: ReturnNoShowBooking,
   actor: "renter" | "owner",
+  approvedEarlyReturn?: EarlyReturnDeadlineInput | null,
   now = new Date(),
 ) => {
   if (booking.status !== "active") return null;
@@ -104,7 +189,7 @@ export const getReturnNoShowWindowState = (
 
   if (!actorArrived || counterpartyArrived) return null;
 
-  const dropoffAt = getBookingReturnDeadline(booking.end_date, booking.dropoff_time);
+  const dropoffAt = getOperativeReturnDeadline(booking, approvedEarlyReturn, now).deadline;
   const reportReadyAt = new Date(
     dropoffAt.getTime() + NO_SHOW_GRACE_WINDOW_MINUTES * 60 * 1000,
   );
@@ -119,12 +204,16 @@ export const getReturnNoShowWindowState = (
 };
 
 export const getReturnReminderState = (
-  booking: Pick<ReminderBooking, "status" | "end_date" | "dropoff_time">,
+  booking: Pick<
+    ReminderBooking,
+    "status" | "end_date" | "dropoff_time" | "renter_return_arrived_at" | "lister_return_arrived_at"
+  >,
+  approvedEarlyReturn?: EarlyReturnDeadlineInput | null,
   now = new Date(),
 ): ReturnReminderState | null => {
   if (!["fully_paid", "active"].includes(booking.status)) return null;
 
-  const deadline = getBookingReturnDeadline(booking.end_date, booking.dropoff_time);
+  const deadline = getOperativeReturnDeadline(booking, approvedEarlyReturn, now).deadline;
   const diffMs = deadline.getTime() - now.getTime();
   const diffMinutes = Math.round(diffMs / 60000);
 
@@ -146,6 +235,22 @@ export const getReturnReminderState = (
   }
 
   const overdueMinutes = Math.abs(diffMinutes);
+
+  // Past the deadline, but still inside the grace period before the
+  // "overdue" label shows - stays a due_soon-toned message noting the
+  // countdown to that label instead.
+  if (overdueMinutes <= RETURN_OVERDUE_LABEL_GRACE_MINUTES) {
+    const graceMinutesLeft = RETURN_OVERDUE_LABEL_GRACE_MINUTES - overdueMinutes;
+    return {
+      kind: "due_soon",
+      deadline,
+      title: "Return due soon",
+      body: "The agreed return time has just passed. Finish the handoff soon.",
+      footnote: `Return deadline: ${deadline.toLocaleString()} • overdue label in ${graceMinutesLeft}m`,
+      tone: "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    };
+  }
+
   const overdueHours = Math.floor(overdueMinutes / 60);
   const overdueRemainder = overdueMinutes % 60;
   const overdueLabel =

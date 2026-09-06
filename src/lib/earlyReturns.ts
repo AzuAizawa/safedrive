@@ -10,7 +10,7 @@ export const earlyReturnStatusLabel = (status: string) => {
     case "pending":
       return "Waiting for the lister's decision";
     case "approved":
-      return "Approved — the return date was moved earlier";
+      return "Approved — return by the new date and time below";
     case "rejected":
       return "Declined — the original return date stands";
     case "cancelled":
@@ -43,6 +43,14 @@ export const latestEarlyReturn = (rows: EarlyReturnRow[] | undefined) =>
         (b.created_at ?? "").localeCompare(a.created_at ?? ""),
       )[0]
     : undefined;
+
+// A booking can only ever have one 'approved' early-return row at a time
+// (a new request can't be created while one is pending, and an approved one
+// is terminal), so the most recently created among approved rows is always
+// the one currently in force. Feeds getOperativeReturnDeadline/
+// getReturnCheckinEligibleDeadline (src/lib/bookingLifecycle.ts).
+export const latestApprovedEarlyReturn = (rows: EarlyReturnRow[] | undefined) =>
+  latestEarlyReturn(rows?.filter((row) => row.status === "approved"));
 
 export const runEarlyReturnAction = async (
   accessToken: string | undefined,

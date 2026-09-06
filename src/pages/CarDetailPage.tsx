@@ -7,6 +7,7 @@ import {
   DEFAULT_DOWNPAYMENT_RATE,
   fetchPlatformPricingSettings,
 } from "@/lib/platformSettings";
+import { TIME_OPTIONS, formatTimeLabel } from "@/lib/timeOptions";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 
@@ -70,16 +71,8 @@ const MAX_TOTAL_RENTAL_DAYS = 30;
 // display can show the current device time as soon as the field mounts, on
 // some mobile browsers indistinguishable from an actual chosen value. A
 // <select> that starts on a disabled placeholder forces an unambiguous,
-// explicit choice on every platform.
-const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
-  const hours24 = Math.floor(index / 2);
-  const minutes = index % 2 === 0 ? "00" : "30";
-  const value = `${hours24.toString().padStart(2, "0")}:${minutes}`;
-  const period = hours24 >= 12 ? "PM" : "AM";
-  const hours12 = hours24 % 12 || 12;
-  const label = `${hours12}:${minutes} ${period}`;
-  return { value, label };
-});
+// explicit choice on every platform. TIME_OPTIONS/formatTimeLabel now live
+// in src/lib/timeOptions.ts - also used by the early-return request form.
 
 type AgreementAccess = {
   agreementVersionId: string;
@@ -108,7 +101,20 @@ export default function CarDetailPage() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [pickupTime, setPickupTime] = useState("");
+  // Reported inconsistency: total_days is a pure calendar-date difference
+  // (Sept 5 -> Sept 6 is always "1 day"), independent of whatever pickup/
+  // drop-off times were picked. Letting the two be chosen independently made
+  // a 1-day-priced booking able to mean anywhere from a few minutes (pickup
+  // 11:59 PM, drop-off 12:01 AM) to nearly 48 hours (pickup 12:01 AM,
+  // drop-off 11:59 PM next day) of actual use. Locking drop-off to the same
+  // clock time as pickup makes every paid "day" a real, consistent 24 hours -
+  // drop-off is now derived, not independently chosen. Enforced again
+  // server-side in api/create-booking.ts.
   const [dropoffTime, setDropoffTime] = useState("");
+
+  useEffect(() => {
+    setDropoffTime(pickupTime);
+  }, [pickupTime]);
   const [submitting, setSubmitting] = useState(false);
   const [processingFeeRate, setProcessingFeeRate] = useState(0);
   const [processingFixedCentavos, setProcessingFixedCentavos] = useState(0);
@@ -1185,21 +1191,12 @@ export default function CarDetailPage() {
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                     Drop-off Time
                   </label>
-                  <select
-                    value={dropoffTime}
-                    onChange={(e) => setDropoffTime(e.target.value)}
-                    disabled={Boolean(licenceGateReason)}
-                    className="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="" disabled>
-                      Select drop-off time
-                    </option>
-                    {TIME_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-muted-foreground">
+                    {pickupTime ? `${formatTimeLabel(pickupTime)} (same as pickup)` : "Set pickup time first"}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Matches your pickup time, so each day you pay for is a full 24 hours.
+                  </p>
                 </div>
               </div>
 

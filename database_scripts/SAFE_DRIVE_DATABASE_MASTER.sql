@@ -9021,4 +9021,62 @@ select
   (select count(*) from public.ledger_entries) as ledger_entries,
   (select count(*) from public.booking_reviews) as booking_reviews;
 
+-- ============================================================================
+-- CHAPTER 56 - Early return requests support a specific time, with a
+-- fallback to the original date+time if an approved early return is missed
+-- ============================================================================
+-- Two related gaps reported this session:
+--   1. booking_early_returns only ever stored a bare date
+--      (requested_end_date), with the earlier-than check constraint on
+--      dates alone - a same-day early return (trip agreed to end at 10 AM,
+--      renter wants to hand the car back at 6 AM that same day) was
+--      impossible to even request.
+--   2. Approving an early return has always rewritten bookings.end_date to
+--      the new, earlier date (api/booking-early-return-action.ts, "approve"
+--      action) - a destructive overwrite of the ORIGINAL agreed return
+--      instant. If both sides then missed the new, earlier window, the
+--      original date was gone - no safety net to fall back to.
+--
+-- api/booking-early-return-action.ts stops writing bookings.end_date/
+-- dropoff_time on approval in the same change (see that file).
+-- bookings.end_date/dropoff_time now permanently mean "the ORIGINAL agreed
+-- return date+time," untouched by early-return approval, and remain the
+-- sole input to every availability/overlap check elsewhere - the
+-- bookings_no_active_date_overlap exclusion constraint (CHAPTER 5),
+-- api/create-booking.ts's overlap check, booking-extension-action.ts's
+-- day-math anchor, and both renter/lister calendars - none of those need
+-- to change.
+--
+-- requested_end_time is required on every new row (no silent default), so
+-- a request is always a real date+time pair - mirrors the explicit
+-- pickup/drop-off time picklist already added to CarDetailPage.tsx this
+-- session, not a native time input.
+--
+-- current_dropoff_time is a new snapshot column, same idea as the existing
+-- current_end_date snapshot: a check constraint can only see columns on
+-- the SAME row, but "the booking's dropoff time at request time" lives on
+-- bookings, not booking_early_returns - so it must be captured onto this
+-- row at request time, same as current_end_date already is for the date.
+
+alter table public.booking_early_returns
+  add column if not exists requested_end_time text,
+  add column if not exists current_dropoff_time text;
+
+update public.booking_early_returns
+  set requested_end_time = coalesce(requested_end_time, '18:00')
+  where requested_end_time is null;
+
+alter table public.booking_early_returns
+  alter column requested_end_time set not null,
+  add constraint booking_early_returns_requested_end_time_format
+    check (requested_end_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+alter table public.booking_early_returns
+  drop constraint if exists booking_early_returns_earlier,
+  add constraint booking_early_returns_earlier
+  check (
+    (requested_end_date + requested_end_time::time)
+    < (current_end_date + coalesce(current_dropoff_time, '18:00')::time)
+  );
+
 -- End of SafeDrive chaptered database master.

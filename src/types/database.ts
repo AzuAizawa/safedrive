@@ -934,7 +934,9 @@ export interface Database {
           renter_id: string;
           owner_id: string;
           current_end_date: string;
+          current_dropoff_time: string | null;
           requested_end_date: string;
+          requested_end_time: string;
           reason: string | null;
           status: string;
           owner_decision_note: string | null;
@@ -952,7 +954,9 @@ export interface Database {
           renter_id: string;
           owner_id: string;
           current_end_date: string;
+          current_dropoff_time?: string | null;
           requested_end_date: string;
+          requested_end_time: string;
           reason?: string | null;
           status?: string;
           owner_decision_note?: string | null;
@@ -970,7 +974,9 @@ export interface Database {
           renter_id?: string;
           owner_id?: string;
           current_end_date?: string;
+          current_dropoff_time?: string | null;
           requested_end_date?: string;
+          requested_end_time?: string;
           reason?: string | null;
           status?: string;
           owner_decision_note?: string | null;

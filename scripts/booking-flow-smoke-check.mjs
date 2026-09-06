@@ -11,7 +11,7 @@ const checks = [
     file: "api/booking-early-return-action.ts",
     markers: [
       "RESPONSE_WINDOW_HOURS",
-      "manilaEndOfDayMs",
+      "requestedInstant",
       "response_deadline",
       "This early-return request expired before it was decided.",
     ],

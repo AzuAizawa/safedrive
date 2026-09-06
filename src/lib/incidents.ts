@@ -1,4 +1,8 @@
-import { getBookingReturnDeadline, NO_SHOW_GRACE_WINDOW_MINUTES } from "@/lib/bookingLifecycle";
+import {
+  getOperativeReturnDeadline,
+  NO_SHOW_GRACE_WINDOW_MINUTES,
+  type EarlyReturnDeadlineInput,
+} from "@/lib/bookingLifecycle";
 
 export type IncidentAction =
   | "renter_no_car"
@@ -26,6 +30,8 @@ type NonReturnBooking = {
   status: string;
   end_date: string;
   dropoff_time: string | null;
+  renter_return_arrived_at: string | null;
+  lister_return_arrived_at: string | null;
   renter_completed?: boolean | null;
   owner_completed?: boolean | null;
   dispute_status?: string | null;
@@ -34,16 +40,23 @@ type NonReturnBooking = {
 /**
  * True when an active trip is past its agreed return time plus the grace
  * window, nobody has started completion, and it is not already flagged.
- * Mirrors the server guard in api/booking-incident-action.ts.
+ * Mirrors the server guard in api/booking-incident-action.ts - both always
+ * converge on the ORIGINAL end_date/dropoff_time for this check in
+ * practice: an approved-but-not-yet-missed early return only shifts the
+ * OPERATIVE deadline earlier until its own grace expires, at which point it
+ * falls back to the original anyway (src/lib/bookingLifecycle.ts), so this
+ * never lets a non-return be reported earlier than the original schedule
+ * already allowed.
  */
 export const canReportNonReturn = (
   booking: NonReturnBooking,
+  approvedEarlyReturn?: EarlyReturnDeadlineInput | null,
   now = new Date(),
 ) => {
   if (booking.status !== "active") return false;
   if (booking.renter_completed || booking.owner_completed) return false;
   if ((booking.dispute_status ?? "none") !== "none") return false;
-  const deadline = getBookingReturnDeadline(booking.end_date, booking.dropoff_time);
+  const deadline = getOperativeReturnDeadline(booking, approvedEarlyReturn, now).deadline;
   return (
     now.getTime() >=
     deadline.getTime() + NO_SHOW_GRACE_WINDOW_MINUTES * 60 * 1000

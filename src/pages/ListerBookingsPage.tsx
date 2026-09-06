@@ -8,6 +8,7 @@ import {
   ensureReturnReminderNotifications,
   getNoShowWindowState,
   getReturnReminderState,
+  getReturnCheckinEligibleDeadline,
 } from "@/lib/bookingLifecycle";
 import {
   canReportNonReturn,
@@ -25,9 +26,11 @@ import {
   earlyReturnStatusLabel,
   earlyReturnTone,
   latestEarlyReturn,
+  latestApprovedEarlyReturn,
   runEarlyReturnAction,
   type EarlyReturnRow,
 } from "@/lib/earlyReturns";
+import { formatTimeLabel } from "@/lib/timeOptions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -97,6 +100,7 @@ const getBookingPickupMs = (booking: {
   // start_date is a plain calendar date; treat pickup as Manila local time.
   return Date.UTC(year, month - 1, day, hour || 0, minute || 0) - 8 * 60 * 60 * 1000;
 };
+
 
 interface ListerBooking {
   id: string;
@@ -511,6 +515,8 @@ export default function ListerBookingsPage() {
       status: getApparentStatus(booking),
       end_date: booking.end_date,
       dropoff_time: booking.dropoff_time,
+      renter_return_arrived_at: booking.renter_return_arrived_at,
+      lister_return_arrived_at: booking.lister_return_arrived_at,
       label: `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`,
     }));
 
@@ -1226,7 +1232,10 @@ export default function ListerBookingsPage() {
           status: apparentState,
           end_date: booking.end_date,
           dropoff_time: booking.dropoff_time,
+          renter_return_arrived_at: booking.renter_return_arrived_at,
+          lister_return_arrived_at: booking.lister_return_arrived_at,
         },
+        latestApprovedEarlyReturn(earlyReturnsByBooking[booking.id]),
         new Date(clockNow),
       );
 
@@ -2565,6 +2574,7 @@ export default function ListerBookingsPage() {
             const renterRel = renterReliabilities[b.renter_id];
             const latestExtension = getLatestExtension(b.id);
             const latestEarly = latestEarlyReturn(earlyReturnsByBooking[b.id]);
+            const latestApprovedEarly = latestApprovedEarlyReturn(earlyReturnsByBooking[b.id]);
             const processGuidance = getProcessGuidance(b, apparentState);
             const payoutStatus = getBookingPayoutStatus(b);
             const shouldShowPayoutStatus =
@@ -2597,7 +2607,7 @@ export default function ListerBookingsPage() {
               "owner",
               new Date(clockNow),
             );
-            const canReportNonReturnNow = canReportNonReturn(b, new Date(clockNow));
+            const canReportNonReturnNow = canReportNonReturn(b, latestApprovedEarly, new Date(clockNow));
             const nonReturnFlagged = (b.dispute_status ?? "none") === "open";
             const reviewedByOwner = b.booking_reviews?.some(
               (review) =>
@@ -2614,6 +2624,19 @@ export default function ListerBookingsPage() {
               arrivalCheckinOpensMs === null || clockNow >= arrivalCheckinOpensMs;
             const tripHasStarted =
               bookingPickupMs === null || clockNow >= bookingPickupMs;
+            // Concept B ("check-in eligible from") - once an early return is
+            // approved this permanently uses ITS instant instead of the
+            // original, and never re-closes even if both sides later miss
+            // that early window (src/lib/bookingLifecycle.ts).
+            const returnCheckinEligibleAt = getReturnCheckinEligibleDeadline(
+              b,
+              latestApprovedEarly,
+            ).getTime();
+            const returnCheckinOpensMs = Number.isNaN(returnCheckinEligibleAt)
+              ? null
+              : returnCheckinEligibleAt - arrivalLeadHours * 60 * 60 * 1000;
+            const returnCheckinOpen =
+              returnCheckinOpensMs === null || clockNow >= returnCheckinOpensMs;
             const nextStep = getNextStep(
               b,
               apparentState,
@@ -2983,11 +3006,15 @@ export default function ListerBookingsPage() {
                               new Date(latestEarly.requested_end_date),
                               "MMM d, yyyy",
                             )}{" "}
-                            (was{" "}
+                            at {formatTimeLabel(latestEarly.requested_end_time)}
+                            {" (was "}
                             {format(
                               new Date(latestEarly.current_end_date),
                               "MMM d, yyyy",
                             )}
+                            {latestEarly.current_dropoff_time
+                              ? ` at ${formatTimeLabel(latestEarly.current_dropoff_time)}`
+                              : ""}
                             ).
                           </p>
                           {latestEarly.status === "pending" && latestEarly.response_deadline ? (
@@ -3425,6 +3452,17 @@ export default function ListerBookingsPage() {
                             <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
                               You can finish the trip once it starts - pickup is{" "}
                               {format(new Date(bookingPickupMs), "MMM d, yyyy h:mm a")}.
+                            </div>
+                          ) : apparentState === "active" &&
+                            !b.lister_return_arrived_at &&
+                            !returnCheckinOpen &&
+                            returnCheckinOpensMs !== null ? (
+                            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
+                              <p className="font-semibold text-foreground">Return check-in not open yet</p>
+                              <p className="mt-1">
+                                Opens {arrivalLeadHours} hour{arrivalLeadHours === 1 ? "" : "s"} before drop-off -{" "}
+                                {format(new Date(returnCheckinOpensMs), "MMM d, yyyy h:mm a")}.
+                              </p>
                             </div>
                           ) : apparentState === "active" && !b.lister_return_arrived_at ? (
                             <div className="space-y-1.5">

@@ -21,6 +21,7 @@ import { supabase } from "@/lib/supabase";
 import type { CarWithDetails } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import InstallButton from "@/components/InstallButton";
 
 const FEATURED_CAR_LIMIT = 8;
 
@@ -115,6 +116,7 @@ export default function LandingPage() {
           </div>
 
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+            <InstallButton />
             {user ? (
               <>
                 <Button variant="ghost" size="sm" onClick={handleSignOut}>

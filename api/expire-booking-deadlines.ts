@@ -639,6 +639,33 @@ export default async function handler(req: Request) {
       .limit(200);
     if (returnNoShowError) throw returnNoShowError;
 
+    // This sweep only ever reaches a booking where exactly one side has
+    // arrived (below), so a fallback to the original instant can never
+    // apply here (the fallback only triggers when NEITHER side has arrived)
+    // - only "prefer the approved early instant over the original" matters,
+    // batch-fetched once for the whole candidate set rather than per-row.
+    const returnNoShowCandidateIds = (returnNoShowCandidates ?? []).map((b) => b.id);
+    const { data: approvedEarlyReturnRows } = returnNoShowCandidateIds.length
+      ? await supabase
+          .from("booking_early_returns")
+          .select("booking_id, requested_end_date, requested_end_time, approved_at")
+          .eq("status", "approved")
+          .in("booking_id", returnNoShowCandidateIds)
+          .order("approved_at", { ascending: false })
+      : { data: [] as { booking_id: string; requested_end_date: string; requested_end_time: string }[] };
+    const approvedEarlyReturnByBooking = new Map<string, { requested_end_date: string; requested_end_time: string }>();
+    for (const early of approvedEarlyReturnRows ?? []) {
+      if (!approvedEarlyReturnByBooking.has(early.booking_id)) {
+        approvedEarlyReturnByBooking.set(early.booking_id, early);
+      }
+    }
+    const getInstantMs = (dateOnly: string, time: string | null, fallback = "18:00") => {
+      const [y, m, d] = (dateOnly || "").split("-").map(Number);
+      const [hh, mm] = (time || fallback).split(":").map(Number);
+      if (!y || !m || !d) return null;
+      return Date.UTC(y, m - 1, d, hh || 0, mm || 0) - 8 * 60 * 60 * 1000;
+    };
+
     let returnNoShowReminderSent = 0;
     for (const booking of (returnNoShowCandidates ?? []) as unknown as Array<{
       id: string;
@@ -654,10 +681,11 @@ export default async function handler(req: Request) {
         Boolean(booking.renter_return_arrived_at) !== Boolean(booking.lister_return_arrived_at);
       if (!onlyOneArrived) continue;
 
-      const [y, m, d] = booking.end_date.split("-").map(Number);
-      const [hh, mm] = (booking.dropoff_time || "18:00").split(":").map(Number);
-      if (!y || !m || !d) continue;
-      const dropoffMs = Date.UTC(y, m - 1, d, hh || 0, mm || 0) - 8 * 60 * 60 * 1000;
+      const approvedEarly = approvedEarlyReturnByBooking.get(booking.id);
+      const dropoffMs = approvedEarly
+        ? getInstantMs(approvedEarly.requested_end_date, approvedEarly.requested_end_time)
+        : getInstantMs(booking.end_date, booking.dropoff_time);
+      if (dropoffMs === null) continue;
       if (Date.now() < dropoffMs + RETURN_NO_SHOW_GRACE_MINUTES * 60_000) continue;
 
       const { data: claimed, error: claimError } = await supabase

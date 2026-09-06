@@ -12,6 +12,7 @@ type EarlyReturnPayload = {
   earlyReturnId?: string;
   action?: EarlyReturnAction;
   requestedEndDate?: string;
+  requestedEndTime?: string;
   reason?: string | null;
   ownerDecisionNote?: string | null;
   goodwillRefundAmount?: number | string | null;
@@ -43,7 +44,9 @@ type EarlyReturnRecord = {
   owner_id: string;
   status: string;
   current_end_date: string;
+  current_dropoff_time: string | null;
   requested_end_date: string;
+  requested_end_time: string;
   response_deadline: string | null;
 };
 
@@ -77,25 +80,18 @@ const getVehicleLabel = (booking: BookingRecord) => {
   return `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`;
 };
 
+const formatTimeLabel = (time: string | null) => {
+  if (!time) return "";
+  const [hour, minute] = time.split(":").map(Number);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return "";
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${minute.toString().padStart(2, "0")} ${period}`;
+};
+
 const parseDateOnly = (value: string) => {
   const parsed = new Date(`${value}T00:00:00`);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
-const todayDateOnly = () => {
-  const now = new Date();
-  return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-};
-
-// End of that calendar day, Manila local time, as an epoch ms instant - same
-// -8h-from-naive-UTC pattern used across booking-action.ts /
-// booking-incident-action.ts for Manila-correct instants from a plain date.
-const manilaEndOfDayMs = (dateOnly: string) => {
-  const [y, m, d] = dateOnly.split("-").map(Number);
-  if (!y || !m || !d) return null;
-  return Date.UTC(y, m - 1, d, 23, 59, 59) - 8 * 60 * 60 * 1000;
 };
 
 // Manila-local wall time -> epoch ms, same -8h-from-naive-UTC pattern used
@@ -133,11 +129,14 @@ export default async function handler(req: Request) {
 
     // ----------------------------------------------------------------- request
     if (payload.action === "request") {
-      if (!payload.bookingId || !payload.requestedEndDate) {
+      if (!payload.bookingId || !payload.requestedEndDate || !payload.requestedEndTime) {
         return jsonResponse(
-          { error: "Booking and requested end date are required" },
+          { error: "Booking, requested end date, and requested time are required" },
           400,
         );
+      }
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(payload.requestedEndTime)) {
+        return jsonResponse({ error: "Invalid requested time" }, 400);
       }
 
       const { data: booking, error: bookingError } = await supabase
@@ -176,14 +175,23 @@ export default async function handler(req: Request) {
       }
 
       const reqEnd = parseDateOnly(payload.requestedEndDate);
-      const curEnd = parseDateOnly(b.end_date);
       const start = parseDateOnly(b.start_date);
-      if (!reqEnd || !curEnd || !start) {
+      // Instant (date+time) comparisons, not date-only - a same-day early
+      // return (same calendar day as the current end_date, but an earlier
+      // time) is a valid request as long as it's genuinely earlier than the
+      // current agreed return instant.
+      const requestedInstant = manilaInstant(
+        payload.requestedEndDate,
+        payload.requestedEndTime,
+        "18:00",
+      );
+      const currentInstant = manilaInstant(b.end_date, b.dropoff_time, "18:00");
+      if (!reqEnd || !start || requestedInstant === null || currentInstant === null) {
         return jsonResponse({ error: "Invalid dates on this booking." }, 422);
       }
-      if (reqEnd.getTime() >= curEnd.getTime()) {
+      if (requestedInstant >= currentInstant) {
         return jsonResponse(
-          { error: "The new return date must be earlier than the current one." },
+          { error: "The new return date and time must be earlier than the current return date and time." },
           422,
         );
       }
@@ -193,9 +201,9 @@ export default async function handler(req: Request) {
           422,
         );
       }
-      if (reqEnd.getTime() < todayDateOnly().getTime()) {
+      if (requestedInstant < Date.now()) {
         return jsonResponse(
-          { error: "The new return date cannot be in the past." },
+          { error: "The new return date and time cannot be in the past." },
           422,
         );
       }
@@ -206,34 +214,43 @@ export default async function handler(req: Request) {
       // to prepare for the impromptu meetup.
       const minNoticeHours = Number(b.cars?.min_early_return_notice_hours);
       if (Number.isFinite(minNoticeHours) && minNoticeHours > 0) {
-        const requestedReturnMs = manilaInstant(
-          payload.requestedEndDate,
-          null,
-          "18:00",
-        );
-        if (
-          requestedReturnMs !== null &&
-          requestedReturnMs - Date.now() < minNoticeHours * 60 * 60 * 1000
-        ) {
+        if (requestedInstant - Date.now() < minNoticeHours * 60 * 60 * 1000) {
           return jsonResponse(
             {
-              error: `This car requires at least ${minNoticeHours} hour${minNoticeHours === 1 ? "" : "s"} of notice for an early return. Choose a later date.`,
+              error: `This car requires at least ${minNoticeHours} hour${minNoticeHours === 1 ? "" : "s"} of notice for an early return. Choose a later date or time.`,
             },
             422,
           );
         }
       }
 
+      // Reported rule: once an early return is approved, that's the one
+      // shot at it - if it doesn't happen, the fallback (this file's
+      // "approve" comment, and src/lib/bookingLifecycle.ts) hands the
+      // return back to the ORIGINAL deadline rather than opening the door
+      // to an endless string of new early-return attempts. Only a pending
+      // request may still be superseded (withdrawn via "cancel", or simply
+      // left to expire) before a new one is sent.
       const { data: existingEarly } = await supabase
         .from("booking_early_returns")
-        .select("id")
+        .select("id, status")
         .eq("booking_id", b.id)
-        .eq("status", "pending")
+        .in("status", ["pending", "approved"])
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (existingEarly) {
+      if (existingEarly?.status === "pending") {
         return jsonResponse(
           { error: "An early-return request is already pending." },
+          409,
+        );
+      }
+      if (existingEarly?.status === "approved") {
+        return jsonResponse(
+          {
+            error:
+              "An early return was already approved for this booking. If it didn't happen, the original return date and time stand - a new early-return request can't be sent for this trip.",
+          },
           409,
         );
       }
@@ -255,16 +272,12 @@ export default async function handler(req: Request) {
         );
       }
 
-      // The lister must decide within 24h, capped at the end of the
-      // requested (earlier) return day itself - deciding after the renter
-      // already wanted the car back is moot. Same "never past the moment
-      // that matters" cap already used for payment_deadline/balance_deadline.
-      const requestedEndOfDayMs = manilaEndOfDayMs(payload.requestedEndDate);
+      // The lister must decide within 24h, capped at the requested (earlier)
+      // return instant itself - deciding after the renter already wanted
+      // the car back is moot. Same "never past the moment that matters" cap
+      // already used for payment_deadline/balance_deadline.
       const responseDeadline = new Date(
-        Math.min(
-          Date.now() + RESPONSE_WINDOW_HOURS * 60 * 60 * 1000,
-          requestedEndOfDayMs ?? Date.now() + RESPONSE_WINDOW_HOURS * 60 * 60 * 1000,
-        ),
+        Math.min(Date.now() + RESPONSE_WINDOW_HOURS * 60 * 60 * 1000, requestedInstant),
       ).toISOString();
 
       const { data: row, error: insertError } = await supabase
@@ -274,7 +287,9 @@ export default async function handler(req: Request) {
           renter_id: b.renter_id,
           owner_id: b.owner_id,
           current_end_date: b.end_date,
+          current_dropoff_time: b.dropoff_time,
           requested_end_date: payload.requestedEndDate,
+          requested_end_time: payload.requestedEndTime,
           reason: payload.reason?.trim() || null,
           status: "pending",
           response_deadline: responseDeadline,
@@ -285,7 +300,7 @@ export default async function handler(req: Request) {
         throw insertError ?? new Error("Failed to create early-return request");
       }
 
-      const msg = `The renter asked to return ${getVehicleLabel(b)} early, on ${payload.requestedEndDate} instead of ${b.end_date}.`;
+      const msg = `The renter asked to return ${getVehicleLabel(b)} early, by ${payload.requestedEndDate} at ${formatTimeLabel(payload.requestedEndTime)} instead of ${b.end_date} at ${formatTimeLabel(b.dropoff_time)}.`;
       await supabase.from("notifications").insert({
         user_id: b.owner_id,
         title: "Early return requested",
@@ -370,13 +385,17 @@ export default async function handler(req: Request) {
       const goodwill = Math.max(0, Number(payload.goodwillRefundAmount ?? 0) || 0);
       const decisionNote = payload.ownerDecisionNote?.trim() || null;
 
-      // Move the booking date first so a failure here leaves the request still
-      // pending (retryable) rather than "approved" with the old date.
-      const { error: bookingUpdateError } = await supabase
-        .from("bookings")
-        .update({ end_date: er.requested_end_date })
-        .eq("id", er.booking_id);
-      if (bookingUpdateError) throw bookingUpdateError;
+      // Deliberately does NOT touch bookings.end_date/dropoff_time - those
+      // columns permanently mean "the ORIGINAL agreed return date+time" and
+      // stay the sole input to every availability/overlap check elsewhere
+      // (the bookings_no_active_date_overlap exclusion constraint,
+      // create-booking.ts's overlap check, booking-extension-action.ts's
+      // day-math anchor, both renter/lister calendars). The approved early
+      // date+time lives only on this row; if both sides miss it, the return
+      // flow (api/booking-action.ts, src/lib/bookingLifecycle.ts) falls
+      // back to the original instant automatically - a safety net that
+      // would be impossible if this handler had already overwritten it.
+      const requestedTimeLabel = formatTimeLabel(er.requested_end_time);
 
       const { data: changed, error: updateError } = await supabase
         .from("booking_early_returns")
@@ -409,7 +428,7 @@ export default async function handler(req: Request) {
             status: "pending",
             payment_method: "manual_review",
             transaction_id: null,
-            notes: `Lister-approved goodwill refund for an early return (new end ${er.requested_end_date}). Admin confirms the return method during refund review.`,
+            notes: `Lister-approved goodwill refund for an early return (requested return ${er.requested_end_date} at ${requestedTimeLabel}). Admin confirms the return method during refund review.`,
           })
           .select("id")
           .single();
@@ -436,8 +455,8 @@ export default async function handler(req: Request) {
 
       const renterMsg =
         goodwill > 0
-          ? `Your early return was approved. The new return date is ${er.requested_end_date} and the lister approved a PHP ${goodwill.toLocaleString()} goodwill refund, which SafeDrive support will release.`
-          : `Your early return was approved. The new return date is ${er.requested_end_date}. There is no refund for the unused days.`;
+          ? `Your early return was approved. Return by ${er.requested_end_date} at ${requestedTimeLabel} and the lister approved a PHP ${goodwill.toLocaleString()} goodwill refund, which SafeDrive support will release. If neither of you confirms return arrival by then (plus a short grace window), the original return time becomes available again automatically.`
+          : `Your early return was approved. Return by ${er.requested_end_date} at ${requestedTimeLabel}. There is no refund for the unused days. If neither of you confirms return arrival by then (plus a short grace window), the original return time becomes available again automatically.`;
       await supabase.from("notifications").insert({
         user_id: er.renter_id,
         title: "Early return approved",
@@ -460,7 +479,8 @@ export default async function handler(req: Request) {
         entity_id: er.id,
         details: {
           booking_id: er.booking_id,
-          new_end_date: er.requested_end_date,
+          requested_end_date: er.requested_end_date,
+          requested_end_time: er.requested_end_time,
           goodwill_refund_amount: goodwill,
           refund_payment_id: refundPaymentId,
           note: decisionNote,

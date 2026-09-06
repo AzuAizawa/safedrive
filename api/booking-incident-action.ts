@@ -133,6 +133,45 @@ const manilaMs = (date: string, time: string | null, fallback: string) => {
   return Date.UTC(y, m - 1, d, hh || 0, mm || 0) - 8 * 60 * 60 * 1000;
 };
 
+type ApprovedEarlyReturn = { requested_end_date: string; requested_end_time: string } | null;
+
+// Mirrors getOperativeReturnDeadline in src/lib/bookingLifecycle.ts: the
+// early instant, unless NEITHER side has confirmed return arrival and now
+// is past the early instant plus its own grace - then the original instant
+// (bookings.end_date/dropoff_time, never rewritten by early-return approval)
+// becomes operative again. Used by both report_non_return (no arrival
+// precondition - either side could be waiting, or neither) and
+// lister_no_show_return (the reporting renter has always arrived, so the
+// fallback branch here can never actually trigger for that caller, but the
+// same general formula is used rather than special-casing it).
+const getOperativeReturnMs = (
+  booking: Pick<BookingRow, "end_date" | "dropoff_time" | "renter_return_arrived_at" | "lister_return_arrived_at">,
+  approvedEarly: ApprovedEarlyReturn,
+) => {
+  const originalMs = manilaMs(booking.end_date, booking.dropoff_time, "18:00");
+  if (!approvedEarly) return originalMs;
+  const earlyMs = manilaMs(approvedEarly.requested_end_date, approvedEarly.requested_end_time, "18:00");
+  if (earlyMs === null) return originalMs;
+  const anyArrived = Boolean(booking.renter_return_arrived_at || booking.lister_return_arrived_at);
+  const missed = !anyArrived && Date.now() >= earlyMs + GRACE_MINUTES * 60_000;
+  return missed ? originalMs : earlyMs;
+};
+
+const fetchApprovedEarlyReturn = async (
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  bookingId: string,
+): Promise<ApprovedEarlyReturn> => {
+  const { data } = await supabase
+    .from("booking_early_returns")
+    .select("requested_end_date, requested_end_time")
+    .eq("booking_id", bookingId)
+    .eq("status", "approved")
+    .order("approved_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data ?? null;
+};
+
 // Haversine distance in meters between two lat/lng points.
 const distanceMeters = (
   lat1: number,
@@ -638,7 +677,7 @@ export default async function handler(req: Request) {
           409,
         );
       }
-      const returnMs = manilaMs(b.end_date, b.dropoff_time, "18:00");
+      const returnMs = getOperativeReturnMs(b, await fetchApprovedEarlyReturn(supabase, b.id));
       if (returnMs === null || Date.now() < returnMs + GRACE_MINUTES * 60_000) {
         return jsonResponse(
           { error: "The return time has not passed yet." },
@@ -727,7 +766,12 @@ export default async function handler(req: Request) {
           409,
         );
       }
-      const returnMs = manilaMs(b.end_date, b.dropoff_time, "18:00");
+      // The renter reporting this has, by definition, already arrived
+      // (checked above), so the fallback branch inside getOperativeReturnMs
+      // can never actually trigger for this caller - it always resolves to
+      // the approved early instant, or the original one if none was ever
+      // approved.
+      const returnMs = getOperativeReturnMs(b, await fetchApprovedEarlyReturn(supabase, b.id));
       if (returnMs === null || Date.now() < returnMs + GRACE_MINUTES * 60_000) {
         return jsonResponse(
           { error: "Wait until the return grace window has passed." },

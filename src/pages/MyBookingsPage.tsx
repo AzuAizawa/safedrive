@@ -9,6 +9,7 @@ import {
   getNoShowWindowState,
   getReturnNoShowWindowState,
   getReturnReminderState,
+  getReturnCheckinEligibleDeadline,
 } from "@/lib/bookingLifecycle";
 import { runIncidentAction } from "@/lib/incidents";
 import { openBookingConversation } from "@/lib/bookingConversation";
@@ -21,9 +22,11 @@ import {
   earlyReturnStatusLabel,
   earlyReturnTone,
   latestEarlyReturn,
+  latestApprovedEarlyReturn,
   runEarlyReturnAction,
   type EarlyReturnRow,
 } from "@/lib/earlyReturns";
+import { TIME_OPTIONS, formatTimeLabel } from "@/lib/timeOptions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -141,6 +144,7 @@ const getBookingPickupMs = (booking: BookingRow): number | null => {
   if (!year || !month || !day) return null;
   return Date.UTC(year, month - 1, day, hour || 0, minute || 0) - 8 * 3600 * 1000;
 };
+
 
 interface RatingSummary {
   average: number;
@@ -282,6 +286,7 @@ export default function MyBookingsPage() {
     useState<BookingRow | null>(null);
   const [earlyReturnDraft, setEarlyReturnDraft] = useState({
     requestedEndDate: "",
+    requestedEndTime: "",
     reason: "",
   });
   const [earlyReturnLoading, setEarlyReturnLoading] = useState<string | null>(
@@ -460,6 +465,8 @@ export default function MyBookingsPage() {
       status: getApparentStatus(booking),
       end_date: booking.end_date,
       dropoff_time: booking.dropoff_time,
+      renter_return_arrived_at: booking.renter_return_arrived_at,
+      lister_return_arrived_at: booking.lister_return_arrived_at,
       label: `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`,
     }));
 
@@ -569,8 +576,8 @@ export default function MyBookingsPage() {
   const submitEarlyReturnRequest = async () => {
     if (!earlyReturnModalBooking) return;
     const bookingId = earlyReturnModalBooking.id;
-    if (!earlyReturnDraft.requestedEndDate) {
-      toast.error("Pick the new return date.");
+    if (!earlyReturnDraft.requestedEndDate || !earlyReturnDraft.requestedEndTime) {
+      toast.error("Pick the new return date and time.");
       return;
     }
     setEarlyReturnLoading(bookingId);
@@ -579,11 +586,12 @@ export default function MyBookingsPage() {
         action: "request",
         bookingId,
         requestedEndDate: earlyReturnDraft.requestedEndDate,
+        requestedEndTime: earlyReturnDraft.requestedEndTime,
         reason: earlyReturnDraft.reason.trim() || null,
       });
       toast.success("Early-return request sent to the lister.");
       setEarlyReturnModalBooking(null);
-      setEarlyReturnDraft({ requestedEndDate: "", reason: "" });
+      setEarlyReturnDraft({ requestedEndDate: "", requestedEndTime: "", reason: "" });
       fetchBookings();
     } catch (err) {
       toast.error("Could not send the request", {
@@ -1386,7 +1394,10 @@ export default function MyBookingsPage() {
           status: apparentState,
           end_date: booking.end_date,
           dropoff_time: booking.dropoff_time,
+          renter_return_arrived_at: booking.renter_return_arrived_at,
+          lister_return_arrived_at: booking.lister_return_arrived_at,
         },
+        latestApprovedEarlyReturn(earlyReturnsByBooking[booking.id]),
         new Date(clockNow),
       );
 
@@ -1888,12 +1899,17 @@ export default function MyBookingsPage() {
             const extensionBlocksCompletion =
               apparentExtensionStatus === "pending" || apparentExtensionStatus === "approved";
             const latestEarly = latestEarlyReturn(earlyReturnsByBooking[booking.id]);
+            const latestApprovedEarly = latestApprovedEarlyReturn(earlyReturnsByBooking[booking.id]);
+            // Once an early return is approved, that's the one shot at it -
+            // server-enforced (api/booking-early-return-action.ts), mirrored
+            // here so the button doesn't invite a request that will just be
+            // rejected.
             const canRequestEarlyReturn =
               (apparentState === "fully_paid" || apparentState === "active") &&
               !booking.renter_completed &&
               !booking.owner_completed &&
               !extensionBlocksCompletion &&
-              (!latestEarly || latestEarly.status !== "pending");
+              (!latestEarly || !["pending", "approved"].includes(latestEarly.status));
             const noShowState = getNoShowWindowState(
               booking,
               "renter",
@@ -1902,6 +1918,7 @@ export default function MyBookingsPage() {
             const returnNoShowState = getReturnNoShowWindowState(
               booking,
               "renter",
+              latestApprovedEarly,
               new Date(clockNow),
             );
             const nextStep = getNextStep(
@@ -1932,6 +1949,19 @@ export default function MyBookingsPage() {
               arrivalCheckinOpensMs === null || clockNow >= arrivalCheckinOpensMs;
             const tripHasStarted =
               bookingPickupMs === null || clockNow >= bookingPickupMs;
+            // Concept B ("check-in eligible from") - once an early return is
+            // approved this permanently uses ITS instant instead of the
+            // original, and never re-closes even if both sides later miss
+            // that early window (src/lib/bookingLifecycle.ts).
+            const returnCheckinEligibleAt = getReturnCheckinEligibleDeadline(
+              booking,
+              latestApprovedEarly,
+            ).getTime();
+            const returnCheckinOpensMs = Number.isNaN(returnCheckinEligibleAt)
+              ? null
+              : returnCheckinEligibleAt - arrivalLeadHours * 60 * 60 * 1000;
+            const returnCheckinOpen =
+              returnCheckinOpensMs === null || clockNow >= returnCheckinOpensMs;
 
             return (
               <div key={booking.id} className="space-y-4">
@@ -2338,7 +2368,8 @@ export default function MyBookingsPage() {
                               new Date(latestEarly.requested_end_date),
                               "MMM d, yyyy",
                             )}
-                            .
+                            {" at "}
+                            {formatTimeLabel(latestEarly.requested_end_time)}.
                           </p>
                           {latestEarly.status === "pending" && latestEarly.response_deadline ? (
                             <p className="mt-1">
@@ -2396,6 +2427,7 @@ export default function MyBookingsPage() {
                             onClick={() => {
                               setEarlyReturnDraft({
                                 requestedEndDate: "",
+                                requestedEndTime: "",
                                 reason: "",
                               });
                               setEarlyReturnModalBooking(booking);
@@ -2765,7 +2797,7 @@ export default function MyBookingsPage() {
                                   {ownReportsByBooking[booking.id]?.pickup && <CheckCircle2 className="w-3.5 h-3.5" />}
                                   {ownReportsByBooking[booking.id]?.pickup ? "Pickup photos (submitted)" : "Pickup photos (optional)"}
                                 </Button>
-                                {!booking.renter_return_arrived_at ? (
+                                {!booking.renter_return_arrived_at && returnCheckinOpen ? (
                                   <Button
                                     size="sm"
                                     onClick={() => handleReturnArrive(booking)}
@@ -2779,7 +2811,7 @@ export default function MyBookingsPage() {
                                     )}
                                     I Have Arrived
                                   </Button>
-                                ) : booking.owner_completed ? (
+                                ) : !booking.renter_return_arrived_at ? null : booking.owner_completed ? (
                                   <Button
                                     size="sm"
                                     onClick={() => handleComplete(booking)}
@@ -2795,7 +2827,12 @@ export default function MyBookingsPage() {
                                   </Button>
                                 ) : null}
                               </div>
-                              {!booking.renter_return_arrived_at ? (
+                              {!booking.renter_return_arrived_at && !returnCheckinOpen && returnCheckinOpensMs !== null ? (
+                                <p className="text-[10px] text-muted-foreground text-right leading-tight">
+                                  Return check-in opens {arrivalLeadHours} hour{arrivalLeadHours === 1 ? "" : "s"} before
+                                  drop-off - {format(new Date(returnCheckinOpensMs), "MMM d, yyyy h:mm a")}.
+                                </p>
+                              ) : !booking.renter_return_arrived_at ? (
                                 <p className="text-[10px] text-muted-foreground text-right leading-tight">
                                   Tap "I Have Arrived" once you're at the agreed return location - the lister carries the
                                   required evidence at pickup and return, so your own reports are optional but recommended
@@ -3040,13 +3077,7 @@ export default function MyBookingsPage() {
                     type="date"
                     value={earlyReturnDraft.requestedEndDate}
                     min={new Date().toISOString().slice(0, 10)}
-                    max={format(
-                      new Date(
-                        new Date(earlyReturnModalBooking.end_date).getTime() -
-                          86_400_000,
-                      ),
-                      "yyyy-MM-dd",
-                    )}
+                    max={earlyReturnModalBooking.end_date}
                     onChange={(e) =>
                       setEarlyReturnDraft((d) => ({
                         ...d,
@@ -3055,12 +3086,33 @@ export default function MyBookingsPage() {
                     }
                     className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">New return time</label>
+                  <select
+                    value={earlyReturnDraft.requestedEndTime}
+                    onChange={(e) =>
+                      setEarlyReturnDraft((d) => ({
+                        ...d,
+                        requestedEndTime: e.target.value,
+                      }))
+                    }
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="" disabled>
+                      Select return time
+                    </option>
+                    {TIME_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                   <p className="text-[11px] text-muted-foreground">
-                    Current return:{" "}
-                    {format(
-                      new Date(earlyReturnModalBooking.end_date),
-                      "MMM d, yyyy",
-                    )}
+                    Current return: {format(new Date(earlyReturnModalBooking.end_date), "MMM d, yyyy")}
+                    {" at "}
+                    {formatTimeLabel(earlyReturnModalBooking.dropoff_time)}. Same-day requests are fine, as
+                    long as the new date and time are earlier than this.
                   </p>
                 </div>
                 <div className="space-y-1.5">
@@ -3088,7 +3140,8 @@ export default function MyBookingsPage() {
                   onClick={() => void submitEarlyReturnRequest()}
                   disabled={
                     earlyReturnLoading === earlyReturnModalBooking.id ||
-                    !earlyReturnDraft.requestedEndDate
+                    !earlyReturnDraft.requestedEndDate ||
+                    !earlyReturnDraft.requestedEndTime
                   }
                 >
                   {earlyReturnLoading === earlyReturnModalBooking.id ? (
