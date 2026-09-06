@@ -9,6 +9,32 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-06 — Install prompt was invisible on the landing/login/signup pages
+
+Reported: the "Install SafeDrive" banner never appeared on the landing page.
+`InstallPrompt.tsx` had been mounted only inside `DashboardLayout.tsx`, but
+`/` (LandingPage), `/login`, `/signup`, `/contact`, and the legal pages are
+all registered outside that shell in `App.tsx` (public routes, no
+`DashboardLayout` wrapper) - so the component never had a chance to render
+there at all. The intended scope exclusion was `/admin/*` only, not every
+public/pre-auth page.
+
+Moved the mount point to the `App.tsx` root (sibling to the already
+app-wide `InquiryWidget`/`Toaster`/`ThemeColorMeta`), and added a
+`useLocation()`-based check inside `InstallPrompt.tsx` itself that returns
+`null` on any `/admin/*` path - the actual intended exclusion. It now
+reaches the landing page and every public page a first-time mobile visitor
+would land on, not just the logged-in renter/lister shell.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/App.tsx`, `src/components/InstallPrompt.tsx`,
+`src/components/DashboardLayout.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-06 — Pickup/drop-off time: explicit dropdown instead of a native time input
 
 Reported: a renter said the pickup/drop-off time appeared already fixed (at

@@ -1,9 +1,14 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router";
 import { Download, Share, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-// Renter/lister-facing "install SafeDrive" nudge. Mounted once in
-// DashboardLayout - meaningless on /admin/*, so it isn't mounted there.
+// Renter/lister-facing "install SafeDrive" nudge. Mounted once at the App
+// root (so it also reaches the public landing/login/signup pages, not just
+// the logged-in DashboardLayout shell - a first-time mobile visitor should
+// be able to install before ever creating an account) and hides itself on
+// /admin/* via the pathname check below, since that surface stays desktop-
+// oriented.
 //
 // Android/Chrome exposes `beforeinstallprompt`, which we capture and defer so
 // we can trigger it from our own button instead of the browser's default
@@ -55,6 +60,7 @@ function dismiss() {
 }
 
 export default function InstallPrompt() {
+  const location = useLocation();
   const [deferredEvent, setDeferredEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [showIosHint, setShowIosHint] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -89,6 +95,7 @@ export default function InstallPrompt() {
     setDeferredEvent(null);
   };
 
+  if (location.pathname.startsWith("/admin")) return null;
   if (dismissed || (!deferredEvent && !showIosHint)) return null;
 
   return (
