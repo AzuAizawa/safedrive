@@ -9,6 +9,35 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-06 — Pickup/drop-off time: explicit dropdown instead of a native time input
+
+Reported: a renter said the pickup/drop-off time appeared already fixed (at
+12:30 PM) and couldn't tell it was something they were meant to choose.
+`CarDetailPage.tsx`'s booking form always used a plain `<input type="time">`
+with no default value in state - functionally it was never actually fixed
+(any value the renter picked was correctly saved through to
+`api/create-booking.ts`), but a known pitfall of native time inputs is that
+their collapsed display can show the current device time as soon as the
+field mounts, indistinguishable on some mobile browsers from an already-
+chosen value - explaining a report that lines up with "stuck at whatever time
+the renter opened the page."
+
+Replaced both fields with an explicit `<select>` (30-minute increments,
+00:00-23:30, 12-hour labels) that starts on a disabled "Select pickup/
+drop-off time" placeholder - a renter must now make a visible, deliberate
+choice on every platform, and the existing "booking disabled until both
+times are set" validation needed no changes since it already just checked
+for a non-empty string. Value format (`HH:MM`) is unchanged, so
+`combineDateAndTime`/`parseTime` and the booking-creation payload are
+unaffected.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/CarDetailPage.tsx`.
+
+---
+
 ## 2026-09-06 — PWA: SafeDrive is now installable (renter/lister pages)
 
 Thesis-panel requirement: mobile users should be able to install SafeDrive and use it like a native app instead of always going through the browser - responsive, no broken UI, no lost functionality. Scope confirmed with the user: renter/lister-facing pages only; `/admin/*` stays desktop-oriented.

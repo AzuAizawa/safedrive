@@ -63,6 +63,24 @@ const MAX_BOOKING_TOTAL = 100000;
 const MAX_ADVANCE_BOOKING_DAYS = 60;
 const MAX_TOTAL_RENTAL_DAYS = 30;
 
+// Pickup/drop-off time is an explicit <select> (30-minute increments, full
+// day) rather than a raw <input type="time">. Reported issue: a renter saw
+// the pickup/drop-off time as if it were already fixed and couldn't tell it
+// was editable - a known pitfall of native time inputs, whose collapsed
+// display can show the current device time as soon as the field mounts, on
+// some mobile browsers indistinguishable from an actual chosen value. A
+// <select> that starts on a disabled placeholder forces an unambiguous,
+// explicit choice on every platform.
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const hours24 = Math.floor(index / 2);
+  const minutes = index % 2 === 0 ? "00" : "30";
+  const value = `${hours24.toString().padStart(2, "0")}:${minutes}`;
+  const period = hours24 >= 12 ? "PM" : "AM";
+  const hours12 = hours24 % 12 || 12;
+  const label = `${hours12}:${minutes} ${period}`;
+  return { value, label };
+});
+
 type AgreementAccess = {
   agreementVersionId: string;
   versionNumber: number;
@@ -1147,25 +1165,41 @@ export default function CarDetailPage() {
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                     Pickup Time
                   </label>
-                  <input
-                    type="time"
+                  <select
                     value={pickupTime}
                     onChange={(e) => setPickupTime(e.target.value)}
                     disabled={Boolean(licenceGateReason)}
                     className="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                  />
+                  >
+                    <option value="" disabled>
+                      Select pickup time
+                    </option>
+                    {TIME_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                     Drop-off Time
                   </label>
-                  <input
-                    type="time"
+                  <select
                     value={dropoffTime}
                     onChange={(e) => setDropoffTime(e.target.value)}
                     disabled={Boolean(licenceGateReason)}
                     className="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                  />
+                  >
+                    <option value="" disabled>
+                      Select drop-off time
+                    </option>
+                    {TIME_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
