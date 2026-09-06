@@ -9108,7 +9108,7 @@ alter table public.profiles
 -- Realtime push so a signed-in tab notices within seconds instead of only
 -- on its 45s poll fallback - mirrors CHAPTER 21's identical opt-in for
 -- public.admin_permissions exactly.
-do $$
+do $guard$
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
      and not exists (
@@ -9120,7 +9120,7 @@ begin
   then
     execute 'alter publication supabase_realtime add table public.profiles';
   end if;
-end $$;
+end $guard$;
 
 -- New security_logs event type for a forced "signed in elsewhere" sign-out
 -- (api/record-security-event.ts's actionMap gains a matching entry).
