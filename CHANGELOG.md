@@ -9,6 +9,114 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-06 — One-time reset script: clear all booking history, payments, and ledger (CHAPTER 55)
+
+Reported need: the booking lifecycle changed materially this session
+(mandatory handover gate, mutual return arrival, commission flip, extension
+deadlines) - bookings created and paid under the old process could behave
+inconsistently mixed with bookings created under the new one. Requested: wipe
+every currently-listed booking and all history so every derived statistic (a
+lister's own earnings, SafeDrive's own commission revenue and payout figures)
+reads back to zero. Confirmed first that nothing in the schema caches or
+materializes those numbers - everything is a live query over
+bookings/payments/ledger_entries, so deleting the underlying rows is
+sufficient.
+
+A one-time operational script (not a reusable RPC, so it leaves no standing
+"wipe everything" capability in the database) that deletes, in FK-safe order,
+`payments`, then `ledger_entries`/`ledger_journals` (with
+`prevent_finalized_entry_change` / `prevent_finalized_journal_change`
+temporarily disabled, since finalized ledger rows are normally append-only,
+then re-enabled immediately after), then `bookings` itself - which cascades
+to `booking_extensions`, `booking_agreement_acceptances`,
+`trip_condition_reports`/`trip_condition_photos`, `booking_reviews`,
+`booking_cancellations`, `booking_early_returns`, and sets
+`support_tickets.booking_id` / `reconciliation_items.booking_id` to null
+(those rows are kept, just unlinked). Deliberately does not touch cars,
+profiles, car documents/images, vehicle listings, or `subscriptions`
+(vehicle-listing-slot plan payments - a separate revenue stream with no
+`booking_id` link, out of scope for "booking history"). `security_deposits` /
+`security_deposit_claims` needed no handling here - CHAPTER 34 already
+dropped both tables outright, not just emptied them (an earlier draft of this
+chapter incorrectly assumed they still existed as an unused table and
+included a `DELETE FROM` for them, which would have failed with "relation
+does not exist" and aborted the whole transaction - caught and fixed before
+this was run, while confirming that removal actually was a full `DROP TABLE`
+and not a leftover).
+
+Also confirmed during this discussion: there is currently no admin-facing
+view of `subscriptions` revenue at all (not on `AdminFinancialLedgerPage` or
+anywhere else) - flagged as a possible follow-up, not built in this pass.
+
+Irreversible; run once, directly, by the project owner in the Supabase SQL
+editor - same as every other chapter.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 55).
+
+---
+
+## 2026-09-06 — Vehicle transmission is admin-only; lister requests a correction instead of self-editing
+
+Reported gap: a vehicle's transmission type (Automatic/Manual) gates which
+renters may book it at all (via `profiles.license_transmission`), so it must
+be a fixed spec set once at initial listing - never lister-editable, not even
+at renewal. `MyVehiclesPage.tsx`'s Edit Listing form already rendered
+transmission read-only, but that was only an app-level convention with no
+database enforcement, and legacy pre-gate listings with `transmission = null`
+had no way to ask for one to be set beyond a dead-end label ("set it on your
+next edit") pointing at a field that was never actually editable. Fixed by
+mirroring the existing `profiles.license_update_pending` pattern exactly,
+onto a new `cars.transmission_update_pending` flag.
+
+**CHAPTER 54:**
+- `cars.transmission_update_pending boolean not null default false`.
+- `protect_car_submission_fields()` (the existing `before insert or update on
+  cars` trigger) extended with the same two rules `protect_profile_sensitive_fields`
+  already enforces for licences: a non-admin session can never change
+  `transmission` on UPDATE (INSERT is unaffected - the lister still proposes
+  it once at initial listing), and `transmission_update_pending` may only be
+  flipped `false -> true` by a non-admin; only an admin (who returns early
+  from the trigger) can set the real value or clear the flag.
+- `notify_admins_of_transmission_update` - an `after update of
+  transmission_update_pending` trigger, same shape as
+  `notify_admins_of_license_update`, notifying every admin/super-admin with a
+  link into the new review tab.
+- The flag is intentionally orthogonal to listing approval status (like
+  `license_update_pending` is orthogonal to `verified_status`): flagging a
+  car does not touch `cars.status` or take the listing offline, matching how
+  a licence resubmission doesn't un-verify the profile.
+
+**Lister side (`MyVehiclesPage.tsx`):**
+- Vehicle card and the Edit Listing modal's transmission box both replace the
+  old "set it on your next edit" text with a real action: "Ask admin to set
+  transmission type" (null transmission) or "Report incorrect transmission
+  type" (already-set value believed wrong), calling a direct
+  `.update({ transmission_update_pending: true })` on the lister's own row -
+  RLS-permitted the same way `license_update_pending` is self-settable by a
+  renter, blocked from going further by the new trigger rule. Shows "sent for
+  review" once flagged instead of the button.
+
+**Admin side (`AdminVehicleApprovalPage.tsx`)** - integrated into the
+existing page rather than a new one, per explicit choice:
+- New "Transmission review" tab (with a live pending-count badge) alongside
+  the existing Pending/Active tabs, querying `transmission_update_pending =
+  true` across any status rather than the two tabs' status-based queries.
+- Status column gets a small "Transmission review" badge when a car in any
+  tab has the flag set, so it's visible without switching tabs.
+- Detail modal gains a review panel (shown whenever the selected car has the
+  flag, regardless of which tab it was opened from): current value, a
+  transmission dropdown, and "Save & Clear Request" - sets `transmission` and
+  clears the flag together, notifies the lister, and writes an audit-log row.
+
+Verified clean: `tsc -b`, `tsc -p tsconfig.api.json`, lint,
+`check:alignment`, `check:booking-flow`.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 54),
+`src/pages/MyVehiclesPage.tsx`, `src/pages/admin/AdminVehicleApprovalPage.tsx`,
+`src/types/database.ts`.
+
+---
+
 ## 2026-09-05 — Dynamic legal content (Terms, Privacy, Platform Agreement) + security-deposit disclosure
 
 Thesis-panel requirement, two parts. Part 1: make it unmistakable that any

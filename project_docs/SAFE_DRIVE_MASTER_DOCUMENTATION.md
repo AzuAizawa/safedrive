@@ -268,7 +268,9 @@ The quick "Edit Listing" editor on `/my-vehicles` only touches booking-facing de
 
 ### 6.5 Driver's licence validity and transmission (CHAPTER 29)
 
-The KYC review now also records two structured facts an admin reads from the licence photos in `/admin/users` (gated by `users.verify`): `profiles.license_expiry` (a date) and `profiles.license_transmission` (`automatic_only` | `manual_and_automatic`, from the AT / AT-MT restriction on the back of the current LTO card). Vehicles carry `cars.transmission` (`automatic` | `manual`), a required dropdown when listing and a material change that returns the listing to review.
+The KYC review now also records two structured facts an admin reads from the licence photos in `/admin/users` (gated by `users.verify`): `profiles.license_expiry` (a date) and `profiles.license_transmission` (`automatic_only` | `manual_and_automatic`, from the AT / AT-MT restriction on the back of the current LTO card). Vehicles carry `cars.transmission` (`automatic` | `manual`), a required dropdown the lister picks once at initial listing.
+
+`cars.transmission` is a fixed vehicle spec, never lister-editable again after that first listing (CHAPTER 54) - the "Edit Listing" form on `/my-vehicles` always renders it read-only, and `protect_car_submission_fields()` enforces the same rule at the database level for any non-admin session, so it cannot be changed through a direct API call either. A lister who finds it wrong (a mistake at listing, or a legacy pre-CHAPTER-29 car that was never given a value) can only flag it - `cars.transmission_update_pending`, set client-side the same way a renter self-flags `license_update_pending` - which notifies every admin (`notify_admins_of_transmission_update`) without taking the listing offline. Only an admin, from the **Transmission review** tab on `/admin/vehicle-approval`, can pick the correct value and clear the flag together; the trigger blocks a lister from clearing their own flag or changing the value themselves even if they try to bypass the UI.
 
 `api/create-booking.ts` enforces two gates, **conservatively - only explicit values block**, so nothing freezes on rollout:
 

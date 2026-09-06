@@ -5494,6 +5494,7 @@ where trigger_schema = 'public'
     'notify_admins_of_vehicle_submission',
     'notify_admins_of_pending_verification',
     'notify_admins_of_license_update',
+    'notify_admins_of_transmission_update',
     'notify_support_ticket_created',
     'notify_admins_of_guest_inquiry',
     'set_guest_inquiry_updated_at',
@@ -8816,5 +8817,208 @@ select 'platform_agreement', 1, $pa$<h2>1. Purpose and Acceptance of Terms</h2>
 <p>SafeDrive does not provide vehicle insurance. Users remain responsible for lawful driving, roadworthiness, truthful disclosure, the approved vehicle-specific agreement, and insurer confirmation of intended use. Any description of SafeDrive as a marketplace or intermediary, and any limitation of responsibility, applies only to the extent allowed by Philippine law and cannot remove mandatory consumer or statutory rights. Obtain legal and insurance review before real-money public use.</p>
 <p>SafeDrive does not hold a refundable security deposit and is not a party to vehicle condition, damage, theft, or loss disputes between a Lister and Renter - those are governed by the vehicle-specific rental agreement described in Section 4 and the anti-carnapping policy in Section 6. SafeDrive's role is limited to keeping a neutral, timestamped record (pickup/return condition reports, arrival check-ins) that either party may use to support their case; it is not obligated to compensate either party for a damaged, lost, or unreturned vehicle. If a Lister requires a security deposit, its amount, collection, and return are arranged directly and independently between the Lister and Renter, entirely outside the Platform - SafeDrive provides no collection, escrow, or dispute-resolution service for such arrangements.</p>$pa$, 'published'
 where not exists (select 1 from public.legal_document_versions where document_key = 'platform_agreement');
+
+-- ============================================================================
+-- CHAPTER 54 - Vehicle transmission correction requests (admin-only value)
+-- ============================================================================
+-- Reported requirement: a vehicle's transmission type (Automatic/Manual) is a
+-- fixed spec that must never be self-editable by the lister - not even at
+-- renewal time - because it gates which renters (by licence restriction) may
+-- book the car at all. It is meant to be set once, at initial listing, and
+-- corrected only by an admin afterward (e.g. a legacy pre-gate listing with
+-- no transmission set, or a lister-reported mistake). MyVehiclesPage.tsx's
+-- Edit Listing form already renders transmission read-only and never sends a
+-- changed value - but that was only an app-level convention with no database
+-- enforcement, and legacy null-transmission cars had no way to ask for one to
+-- be set beyond a dead-end "set it on your next edit" label pointing at a
+-- field that was never actually editable.
+--
+-- Mirrors the existing profiles.license_update_pending pattern exactly: a
+-- pending flag the lister may only flip false -> true (never clear, never
+-- touch the underlying value), an admin-notification trigger, and an admin
+-- review surface (Vehicle Approval page) that sets the real value and clears
+-- the flag. Column-level locking is added to the existing
+-- protect_car_submission_fields trigger rather than a new one, since that
+-- trigger already runs before update on cars for every non-admin session.
+
+alter table public.cars
+  add column if not exists transmission_update_pending boolean not null default false;
+
+create or replace function public.protect_car_submission_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  privileged boolean;
+begin
+  privileged := public.is_admin()
+    or current_user in ('postgres', 'service_role', 'supabase_admin');
+
+  if privileged then
+    return new;
+  end if;
+
+  if auth.uid() is null or new.owner_id <> auth.uid() then
+    raise exception 'Only the listing owner can create or update this vehicle';
+  end if;
+
+  if not exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and verified_status = 'verified'
+      and deleted_at is null
+  ) then
+    raise exception 'Identity verification is required before listing a vehicle';
+  end if;
+
+  if tg_op = 'INSERT' then
+    new.status := 'pending';
+    new.rejection_reason := null;
+    new.last_verified_at := null;
+    new.transmission_update_pending := false;
+    return new;
+  end if;
+
+  if new.owner_id is distinct from old.owner_id then
+    raise exception 'Vehicle ownership cannot be changed by the lister';
+  end if;
+
+  if new.rejection_reason is distinct from old.rejection_reason
+     or new.last_verified_at is distinct from old.last_verified_at then
+    raise exception 'Vehicle review fields can only be changed by an administrator';
+  end if;
+
+  if new.status is distinct from old.status then
+    if not (
+      (old.status = 'rejected' and new.status = 'pending')
+      or (old.status = 'approved' and new.status = 'inactive')
+      or (old.status = 'inactive' and new.status = 'approved')
+    ) then
+      raise exception 'Listers cannot change vehicle approval status';
+    end if;
+  end if;
+
+  if new.transmission is distinct from old.transmission then
+    raise exception 'Vehicle transmission type is set by an administrator and cannot be changed by the lister';
+  end if;
+
+  if new.transmission_update_pending is distinct from old.transmission_update_pending
+     and not (old.transmission_update_pending = false and new.transmission_update_pending = true) then
+    raise exception 'Only an administrator can clear a pending transmission correction request';
+  end if;
+
+  return new;
+end;
+$$;
+
+create or replace function public.notify_admins_of_transmission_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.transmission_update_pending = true
+     and old.transmission_update_pending is distinct from new.transmission_update_pending then
+    insert into public.notifications (user_id, title, message, type, link)
+    select
+      id,
+      'Vehicle transmission correction requested',
+      coalesce(
+        (select coalesce(full_name, email) from public.profiles where id = new.owner_id),
+        'A lister'
+      ) || ' flagged the transmission type for ' || new.plate_number || ' for admin correction.',
+      'warning',
+      '/admin/vehicle-approval?tab=transmission'
+    from public.profiles
+    where role in ('admin', 'super_admin')
+      and deleted_at is null;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists notify_admins_of_transmission_update on public.cars;
+create trigger notify_admins_of_transmission_update
+after update of transmission_update_pending on public.cars
+for each row execute function public.notify_admins_of_transmission_update();
+
+-- ============================================================================
+-- CHAPTER 55 - One-time reset: clear all booking history, payments, and ledger
+-- ============================================================================
+-- Reported requirement: the booking lifecycle changed materially this session
+-- (mandatory handover gate, mutual return arrival, commission flip, extension
+-- deadlines, etc.) - bookings created and paid under the old process could
+-- behave inconsistently if left mixed with bookings created under the new
+-- one. Requested: wipe every currently-listed booking and all booking
+-- history, so every derived statistic (a lister's own earnings shown on
+-- /my-vehicles and /lister-bookings, and SafeDrive's own commission revenue
+-- and payout figures across the admin panel) reads back to zero. Confirmed
+-- beforehand that nothing in this schema caches or materializes those
+-- figures - every one of them is a live query over bookings/payments/
+-- ledger_entries, so deleting the underlying rows is sufficient; there is no
+-- separate counter or aggregate to reset.
+--
+-- This is a ONE-TIME OPERATIONAL SCRIPT, not a reusable function - it is
+-- intentionally not wrapped as a callable RPC, so it does not leave a
+-- standing "wipe everything" capability sitting in the database afterward.
+-- Run it once, directly, as done for every other chapter in this file.
+--
+-- Deliberately NOT touched: cars, car_documents, car_images, profiles,
+-- car_agreement_versions, vehicle_unavailability (vehicle listings and their
+-- approval state are untouched - only booking activity resets), and
+-- subscriptions (the vehicle-listing-slot plan payments a lister makes -  a
+-- separate revenue stream with no booking_id link at all, out of scope for
+-- "booking history"). Note: security_deposits / security_deposit_claims are
+-- NOT part of this script - CHAPTER 34 already DROPPED both tables entirely
+-- (not just emptied them), so there is nothing left there to delete.
+--
+-- Deletion order matters because of ON DELETE RESTRICT / NO ACTION foreign
+-- keys that would otherwise block deleting a still-referenced booking:
+--   1. payments - booking_id has no ON DELETE action (defaults to RESTRICT).
+--   2. ledger_entries, then ledger_journals - both booking-linked, and each
+--      protected from ordinary UPDATE/DELETE once its parent journal is
+--      'finalized' by prevent_finalized_entry_change /
+--      prevent_finalized_journal_change. Both triggers are disabled for this
+--      operation only, then re-enabled immediately after - they must not stay
+--      disabled, since they are what keeps the ledger append-only going
+--      forward.
+--   3. bookings itself - cascades automatically to booking_extensions,
+--      booking_agreement_acceptances, trip_condition_reports (and its child
+--      trip_condition_photos), booking_reviews, booking_cancellations, and
+--      booking_early_returns. Sets support_tickets.booking_id and
+--      reconciliation_items.booking_id to null on any row that referenced a
+--      deleted booking - the support ticket or reconciliation item itself is
+--      kept, just unlinked from the (now-gone) booking; this script does not
+--      delete support tickets.
+--
+-- This is IRREVERSIBLE. Confirm this is really wanted before running it.
+
+begin;
+
+alter table public.ledger_journals disable trigger prevent_finalized_journal_change;
+alter table public.ledger_entries disable trigger prevent_finalized_entry_change;
+
+delete from public.payments;
+delete from public.ledger_entries;
+delete from public.ledger_journals;
+delete from public.bookings;
+
+alter table public.ledger_journals enable trigger prevent_finalized_journal_change;
+alter table public.ledger_entries enable trigger prevent_finalized_entry_change;
+
+commit;
+
+-- Sanity check (read-only) - every count below should be 0.
+select
+  (select count(*) from public.bookings) as bookings,
+  (select count(*) from public.payments) as payments,
+  (select count(*) from public.ledger_journals) as ledger_journals,
+  (select count(*) from public.ledger_entries) as ledger_entries,
+  (select count(*) from public.booking_reviews) as booking_reviews;
 
 -- End of SafeDrive chaptered database master.

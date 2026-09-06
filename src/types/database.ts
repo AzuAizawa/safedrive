@@ -331,6 +331,7 @@ export interface Database {
           additional_info: string | null;
           contact_number: string | null;
           transmission: string | null;
+          transmission_update_pending: boolean;
           status: string;
           rejection_reason: string | null;
           last_verified_at: string | null;
@@ -359,6 +360,7 @@ export interface Database {
           additional_info?: string | null;
           contact_number?: string | null;
           transmission?: string | null;
+          transmission_update_pending?: boolean;
           status?: string;
           rejection_reason?: string | null;
           last_verified_at?: string | null;
@@ -387,6 +389,7 @@ export interface Database {
           additional_info?: string | null;
           contact_number?: string | null;
           transmission?: string | null;
+          transmission_update_pending?: boolean;
           status?: string;
           rejection_reason?: string | null;
           last_verified_at?: string | null;

@@ -160,6 +160,7 @@ interface VehicleRow {
   insurer_rental_use_confirmed: boolean;
   insurance_verification_status: string;
   transmission: string | null;
+  transmission_update_pending: boolean;
   status: string;
   rejection_reason: string | null;
   created_at: string | null;
@@ -998,6 +999,39 @@ export default function MyVehiclesPage() {
       fetchVehicles();
     } catch (error) {
       toast.error("Failed to enable vehicle", {
+        id: toastId,
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setVehicleActionId(null);
+    }
+  };
+
+  const handleFlagTransmissionForReview = async (vehicle: VehicleRow) => {
+    if (!user || vehicle.transmission_update_pending) return;
+    setVehicleActionId(vehicle.id);
+    const toastId = toast.loading("Sending to admin for review...");
+    try {
+      const { error } = await supabase
+        .from("cars")
+        .update({ transmission_update_pending: true })
+        .eq("id", vehicle.id)
+        .eq("owner_id", user.id);
+      if (error) throw error;
+      toast.success("Sent to SafeDrive admin for review.", {
+        id: toastId,
+        description:
+          "Your listing stays live while this is reviewed. An admin will set the correct transmission type.",
+      });
+      setEditVehicle((prev) =>
+        prev && prev.id === vehicle.id
+          ? { ...prev, transmission_update_pending: true }
+          : prev,
+      );
+      fetchVehicles();
+    } catch (error) {
+      toast.error("Could not submit for review", {
         id: toastId,
         description:
           error instanceof Error ? error.message : "Please try again.",
@@ -2094,9 +2128,26 @@ export default function MyVehiclesPage() {
                             ? "Automatic"
                             : v.transmission === "manual"
                               ? "Manual"
-                              : "Not specified — set it on your next edit"}
+                              : "Not specified"}
                         </span>
                       </p>
+                      {v.transmission_update_pending ? (
+                        <p className="mt-1 flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          Transmission correction sent to admin for review.
+                        </p>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleFlagTransmissionForReview(v)}
+                          disabled={vehicleActionId === v.id}
+                          className="mt-1 text-xs font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                        >
+                          {v.transmission
+                            ? "Report incorrect transmission type"
+                            : "Ask admin to set transmission type"}
+                        </button>
+                      )}
                       <div className="mt-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                           Documents
@@ -2477,6 +2528,23 @@ export default function MyVehiclesPage() {
                     <p className="mt-1">
                       {editTransmission === "automatic" ? "Automatic" : editTransmission === "manual" ? "Manual" : "Not specified"} - locked after listing. This is a fixed vehicle spec, not something that changes after approval.
                     </p>
+                    {editVehicle.transmission_update_pending ? (
+                      <p className="mt-2 flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                        <Clock className="h-3 w-3 shrink-0" />
+                        Transmission correction sent to admin for review.
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleFlagTransmissionForReview(editVehicle)}
+                        disabled={vehicleActionId === editVehicle.id}
+                        className="mt-2 font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                      >
+                        {editTransmission
+                          ? "Report incorrect transmission type"
+                          : "Ask admin to set transmission type"}
+                      </button>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Fuel Category</Label>
