@@ -9,6 +9,57 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-06 — Install button never hides itself, period
+
+Immediate follow-up to the entry directly below. That fix still hid the
+button when `isStandalone` (already installed) was true - rejected: if a
+user later uninstalls the app, they'd have no visible way back to an
+install control. (`isStandalone` is actually a live per-tab check, not a
+permanent "ever installed" flag, so it would already un-hide itself in a
+normal browser tab post-uninstall - but depending on that being obvious, or
+on any single browser signal being reliable at all, is exactly the
+fragility that caused the original bug.) Simplest and most robust: the
+button never hides itself, for any reason, on any page, matching how an
+install control behaves on other sites. Clicking it while already
+standalone now shows "SafeDrive is already installed on this device."
+instead of doing nothing (previously the button just wasn't there to click).
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/components/InstallButton.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
+## 2026-09-06 — Install button no longer disappears after repeated page refreshes
+
+Reported: on the landing page, refreshing several times made the "Install"
+button vanish. Root cause: `InstallButton.tsx` hid itself whenever neither
+`canInstall` nor `showIosHint` was true - but `beforeinstallprompt` (the
+event `canInstall` depends on) is a one-shot-ish browser event that Chrome
+throttles/suppresses re-firing on repeated page loads within one session
+once it's fired and gone unused. So on an installable browser, `canInstall`
+could legitimately be `false` on any given reload for reasons that have
+nothing to do with whether the page is actually installable, and the button
+flickered in and out accordingly.
+
+Fixed by always rendering the button once mounted - the only real
+"permanently irrelevant" signal is `isStandalone` (already installed).
+Clicking it with no native prompt available (canInstall false, not iOS
+Safari either) now shows a toast with manual instructions ("Look for the
+install icon in your browser's address bar, or open the browser menu and
+choose 'Install app' / 'Add to Home Screen'") instead of the button just
+not being there.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/components/InstallButton.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-06 — Fixed a client/server mismatch: incident actions ignored approved early returns
 
 Caught while explaining the "renter arrived early, lister didn't" scenario:
