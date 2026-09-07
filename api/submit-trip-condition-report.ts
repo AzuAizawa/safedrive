@@ -92,7 +92,7 @@ export default async function handler(req: Request) {
     const odometer = odometerInput.provided && odometerInput.valid ? odometerInput.value : null;
     const level = levelInput.provided && levelInput.valid ? levelInput.value : null;
 
-    const { data: booking, error: bookingError } = await supabase.from("bookings").select("id, renter_id, owner_id, status, renter_arrived_at, lister_arrived_at, renter_return_arrived_at, lister_return_arrived_at").eq("id", payload.bookingId).single();
+    const { data: booking, error: bookingError } = await supabase.from("bookings").select("id, renter_id, owner_id, status, start_date, end_date, renter_arrived_at, lister_arrived_at, renter_return_arrived_at, lister_return_arrived_at, cars(plate_number, car_models(name, car_brands(name)))").eq("id", payload.bookingId).single();
     if (bookingError || !booking) return respond({ error: "Booking not found" }, 404);
     const reporterRole = booking.renter_id === user.id ? "renter" : booking.owner_id === user.id ? "lister" : null;
     if (!reporterRole) return respond({ error: "Only booking participants can submit this report" }, 403);
@@ -234,13 +234,20 @@ export default async function handler(req: Request) {
       if (existingTicket?.id) {
         ticketId = existingTicket.id;
       } else {
+        const bookingCars = booking.cars as unknown as {
+          plate_number: string;
+          car_models: { name: string; car_brands: { name: string } } | null;
+        } | null;
+        const vehicleLabel = bookingCars?.car_models
+          ? `${bookingCars.car_models.car_brands.name} ${bookingCars.car_models.name} (${bookingCars.plate_number})`
+          : `Booking ${booking.id}`;
         const { data: newTicket, error: newTicketError } = await supabase
           .from("support_tickets")
           .insert({
             user_id: booking.renter_id,
             participant_user_id: booking.owner_id,
             booking_id: booking.id,
-            subject: `Booking conversation: ${booking.id}`,
+            subject: `Booking conversation: ${vehicleLabel} (${booking.start_date} to ${booking.end_date})`,
             tag: "booking_conversation",
             status: "open",
           })

@@ -1268,7 +1268,7 @@ export default async function handler(req: Request) {
               user_id: bookingRecord.renter_id,
               participant_user_id: bookingRecord.owner_id,
               booking_id: bookingRecord.id,
-              subject: `Booking conversation: ${bookingRecord.id}`,
+              subject: `Booking conversation: ${getVehicleLabel(bookingRecord)} (${bookingRecord.start_date} to ${bookingRecord.end_date})`,
               tag: "booking_conversation",
               status: "open",
             })

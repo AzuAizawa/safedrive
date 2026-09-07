@@ -23,12 +23,15 @@ import {
 import { toast } from "sonner";
 import { CarWithDetails, CarRenewal, Database } from "@/types/database";
 
+// LTO receipt, MVIR, emission test, and car photos were dropped from
+// this list (were required) - an updated OR/CR cannot be issued without
+// having already passed the LTO receipt/MVIR/emission-test steps, so
+// asking for them again is asking for evidence the OR/CR already
+// certifies. Car photos aren't a renewal document at all - those are
+// edited directly on the listing (My Vehicles), unrelated to
+// registration/insurance compliance.
 const renewalDocs = [
   { key: "orcr_document_path", label: "Updated OR/CR" },
-  { key: "lto_receipt_path", label: "Latest LTO Receipt" },
-  { key: "mvir_path", label: "MVIR (Motor Vehicle Inspection Report)" },
-  { key: "emission_test_path", label: "Latest Emission Test Result" },
-  { key: "updated_car_photos_path", label: "Updated Car Photos (Zip/Image)" },
 ] as const;
 
 export default function ListerCarRenewalPage() {
@@ -45,10 +48,6 @@ export default function ListerCarRenewalPage() {
   const [mileage, setMileage] = useState<string>("");
   const [files, setFiles] = useState<Record<string, File | null>>({
     orcr_document_path: null,
-    lto_receipt_path: null,
-    mvir_path: null,
-    emission_test_path: null,
-    updated_car_photos_path: null,
     ctpl_document_path: null,
     comprehensive_document_path: null,
   });
@@ -110,10 +109,6 @@ export default function ListerCarRenewalPage() {
     setMileage("");
     setFiles({
       orcr_document_path: null,
-      lto_receipt_path: null,
-      mvir_path: null,
-      emission_test_path: null,
-      updated_car_photos_path: null,
       ctpl_document_path: null,
       comprehensive_document_path: null,
     });
@@ -206,10 +201,6 @@ export default function ListerCarRenewalPage() {
         current_mileage: parseInt(mileage),
         status: "pending",
         orcr_document_path: "",
-        lto_receipt_path: "",
-        mvir_path: "",
-        emission_test_path: "",
-        updated_car_photos_path: "",
         registration_expiry: registrationExpiry,
         ctpl_expiry: ctplExpiry,
         comprehensive_insurance_expiry: comprehensiveExpiry || null,

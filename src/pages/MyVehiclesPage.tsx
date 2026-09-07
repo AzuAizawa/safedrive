@@ -341,8 +341,6 @@ export default function MyVehiclesPage() {
   const [editLocation, setEditLocation] = useState("");
   const [editCity, setEditCity] = useState("");
   const [editSpecificLocation, setEditSpecificLocation] = useState("");
-  const [editPickupLatitude, setEditPickupLatitude] = useState("");
-  const [editPickupLongitude, setEditPickupLongitude] = useState("");
   const [editFuelCategory, setEditFuelCategory] = useState("");
   const [editTransmission, setEditTransmission] = useState("");
   const [editFuelSubtype, setEditFuelSubtype] = useState("");
@@ -374,8 +372,6 @@ export default function MyVehiclesPage() {
     location: "",
     city: "",
     specific_location: "",
-    pickup_latitude: "",
-    pickup_longitude: "",
     fuel_category: "",
     fuel_subtype: "",
     transmission: "",
@@ -711,8 +707,6 @@ export default function MyVehiclesPage() {
             form.city || null,
             form.specific_location || null,
           ].filter(Boolean).join(" - ") : null,
-          pickup_latitude: form.pickup_latitude ? Number(form.pickup_latitude) : null,
-          pickup_longitude: form.pickup_longitude ? Number(form.pickup_longitude) : null,
           fuel_category: form.fuel_category || null,
           fuel_subtype: form.fuel_subtype || null,
           transmission: form.transmission || null,
@@ -801,8 +795,6 @@ export default function MyVehiclesPage() {
         location: "",
         city: "",
         specific_location: "",
-        pickup_latitude: "",
-        pickup_longitude: "",
         fuel_category: "",
         fuel_subtype: "",
         transmission: "",
@@ -922,8 +914,6 @@ export default function MyVehiclesPage() {
             [editLocation, editCity, editSpecificLocation]
               .filter(Boolean)
               .join(" - ") || null,
-          pickup_latitude: editPickupLatitude ? Number(editPickupLatitude) : null,
-          pickup_longitude: editPickupLongitude ? Number(editPickupLongitude) : null,
           fuel_category: editFuelCategory || null,
           fuel_subtype: editFuelSubtype || null,
           transmission: editTransmission || null,
@@ -1739,63 +1729,6 @@ export default function MyVehiclesPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Pickup Location Pin (optional, recommended)</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Used to verify arrival check-ins and protect against fraudulent no-show claims. Stand at the pickup spot and tap the button below, or enter coordinates manually.
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        if (!navigator.geolocation) {
-                          toast.error("Location is not supported on this device/browser.");
-                          return;
-                        }
-                        navigator.geolocation.getCurrentPosition(
-                          (position) => {
-                            setForm((prev) => ({
-                              ...prev,
-                              pickup_latitude: position.coords.latitude.toFixed(6),
-                              pickup_longitude: position.coords.longitude.toFixed(6),
-                            }));
-                            toast.success("Pickup pin set to your current location.");
-                          },
-                          () =>
-                            toast.error(
-                              "Could not get your location. Enter coordinates manually instead.",
-                            ),
-                          { enableHighAccuracy: true, timeout: 8000 },
-                        );
-                      }}
-                    >
-                      Use My Current Location
-                    </Button>
-                    {form.pickup_latitude && form.pickup_longitude && (
-                      <span className="text-xs text-muted-foreground">
-                        Pin set: {form.pickup_latitude}, {form.pickup_longitude}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      type="number"
-                      step="any"
-                      placeholder="Latitude"
-                      value={form.pickup_latitude}
-                      onChange={(e) => setForm({ ...form, pickup_latitude: e.target.value })}
-                    />
-                    <Input
-                      type="number"
-                      step="any"
-                      placeholder="Longitude"
-                      value={form.pickup_longitude}
-                      onChange={(e) => setForm({ ...form, pickup_longitude: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
                   <Label>Contact Number</Label>
                   <Input
                     value={form.contact_number}
@@ -2238,12 +2171,6 @@ export default function MyVehiclesPage() {
                         setEditLocation(parsedLocation.region);
                         setEditCity(parsedLocation.city);
                         setEditSpecificLocation(parsedLocation.specificLocation);
-                        setEditPickupLatitude(
-                          v.pickup_latitude != null ? String(v.pickup_latitude) : "",
-                        );
-                        setEditPickupLongitude(
-                          v.pickup_longitude != null ? String(v.pickup_longitude) : "",
-                        );
                         setEditFuelCategory(v.fuel_category || "");
                         setEditFuelSubtype(v.fuel_subtype || "");
                         setEditTransmission(v.transmission || "");
@@ -2468,60 +2395,6 @@ export default function MyVehiclesPage() {
                       onChange={(e) => setEditSpecificLocation(e.target.value)}
                       placeholder="e.g. STI Novaliches, building entrance, mall pickup bay"
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Pickup Location Pin (optional, recommended)</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Used to verify arrival check-ins and protect against fraudulent no-show claims. Stand at the pickup spot and tap the button below, or enter coordinates manually.
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          if (!navigator.geolocation) {
-                            toast.error("Location is not supported on this device/browser.");
-                            return;
-                          }
-                          navigator.geolocation.getCurrentPosition(
-                            (position) => {
-                              setEditPickupLatitude(position.coords.latitude.toFixed(6));
-                              setEditPickupLongitude(position.coords.longitude.toFixed(6));
-                              toast.success("Pickup pin set to your current location.");
-                            },
-                            () =>
-                              toast.error(
-                                "Could not get your location. Enter coordinates manually instead.",
-                              ),
-                            { enableHighAccuracy: true, timeout: 8000 },
-                          );
-                        }}
-                      >
-                        Use My Current Location
-                      </Button>
-                      {editPickupLatitude && editPickupLongitude && (
-                        <span className="text-xs text-muted-foreground">
-                          Pin set: {editPickupLatitude}, {editPickupLongitude}
-                        </span>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input
-                        type="number"
-                        step="any"
-                        placeholder="Latitude"
-                        value={editPickupLatitude}
-                        onChange={(e) => setEditPickupLatitude(e.target.value)}
-                      />
-                      <Input
-                        type="number"
-                        step="any"
-                        placeholder="Longitude"
-                        value={editPickupLongitude}
-                        onChange={(e) => setEditPickupLongitude(e.target.value)}
-                      />
-                    </div>
                   </div>
                   <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
                     <p className="font-medium text-foreground">Transmission</p>

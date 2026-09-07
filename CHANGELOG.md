@@ -9,6 +9,256 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-07 — Renter's trip-report buttons only appear when they're actually usable
+
+Reported from an ongoing rental: the renter already received the car and
+the drop-off was days away, yet the booking detail still offered "Return
+report (optional)" and "Pickup photos (optional)". Once you've tapped "I
+Have Received the Car", the pickup is over and the return isn't close -
+neither belongs on screen.
+
+"Return report" was also a real bug, not just clutter: it rendered from
+the moment the renter checked in at *pickup* and stayed all trip, but
+`api/submit-trip-condition-report.ts` (lines 102-122) rejects a
+return-phase report unless the booking is `active` **and** the renter's
+own `renter_return_arrived_at` is set. Tapping it mid-trip walked the
+renter through the entire live-camera form and failed at submit with a
+409 - while the caption directly underneath already said "Return check-in
+opens N hours before drop-off". The button contradicted its own caption.
+
+In `MyBookingsPage.tsx`'s mid-trip block: the pickup-report button is
+gone (the two moments where it makes sense - at the pickup point, and at
+handover beside "I Have Received the Car" - each still offer it,
+untouched), and the return-report button now renders only once
+`booking.renter_return_arrived_at` is set. So during the trip the screen
+is clean - "Message Lister" and "Report Booking" only, plus the
+check-in-opens caption - and the return report reappears when the car is
+actually being handed back.
+
+This matches what the lister side has always done
+(`ListerBookingsPage.tsx:3425-3490`): report buttons only in states the
+API would accept, and "Pickup report"/"Return report" wording rather than
+"photos". No backend change - the API already enforced the right rules;
+the UI just stopped offering an action it would refuse.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/MyBookingsPage.tsx`.
+
+---
+
+## 2026-09-07 — Added a "Booking Ref" on My Bookings and Lister Bookings
+
+Follow-up to the entry directly below: fixing the conversation ticket
+title solves matching a *chat thread* back to its booking, but there was
+still no standalone reference number for a booking itself - the kind of
+short code an online order confirmation shows, that a renter or lister
+can read out or quote when talking to support or to each other, instead
+of a 36-character UUID.
+
+New `src/lib/bookingReference.ts`: `getBookingReference(bookingId)`
+returns `SD-BK-<first 8 hex chars, uppercased>` - same "SD-<type>-<8
+chars>" pattern already used for payment/refund receipt document numbers
+in `MyBookingsPage.tsx` (`documentNo`), just for bookings instead of
+payments. Shown as "Booking Ref: SD-BK-0B1F5701" in the booking detail
+view on both `MyBookingsPage.tsx` (renter) and `ListerBookingsPage.tsx`
+(lister) - not on the compact list card, matching how a support ticket's
+"Ticket ID" is likewise only shown once the ticket is opened. The payment
+receipt's existing "Booking ID" row is untouched (keeps the full UUID,
+for audit precision) - different label so the two are never confused for
+the same thing.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/lib/bookingReference.ts` (new), `src/pages/MyBookingsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`.
+
+---
+
+## 2026-09-07 — Booking conversation tickets now show the vehicle, not a raw ID (CHAPTER 61)
+
+Reported: a "Car inquiry" support ticket already showed a readable title
+("Car inquiry: Toyota Ativ (NNY 3609)"), but a booking's own conversation
+thread showed only the raw booking UUID ("Booking conversation:
+0b1f5701-ffa9-4d45-b492-303858c3315f") - confusing, and there was nowhere
+on the booking screens to look that ID up either.
+
+`api/open-booking-conversation.ts` (the "Message Lister"/"Message Renter"
+button) already built a proper "<Brand> <Model> (<Plate>) (<start> to
+<end>)" label. Two other places that can auto-create the same kind of
+ticket were still falling back to the raw ID: `api/booking-action.ts`'s
+arrival auto-post to chat, and `api/submit-trip-condition-report.ts`'s
+pickup/return report auto-post (both only create a ticket here if the
+renter/lister never explicitly opened the conversation first). Both now
+build the same label - `booking-action.ts` reuses its existing
+`getVehicleLabel()` helper; `submit-trip-condition-report.ts`'s booking
+query was expanded to also fetch the car/model/brand needed to build one
+locally, since the ticket-creation code lives in a "never let a chat
+hiccup fail an already-saved report" try/catch already.
+
+CHAPTER 61 SQL backfills existing tickets that already carry the old raw-
+ID subject (matches only that exact old format, so it never touches a
+ticket already carrying a real label) - this is what fixes the specific
+ticket from the report, not just future ones.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:api-boundaries`.
+
+Files: `api/booking-action.ts`, `api/submit-trip-condition-report.ts`,
+`database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 61 - run in
+Supabase SQL Editor).
+
+---
+
+## 2026-09-07 — Removed the car pickup GPS pin feature entirely
+
+Follow-up to (and supersedes) the two entries directly below. Talking
+through the city-mismatch warning surfaced a bigger question: is a raw
+GPS pin the right way to convey a pickup location to a person at all?
+Confirmed `cars.location` is already a pre-combined "Region - City -
+Specific Pick-up Location" string built at write time
+(`MyVehiclesPage.tsx`'s add/edit save handlers), and `CarDetailPage.tsx`
+already renders that full string to renters today - so nothing new was
+needed to show renters a real, human-readable address. The GPS pin only
+ever added a second, harder-to-read representation of the same spot.
+
+Removed the entire "Pickup Location Pin" section from both the
+add-vehicle form and the Edit Listing modal - the "Use My Current
+Location" button, its city-mismatch-warning check, and the "view on
+Google Maps" confirmation link are all gone. Also removed
+`pickup_latitude`/`pickup_longitude` from the add-form state, the
+car-creation insert payload, and the car-edit update payload; deleted
+`src/lib/pickupLocationCheck.ts` (now fully unused).
+
+Deliberately did **not** touch the `cars.pickup_latitude`/`pickup_longitude`
+database columns (left nullable, not dropped) or the type fields that
+describe them - old listings that already have a pin keep it. That pin
+is also the input to `api/booking-incident-action.ts`'s
+`isReporterLocationVerified()`, which auto-approves an instant refund
+for a "no car at pickup" incident report when a renter's arrival GPS
+matches the car's pin within 500m. That function already degrades
+gracefully when the pin is missing (`return false` when any coordinate
+isn't finite), routing to `queueManualRefundReview()` instead of
+crashing - so going forward, new listings' "no car at pickup" reports
+route to manual admin review rather than instant auto-refund. This only
+affects that one incident-report fast path; the regular time-based
+"Cancel Booking" flow is unrelated and stays fully automatic.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/MyVehiclesPage.tsx`, `src/lib/pickupLocationCheck.ts`
+(deleted).
+
+---
+
+## 2026-09-07 — Warns when the GPS pickup pin looks far from the selected city
+
+Raised scenario: a lister selects Region/City from the dropdowns (e.g. a
+Calabarzon city), but taps "Use My Current Location" while actually
+standing somewhere else entirely (e.g. Quezon City) - nothing caught the
+two contradicting each other. The dropdown stays a legitimate fallback
+for editing a listing away from the actual pickup spot (the GPS pin is
+optional for exactly that reason), so this can't just always defer to
+one or the other - but `BrowseCarsPage.tsx` filters/displays cars by the
+dropdown's Region value directly, so a silent mismatch isn't cosmetic to
+a renter.
+
+Added a local-only (no external geocoding service) distance check: new
+`src/lib/pickupLocationCheck.ts` holds an approximate center coordinate
+for every city already in `MyVehiclesPage.tsx`'s dropdown list, and
+`isPinFarFromCity()` compares a freshly captured pin against the
+currently selected city (checked at the city level, not the broader
+region bucket - several region buckets like "Southern Luzon" span areas
+too large/non-circular for a region-level radius to usefully catch
+anything). If the pin lands over ~40km from the selected city, "Use My
+Current Location" now shows an additional warning toast alongside its
+usual success toast - advisory only, never blocks saving, never changes
+the dropdown or the captured pin. The free-text "Other" city option has
+no known coordinate, so it's silently skipped (no false warnings).
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/lib/pickupLocationCheck.ts` (new), `src/pages/MyVehiclesPage.tsx`.
+
+---
+
+## 2026-09-07 — Pickup pin confirmation is now a Google Maps link, not raw coordinates
+
+Follow-up to the entry directly below: after removing the manual
+lat/long inputs, the confirmation text still showed raw coordinates
+("Pin set: 14.725551, 121.006767") - not something a lister can read or
+verify. Checked the one other place a pin's coordinates are shown to a
+person (`AdminSupportTicketsPage.tsx`'s arrival-evidence review) and
+confirmed it already does the right thing - a clickable "Map" button via
+a plain `https://www.google.com/maps?q=...` link, never raw numbers.
+Applied the same pattern here: "Pin set" is now a clickable "view on
+Google Maps" link instead of text, in both the add-vehicle form and the
+Edit Listing modal. No external API/key needed - same zero-cost Maps URL
+pattern already used elsewhere in this codebase (the admin arrival
+review, and this session's earlier booking-arrival chat message).
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/MyVehiclesPage.tsx`.
+
+---
+
+## 2026-09-07 — Removed the manual latitude/longitude fields from the pickup pin
+
+Reported: the "Pickup Location Pin" section (add-vehicle form and Edit
+Listing modal, `MyVehiclesPage.tsx`) showed raw editable latitude/longitude
+number fields under the "Use My Current Location" button - a lister has
+no way to know what coordinates to type there.
+
+Removed the manual number inputs from both places - "Use My Current
+Location" (stand at the pickup spot, tap the button) is now the only way
+to set the pin, which is also the only way that actually produces a
+correct real-world coordinate for this feature to begin with. Updated the
+helper text and the geolocation-failure toast to stop mentioning manual
+entry ("Try again from the pickup spot" instead of "enter coordinates
+manually"). No data model change - `pickup_latitude`/`pickup_longitude`
+are set the same way as before, just no longer directly editable as text.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/MyVehiclesPage.tsx`.
+
+---
+
+## 2026-09-07 — Vehicle renewal no longer asks for documents an updated OR/CR already proves
+
+Feedback: the renewal form required 5 separate uploads (OR/CR, LTO
+receipt, MVIR, emission test, updated car photos) plus CTPL. An updated
+OR/CR cannot be issued by the LTO without already having passed the LTO
+receipt, MVIR inspection, and emission test - the OR/CR is itself proof
+those already happened, so asking for them again was redundant. Updated
+car photos aren't a renewal/compliance document at all - vehicle photos
+are edited directly on the listing (My Vehicles), unrelated to
+registration/insurance renewal.
+
+Dropped LTO receipt, MVIR, emission test, and car photos from the
+required-upload set on both `ListerCarRenewalPage.tsx` (submission) and
+`AdminVehicleRenewalsPage.tsx` (review) - only **Updated OR/CR** (required),
+**CTPL document** (required, unchanged), and **comprehensive insurance
+document** (optional, unchanged) remain. The four dropped columns on
+`car_renewals` are relaxed to nullable, not removed (CHAPTER 60) - no
+data loss, only changes what a new submission must provide.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/ListerCarRenewalPage.tsx`,
+`src/pages/admin/AdminVehicleRenewalsPage.tsx`, `src/types/database.ts`,
+`database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 60).
+
+---
+
 ## 2026-09-07 — Security fix: the 2FA step could be skipped entirely by opening a new tab/PWA
 
 Reported: entered the correct password, stopped at the "enter your

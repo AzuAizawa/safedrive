@@ -9475,4 +9475,65 @@ $notify_licenses$;
 revoke all on function public.notify_expiring_licenses() from public, anon, authenticated;
 grant execute on function public.notify_expiring_licenses() to service_role;
 
+-- ============================================================================
+-- CHAPTER 60 - Vehicle renewal: LTO receipt/MVIR/emission test/car photos are
+-- no longer required uploads
+-- ============================================================================
+-- Feedback: an updated OR/CR cannot be issued by the LTO without already
+-- having passed the LTO receipt, MVIR inspection, and emission test steps -
+-- the OR/CR is itself proof those already happened, so requiring them again
+-- as separate uploads was redundant. Updated car photos aren't a renewal/
+-- compliance document at all - vehicle photos are edited directly on the
+-- listing (My Vehicles), unrelated to registration/insurance renewal.
+-- ListerCarRenewalPage.tsx / AdminVehicleRenewalsPage.tsx now only collect/
+-- show orcr_document_path (still required) plus the already-separate CTPL
+-- (required) and comprehensive (optional) documents.
+--
+-- Relaxed to nullable, not dropped - no data loss, any already-submitted
+-- renewal keeps whatever it has; this only changes what a NEW submission
+-- must provide. orcr_document_path is untouched (stays NOT NULL - still
+-- the one real requirement).
+
+alter table public.car_renewals
+  alter column lto_receipt_path drop not null,
+  alter column mvir_path drop not null,
+  alter column emission_test_path drop not null,
+  alter column updated_car_photos_path drop not null;
+
+-- ============================================================================
+-- CHAPTER 61 - Booking conversation tickets show a real vehicle label, not a
+-- raw booking ID
+-- ============================================================================
+-- Feedback: an older ticket type ("Car inquiry: Toyota Ativ (NNY 3609)")
+-- already showed the car and plate in its title, but a booking's own
+-- conversation thread showed only the raw booking UUID as its subject
+-- ("Booking conversation: 0b1f5701-ffa9-4d45-b492-303858c3315f") - a renter
+-- or lister has no way to tell which car/trip that is, and there was nowhere
+-- on the booking screens to look the ID up either.
+--
+-- api/open-booking-conversation.ts already built a proper
+-- "<Brand> <Model> (<Plate>) (<start> to <end>)" label; the other two places
+-- that can auto-create the same kind of ticket (api/booking-action.ts's
+-- arrival auto-post, api/submit-trip-condition-report.ts's pickup/return
+-- report auto-post) were still falling back to the raw ID. Both now build
+-- the same label - no code change needed here, this is a one-time data
+-- backfill for tickets already created with the old raw-ID subject before
+-- that code fix shipped.
+--
+-- Matches only the exact old format ('Booking conversation: <booking id>')
+-- so it never touches a ticket already carrying a real label.
+update public.support_tickets st
+set subject = 'Booking conversation: ' ||
+  case
+    when cm.id is not null then cb.name || ' ' || cm.name || ' (' || c.plate_number || ')'
+    else 'Booking ' || b.id::text
+  end || ' (' || b.start_date || ' to ' || b.end_date || ')'
+from public.bookings b
+left join public.cars c on c.id = b.car_id
+left join public.car_models cm on cm.id = c.model_id
+left join public.car_brands cb on cb.id = cm.brand_id
+where st.booking_id = b.id
+  and st.tag = 'booking_conversation'
+  and st.subject = 'Booking conversation: ' || b.id::text;
+
 -- End of SafeDrive chaptered database master.

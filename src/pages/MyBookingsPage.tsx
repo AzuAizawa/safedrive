@@ -37,6 +37,7 @@ import {
 import ConfirmDialog from "@/components/ConfirmDialog";
 import BookingPagination from "@/components/BookingPagination";
 import { formatDayCount } from "@/lib/formatCount";
+import { getBookingReference } from "@/lib/bookingReference";
 import { paginateItems } from "@/lib/pagination";
 import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
 import {
@@ -2065,6 +2066,9 @@ export default function MyBookingsPage() {
                         </span>
                       </div>
                       <div className="text-sm text-muted-foreground space-y-0.5">
+                        <p className="font-mono">
+                          Booking Ref: {getBookingReference(booking.id)}
+                        </p>
                         <p>Plate: {booking.cars.plate_number}</p>
                         <p className="flex items-center gap-1.5">
                           <Star className="w-3.5 h-3.5 text-amber-500 fill-current" />
@@ -2777,26 +2781,28 @@ export default function MyBookingsPage() {
                           ) : (
                             <div className="space-y-1.5">
                               <div className="flex flex-wrap justify-end gap-2">
-                                <Button
-                                  size="sm"
-                                  variant={ownReportsByBooking[booking.id]?.return ? "ghost" : "outline"}
-                                  className={ownReportsByBooking[booking.id]?.return ? "gap-1 text-green-600" : undefined}
-                                  onClick={() => navigate(`/trip-report/${booking.id}/return`)}
-                                  disabled={Boolean(ownReportsByBooking[booking.id]?.return)}
-                                >
-                                  {ownReportsByBooking[booking.id]?.return && <CheckCircle2 className="w-3.5 h-3.5" />}
-                                  {ownReportsByBooking[booking.id]?.return ? "Return report (submitted)" : "Return report (optional)"}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className={ownReportsByBooking[booking.id]?.pickup ? "gap-1 text-green-600" : "text-muted-foreground"}
-                                  onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}
-                                  disabled={Boolean(ownReportsByBooking[booking.id]?.pickup)}
-                                >
-                                  {ownReportsByBooking[booking.id]?.pickup && <CheckCircle2 className="w-3.5 h-3.5" />}
-                                  {ownReportsByBooking[booking.id]?.pickup ? "Pickup photos (submitted)" : "Pickup photos (optional)"}
-                                </Button>
+                                {/* Only offered once the renter's own return
+                                    arrival is on file - submit-trip-condition-report
+                                    rejects a return-phase report before that, so
+                                    showing it earlier just walks them through the
+                                    whole camera form and fails at submit. The
+                                    pickup report isn't offered here at all: the
+                                    pickup is already over by the time this block
+                                    renders, and the two moments where it does make
+                                    sense (at the pickup point, and at handover)
+                                    each already offer it. */}
+                                {booking.renter_return_arrived_at && (
+                                  <Button
+                                    size="sm"
+                                    variant={ownReportsByBooking[booking.id]?.return ? "ghost" : "outline"}
+                                    className={ownReportsByBooking[booking.id]?.return ? "gap-1 text-green-600" : undefined}
+                                    onClick={() => navigate(`/trip-report/${booking.id}/return`)}
+                                    disabled={Boolean(ownReportsByBooking[booking.id]?.return)}
+                                  >
+                                    {ownReportsByBooking[booking.id]?.return && <CheckCircle2 className="w-3.5 h-3.5" />}
+                                    {ownReportsByBooking[booking.id]?.return ? "Return report (submitted)" : "Return report (optional)"}
+                                  </Button>
+                                )}
                                 {!booking.renter_return_arrived_at && returnCheckinOpen ? (
                                   <Button
                                     size="sm"

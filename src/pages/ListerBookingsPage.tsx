@@ -48,6 +48,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import BookingPagination from "@/components/BookingPagination";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { formatDayCount } from "@/lib/formatCount";
+import { getBookingReference } from "@/lib/bookingReference";
 import { paginateItems } from "@/lib/pagination";
 import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
 import {
@@ -2709,6 +2710,9 @@ export default function ListerBookingsPage() {
                           {badge.label}
                         </span>
                       </div>
+                      <p className="font-mono text-xs text-muted-foreground">
+                        Booking Ref: {getBookingReference(b.id)}
+                      </p>
 
                       {/* Renter info */}
                       <div className="flex items-center gap-3 mt-4 pt-3 border-t border-border/40">

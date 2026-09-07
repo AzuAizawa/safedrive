@@ -10,12 +10,12 @@ import { supabase } from "@/lib/supabase";
 import { createPrivateStorageUrl } from "@/lib/privateStorage";
 import type { CarRenewal } from "@/types/database";
 
+// LTO receipt, MVIR, emission test, and car photos were dropped from
+// this list (see ListerCarRenewalPage.tsx) - an updated OR/CR cannot be
+// issued without already having passed those steps, and car photos are
+// edited on the listing itself, not part of renewal.
 const RENEWAL_DOCS: { key: keyof CarRenewal; label: string }[] = [
   { key: "orcr_document_path", label: "Updated OR/CR" },
-  { key: "lto_receipt_path", label: "Latest LTO receipt" },
-  { key: "mvir_path", label: "MVIR" },
-  { key: "emission_test_path", label: "Emission test result" },
-  { key: "updated_car_photos_path", label: "Updated car photos" },
 ];
 
 type CarInfo = {
