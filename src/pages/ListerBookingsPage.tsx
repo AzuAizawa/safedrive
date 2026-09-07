@@ -747,7 +747,6 @@ export default function ListerBookingsPage() {
     arrivalPhotoUrl?: string | null,
     arrivalLocation?: ArrivalLocationEvidence | null,
     note?: string | null,
-    confirmOnBehalfOfRenter?: boolean,
   ) => {
     const res = await fetch("/api/booking-action", {
       method: "POST",
@@ -761,7 +760,6 @@ export default function ListerBookingsPage() {
         arrivalPhotoUrl,
         arrivalLocation,
         note,
-        confirmOnBehalfOfRenter,
       }),
     });
 
@@ -880,23 +878,6 @@ export default function ListerBookingsPage() {
       fetchBookings();
     } catch (err) {
       toast.error("Failed to record arrival", {
-        id: toastId,
-        description: err instanceof Error ? err.message : "Please try again.",
-      });
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleConfirmRenterArrived = async (bookingId: string) => {
-    setActionLoading(bookingId);
-    const toastId = toast.loading("Confirming renter's arrival...");
-    try {
-      await runBookingAction(bookingId, "arrive", null, null, null, true);
-      toast.success("Renter's arrival recorded.", { id: toastId });
-      fetchBookings();
-    } catch (err) {
-      toast.error("Could not confirm the renter's arrival", {
         id: toastId,
         description: err instanceof Error ? err.message : "Please try again.",
       });
@@ -3191,30 +3172,6 @@ export default function ListerBookingsPage() {
                           </p>
                         </div>
                       )}
-
-                      {(apparentState === "fully_paid" || apparentState === "active") &&
-                        !b.renter_arrived_at &&
-                        arrivalCheckinOpen && (
-                          <div className="mt-2 text-right">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="gap-1.5"
-                              disabled={actionLoading === b.id}
-                              onClick={() => handleConfirmRenterArrived(b.id)}
-                            >
-                              {actionLoading === b.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                              )}
-                              Confirm - Renter Is Here
-                            </Button>
-                            <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                              Only if needed - e.g. the renter's phone is dead. Prefer letting them confirm it themselves.
-                            </p>
-                          </div>
-                        )}
 
                       {apparentState === "fully_paid" &&
                         b.lister_arrived_at &&

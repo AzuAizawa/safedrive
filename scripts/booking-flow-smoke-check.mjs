@@ -234,16 +234,20 @@ const checks = [
     // a handover happened (that's now its own gated step, see the
     // handover_confirm/handover_receive entry above). return_arrive became
     // mutual (both roles call it) in this session's redesign, mirroring
-    // pickup arrival, instead of a renter-only one-way announcement.
+    // pickup arrival, instead of a renter-only one-way announcement. The
+    // lister's "confirm on the renter's behalf" override was removed -
+    // arrival now always auto-posts into the booking's chat thread instead.
     file: "api/booking-action.ts",
     markers: [
       "Lister Arrived for Pickup",
-      "confirmOnBehalfOfRenter",
+      "booking_conversation",
+      "arrived at pickup",
       "return_arrive",
       "renter_return_arrived_at",
       "lister_return_arrived_at",
       "bothArrivedForReturn",
     ],
+    absentMarkers: ["confirmOnBehalfOfRenter"],
   },
   {
     // "I've Returned the Car" was renamed to "I Have Arrived" - the return

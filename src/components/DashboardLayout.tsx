@@ -120,12 +120,12 @@ export default function DashboardLayout() {
       : [
           { to: "/browse", label: "Browse Cars", icon: CarFront },
           { to: "/my-bookings", label: "My Bookings", icon: CalendarDays },
-          { to: "/support", label: "Support", icon: Headset },
+          { to: "/support", label: "Support & Chats", icon: Headset },
         ]),
     ...(isLister
       ? [
           { to: "/lister-bookings", label: "Bookings", icon: LayoutDashboard },
-          { to: "/support", label: "Support", icon: Headset },
+          { to: "/support", label: "Support & Chats", icon: Headset },
         ]
       : []),
   ];

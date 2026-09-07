@@ -33,10 +33,6 @@ type BookingActionPayload = {
   // damaged and an incident case is open: the cancellation is still recorded
   // but excluded from the completion rate and the auto-pause strike count.
   waiveStrike?: boolean;
-  // Owner-only override on the "arrive" action: lets the lister confirm the
-  // renter's arrival on their behalf (e.g. renter's phone is dead) instead of
-  // waiting for the renter to tap it themselves.
-  confirmOnBehalfOfRenter?: boolean;
 };
 
 type BookingRecord = {
@@ -1117,13 +1113,10 @@ export default async function handler(req: Request) {
       // the lister must submit required pickup photos and confirm handover
       // ("handover_confirm"), then the renter must confirm receipt
       // ("handover_receive") - only that last step activates the trip.
-      const onBehalfOfRenter = owner && payload.confirmOnBehalfOfRenter === true;
-
       const arrivalTime = new Date().toISOString();
       const arrivalLocation = normalizeArrivalLocation(payload.arrivalLocation);
       const updatePayload: Record<string, string | number | null> = {};
-      const ownArrivalField =
-        renter || onBehalfOfRenter ? "renter_arrived_at" : "lister_arrived_at";
+      const ownArrivalField = renter ? "renter_arrived_at" : "lister_arrived_at";
       const addLocationEvidence = (prefix: "renter" | "lister") => {
         if (!arrivalLocation) return;
         updatePayload[`${prefix}_arrival_latitude`] = arrivalLocation.latitude;
@@ -1136,7 +1129,7 @@ export default async function handler(req: Request) {
 
       let bothArrivedAfterThis = false;
 
-      if (renter || onBehalfOfRenter) {
+      if (renter) {
         if (bookingRecord.renter_arrived_at) {
           return jsonResponse(
             { error: "Renter arrival has already been recorded" },
@@ -1144,10 +1137,8 @@ export default async function handler(req: Request) {
           );
         }
         updatePayload.renter_arrived_at = arrivalTime;
-        if (renter) {
-          updatePayload.renter_arrival_photo_url = payload.arrivalPhotoUrl ?? null;
-          addLocationEvidence("renter");
-        }
+        updatePayload.renter_arrival_photo_url = payload.arrivalPhotoUrl ?? null;
+        addLocationEvidence("renter");
         if (bookingRecord.lister_arrived_at) {
           bothArrivedAfterThis = true;
         }
@@ -1219,11 +1210,7 @@ export default async function handler(req: Request) {
 
       await supabase.from("audit_log").insert({
         user_id: user.id,
-        action: onBehalfOfRenter
-          ? "owner_confirmed_renter_arrived_booking"
-          : renter
-            ? "renter_arrived_booking"
-            : "owner_arrived_booking",
+        action: renter ? "renter_arrived_booking" : "owner_arrived_booking",
         entity_type: "booking",
         entity_id: bookingRecord.id,
         details: {
@@ -1237,30 +1224,74 @@ export default async function handler(req: Request) {
         },
       });
 
-      const counterpartyId = renter || onBehalfOfRenter
-        ? bookingRecord.owner_id
-        : bookingRecord.renter_id;
+      const counterpartyId = renter ? bookingRecord.owner_id : bookingRecord.renter_id;
 
-      if (!onBehalfOfRenter) {
-        const arrivalTitle = renter ? "Renter Arrived for Pickup" : "Lister Arrived for Pickup";
-        const arrivalMessage = renter
-          ? `The renter arrived for the pickup of ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`
-          : `The lister arrived for the pickup of ${getVehicleLabel(bookingRecord)}. Confirm your own arrival so the lister can hand over the car.`;
-        await supabase.from("notifications").insert({
-          user_id: counterpartyId,
-          title: arrivalTitle,
-          message: arrivalMessage,
-          type: "info",
-          link: renter ? "/lister-bookings" : "/my-bookings",
-        });
-        await sendUserNotificationEmail(supabase, {
-          userId: counterpartyId,
-          title: arrivalTitle,
-          message: arrivalMessage,
-          link: renter ? "/lister-bookings" : "/my-bookings",
-          baseOrigin: new URL(req.url).origin,
-          eventKey: `arrive:${renter ? "renter" : "lister"}:${bookingRecord.id}`,
-        });
+      const arrivalTitle = renter ? "Renter Arrived for Pickup" : "Lister Arrived for Pickup";
+      const arrivalMessage = renter
+        ? `The renter arrived for the pickup of ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`
+        : `The lister arrived for the pickup of ${getVehicleLabel(bookingRecord)}. Confirm your own arrival so the lister can hand over the car.`;
+      await supabase.from("notifications").insert({
+        user_id: counterpartyId,
+        title: arrivalTitle,
+        message: arrivalMessage,
+        type: "info",
+        link: renter ? "/lister-bookings" : "/my-bookings",
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: counterpartyId,
+        title: arrivalTitle,
+        message: arrivalMessage,
+        link: renter ? "/lister-bookings" : "/my-bookings",
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `arrive:${renter ? "renter" : "lister"}:${bookingRecord.id}`,
+      });
+
+      // Auto-post the arrival into the booking's conversation thread, with a
+      // clickable map link when a location was shared - mirrors the exact
+      // find-or-create-ticket pattern already used for pickup/return
+      // condition-report photos (api/submit-trip-condition-report.ts). Never
+      // let a chat hiccup fail an already-recorded arrival.
+      try {
+        let conversationTicketId: string | null = null;
+        const { data: existingConversation } = await supabase
+          .from("support_tickets")
+          .select("id")
+          .eq("booking_id", bookingRecord.id)
+          .not("participant_user_id", "is", null)
+          .maybeSingle();
+        if (existingConversation?.id) {
+          conversationTicketId = existingConversation.id;
+        } else {
+          const { data: newConversation, error: newConversationError } = await supabase
+            .from("support_tickets")
+            .insert({
+              user_id: bookingRecord.renter_id,
+              participant_user_id: bookingRecord.owner_id,
+              booking_id: bookingRecord.id,
+              subject: `Booking conversation: ${bookingRecord.id}`,
+              tag: "booking_conversation",
+              status: "open",
+            })
+            .select("id")
+            .single();
+          if (!newConversationError && newConversation) {
+            conversationTicketId = newConversation.id;
+          }
+        }
+
+        if (conversationTicketId) {
+          const roleLabel = renter ? "Renter" : "Lister";
+          const locationLink = arrivalLocation
+            ? ` <a href="https://www.google.com/maps?q=${arrivalLocation.latitude},${arrivalLocation.longitude}">View location</a>`
+            : "";
+          await supabase.from("ticket_messages").insert({
+            ticket_id: conversationTicketId,
+            sender_id: user.id,
+            message: `${roleLabel} arrived at pickup.${locationLink}`,
+          });
+        }
+      } catch (chatError) {
+        console.error("Failed to post arrival to booking conversation", chatError);
       }
 
       if (bothArrivedAfterThis) {

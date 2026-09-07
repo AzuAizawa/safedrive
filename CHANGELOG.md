@@ -9,6 +9,66 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-07 — Renamed "Support" nav to "Support & Chats"
+
+Reported: the sidebar nav item is just "Support" with a headset icon,
+which reads as SafeDrive-facing help - but the page behind it also holds
+every renter↔lister booking conversation ("Message Lister"/"Message
+Renter"). Nothing to click into first shows that.
+
+The two kinds of threads were already correctly separated *inside* the
+page (`SupportTicketsPage.tsx` already has distinct "SafeDrive Support"
+and "Booking Conversations" tabs, backed by `isConversationTicket()`) - the
+mislabel was only the entry point. Renamed the sidebar nav label and the
+page's own H1 (both renter and lister) from "Support"/"Help & Support" to
+**"Support & Chats"**. Route, icon, and everything inside the page
+(including the two tab labels) are unchanged. Admin's own
+`AdminSupportTicketsPage.tsx` keeps its "Support" wording - that's their
+actual support queue, not this nav item.
+
+A bigger, separate idea was discussed and deliberately deferred: opening
+the booking conversation inline in a modal right on the booking card
+(Grab/Uber-style), instead of navigating to `/support?ticketId=...`. Left
+for a future pass since it needs extracting the message-thread view out of
+`SupportTicketsPage.tsx` into a shared component first.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/components/DashboardLayout.tsx`, `src/pages/SupportTicketsPage.tsx`.
+
+---
+
+## 2026-09-07 — Removed the lister's manual "renter is here" override; arrivals now auto-post to the booking chat
+
+Two related pickup-handoff cleanups, lister side:
+
+1. Removed "Confirm - Renter Is Here" - a manual override letting the
+   lister confirm the renter's arrival on their behalf (originally for
+   "renter's phone is dead"). Removed end to end: the button, its handler,
+   and the server-side `confirmOnBehalfOfRenter` override in
+   `api/booking-action.ts`'s `"arrive"` action - confirmed via a full-repo
+   grep that nothing else depended on it.
+2. When either party taps "I Have Arrived" and optionally shares a
+   location, the action now auto-posts a message into that booking's chat
+   thread (e.g. "Renter arrived at pickup." with a clickable "View
+   location" Google Maps link when a location was shared) - the same
+   find-or-create-conversation pattern already used for pickup/return
+   condition-report photos (`api/submit-trip-condition-report.ts`). No
+   external API or key needed - the link is just
+   `https://www.google.com/maps?q={lat},{lng}` from data already captured.
+   A chat-post failure never fails the arrival itself (logged only).
+   Return-arrival isn't included - it captures no location today.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:api-boundaries`.
+
+Files: `src/pages/ListerBookingsPage.tsx`, `api/booking-action.ts`,
+`scripts/booking-flow-smoke-check.mjs`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-07 — Dormant account policy: inactivity indicator + auto-flag, manual execute
 
 Requested: a way to see how long a user account has gone unused, a
