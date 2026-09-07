@@ -9,6 +9,36 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Trip condition photos never appeared in the booking chat
+
+Reported from a booking conversation showing "Lister pickup photo" twice as
+plain text, with no image behind either.
+
+`submit-trip-condition-report.ts` posts those photos correctly: the message
+carries `attachment_storage_path` **and** `attachment_bucket:
+"trip-condition-evidence"`, because that evidence lives in its own private
+bucket rather than the default attachment one. `getTicketAttachmentUrl()`
+accepts that bucket as its second argument for exactly this reason.
+
+Both reader pages dropped it — `SupportTicketsPage.tsx` and
+`AdminSupportTicketsPage.tsx` each called
+`getTicketAttachmentUrl(message.attachment_storage_path)` with no bucket, so
+the lookup fell through to `support-attachments`, found nothing, returned
+null, and the message rendered as its bare caption. Every party was
+affected: renter, lister and admin all saw a label where the evidence should
+have been.
+
+Both now pass `message.attachment_bucket` through. No data was lost — the
+photos were in storage the whole time, just never resolved to a URL.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/SupportTicketsPage.tsx`,
+`src/pages/admin/AdminSupportTicketsPage.tsx`.
+
+---
+
 ## 2026-09-08 — No extending a booking you already showed up to return
 
 User feedback: the "Request extension" button should disappear once the

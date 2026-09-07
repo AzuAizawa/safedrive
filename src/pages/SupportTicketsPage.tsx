@@ -245,7 +245,17 @@ export default function SupportTicketsPage() {
           .filter((message) => Boolean(message.attachment_storage_path))
           .map(async (message) => [
             message.id,
-            await getTicketAttachmentUrl(message.attachment_storage_path),
+            // The bucket has to come along: a photo auto-posted from a trip
+            // condition report lives in the private
+            // "trip-condition-evidence" bucket, not the default attachment
+            // one. Passing only the path made getTicketAttachmentUrl look in
+            // the wrong bucket, find nothing, and return null - so the
+            // message rendered as bare text ("Lister pickup photo") with no
+            // image, for every party.
+            await getTicketAttachmentUrl(
+              message.attachment_storage_path,
+              message.attachment_bucket,
+            ),
           ] as const),
       );
       setAttachmentUrls(
