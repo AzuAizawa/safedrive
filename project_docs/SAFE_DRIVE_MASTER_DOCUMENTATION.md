@@ -1361,6 +1361,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/send-return-reminders.ts` | GET/POST; cron secret | Notify both booking parties in-app and through Resend; use the Gmail webhook only when Resend is not configured |
 | `api/send-verification-decision-email.ts` | POST; admin/super-admin | Send the already-recorded verification approval/rejection notification through the server-only Resend integration |
 | `api/send-vehicle-decision-email.ts` | POST; admin/super-admin | Send the already-recorded vehicle approval/rejection/review notification through server-only Resend after rechecking the current vehicle status |
+| `api/send-vehicle-renewal-decision-email.ts` | POST; admin/super-admin | Structural twin of `send-vehicle-decision-email.ts` for the renewal (compliance-document resubmission) flow instead of the initial listing review - emails the lister after a renewal is flagged/rejected/approved in `AdminVehicleRenewalsPage.tsx`, after rechecking the car/renewal status |
 | `api/send-support-ticket-reply-email.ts` | POST; admin/super-admin and original message author | Email a registered user after their administrator's already-recorded support-ticket reply; does not block the in-app reply |
 | `api/submit-trip-condition-report.ts` | POST; booking participant | Validate phase/categories/optional location and persist report/photos |
 | `api/webhooks/paymongo.ts` | POST; signed PayMongo callback | Idempotently authorize checkout/refund/subscription state changes and journals |

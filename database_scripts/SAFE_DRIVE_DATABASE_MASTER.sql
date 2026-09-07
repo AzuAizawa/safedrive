@@ -9341,4 +9341,138 @@ end;
 $flag$;
 revoke all on function public.flag_dormant_accounts() from public, anon, authenticated;
 
+-- ============================================================================
+-- CHAPTER 59 - Automated compliance-flagging jobs now email too, not just
+-- in-app notify (found while auditing every process for notification/email
+-- parity)
+-- ============================================================================
+-- Reported gap: api/flag-expired-vehicle-documents.ts (daily, flags a car
+-- with an expired registration/CTPL/insurance date) and
+-- api/flag-expiring-licenses.ts (daily, warns of an expiring/expired
+-- driver's licence) only ever wrote an in-app notifications row - unlike
+-- every admin-decision flow in this codebase (licence resubmission, KYC
+-- verification, vehicle listing approval), which already emails too. These
+-- are the two places a user is LEAST likely to have the app open when the
+-- event fires, since nothing they did triggered it.
+--
+-- Both underlying functions only ever returned a plain count
+-- (`returns integer`) - Postgres cannot change a function's return type via
+-- CREATE OR REPLACE, so each is dropped and recreated as `returns table
+-- (...)`, handing back exactly the rows it already computes in its own
+-- loop instead of only the total. The calling edge function then loops the
+-- result and calls the existing sendUserNotificationEmail helper once per
+-- row, reusing the exact same title/message text the SQL function already
+-- composes for the in-app notification. No table/column changes - pure
+-- logic update, safe to run any time.
+--
+-- Note: the SELECT feeding each loop is fully table-aliased so its column
+-- references can never be shadowed by the new OUT parameter names (e.g.
+-- notify_expiring_licenses's own `license_expiry` OUT column would
+-- otherwise collide with profiles.license_expiry in the loop's WHERE
+-- clause - PL/pgSQL resolves a bare, unqualified column name against a
+-- same-named OUT variable first, which would silently break the filter).
+
+drop function if exists public.flag_vehicles_needing_renewal();
+create function public.flag_vehicles_needing_renewal()
+returns table(owner_id uuid, car_id uuid, plate_number text)
+language plpgsql
+security definer
+set search_path = public
+as $flag_renewal$
+declare
+  car_row record;
+begin
+  for car_row in
+    select c.id, c.owner_id, c.plate_number
+    from public.cars c
+    where c.status in ('approved', 'active')
+      and (
+        c.registration_expiry < current_date
+        or c.ctpl_expiry < current_date
+        or c.comprehensive_insurance_expiry < current_date
+      )
+  loop
+    update public.cars
+      set status = 'renewal_required', updated_at = now()
+      where id = car_row.id;
+
+    insert into public.notifications (user_id, title, message, type, link)
+      values (
+        car_row.owner_id,
+        'Vehicle renewal required',
+        'A compliance document for ' || car_row.plate_number ||
+          ' has expired. Submit updated documents to relist the vehicle.',
+        'vehicle',
+        '/car-renewals'
+      );
+
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+      values (
+        car_row.owner_id, 'vehicle_renewal_required', 'car', car_row.id,
+        jsonb_build_object('reason', 'document_expiry', 'auto', true)
+      );
+
+    owner_id := car_row.owner_id;
+    car_id := car_row.id;
+    plate_number := car_row.plate_number;
+    return next;
+  end loop;
+
+  return;
+end;
+$flag_renewal$;
+revoke all on function public.flag_vehicles_needing_renewal() from public, anon, authenticated;
+grant execute on function public.flag_vehicles_needing_renewal() to service_role;
+
+drop function if exists public.notify_expiring_licenses();
+create function public.notify_expiring_licenses()
+returns table(user_id uuid, license_expiry date, is_expired boolean)
+language plpgsql
+security definer
+set search_path = public
+as $notify_licenses$
+declare
+  r record;
+begin
+  for r in
+    select p.id, p.license_expiry
+    from public.profiles p
+    where p.deleted_at is null
+      and p.verified_status = 'verified'
+      and p.license_expiry is not null
+      and p.license_expiry <= (current_date + 30)
+      and (p.license_expiry_notified_at is null
+           or p.license_expiry_notified_at < now() - interval '7 days')
+  loop
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      r.id,
+      case when r.license_expiry < current_date
+           then 'Driver''s licence expired'
+           else 'Driver''s licence expiring soon' end,
+      case when r.license_expiry < current_date
+           then 'Your driver''s licence expired on ' || to_char(r.license_expiry, 'Mon DD, YYYY')
+                || '. Submit an updated licence from Account & Identity so an admin can renew your access.'
+           else 'Your driver''s licence expires on ' || to_char(r.license_expiry, 'Mon DD, YYYY')
+                || '. Submit an updated licence from Account & Identity to avoid a booking hold.' end,
+      case when r.license_expiry < current_date then 'error' else 'warning' end,
+      '/verify'
+    );
+
+    update public.profiles
+    set license_expiry_notified_at = now()
+    where id = r.id;
+
+    user_id := r.id;
+    license_expiry := r.license_expiry;
+    is_expired := r.license_expiry < current_date;
+    return next;
+  end loop;
+
+  return;
+end;
+$notify_licenses$;
+revoke all on function public.notify_expiring_licenses() from public, anon, authenticated;
+grant execute on function public.notify_expiring_licenses() to service_role;
+
 -- End of SafeDrive chaptered database master.

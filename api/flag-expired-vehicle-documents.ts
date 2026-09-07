@@ -1,4 +1,5 @@
 import { createSupabaseAdmin } from "./lib/payoutAutomation";
+import { sendUserNotificationEmail } from "./lib/email.js";
 
 export const config = {
   runtime: "edge",
@@ -47,7 +48,23 @@ export default async function handler(req: Request) {
     if (error) {
       return jsonResponse({ error: error.message }, 500);
     }
-    return jsonResponse({ success: true, flagged: Number(data ?? 0) });
+    const flaggedRows = (data ?? []) as Array<{
+      owner_id: string;
+      car_id: string;
+      plate_number: string;
+    }>;
+    const baseOrigin = new URL(req.url).origin;
+    for (const row of flaggedRows) {
+      await sendUserNotificationEmail(supabase, {
+        userId: row.owner_id,
+        title: "Vehicle renewal required",
+        message: `A compliance document for ${row.plate_number} has expired. Submit updated documents to relist the vehicle.`,
+        link: "/car-renewals",
+        baseOrigin,
+        eventKey: `vehicle-renewal-required:${row.car_id}:${new Date().toISOString().slice(0, 10)}`,
+      });
+    }
+    return jsonResponse({ success: true, flagged: flaggedRows.length });
   } catch (error) {
     return jsonResponse(
       {

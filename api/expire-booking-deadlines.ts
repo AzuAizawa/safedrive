@@ -6,6 +6,7 @@ import {
   getVehicleLabel,
   type RefundableBooking,
 } from "./lib/cancellationRefundPlan.js";
+import { sendUserNotificationEmail } from "./lib/email.js";
 
 export const config = {
   runtime: "edge",
@@ -76,30 +77,38 @@ const notifyParticipants = async (
   supabase: ReturnType<typeof getSupabaseAdmin>,
   booking: DeadlineBooking,
   state: "owner_response_expired" | "payment_expired",
+  baseOrigin: string,
 ) => {
   const isOwnerResponseExpiry = state === "owner_response_expired";
-  const notifications = [
-    {
-      user_id: booking.renter_id,
-      title: isOwnerResponseExpiry ? "Booking Request Expired" : "Booking Payment Expired",
-      message: isOwnerResponseExpiry
-        ? "The lister did not respond before the 24-hour review window closed, so your request was released."
-        : "The reservation payment deadline passed before PayMongo confirmed payment, so the booking was cancelled. This affects your completion rate.",
-      type: "warning",
-      link: "/my-bookings",
-    },
-    {
-      user_id: booking.owner_id,
-      title: isOwnerResponseExpiry ? "Booking Request Released" : "Booking Payment Expired",
-      message: isOwnerResponseExpiry
-        ? "A pending booking request was released because the 24-hour response window passed."
-        : "A renter did not complete reservation payment before the deadline, so the booking was cancelled.",
-      type: "warning",
-      link: "/lister-bookings",
-    },
-  ];
+  const renterTitle = isOwnerResponseExpiry ? "Booking Request Expired" : "Booking Payment Expired";
+  const renterMessage = isOwnerResponseExpiry
+    ? "The lister did not respond before the 24-hour review window closed, so your request was released."
+    : "The reservation payment deadline passed before PayMongo confirmed payment, so the booking was cancelled. This affects your completion rate.";
+  const ownerTitle = isOwnerResponseExpiry ? "Booking Request Released" : "Booking Payment Expired";
+  const ownerMessage = isOwnerResponseExpiry
+    ? "A pending booking request was released because the 24-hour response window passed."
+    : "A renter did not complete reservation payment before the deadline, so the booking was cancelled.";
 
-  await supabase.from("notifications").insert(notifications);
+  await supabase.from("notifications").insert([
+    { user_id: booking.renter_id, title: renterTitle, message: renterMessage, type: "warning", link: "/my-bookings" },
+    { user_id: booking.owner_id, title: ownerTitle, message: ownerMessage, type: "warning", link: "/lister-bookings" },
+  ]);
+  await sendUserNotificationEmail(supabase, {
+    userId: booking.renter_id,
+    title: renterTitle,
+    message: renterMessage,
+    link: "/my-bookings",
+    baseOrigin,
+    eventKey: `${state}-renter:${booking.id}`,
+  });
+  await sendUserNotificationEmail(supabase, {
+    userId: booking.owner_id,
+    title: ownerTitle,
+    message: ownerMessage,
+    link: "/lister-bookings",
+    baseOrigin,
+    eventKey: `${state}-owner:${booking.id}`,
+  });
   await supabase.from("audit_log").insert({
     user_id: null,
     action: state,
@@ -120,6 +129,7 @@ export default async function handler(req: Request) {
     }
 
     const supabase = getSupabaseAdmin();
+    const baseOrigin = new URL(req.url).origin;
     const now = new Date().toISOString();
     const { data: unansweredBookings, error: unansweredError } = await supabase
       .from("bookings")
@@ -157,7 +167,7 @@ export default async function handler(req: Request) {
       if (error) throw error;
       if (!updated) continue;
 
-      await notifyParticipants(supabase, booking, "owner_response_expired");
+      await notifyParticipants(supabase, booking, "owner_response_expired", baseOrigin);
       ownerResponseExpired += 1;
     }
 
@@ -198,7 +208,7 @@ export default async function handler(req: Request) {
         // Non-fatal - see comment above.
       }
 
-      await notifyParticipants(supabase, booking, "payment_expired");
+      await notifyParticipants(supabase, booking, "payment_expired", baseOrigin);
       paymentExpired += 1;
     }
 
@@ -271,22 +281,42 @@ export default async function handler(req: Request) {
           { onConflict: "booking_id" },
         );
 
+        const balanceRenterTitle = "Booking Cancelled - Balance Unpaid";
+        const balanceRenterMessage = `Your booking for ${vehicleLabel} was cancelled because the remaining balance was not paid in time. SafeDrive support will review and release your ${refundPlan.lateRenterPercent}% refund. This affects your completion rate.`;
+        const balanceOwnerTitle = "Booking Cancelled - Balance Unpaid";
+        const balanceOwnerMessage = `A renter did not pay the remaining balance for ${vehicleLabel} in time, so the booking was cancelled and those dates are free again.`;
         await supabase.from("notifications").insert([
           {
             user_id: rawBooking.renter_id,
-            title: "Booking Cancelled - Balance Unpaid",
-            message: `Your booking for ${vehicleLabel} was cancelled because the remaining balance was not paid in time. SafeDrive support will review and release your ${refundPlan.lateRenterPercent}% refund. This affects your completion rate.`,
+            title: balanceRenterTitle,
+            message: balanceRenterMessage,
             type: "warning",
             link: "/my-bookings",
           },
           {
             user_id: rawBooking.owner_id,
-            title: "Booking Cancelled - Balance Unpaid",
-            message: `A renter did not pay the remaining balance for ${vehicleLabel} in time, so the booking was cancelled and those dates are free again.`,
+            title: balanceOwnerTitle,
+            message: balanceOwnerMessage,
             type: "warning",
             link: "/lister-bookings",
           },
         ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: rawBooking.renter_id,
+          title: balanceRenterTitle,
+          message: balanceRenterMessage,
+          link: "/my-bookings",
+          baseOrigin,
+          eventKey: `balance-deadline-renter:${rawBooking.id}`,
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: rawBooking.owner_id,
+          title: balanceOwnerTitle,
+          message: balanceOwnerMessage,
+          link: "/lister-bookings",
+          baseOrigin,
+          eventKey: `balance-deadline-owner:${rawBooking.id}`,
+        });
 
         await supabase.from("audit_log").insert({
           user_id: null,
@@ -354,12 +384,22 @@ export default async function handler(req: Request) {
       if (claimReminderError) throw claimReminderError;
       if (!claimedReminder) continue;
 
+      const balanceReminderTitle = "Balance Payment Reminder";
+      const balanceReminderMessage = `Pay the remaining balance for ${getVehicleLabel(booking)} soon - the booking will be automatically cancelled if it is not settled before the deadline.`;
       await supabase.from("notifications").insert({
         user_id: booking.renter_id,
-        title: "Balance Payment Reminder",
-        message: `Pay the remaining balance for ${getVehicleLabel(booking)} soon - the booking will be automatically cancelled if it is not settled before the deadline.`,
+        title: balanceReminderTitle,
+        message: balanceReminderMessage,
         type: "warning",
         link: "/my-bookings",
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: booking.renter_id,
+        title: balanceReminderTitle,
+        message: balanceReminderMessage,
+        link: "/my-bookings",
+        baseOrigin,
+        eventKey: `balance-reminder:${booking.id}`,
       });
       balanceReminderSent += 1;
     }
@@ -393,22 +433,42 @@ export default async function handler(req: Request) {
       if (claimEarlyReturnError) throw claimEarlyReturnError;
       if (!claimedEarlyReturn) continue;
 
+      const earlyReturnRenterTitle = "Early return request expired";
+      const earlyReturnRenterMessage = `The lister did not respond to your early-return request in time. The original return date (${er.current_end_date}) stands.`;
+      const earlyReturnOwnerTitle = "Early return request expired";
+      const earlyReturnOwnerMessage = `You did not respond to a renter's early-return request in time, so it expired. The original return date (${er.current_end_date}) stands.`;
       await supabase.from("notifications").insert([
         {
           user_id: er.renter_id,
-          title: "Early return request expired",
-          message: `The lister did not respond to your early-return request in time. The original return date (${er.current_end_date}) stands.`,
+          title: earlyReturnRenterTitle,
+          message: earlyReturnRenterMessage,
           type: "warning",
           link: "/my-bookings",
         },
         {
           user_id: er.owner_id,
-          title: "Early return request expired",
-          message: `You did not respond to a renter's early-return request in time, so it expired. The original return date (${er.current_end_date}) stands.`,
+          title: earlyReturnOwnerTitle,
+          message: earlyReturnOwnerMessage,
           type: "warning",
           link: "/lister-bookings",
         },
       ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: er.renter_id,
+        title: earlyReturnRenterTitle,
+        message: earlyReturnRenterMessage,
+        link: "/my-bookings",
+        baseOrigin,
+        eventKey: `early-return-expired-renter:${er.id}`,
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: er.owner_id,
+        title: earlyReturnOwnerTitle,
+        message: earlyReturnOwnerMessage,
+        link: "/lister-bookings",
+        baseOrigin,
+        eventKey: `early-return-expired-owner:${er.id}`,
+      });
 
       await supabase.from("audit_log").insert({
         user_id: null,
@@ -477,22 +537,42 @@ export default async function handler(req: Request) {
         entity_id: booking.id,
         details: { timeout_hours: timeoutHours, automated: true },
       });
+      const autoCompleteOwnerTitle = "Trip Auto-Completed";
+      const autoCompleteOwnerMessage = `The renter finished this trip and it was auto-completed after ${timeoutHours} hours without your confirmation.`;
+      const autoCompleteRenterTitle = "Trip Completed";
+      const autoCompleteRenterMessage = "Your trip was completed automatically because the lister did not confirm in time.";
       await supabase.from("notifications").insert([
         {
           user_id: booking.owner_id,
-          title: "Trip Auto-Completed",
-          message: `The renter finished this trip and it was auto-completed after ${timeoutHours} hours without your confirmation.`,
+          title: autoCompleteOwnerTitle,
+          message: autoCompleteOwnerMessage,
           type: "warning",
           link: "/lister-bookings",
         },
         {
           user_id: booking.renter_id,
-          title: "Trip Completed",
-          message: "Your trip was completed automatically because the lister did not confirm in time.",
+          title: autoCompleteRenterTitle,
+          message: autoCompleteRenterMessage,
           type: "info",
           link: "/my-bookings",
         },
       ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: booking.owner_id,
+        title: autoCompleteOwnerTitle,
+        message: autoCompleteOwnerMessage,
+        link: "/lister-bookings",
+        baseOrigin,
+        eventKey: `lister-timeout-owner:${booking.id}`,
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: booking.renter_id,
+        title: autoCompleteRenterTitle,
+        message: autoCompleteRenterMessage,
+        link: "/my-bookings",
+        baseOrigin,
+        eventKey: `lister-timeout-renter:${booking.id}`,
+      });
       await runBookingCompletionSideEffects(
         supabase,
         {
@@ -568,22 +648,42 @@ export default async function handler(req: Request) {
           entity_id: booking.id,
           details: { timeout_hours: HANDOVER_STALL_TIMEOUT_HOURS, automated: true },
         });
+        const tripStartedRenterTitle = "Trip Started";
+        const tripStartedRenterMessage = `Your trip for ${vehicleLabel} was started automatically after ${HANDOVER_STALL_TIMEOUT_HOURS} hours since the lister handed over the car.`;
+        const tripStartedOwnerTitle = "Trip Started";
+        const tripStartedOwnerMessage = `The rental for ${vehicleLabel} started automatically because the renter did not confirm receipt in time.`;
         await supabase.from("notifications").insert([
           {
             user_id: booking.renter_id,
-            title: "Trip Started",
-            message: `Your trip for ${vehicleLabel} was started automatically after ${HANDOVER_STALL_TIMEOUT_HOURS} hours since the lister handed over the car.`,
+            title: tripStartedRenterTitle,
+            message: tripStartedRenterMessage,
             type: "info",
             link: "/my-bookings",
           },
           {
             user_id: booking.owner_id,
-            title: "Trip Started",
-            message: `The rental for ${vehicleLabel} started automatically because the renter did not confirm receipt in time.`,
+            title: tripStartedOwnerTitle,
+            message: tripStartedOwnerMessage,
             type: "info",
             link: "/lister-bookings",
           },
         ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: booking.renter_id,
+          title: tripStartedRenterTitle,
+          message: tripStartedRenterMessage,
+          link: "/my-bookings",
+          baseOrigin,
+          eventKey: `handover-stall-activated-renter:${booking.id}`,
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: booking.owner_id,
+          title: tripStartedOwnerTitle,
+          message: tripStartedOwnerMessage,
+          link: "/lister-bookings",
+          baseOrigin,
+          eventKey: `handover-stall-activated-owner:${booking.id}`,
+        });
         handoverAutoActivated += 1;
       } else if (!booking.handover_stall_notified_at) {
         const { data: claimedNotice, error: claimNoticeError } = await supabase
@@ -596,22 +696,42 @@ export default async function handler(req: Request) {
         if (claimNoticeError) throw claimNoticeError;
         if (!claimedNotice) continue;
 
+        const handoverStallOwnerTitle = "Complete the handover";
+        const handoverStallOwnerMessage = `You and the renter both arrived for ${vehicleLabel} over ${HANDOVER_STALL_TIMEOUT_HOURS} hours ago, but the car hasn't been handed over yet. Submit your pickup photos and tap "Hand Over the Car."`;
+        const handoverStallRenterTitle = "Waiting on the lister";
+        const handoverStallRenterMessage = `You and the lister both arrived for ${vehicleLabel} over ${HANDOVER_STALL_TIMEOUT_HOURS} hours ago, but the lister hasn't handed over the car yet.`;
         await supabase.from("notifications").insert([
           {
             user_id: booking.owner_id,
-            title: "Complete the handover",
-            message: `You and the renter both arrived for ${vehicleLabel} over ${HANDOVER_STALL_TIMEOUT_HOURS} hours ago, but the car hasn't been handed over yet. Submit your pickup photos and tap "Hand Over the Car."`,
+            title: handoverStallOwnerTitle,
+            message: handoverStallOwnerMessage,
             type: "warning",
             link: "/lister-bookings",
           },
           {
             user_id: booking.renter_id,
-            title: "Waiting on the lister",
-            message: `You and the lister both arrived for ${vehicleLabel} over ${HANDOVER_STALL_TIMEOUT_HOURS} hours ago, but the lister hasn't handed over the car yet.`,
+            title: handoverStallRenterTitle,
+            message: handoverStallRenterMessage,
             type: "warning",
             link: "/my-bookings",
           },
         ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: booking.owner_id,
+          title: handoverStallOwnerTitle,
+          message: handoverStallOwnerMessage,
+          link: "/lister-bookings",
+          baseOrigin,
+          eventKey: `handover-stall-notice-owner:${booking.id}`,
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: booking.renter_id,
+          title: handoverStallRenterTitle,
+          message: handoverStallRenterMessage,
+          link: "/my-bookings",
+          baseOrigin,
+          eventKey: `handover-stall-notice-renter:${booking.id}`,
+        });
         await supabase.from("audit_log").insert({
           user_id: null,
           action: "handover_stall_notified",
@@ -700,14 +820,26 @@ export default async function handler(req: Request) {
 
       const vehicleLabel = getVehicleLabel(booking as unknown as RefundableBooking);
       const arrivedIsRenter = Boolean(booking.renter_return_arrived_at);
+      const returnNoShowUserId = arrivedIsRenter ? booking.renter_id : booking.owner_id;
+      const returnNoShowTitle = "The other party hasn't shown up";
+      const returnNoShowMessage = arrivedIsRenter
+        ? `You arrived to return ${vehicleLabel}, but the lister hasn't shown up yet. If they don't arrive, you can report a no-show from the booking.`
+        : `You arrived to receive ${vehicleLabel}, but the renter hasn't shown up yet. If they don't arrive, you can report this from the booking.`;
+      const returnNoShowLink = arrivedIsRenter ? "/my-bookings" : "/lister-bookings";
       await supabase.from("notifications").insert({
-        user_id: arrivedIsRenter ? booking.renter_id : booking.owner_id,
-        title: "The other party hasn't shown up",
-        message: arrivedIsRenter
-          ? `You arrived to return ${vehicleLabel}, but the lister hasn't shown up yet. If they don't arrive, you can report a no-show from the booking.`
-          : `You arrived to receive ${vehicleLabel}, but the renter hasn't shown up yet. If they don't arrive, you can report this from the booking.`,
+        user_id: returnNoShowUserId,
+        title: returnNoShowTitle,
+        message: returnNoShowMessage,
         type: "warning",
-        link: arrivedIsRenter ? "/my-bookings" : "/lister-bookings",
+        link: returnNoShowLink,
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: returnNoShowUserId,
+        title: returnNoShowTitle,
+        message: returnNoShowMessage,
+        link: returnNoShowLink,
+        baseOrigin,
+        eventKey: `return-no-show-${arrivedIsRenter ? "renter" : "owner"}:${booking.id}`,
       });
       await supabase.from("audit_log").insert({
         user_id: null,
@@ -752,22 +884,42 @@ export default async function handler(req: Request) {
       if (claimExtError) throw claimExtError;
       if (!claimedExt) continue;
 
+      const extensionExpiredRenterTitle = "Extension request expired";
+      const extensionExpiredRenterMessage = `The lister did not respond to your extension request in time. The current return date (${ext.current_end_date}) stands.`;
+      const extensionExpiredOwnerTitle = "Extension request expired";
+      const extensionExpiredOwnerMessage = `You did not respond to a renter's extension request in time, so it expired. The current return date (${ext.current_end_date}) stands.`;
       await supabase.from("notifications").insert([
         {
           user_id: ext.renter_id,
-          title: "Extension request expired",
-          message: `The lister did not respond to your extension request in time. The current return date (${ext.current_end_date}) stands.`,
+          title: extensionExpiredRenterTitle,
+          message: extensionExpiredRenterMessage,
           type: "warning",
           link: "/my-bookings",
         },
         {
           user_id: ext.owner_id,
-          title: "Extension request expired",
-          message: `You did not respond to a renter's extension request in time, so it expired. The current return date (${ext.current_end_date}) stands.`,
+          title: extensionExpiredOwnerTitle,
+          message: extensionExpiredOwnerMessage,
           type: "warning",
           link: "/lister-bookings",
         },
       ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: ext.renter_id,
+        title: extensionExpiredRenterTitle,
+        message: extensionExpiredRenterMessage,
+        link: "/my-bookings",
+        baseOrigin,
+        eventKey: `extension-expired-renter:${ext.id}`,
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: ext.owner_id,
+        title: extensionExpiredOwnerTitle,
+        message: extensionExpiredOwnerMessage,
+        link: "/lister-bookings",
+        baseOrigin,
+        eventKey: `extension-expired-owner:${ext.id}`,
+      });
       await supabase.from("audit_log").insert({
         user_id: null,
         action: "booking_extension_response_expired",
@@ -814,22 +966,42 @@ export default async function handler(req: Request) {
       if (claimExtError) throw claimExtError;
       if (!claimedExt) continue;
 
+      const extensionPaymentRenterTitle = "Extension payment window expired";
+      const extensionPaymentRenterMessage = `You did not complete the extension payment in time, so the approved extension expired. The current return date (${ext.current_end_date}) stands.`;
+      const extensionPaymentOwnerTitle = "Extension payment window expired";
+      const extensionPaymentOwnerMessage = `The renter did not pay for the approved extension in time, so it expired. The current return date (${ext.current_end_date}) stands.`;
       await supabase.from("notifications").insert([
         {
           user_id: ext.renter_id,
-          title: "Extension payment window expired",
-          message: `You did not complete the extension payment in time, so the approved extension expired. The current return date (${ext.current_end_date}) stands.`,
+          title: extensionPaymentRenterTitle,
+          message: extensionPaymentRenterMessage,
           type: "warning",
           link: "/my-bookings",
         },
         {
           user_id: ext.owner_id,
-          title: "Extension payment window expired",
-          message: `The renter did not pay for the approved extension in time, so it expired. The current return date (${ext.current_end_date}) stands.`,
+          title: extensionPaymentOwnerTitle,
+          message: extensionPaymentOwnerMessage,
           type: "warning",
           link: "/lister-bookings",
         },
       ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: ext.renter_id,
+        title: extensionPaymentRenterTitle,
+        message: extensionPaymentRenterMessage,
+        link: "/my-bookings",
+        baseOrigin,
+        eventKey: `extension-payment-expired-renter:${ext.id}`,
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: ext.owner_id,
+        title: extensionPaymentOwnerTitle,
+        message: extensionPaymentOwnerMessage,
+        link: "/lister-bookings",
+        baseOrigin,
+        eventKey: `extension-payment-expired-owner:${ext.id}`,
+      });
       await supabase.from("audit_log").insert({
         user_id: null,
         action: "booking_extension_payment_expired",

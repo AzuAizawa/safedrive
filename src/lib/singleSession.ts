@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { isUserAuthPending, isAdminAuthPending } from "@/lib/authPending";
 
 // Enforces "only the most recently completed login stays active" across
 // devices/browsers for the same account (CHAPTER 57). Two parts:
@@ -68,6 +69,19 @@ export function startSingleSessionGuard(
 
   const check = async () => {
     if (cancelled || checking) return;
+    // A password-only sign-in already establishes a Supabase session (and
+    // fires this guard, since AuthContext keys it off session?.user) before
+    // the 2FA step this app requires has actually completed -
+    // finalizeSingleSession() only runs once that finishes, so this tab's
+    // OWN token is still whatever an earlier, separate login left behind.
+    // Comparing that stale token while a challenge is still pending would
+    // wrongly look "superseded" and sign the tab out mid-code-entry -
+    // reported bug: admin login failed at the authenticator step with
+    // "invalid claim: missing sub claim" because this guard force-signed
+    // the in-progress session out from under it. Skip entirely until the
+    // pending marker (src/lib/authPending.ts, cleared right after a
+    // successful verify) is gone.
+    if (isUserAuthPending() || isAdminAuthPending()) return;
     checking = true;
     try {
       const localToken = window.localStorage.getItem(

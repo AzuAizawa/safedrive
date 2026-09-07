@@ -1,4 +1,5 @@
 import { createSupabaseAdmin } from "./lib/payoutAutomation";
+import { sendUserNotificationEmail } from "./lib/email.js";
 
 export const config = {
   runtime: "edge",
@@ -46,7 +47,29 @@ export default async function handler(req: Request) {
     if (error) {
       return jsonResponse({ error: error.message }, 500);
     }
-    return jsonResponse({ success: true, notified: Number(data ?? 0) });
+    const notifiedRows = (data ?? []) as Array<{
+      user_id: string;
+      license_expiry: string;
+      is_expired: boolean;
+    }>;
+    const baseOrigin = new URL(req.url).origin;
+    for (const row of notifiedRows) {
+      const expiryLabel = new Date(`${row.license_expiry}T00:00:00`).toLocaleDateString(
+        "en-US",
+        { month: "short", day: "2-digit", year: "numeric" },
+      );
+      await sendUserNotificationEmail(supabase, {
+        userId: row.user_id,
+        title: row.is_expired ? "Driver's licence expired" : "Driver's licence expiring soon",
+        message: row.is_expired
+          ? `Your driver's licence expired on ${expiryLabel}. Submit an updated licence from Account & Identity so an admin can renew your access.`
+          : `Your driver's licence expires on ${expiryLabel}. Submit an updated licence from Account & Identity to avoid a booking hold.`,
+        link: "/verify",
+        baseOrigin,
+        eventKey: `license-expiry:${row.user_id}:${new Date().toISOString().slice(0, 10)}`,
+      });
+    }
+    return jsonResponse({ success: true, notified: notifiedRows.length });
   } catch (error) {
     return jsonResponse(
       {

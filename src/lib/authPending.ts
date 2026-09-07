@@ -13,27 +13,39 @@ type PendingAuthState = {
 const USER_AUTH_PENDING_KEY = "user_auth_pending";
 const ADMIN_AUTH_PENDING_KEY = "admin_auth_pending";
 
-const canUseSessionStorage = () => typeof window !== "undefined";
+// Deliberately localStorage, not sessionStorage. The Supabase session this
+// flag is meant to gate (signInWithPassword() already writes a full,
+// usable session the instant the password is correct - the 2FA step is
+// enforced entirely by this app's own client-side check, not by Supabase
+// withholding the session) lives in localStorage, which is shared across
+// every tab/window/installed-PWA instance on the same origin.
+// sessionStorage is scoped to a single tab - a login left sitting at "enter
+// your code" in one tab, then opened in a second tab or a separately
+// launched PWA icon, would see the valid session with no memory that 2FA
+// was never finished, and sign straight in. UserRoute.tsx/AdminRoute.tsx's
+// isUserAuthPending()/isAdminAuthPending() checks need this flag visible
+// from any such context to force the sign-out they already correctly do.
+const canUseLocalStorage = () => typeof window !== "undefined";
 
 const getKey = (portal: Portal) =>
   portal === "admin" ? ADMIN_AUTH_PENDING_KEY : USER_AUTH_PENDING_KEY;
 
 const writePendingState = (portal: Portal, value: PendingAuthState | null) => {
-  if (!canUseSessionStorage()) return;
+  if (!canUseLocalStorage()) return;
 
   const key = getKey(portal);
   if (!value) {
-    window.sessionStorage.removeItem(key);
+    window.localStorage.removeItem(key);
     return;
   }
 
-  window.sessionStorage.setItem(key, JSON.stringify(value));
+  window.localStorage.setItem(key, JSON.stringify(value));
 };
 
 const readPendingState = (portal: Portal): PendingAuthState | null => {
-  if (!canUseSessionStorage()) return null;
+  if (!canUseLocalStorage()) return null;
 
-  const rawValue = window.sessionStorage.getItem(getKey(portal));
+  const rawValue = window.localStorage.getItem(getKey(portal));
   if (!rawValue) return null;
 
   try {
@@ -59,7 +71,7 @@ const readPendingState = (portal: Portal): PendingAuthState | null => {
       };
     }
   } catch {
-    window.sessionStorage.removeItem(getKey(portal));
+    window.localStorage.removeItem(getKey(portal));
   }
 
   return null;

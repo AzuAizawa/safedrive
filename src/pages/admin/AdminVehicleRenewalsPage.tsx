@@ -138,6 +138,36 @@ export default function AdminVehicleRenewalsPage() {
     void load();
   }, [load]);
 
+  // Admin-editable expiry drafts, pre-filled from the lister's own
+  // submission as a starting point - approveRenewal saves whatever is
+  // typed HERE, not the lister's raw values, so the admin actually
+  // verifies/corrects each date against the opened document instead of
+  // blindly trusting self-reported input (same philosophy as the driver's
+  // licence review, where the admin - not the renter - types the
+  // authoritative expiry). Only seeds rows not already drafted, so an
+  // in-progress edit on one pending renewal survives a `load()` refresh
+  // triggered by approving/rejecting a different one.
+  const [dateDrafts, setDateDrafts] = useState<
+    Record<string, { registration: string; ctpl: string; comprehensive: string }>
+  >({});
+  useEffect(() => {
+    setDateDrafts((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const row of renewals) {
+        if (!next[row.id]) {
+          next[row.id] = {
+            registration: row.registration_expiry ?? "",
+            ctpl: row.ctpl_expiry ?? "",
+            comprehensive: row.comprehensive_insurance_expiry ?? "",
+          };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [renewals]);
+
   const openDoc = async (path: string | null) => {
     if (!path) {
       toast.error("That document was not uploaded");
@@ -146,6 +176,30 @@ export default function AdminVehicleRenewalsPage() {
     const url = await createPrivateStorageUrl("car-documents", path);
     if (url) window.open(url, "_blank", "noopener,noreferrer");
     else toast.error("Could not open the document");
+  };
+
+  const sendRenewalDecisionEmail = async (
+    carId: string,
+    decision: "flagged" | "rejected" | "approved",
+    extra: { renewalId?: string; reason?: string } = {},
+  ) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return;
+    try {
+      const response = await fetch("/api/send-vehicle-renewal-decision-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ carId, decision, ...extra }),
+      });
+      if (!response.ok) {
+        console.warn("Renewal decision email was not delivered", await response.text());
+      }
+    } catch (emailError) {
+      console.warn("Renewal decision email request failed", emailError);
+    }
   };
 
   const flagVehicle = async (event: React.FormEvent) => {
@@ -183,6 +237,7 @@ export default function AdminVehicleRenewalsPage() {
         entity_id: car.id,
         details: { reason: flagReason.trim(), auto: false },
       });
+      await sendRenewalDecisionEmail(car.id, "flagged", { reason: flagReason.trim() });
 
       toast.success("Vehicle flagged for renewal", {
         description: "The lister was notified to submit updated documents.",
@@ -232,6 +287,7 @@ export default function AdminVehicleRenewalsPage() {
         entity_id: row.car_id,
         details: { renewal_id: row.id, reason: reason.trim() },
       });
+      await sendRenewalDecisionEmail(row.car_id, "rejected", { renewalId: row.id });
 
       toast.success("Renewal returned to the lister");
       await load();
@@ -247,11 +303,14 @@ export default function AdminVehicleRenewalsPage() {
   const approveRenewal = async (row: RenewalRow) => {
     if (!user?.id || busyId) return;
 
-    // Dates come from the lister's own submission (checked against the
-    // documents opened above), not typed blind by the admin.
-    const registration = row.registration_expiry;
-    const ctpl = row.ctpl_expiry;
-    const insurance = row.comprehensive_insurance_expiry;
+    // Dates are whatever the admin has typed/corrected in the draft
+    // fields (pre-filled from the lister's submission, but the admin's
+    // own value governs) - verified against the documents opened above,
+    // never saved blind.
+    const draft = dateDrafts[row.id];
+    const registration = draft?.registration || null;
+    const ctpl = draft?.ctpl || null;
+    const insurance = draft?.comprehensive || null;
 
     const isValidFutureDate = (value: string | null) => {
       if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -259,9 +318,9 @@ export default function AdminVehicleRenewalsPage() {
       return !Number.isNaN(date.getTime()) && date.getTime() > Date.now();
     };
     if (!isValidFutureDate(registration) || !isValidFutureDate(ctpl)) {
-      toast.error("This submission is missing valid registration/CTPL dates", {
+      toast.error("Enter valid registration/CTPL expiry dates", {
         description:
-          "Return it to the lister for changes - it predates the current renewal form or the dates have already lapsed.",
+          "Check the opened documents and correct the date fields before approving.",
       });
       return;
     }
@@ -308,6 +367,7 @@ export default function AdminVehicleRenewalsPage() {
           comprehensive_insurance_expiry: insurance || null,
         },
       });
+      await sendRenewalDecisionEmail(row.car_id, "approved", { renewalId: row.id });
 
       toast.success("Renewal approved", {
         description: "The vehicle is back to approved status.",
@@ -411,19 +471,75 @@ export default function AdminVehicleRenewalsPage() {
                       {new Date(row.submitted_at).toLocaleDateString()}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Registration expiry:{" "}
+                      Lister submitted - registration:{" "}
                       <strong className="text-foreground">
                         {row.registration_expiry || "Missing"}
                       </strong>{" "}
-                      · CTPL expiry:{" "}
+                      · CTPL:{" "}
                       <strong className="text-foreground">
                         {row.ctpl_expiry || "Missing"}
                       </strong>{" "}
-                      · Comprehensive expiry:{" "}
+                      · Comprehensive:{" "}
                       <strong className="text-foreground">
                         {row.comprehensive_insurance_expiry || "Not supplied"}
                       </strong>
                     </p>
+                    <p className="mt-2 text-xs font-medium text-foreground">
+                      Confirm each date against the opened document before approving:
+                    </p>
+                    <div className="mt-1 grid gap-2 sm:grid-cols-3">
+                      <label className="space-y-1">
+                        <Label className="text-xs">Registration expiry</Label>
+                        <Input
+                          type="date"
+                          value={dateDrafts[row.id]?.registration ?? ""}
+                          onChange={(event) =>
+                            setDateDrafts((prev) => ({
+                              ...prev,
+                              [row.id]: {
+                                registration: event.target.value,
+                                ctpl: prev[row.id]?.ctpl ?? "",
+                                comprehensive: prev[row.id]?.comprehensive ?? "",
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <Label className="text-xs">CTPL expiry</Label>
+                        <Input
+                          type="date"
+                          value={dateDrafts[row.id]?.ctpl ?? ""}
+                          onChange={(event) =>
+                            setDateDrafts((prev) => ({
+                              ...prev,
+                              [row.id]: {
+                                registration: prev[row.id]?.registration ?? "",
+                                ctpl: event.target.value,
+                                comprehensive: prev[row.id]?.comprehensive ?? "",
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <Label className="text-xs">Comprehensive expiry (optional)</Label>
+                        <Input
+                          type="date"
+                          value={dateDrafts[row.id]?.comprehensive ?? ""}
+                          onChange={(event) =>
+                            setDateDrafts((prev) => ({
+                              ...prev,
+                              [row.id]: {
+                                registration: prev[row.id]?.registration ?? "",
+                                ctpl: prev[row.id]?.ctpl ?? "",
+                                comprehensive: event.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button

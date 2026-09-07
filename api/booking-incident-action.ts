@@ -474,12 +474,22 @@ export default async function handler(req: Request) {
           .update({ dispute_status: "open" })
           .eq("id", overstay.id)
           .eq("status", "active");
+        const overdueTitle = "Vehicle overdue";
+        const overdueMessage = `Your rental of ${label(b)} is past its return date and another renter could not pick it up. Return it immediately and file your return report.`;
         await supabase.from("notifications").insert({
           user_id: overstay.renter_id,
-          title: "Vehicle overdue",
-          message: `Your rental of ${label(b)} is past its return date and another renter could not pick it up. Return it immediately and file your return report.`,
+          title: overdueTitle,
+          message: overdueMessage,
           type: "error",
           link: "/my-bookings",
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: overstay.renter_id,
+          title: overdueTitle,
+          message: overdueMessage,
+          link: "/my-bookings",
+          baseOrigin,
+          eventKey: `overdue-overstay:${overstay.id}`,
         });
       }
 
@@ -493,11 +503,13 @@ export default async function handler(req: Request) {
           : `The renter checked in at pickup, waited past the ${GRACE_MINUTES}-minute grace window, and the lister did not appear with the vehicle. This booking was cancelled and fully refunded. ${note ?? ""}`.trim(),
       );
 
+      const noCarRenterTitle = "Booking cancelled — full refund";
+      const noCarRenterMessage = `${label(b)} wasn't available at pickup. Your full refund is being processed and your record is not affected. Browse other cars to rebook.`;
       await supabase.from("notifications").insert([
         {
           user_id: b.renter_id,
-          title: "Booking cancelled — full refund",
-          message: `${label(b)} wasn't available at pickup. Your full refund is being processed and your record is not affected. Browse other cars to rebook.`,
+          title: noCarRenterTitle,
+          message: noCarRenterMessage,
           type: "info",
           link: "/browse",
         },
@@ -511,6 +523,14 @@ export default async function handler(req: Request) {
           link: "/lister-bookings",
         },
       ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: b.renter_id,
+        title: noCarRenterTitle,
+        message: noCarRenterMessage,
+        link: "/browse",
+        baseOrigin,
+        eventKey: `no-car-renter:${b.id}`,
+      });
       await sendUserNotificationEmail(supabase, {
         userId: b.owner_id,
         title: "Handover issue reported",
@@ -624,25 +644,45 @@ export default async function handler(req: Request) {
         } ${note ?? ""}`.trim(),
       );
 
+      const noShowRenterTitle = "Booking cancelled — you did not show up";
+      const noShowRenterMessage =
+        captured > 0
+          ? `You did not appear for ${label(b)} at pickup. Per the no-show policy you keep a ${noShowRefundPercent}% forfeit; SafeDrive support will release your ${renterShare.toLocaleString()} refund. This affects your completion rate.`
+          : `You did not appear for ${label(b)} at pickup. This affects your completion rate.`;
+      const noShowOwnerTitle = "Renter no-show recorded";
+      const noShowOwnerMessage = `The renter did not appear for ${label(b)}. The booking was cancelled and your record is not affected.`;
       await supabase.from("notifications").insert([
         {
           user_id: b.renter_id,
-          title: "Booking cancelled — you did not show up",
-          message:
-            captured > 0
-              ? `You did not appear for ${label(b)} at pickup. Per the no-show policy you keep a ${noShowRefundPercent}% forfeit; SafeDrive support will release your ${renterShare.toLocaleString()} refund. This affects your completion rate.`
-              : `You did not appear for ${label(b)} at pickup. This affects your completion rate.`,
+          title: noShowRenterTitle,
+          message: noShowRenterMessage,
           type: "error",
           link: "/my-bookings",
         },
         {
           user_id: b.owner_id,
-          title: "Renter no-show recorded",
-          message: `The renter did not appear for ${label(b)}. The booking was cancelled and your record is not affected.`,
+          title: noShowOwnerTitle,
+          message: noShowOwnerMessage,
           type: "info",
           link: "/lister-bookings",
         },
       ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: b.renter_id,
+        title: noShowRenterTitle,
+        message: noShowRenterMessage,
+        link: "/my-bookings",
+        baseOrigin,
+        eventKey: `renter-no-show-renter:${b.id}`,
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: b.owner_id,
+        title: noShowOwnerTitle,
+        message: noShowOwnerMessage,
+        link: "/lister-bookings",
+        baseOrigin,
+        eventKey: `renter-no-show-owner:${b.id}`,
+      });
 
       await supabase.from("audit_log").insert({
         user_id: user.id,

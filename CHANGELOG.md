@@ -9,6 +9,196 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-07 — Security fix: the 2FA step could be skipped entirely by opening a new tab/PWA
+
+Reported: entered the correct password, stopped at the "enter your
+verification code" screen without submitting it, then opened SafeDrive
+from a separately installed PWA icon on the same device - it signed
+straight in, no code ever required.
+
+Root cause: `signInWithPassword()` already writes a full, usable Supabase
+session into `localStorage` the instant the password is correct - the
+2FA step is enforced entirely by this app's own client-side gate
+(`src/lib/authPending.ts`), not by Supabase withholding the session. That
+gate was stored in `sessionStorage`, scoped to a single tab/window and
+never shared with any other browsing context - so a second tab, a new
+window, or a separately launched installed-PWA icon saw the valid
+session with no memory that its 2FA step was never finished, and let it
+straight through. `UserRoute.tsx`/`AdminRoute.tsx` already had the
+correct guard logic (force sign-out + a "Finish Sign-In First" screen) -
+it just couldn't see the flag from any context but the one that started
+the login.
+
+Fixed by moving `authPending.ts`'s storage from `sessionStorage` to
+`localStorage`, which - like the session it's gating - is shared across
+every tab/window/installed-PWA instance on the same origin. No other file
+needed to change.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/lib/authPending.ts`.
+
+---
+
+## 2026-09-07 — Defensive fix: light/dark theme now has a plain-hex fallback for browsers without oklch() support
+
+Reported (second-hand, not reproducible on the reporting user's own
+device): a tester's light/dark toggle did nothing - the app stayed black
+regardless. The toggle logic and the `:root`/`.dark` CSS variables were
+both confirmed correct and distinct; not a universal bug. One real gap
+found while checking: every color token in `src/index.css` was
+`oklch()`-only with no fallback - on a browser that doesn't support
+`oklch()` (older Android WebView, older in-app browsers/Samsung
+Internet), `var(--background)` etc. resolve to nothing usable and the
+affected elements fall back to the browser's own unstyled default, which
+can plausibly render as "stuck black" - a "works for me, not for them"
+pattern that matches the report, though it isn't confirmed as this
+specific tester's exact cause.
+
+Added a `@supports not (color: oklch(0 0 0))` block restating the same
+`:root`/`.dark` custom properties with plain hex equivalents. A browser
+that supports `oklch()` is completely unaffected (the block never
+activates); one that doesn't gets a fully working, if slightly less
+precise, palette instead of broken/unstyled elements.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/index.css`.
+
+---
+
+## 2026-09-07 — Fixed: single-active-session guard could kick a login out mid-2FA-entry
+
+Reported: login with the correct password AND a valid authenticator code
+still got rejected with "Authenticator verification rejected - invalid
+claim: missing sub claim."
+
+Root cause: `signInWithPassword()` already establishes a real Supabase
+session the moment the password is correct - the second factor
+(authenticator/email code) this app additionally requires is enforced by
+the app's own UI/routing, not by Supabase withholding the session. That
+means `AuthContext.tsx`'s single-active-session guard (CHAPTER 57, shipped
+this session) started running - and could act - the instant the password
+step succeeded, before the 2FA step had actually finished.
+`finalizeSingleSession()` only runs once the WHOLE login (password + 2FA)
+completes, so at that in-between moment this tab's own saved session
+token was still whatever an earlier, separate login had left behind. If
+another device had logged in in the meantime, the guard saw a mismatch,
+decided this looked "superseded," and force-signed the tab out - out from
+under its own in-progress login - right as the authenticator code was
+being verified, producing the missing-JWT error.
+
+Fixed in `src/lib/singleSession.ts`: the guard now checks
+`isUserAuthPending()`/`isAdminAuthPending()` (`src/lib/authPending.ts` -
+already tracks exactly "a 2FA challenge is in progress on this tab,"
+cleared right after a successful verify) and skips its check entirely
+while either is true. Applies to every trigger (poll, realtime, tab
+focus) uniformly, and to both portals and every 2FA sub-path (authenticator
+verify, email-code fallback, first-time enrollment).
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/lib/singleSession.ts`.
+
+---
+
+## 2026-09-07 — Vehicle renewal: admin now enters/verifies the expiry dates, not the lister
+
+Reported gap, found while brainstorming the renewal flow: driver's-licence
+resubmission has the *admin* type the authoritative expiry date after
+reading the uploaded document - the renter never self-reports it. Vehicle
+renewal was the opposite: the lister typed all three expiry dates
+(registration, CTPL, comprehensive insurance) when submitting, and
+`AdminVehicleRenewalsPage.tsx`'s "Approve & relist" saved those lister-typed
+values straight to `cars` with no admin date-picker at all - the admin only
+opened the document images and clicked one button.
+
+Fixed to match the licence pattern: each pending renewal card now shows
+the lister's submitted dates as reference text plus three editable date
+fields (registration and CTPL required, comprehensive optional - CTPL is
+legally mandatory in the Philippines, comprehensive isn't), pre-filled
+from the lister's submission but fully admin-correctable. Approving now
+saves whatever the admin actually confirmed/typed, not the unverified
+lister input. `ListerCarRenewalPage.tsx` (the lister's own submission
+form) is unchanged - their self-reported dates remain a useful starting
+point for the admin, they just stop being the final source of truth.
+
+Also confirmed, no change needed: a car goes fully offline
+(`renewal_required`, unbookable) the moment **any one** of the three
+compliance dates expires - `public.flag_vehicles_needing_renewal()`
+already checks `registration_expiry < current_date OR ctpl_expiry <
+current_date OR comprehensive_insurance_expiry < current_date`, run daily.
+Already prevents "registration is fine but the insurance quietly expired
+and the car stayed bookable."
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/admin/AdminVehicleRenewalsPage.tsx`.
+
+---
+
+## 2026-09-07 — Closed notification/email gaps found in a full-app audit
+
+Requested: verify every significant process/status-update (arrival,
+licence resubmission accept/reject, and similar) notifies both in-app AND
+by email. Confirmed the established pattern already holds for every
+admin-decision event (licence resubmission, KYC verification, vehicle
+listing approve/reject, support replies, payouts, manual refunds) - but
+several automated/background events, and two incident branches, only
+ever wrote an in-app `notifications` row.
+
+Five gaps closed, all reusing the existing `sendUserNotificationEmail`
+helper (`api/lib/email.ts`) with the exact same title/message text
+already written for each in-app notification - no new copywriting:
+
+1. `api/booking-incident-action.ts`: `renter_no_show` (lister reports the
+   renter never showed at pickup) had zero email for either party -
+   money/reliability-record-affecting, now emails both. `renter_no_car`
+   (renter reports no car at pickup) only emailed the owner - the renter
+   (whose booking is cancelled and refunded) now gets one too, including
+   the `overstay` sub-case.
+2. `api/expire-booking-deadlines.ts` - every one of its ~10 automated
+   notification sites (owner-response/payment expiry, balance-unpaid
+   cancellation, balance reminder, early-return/extension expiry x2,
+   lister-completion timeout, handover-stall auto-start and notice,
+   return no-show warning) now also emails, on top of the in-app row -
+   this is the file where a user is least likely to have the app open
+   when it fires.
+3. New `api/send-vehicle-renewal-decision-email.ts` (structural twin of
+   `send-vehicle-decision-email.ts`), wired into `AdminVehicleRenewalsPage.tsx`'s
+   three actions (flag for renewal, reject a resubmission, approve a
+   resubmission) - previously the direct structural twin of licence
+   resubmission review, which already emailed, while renewal decisions
+   didn't.
+4. Found one level deeper while researching #3: the *automated* daily
+   sweep (`api/flag-expired-vehicle-documents.ts` →
+   `flag_vehicles_needing_renewal()`) had the same gap - a car auto-flagged
+   for an expired document only ever got an in-app notice.
+5. Same pattern again: `api/flag-expiring-licenses.ts` →
+   `notify_expiring_licenses()` (licence expiry reminders) was in-app only.
+
+For #4/#5, Postgres can't change a function's return type via
+`CREATE OR REPLACE`, so both SQL functions were dropped and recreated
+`returns table(...)` instead of a bare count, handing back the rows they
+already compute so the edge function can loop and email each one - no
+table/column changes, pure logic update (CHAPTER 59).
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:api-boundaries`.
+
+Files: `api/booking-incident-action.ts`, `api/expire-booking-deadlines.ts`,
+`api/send-vehicle-renewal-decision-email.ts` (new),
+`src/pages/admin/AdminVehicleRenewalsPage.tsx`,
+`api/flag-expired-vehicle-documents.ts`, `api/flag-expiring-licenses.ts`,
+`database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 59),
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-07 — Renamed "Support" nav to "Support & Chats"
 
 Reported: the sidebar nav item is just "Support" with a headset icon,

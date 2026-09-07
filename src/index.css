@@ -56,6 +56,65 @@
   --warning: oklch(0.75 0.2 80);
 }
 
+/* Plain-hex fallback for a browser without oklch() support (older Android
+   WebView / in-app browsers, older Samsung Internet) - reported: the
+   light/dark toggle did nothing for one tester, staying black regardless.
+   Every token above is oklch()-only with nothing else to fall back on;
+   var(--background) etc. resolve to nothing usable on such a browser and
+   the affected elements render with the browser's own unstyled default,
+   which can plausibly look "stuck black." @supports correctly detects
+   real function support and applies this block only when oklch() is
+   NOT understood - a browser that does support it keeps using the
+   oklch() rules above untouched. Approximate hex equivalents, not exact -
+   fine for a fallback path. */
+@supports not (color: oklch(0 0 0)) {
+  :root {
+    --background: #ffffff;
+    --foreground: #262626;
+    --card: #ffffff;
+    --card-foreground: #262626;
+    --popover: #ffffff;
+    --popover-foreground: #262626;
+    --primary: #3b5fce;
+    --primary-foreground: #fafafa;
+    --secondary: #f2f2f2;
+    --secondary-foreground: #333333;
+    --muted: #f2f2f2;
+    --muted-foreground: #8c8c8c;
+    --accent: #f2f2f2;
+    --accent-foreground: #333333;
+    --destructive: #dc4444;
+    --border: #e6e6e6;
+    --input: #e6e6e6;
+    --ring: #3b5fce;
+    --success: #3ba55d;
+    --warning: #c99a2e;
+  }
+
+  .dark {
+    --background: #1a1a2e;
+    --foreground: #ededed;
+    --card: #212138;
+    --card-foreground: #ededed;
+    --popover: #212138;
+    --popover-foreground: #ededed;
+    --primary: #5b7fe0;
+    --primary-foreground: #fafafa;
+    --secondary: #2a2a42;
+    --secondary-foreground: #ededed;
+    --muted: #2a2a42;
+    --muted-foreground: #8c8c8c;
+    --accent: #2a2a42;
+    --accent-foreground: #ededed;
+    --destructive: #dc4444;
+    --border: #34344a;
+    --input: #34344a;
+    --ring: #5b7fe0;
+    --success: #43b96a;
+    --warning: #dba53a;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
