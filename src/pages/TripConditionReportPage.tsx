@@ -131,11 +131,27 @@ export default function TripConditionReportPage() {
       cameraStreamRef.current = stream;
       setCameraStream(stream);
     } catch (error) {
-      setCameraError(
-        error instanceof Error
-          ? error.message
-          : "Unable to start the camera.",
-      );
+      // The browser's own message here is a bare string like "Permission
+      // denied", which was then shown with "use the waiver button if this
+      // device has no working camera" appended - the wrong advice for the
+      // most common case by far. When a site's camera access has been
+      // blocked (once refused, or refused with "remember" ticked), the
+      // browser rejects instantly and shows NO prompt, which is exactly the
+      // "walang nag-aask" report. The user does have a camera; they need to
+      // unblock it, not waive the requirement. Map the failure to something
+      // they can act on.
+      const name = error instanceof Error ? error.name : "";
+      const message =
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "Camera access is blocked for this site, so no prompt appears. Tap the lock or settings icon beside the web address, set Camera to Allow, then reopen this and try again."
+          : name === "NotFoundError" || name === "OverconstrainedError"
+            ? "No usable camera was found on this device. Close this and use the waiver button below."
+            : name === "NotReadableError"
+              ? "The camera is already in use by another app. Close that app, then try again."
+              : error instanceof Error && error.message
+                ? error.message
+                : "Unable to start the camera.";
+      setCameraError(message);
     } finally {
       setIsStartingCamera(false);
     }
@@ -361,7 +377,7 @@ export default function TripConditionReportPage() {
                   )}
                   {cameraError ? (
                     <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-red-200">
-                      {cameraError} Close this and use the waiver button below if this device has no working camera.
+                      {cameraError}
                     </div>
                   ) : (
                     <video ref={videoRef} className="h-full w-full object-cover" playsInline muted />

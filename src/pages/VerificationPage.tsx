@@ -592,11 +592,23 @@ export default function VerificationPage() {
       cameraStreamRef.current = stream;
       setCameraStream(stream);
     } catch (error) {
-      setCameraError(
-        error instanceof Error
-          ? error.message
-          : "Unable to start the camera.",
-      );
+      // Same mapping as TripConditionReportPage: a site whose camera access
+      // was already refused gets an instant rejection and no prompt, and the
+      // raw browser text ("Permission denied") tells the user nothing they
+      // can act on. It matters more here - without a selfie there is no way
+      // to finish verification at all.
+      const name = error instanceof Error ? error.name : "";
+      const message =
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "Camera access is blocked for this site, so no prompt appears. Tap the lock or settings icon beside the web address, set Camera to Allow, then try again."
+          : name === "NotFoundError" || name === "OverconstrainedError"
+            ? "No usable camera was found on this device. Try again on a phone with a front camera."
+            : name === "NotReadableError"
+              ? "The camera is already in use by another app. Close that app, then try again."
+              : error instanceof Error && error.message
+                ? error.message
+                : "Unable to start the camera.";
+      setCameraError(message);
     } finally {
       setIsStartingCamera(false);
     }

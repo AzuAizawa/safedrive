@@ -9,6 +9,37 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Camera "Permission denied" now says what to actually do
+
+User feedback: *"Naka denied agad yung camera, walang nag a-ask if a-allow ba
+yung camera or not."*
+
+The missing prompt is the browser, not a bug: once camera access for a site
+has been refused - especially with "remember" ticked - `getUserMedia()`
+rejects instantly and no prompt is shown again. Nothing in the app can
+re-trigger it; only the user can clear it in site settings.
+
+What *was* our bug is the advice. The screen printed the browser's bare
+string ("Permission denied") and appended "use the waiver button below if
+this device has no working camera" — the wrong instruction for by far the
+most common cause. The user has a working camera; they need to unblock it.
+Following that advice meant filing a condition report with no photo when a
+photo was perfectly possible.
+
+The failure is now mapped to something actionable: a blocked permission
+explains where to re-enable it and does not mention the waiver; a genuinely
+missing camera points at the waiver; a camera held by another app says to
+close that app. Applied to both camera screens — the trip condition report
+and, where it matters more, the verification selfie, since without it a user
+cannot finish KYC at all.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/TripConditionReportPage.tsx`, `src/pages/VerificationPage.tsx`.
+
+---
+
 ## 2026-09-08 — Arrival check-in no longer asks for your location
 
 User feedback: *"Bakit tinatanong yung location kapag nag click ng 'I have

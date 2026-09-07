@@ -9974,4 +9974,46 @@ where (
   )
 );
 
+-- ============================================================================
+-- CHAPTER 66 - Purge the location data left behind by the retired GPS features
+-- ============================================================================
+-- Two location features were removed from the application: the car listing's
+-- pickup pin, and the device location captured at arrival check-in. Nothing
+-- writes either any more, but rows created while they existed still carry the
+-- coordinates. Owner's decision: clear them, so the platform holds no location
+-- data at all rather than a shrinking pool of it.
+--
+-- Values are nulled, columns are NOT dropped. The admin dispute view still
+-- selects these columns and renders "no location stored" for a null, so
+-- dropping them would break that screen for no gain. Nulling is also
+-- idempotent - re-running this is a no-op.
+--
+-- IRREVERSIBLE. Run the count first (see the CHANGELOG entry) if you want to
+-- know what is about to go, and hold off while any dispute over an older
+-- booking is still open, since this is evidence for those.
+
+update public.bookings
+set renter_arrival_latitude = null,
+    renter_arrival_longitude = null,
+    renter_arrival_accuracy_meters = null,
+    renter_arrival_location_captured_at = null,
+    lister_arrival_latitude = null,
+    lister_arrival_longitude = null,
+    lister_arrival_accuracy_meters = null,
+    lister_arrival_location_captured_at = null
+where renter_arrival_latitude is not null
+   or renter_arrival_longitude is not null
+   or renter_arrival_accuracy_meters is not null
+   or renter_arrival_location_captured_at is not null
+   or lister_arrival_latitude is not null
+   or lister_arrival_longitude is not null
+   or lister_arrival_accuracy_meters is not null
+   or lister_arrival_location_captured_at is not null;
+
+update public.cars
+set pickup_latitude = null,
+    pickup_longitude = null
+where pickup_latitude is not null
+   or pickup_longitude is not null;
+
 -- End of SafeDrive chaptered database master.
