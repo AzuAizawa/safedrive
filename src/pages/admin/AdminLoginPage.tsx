@@ -157,7 +157,11 @@ export default function AdminLoginPage() {
 
   useEffect(() => {
     const pendingState = getAdminAuthPendingState();
-    if (!pendingState || pendingState.step !== "otp") return;
+    // Email-less means the placeholder from markAdminAuthPending(), before
+    // any real code step - nothing to resume. Left in place rather than
+    // cleared, for the same reason as LoginPage.tsx.
+    if (!pendingState || pendingState.step !== "otp" || !pendingState.email)
+      return;
 
     setEmail((currentEmail) => currentEmail || pendingState.email);
     setStep("otp");
@@ -235,9 +239,15 @@ export default function AdminLoginPage() {
     setIsLoading(true);
 
     try {
+      // Marked BEFORE the password call - see the matching comment in
+      // LoginPage.tsx. A session exists the moment the password is right,
+      // and the single-session guard must never see a login that still
+      // owes its authenticator step as a finished one.
+      markAdminAuthPending();
       const { error } = await signIn(normalizedEmail, password, consumeCaptcha());
 
       if (error) {
+        clearAdminAuthPending();
         const failureState = registerAuthFailure("admin", normalizedEmail);
         await recordSecurityEvent("admin_login_failed", {
           email: normalizedEmail,
@@ -340,7 +350,6 @@ export default function AdminLoginPage() {
       }
 
       const { factorId, error: factorError } = await getAuthenticatorFactor();
-      markAdminAuthPending();
       if (factorError) {
         toast.error("Authenticator check failed", {
           description: factorError.message,
@@ -398,6 +407,10 @@ export default function AdminLoginPage() {
 
       await startEmailCode();
     } catch (err: unknown) {
+      // The pending marker is set before the password call now, so an
+      // exception anywhere above would otherwise strand it set with no
+      // session behind it.
+      clearAdminAuthPending();
       toast.error("Error", { description: (err as Error).message });
     } finally {
       setIsLoading(false);

@@ -11,7 +11,10 @@ import { supabase } from "@/lib/supabase";
 import { clearAllAuthPending } from "@/lib/authPending";
 import { signInWithTransientJwtRetry } from "@/lib/authRetry";
 import { recordSecurityEvent } from "@/lib/securityLog";
-import { startSingleSessionGuard } from "@/lib/singleSession";
+import {
+  clearLocalSessionToken,
+  startSingleSessionGuard,
+} from "@/lib/singleSession";
 import { hasPermission } from "@/lib/permissions";
 import { resetToRenterMode } from "@/lib/listerMode";
 import type { User, Session, AuthResponse } from "@supabase/supabase-js";
@@ -337,6 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.location.pathname.startsWith("/admin");
 
       clearAllAuthPending();
+      clearLocalSessionToken();
       sessionStorage.removeItem("admin_auth_portal");
       sessionStorage.setItem(
         SESSION_TIMEOUT_NOTICE_KEY,
@@ -689,6 +693,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       clearInactivityTimeout();
       clearAllAuthPending();
+      clearLocalSessionToken();
       sessionStorage.removeItem("admin_auth_portal");
       await resetToRenterMode(user?.id);
       // Local scope - a deliberate "Sign Out" click on this device must not

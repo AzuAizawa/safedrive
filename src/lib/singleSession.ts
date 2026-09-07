@@ -60,6 +60,24 @@ export async function finalizeSingleSession(
   }
 }
 
+// Called from every path that ends this device's own session. Without
+// this, the token written at the last successful login stays in
+// localStorage forever - and on the NEXT login attempt, before
+// finalizeSingleSession() has replaced it, the guard would compare that
+// stale value against whichever device currently holds the account and
+// wrongly conclude this tab had been superseded, force-signing out a
+// login that was still mid-2FA. Clearing it means a returning device
+// starts with no token at all, which the guard already treats as
+// "nothing to compare, don't act" (see check() below).
+export function clearLocalSessionToken() {
+  try {
+    window.localStorage.removeItem(ACTIVE_SESSION_TOKEN_KEY);
+  } catch {
+    // Storage can be unavailable (private mode, blocked site data) -
+    // never let that break a sign-out.
+  }
+}
+
 export function startSingleSessionGuard(
   userId: string,
   onSuperseded: () => void,

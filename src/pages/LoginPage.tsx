@@ -191,7 +191,16 @@ export default function LoginPage() {
 
   useEffect(() => {
     const pendingState = getUserAuthPendingState();
-    if (!pendingState || pendingState.step !== "otp") return;
+    // An email-less state is the placeholder markUserAuthPending() writes
+    // before the password call - the login never reached a real code step,
+    // so there is nothing to resume and restoring one would show a code
+    // screen with no challenge behind it. Deliberately NOT cleared here:
+    // the flag is also what UserRoute uses to force a sign-out if a
+    // password-only session is opened in another tab, and dropping it
+    // would reopen that bypass. Falling through to the password step
+    // re-marks it properly.
+    if (!pendingState || pendingState.step !== "otp" || !pendingState.email)
+      return;
 
     setEmail((currentEmail) => currentEmail || pendingState.email);
     setStep("otp");
@@ -308,8 +317,17 @@ export default function LoginPage() {
     }
     setShowResendConfirmation(false);
     setIsLoading(true);
+    // Marked BEFORE the password call, not after the profile checks below.
+    // signInWithPassword() establishes a real session the moment the
+    // password is right, and AuthContext starts the single-session guard
+    // as soon as it sees one. If this marker isn't already set by then,
+    // that guard treats a login still owing its 2FA step as a completed
+    // one, and can force-sign it out mid-code-entry - which surfaced as
+    // "invalid claim: missing sub claim" at the authenticator step.
+    markUserAuthPending();
     const { error } = await signIn(normalizedEmail, password, consumeCaptcha());
     if (error) {
+      clearUserAuthPending();
       const failureState = registerAuthFailure("user", normalizedEmail);
       await recordSecurityEvent("user_login_failed", {
         email: normalizedEmail,
@@ -409,8 +427,6 @@ export default function LoginPage() {
       setIsLoading(false);
       return;
     }
-
-    markUserAuthPending();
 
     const { factorId, error: factorError } = await getAuthenticatorFactor();
     if (factorError) {

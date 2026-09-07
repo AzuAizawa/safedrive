@@ -9,6 +9,60 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-07 — Fixed: single-session guard could lock you out of your own account recovery
+
+Reported: signing in on a device while another device held the session
+showed "signed in on another device", the OTP was still entered, and the
+authenticator step failed with "invalid claim: missing sub claim" - the
+device could not get in at all. The follow-up question was the serious
+one: if someone hacks your account and is using it, can you still log
+back in to take it back?
+
+By design, yes - CHAPTER 57 is "newest login wins", and
+`finalizeSingleSession()` revokes every other session server-side via
+`signOut({ scope: "others" })`, so logging in *is* the recovery path. A
+bug was defeating it, and it bit precisely in that case.
+
+Two causes compounding:
+
+1. `sd_active_session_token` was written at login (`singleSession.ts`)
+   and read by the guard, but **never cleared** - not by `signOut()`, not
+   by `forceSignOut()`. Any device that had ever logged in kept a stale
+   token forever.
+2. `markUserAuthPending()` ran *after* the password call plus two awaited
+   round-trips, but `AuthContext` starts the guard the instant a session
+   appears and the guard checks immediately. In that window the guard
+   didn't know a 2FA step was still owed, so it compared the stale local
+   token against the remote one (the other device's), saw a mismatch, and
+   force-signed-out the half-finished login. The OTP was then verified
+   against a dead session - hence "missing sub claim".
+
+A device that had never logged in has no local token and returns early,
+which is why this only struck a returning device while another session
+was active.
+
+Fixes: new `clearLocalSessionToken()` called from both sign-out paths in
+`AuthContext.tsx`, so a returning device starts with nothing to compare
+(timing-independent); and the pending-2FA marker now set *before* the
+password call on both portals, with matching clears on the
+password-failure branches and in AdminLoginPage's catch. The login pages
+also no longer restore an OTP step from the email-less placeholder state
+- that flag is deliberately left in place rather than cleared, since it
+is also what forces a sign-out if a password-only session is opened in
+another tab.
+
+Note (not code): single-session ends the attacker's *session*, but
+someone who knows the password can log in again and ping-pong. Changing
+the password is what actually ends it.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/lib/singleSession.ts`, `src/contexts/AuthContext.tsx`,
+`src/pages/LoginPage.tsx`, `src/pages/admin/AdminLoginPage.tsx`.
+
+---
+
 ## 2026-09-07 — Renter's trip-report buttons only appear when they're actually usable
 
 Reported from an ongoing rental: the renter already received the car and
