@@ -360,6 +360,91 @@ const calculateSubscriptionEndDate = (startDate = new Date()) => {
   return formatDateOnly(endDate);
 };
 
+// A capture that landed on a booking that can no longer accept it. The usual
+// cause is timing, not fraud: the deadline-expiry cron runs every 15 minutes
+// and payments cluster at the last minute, so it can cancel a booking in the
+// seconds between the renter tapping Pay and PayMongo's webhook arriving.
+//
+// Before this, those branches logged a security event and returned 409 -
+// nothing else. The renter's money was gone, and SafeDrive had no payments
+// row, no refund row, no ticket and no notification, so unless the renter
+// complained nobody would ever know. The money is real either way: record it
+// so it exists in the books, and open a manual-refund review so a human
+// decides. Deliberately not an automatic refund.
+const recordUnclaimableCapture = async (
+  supabase: ServiceRoleSupabaseClient,
+  input: {
+    bookingId: string;
+    amount: number;
+    paymentType: CompletedBookingPaymentType;
+    paymentMethod: string;
+    transactionId: string;
+    bookingStatus: string;
+    baseOrigin: string;
+  },
+) => {
+  try {
+    await insertCompletedPaymentIfMissing(
+      supabase,
+      {
+        bookingId: input.bookingId,
+        amount: input.amount,
+        paymentType: input.paymentType,
+        paymentMethod: input.paymentMethod,
+        transactionId: input.transactionId,
+        notes: `Captured by PayMongo AFTER the booking left its payable state (status: ${input.bookingStatus}). Not applied to the booking. Needs manual review and most likely a refund.`,
+      },
+      input.baseOrigin,
+      false,
+    );
+
+    const { data: existingTicket } = await supabase
+      .from("support_tickets")
+      .select("id")
+      .eq("booking_id", input.bookingId)
+      .eq("tag", "manual_refund")
+      .in("status", ["open", "in_progress"])
+      .maybeSingle();
+
+    if (!existingTicket?.id) {
+      const { data: booking } = await supabase
+        .from("bookings")
+        .select("renter_id")
+        .eq("id", input.bookingId)
+        .maybeSingle();
+      if (booking?.renter_id) {
+        await supabase.from("support_tickets").insert({
+          user_id: booking.renter_id,
+          subject: `Payment captured on a ${input.bookingStatus} booking`,
+          tag: "manual_refund",
+          booking_id: input.bookingId,
+          status: "open",
+        });
+      }
+    }
+
+    const { data: superAdmins } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("role", "super_admin");
+    if (superAdmins?.length) {
+      await supabase.from("notifications").insert(
+        superAdmins.map((admin) => ({
+          user_id: admin.id,
+          title: "Payment captured on a booking that cannot accept it",
+          message: `PHP ${input.amount.toLocaleString()} was captured after the booking became "${input.bookingStatus}". It was recorded but not applied - review and refund if appropriate.`,
+          type: "warning",
+          link: "/admin/financial-reviews?view=refunds",
+        })),
+      );
+    }
+  } catch (error) {
+    // Never let bookkeeping failure change the webhook's answer to PayMongo -
+    // the security event and the 409 still stand.
+    console.error("Failed to record an unclaimable capture", error);
+  }
+};
+
 const insertCompletedPaymentIfMissing = async (
   supabase: ServiceRoleSupabaseClient,
   payment: {
@@ -871,6 +956,15 @@ export default async function handler(req: Request) {
           booking_status: bookingRecord.status,
           event_id: event.id,
           livemode,
+        });
+        await recordUnclaimableCapture(supabase, {
+          bookingId,
+          amount: paidAmountInCentavos / 100,
+          paymentType: "balance",
+          paymentMethod: getPaymentMethodLabel(checkoutAttributes),
+          transactionId: checkoutId,
+          bookingStatus: bookingRecord.status,
+          baseOrigin: new URL(req.url).origin,
         });
         return new Response(
           JSON.stringify({ error: "Booking is not awaiting a balance payment" }),
@@ -1419,6 +1513,15 @@ export default async function handler(req: Request) {
           event_id: event.id,
           livemode,
         });
+        await recordUnclaimableCapture(supabase, {
+          bookingId,
+          amount: paidAmountInCentavos / 100,
+          paymentType: "downpayment",
+          paymentMethod: getPaymentMethodLabel(checkoutAttributes),
+          transactionId: checkoutId,
+          bookingStatus: bookingRecord.status,
+          baseOrigin: new URL(req.url).origin,
+        });
         return new Response(
           JSON.stringify({ error: "Booking is not awaiting a full payment" }),
           {
@@ -1667,6 +1770,15 @@ export default async function handler(req: Request) {
         booking_status: bookingRecord.status,
         event_id: event.id,
         livemode,
+      });
+      await recordUnclaimableCapture(supabase, {
+        bookingId,
+        amount: paidAmountInCentavos / 100,
+        paymentType: "downpayment",
+        paymentMethod: getPaymentMethodLabel(checkoutAttributes),
+        transactionId: checkoutId,
+        bookingStatus: bookingRecord.status,
+        baseOrigin: new URL(req.url).origin,
       });
       return new Response(
         JSON.stringify({ error: "Booking is not awaiting a downpayment" }),

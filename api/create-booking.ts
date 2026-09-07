@@ -695,14 +695,21 @@ export default async function handler(req: Request) {
     // 500 carrying the Postgres text ("conflicting key value violates
     // exclusion constraint ..."), which reads as a crash and leaks schema
     // internals. It is an ordinary "someone got there first", so say that.
-    if (
+    const isExclusionViolation =
       (error as { code?: string })?.code === "23P01" ||
-      /bookings_no_active_date_overlap|exclusion constraint/i.test(message)
-    ) {
+      /exclusion constraint/i.test(message);
+
+    if (isExclusionViolation) {
+      // Two different constraints can land here and they mean opposite
+      // things to the person reading the message: the car was taken by
+      // someone else, or this renter already has an overlapping trip of
+      // their own (CHAPTER 65).
+      const isRenterOverlap = /bookings_renter_no_active_overlap/i.test(message);
       return jsonResponse(
         {
-          error:
-            "Those dates were just booked by someone else. Please pick different dates.",
+          error: isRenterOverlap
+            ? "You already have a booking that overlaps these dates. Finish or cancel it first."
+            : "Those dates were just booked by someone else. Please pick different dates.",
         },
         409,
       );

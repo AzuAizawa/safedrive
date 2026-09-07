@@ -9933,4 +9933,45 @@ create trigger enforce_admin_profile_permission
   before update on public.profiles
   for each row execute function public.enforce_admin_profile_permission();
 
+-- ============================================================================
+-- CHAPTER 65 - "One trip at a time" gets a database backstop
+-- ============================================================================
+-- api/create-booking.ts enforces one active trip per renter in application
+-- code, but as a read-then-write: it SELECTs the renter's overlapping
+-- bookings, then INSERTs. Two requests arriving milliseconds apart (a
+-- double-tapped Confirm on a slow connection, a client retry, or two tabs
+-- opened deliberately) both pass the check before either inserts, and both
+-- succeed - leaving one renter holding overlapping bookings on two different
+-- cars, blocking two listers' calendars.
+--
+-- The car side already has exactly this backstop
+-- (bookings_no_active_date_overlap, CHAPTER 5): even when the application
+-- check is beaten by timing, the database refuses the second row. The renter
+-- side had nothing. This mirrors it, with the same status list, so the two
+-- constraints can never drift apart in meaning.
+--
+-- Verified against live data before adding: the self-join for overlapping
+-- active bookings by the same renter returned no rows, so no existing row
+-- violates this.
+
+alter table public.bookings
+drop constraint if exists bookings_renter_no_active_overlap;
+
+alter table public.bookings
+add constraint bookings_renter_no_active_overlap
+exclude using gist (
+  renter_id with =,
+  daterange(start_date, end_date, '[]') with &&
+)
+where (
+  status in (
+    'pending',
+    'confirmed',
+    'awaiting_payment',
+    'downpayment_paid',
+    'fully_paid',
+    'active'
+  )
+);
+
 -- End of SafeDrive chaptered database master.

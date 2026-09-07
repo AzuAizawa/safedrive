@@ -9,6 +9,50 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Captured money that nobody recorded, and a renter-overlap backstop (CHAPTER 65)
+
+The last two findings from the lifecycle audit.
+
+**A payment captured seconds after its deadline vanished from the books.**
+The deadline-expiry cron runs every 15 minutes and payments cluster at the
+last minute, so it can cancel a booking in the gap between the renter
+tapping Pay and PayMongo's webhook arriving. All three payment branches
+(downpayment, balance, full) then found the booking no longer payable,
+wrote a security log line, and returned 409 — and nothing else. The
+renter's money was gone while SafeDrive held no `payments` row, no refund
+row, no ticket and no notification, so unless the renter complained nobody
+would ever learn of it.
+
+Those branches now record the capture with a note saying it was not
+applied, open a `manual_refund` review ticket, and notify super admins.
+Deliberately **not** an automatic refund — a human decides — but the money
+lands in a queue instead of disappearing. Wrapped so a bookkeeping failure
+cannot change the webhook's answer to PayMongo.
+
+**"One trip at a time" now has a database backstop (CHAPTER 65).**
+`create-booking.ts` enforced it as a read-then-write: SELECT the renter's
+overlapping bookings, then INSERT. Two requests milliseconds apart — a
+double-tapped Confirm on a slow connection, a client retry, two tabs — both
+passed the check before either inserted, leaving one renter holding
+overlapping bookings on two different cars and blocking two listers'
+calendars. The car side has had exactly this backstop since CHAPTER 5
+(`bookings_no_active_date_overlap`); the renter side had nothing. CHAPTER 65
+mirrors it with the same status list. Verified against live data first —
+the self-join for existing violations returned no rows. `create-booking.ts`
+now tells the two exclusion violations apart, since "someone else booked
+these dates" and "you already have an overlapping trip" mean opposite
+things to the reader.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:financial-logic`,
+`check:process-logic`, `check:api-boundaries`.
+
+Files: `api/webhooks/paymongo.ts`, `api/create-booking.ts`,
+`database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 65 — run in
+Supabase SQL Editor).
+
+---
+
 ## 2026-09-08 — Both profile guard triggers had never run (CHAPTER 64)
 
 Found while verifying CHAPTER 63 against the live database, and more severe
