@@ -9206,7 +9206,7 @@ create or replace function public.validate_platform_setting_change(p_changes jso
 returns void
 language plpgsql
 immutable
-as $$
+as $validate$
 declare
   k text;
   v numeric;
@@ -9246,7 +9246,7 @@ begin
     end if;
   end loop;
 end;
-$$;
+$validate$;
 
 -- Daily cron helper (api/flag-dormant-accounts.ts, CRON_SECRET): files a
 -- 'deletion' data_retention_requests row for any regular-user account whose
@@ -9260,7 +9260,7 @@ returns integer
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $flag$
 declare
   v_count integer := 0;
   v_threshold_days integer;
@@ -9338,7 +9338,7 @@ begin
 
   return v_count;
 end;
-$$;
+$flag$;
 revoke all on function public.flag_dormant_accounts() from public, anon, authenticated;
 
 -- End of SafeDrive chaptered database master.
