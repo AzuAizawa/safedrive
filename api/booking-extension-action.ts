@@ -47,6 +47,7 @@ type BookingRecord = {
   total_days: number;
   base_price: number;
   commission: number;
+  renter_return_arrived_at: string | null;
   cars: {
     plate_number: string;
     car_models: {
@@ -218,6 +219,7 @@ export default async function handler(req: Request) {
           total_days,
           base_price,
           commission,
+          renter_return_arrived_at,
           cars (
             plate_number,
             car_models (
@@ -242,6 +244,20 @@ export default async function handler(req: Request) {
       if (!["fully_paid", "active"].includes(bookingRecord.status)) {
         return jsonResponse(
           { error: "Settle the full booking balance before requesting an extension." },
+          409,
+        );
+      }
+
+      // Once the renter has checked in at the return, they are standing at
+      // the handoff giving the car back - "I need more time" no longer
+      // applies. Worse, an approved-but-unpaid extension blocks completion,
+      // so allowing one here could jam the very return in progress.
+      if (bookingRecord.renter_return_arrived_at) {
+        return jsonResponse(
+          {
+            error:
+              "You already checked in to return the car, so this booking can no longer be extended.",
+          },
           409,
         );
       }

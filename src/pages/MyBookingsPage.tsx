@@ -1342,6 +1342,11 @@ export default function MyBookingsPage() {
   const canStartFreshExtension = (booking: BookingRow, latestExtension?: BookingExtensionRow) => {
     const apparentState = getApparentStatus(booking);
     if (!["fully_paid", "active"].includes(apparentState)) return false;
+    // Checked in at the return: they are at the handoff giving the car back,
+    // so "Need more time?" makes no sense - and an approved-but-unpaid
+    // extension blocks completion, so offering one here could jam the return
+    // that is already under way.
+    if (booking.renter_return_arrived_at) return false;
     if (!latestExtension) return true;
     return !["pending", "approved"].includes(
       getExtensionDisplayStatus(latestExtension, new Date(clockNow)),
@@ -1925,6 +1930,9 @@ export default function MyBookingsPage() {
               // point waiting for the lister. Shortening a booking that hasn't
               // started is a cancellation, not an early return.
               apparentState === "active" &&
+              // Same reason as the extension button above - nothing left to
+              // shorten once you are at the return handoff.
+              !booking.renter_return_arrived_at &&
               !booking.renter_completed &&
               !booking.owner_completed &&
               !extensionBlocksCompletion &&

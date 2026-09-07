@@ -30,6 +30,7 @@ type BookingRecord = {
   base_price: number | string;
   renter_completed: boolean;
   owner_completed: boolean;
+  renter_return_arrived_at: string | null;
   cars: {
     plate_number: string;
     min_early_return_notice_hours: number | string | null;
@@ -144,7 +145,7 @@ export default async function handler(req: Request) {
         .select(
           `
           id, car_id, renter_id, owner_id, status, start_date, end_date, dropoff_time,
-          base_price, renter_completed, owner_completed,
+          base_price, renter_completed, owner_completed, renter_return_arrived_at,
           cars ( plate_number, min_early_return_notice_hours, car_models ( name, car_brands ( name ) ) )
         `,
         )
@@ -171,6 +172,19 @@ export default async function handler(req: Request) {
           {
             error:
               "An early return can only be requested once the trip is running. Cancel the booking instead if it has not started.",
+          },
+          409,
+        );
+      }
+
+      // Already checked in at the return - the car is being handed back now,
+      // so there is nothing left to shorten. Same reasoning as the extension
+      // guard in api/booking-extension-action.ts.
+      if (b.renter_return_arrived_at) {
+        return jsonResponse(
+          {
+            error:
+              "You already checked in to return the car, so there is nothing left to shorten.",
           },
           409,
         );

@@ -9,6 +9,37 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — No extending a booking you already showed up to return
+
+User feedback: the "Request extension" button should disappear once the
+renter has checked in for the return — they are standing at the meetup
+handing the car back, so asking for more time makes no sense.
+
+Correct, and it was worse than cosmetic. Neither the button nor the API
+looked at `renter_return_arrived_at` — both only checked the booking status,
+which is still `active` at that point. So an extension could be requested,
+approved by the lister, and paid for while the return handoff was under way.
+And because an approved-but-unpaid extension blocks completion
+(`extensionBlocksCompletion`), doing so could **jam the very return already
+in progress** — the two parties standing there unable to close the trip.
+
+"Request early return" had the identical hole for the same reason: nothing
+left to shorten when you are already at the handoff.
+
+Both are now gated on `renter_return_arrived_at`, in the UI and on the
+server (`api/booking-extension-action.ts`,
+`api/booking-early-return-action.ts` — the field had to be added to both
+booking selects, which had never fetched it).
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:process-logic`,
+`check:financial-logic`.
+
+Files: `src/pages/MyBookingsPage.tsx`, `api/booking-extension-action.ts`,
+`api/booking-early-return-action.ts`.
+
+---
+
 ## 2026-09-08 — Camera "Permission denied" now says what to actually do
 
 User feedback: *"Naka denied agad yung camera, walang nag a-ask if a-allow ba
