@@ -39,6 +39,43 @@ const LEGAL_DOCUMENT_ALLOWED_TAGS = new Set([
   "a",
 ]);
 
+// Removed outright, subtree and all - never unwrapped. Unwrapping promotes
+// an element's children into the parent, which is right for a harmless
+// wrapper like <div> but wrong for these: their content is script, style,
+// or foreign-namespace markup that has no business becoming page content.
+const DANGEROUS_TAGS = new Set([
+  "script",
+  "style",
+  "iframe",
+  "object",
+  "embed",
+  "link",
+  "meta",
+  "base",
+  "form",
+  "input",
+  "button",
+  "textarea",
+  "select",
+  "option",
+  "svg",
+  "math",
+  "template",
+  "noscript",
+  "noembed",
+  "noframes",
+  "xmp",
+  "plaintext",
+  "frame",
+  "frameset",
+  "applet",
+  "audio",
+  "video",
+  "source",
+  "track",
+  "img",
+]);
+
 const HTML_TAG_PATTERN = /<\/?[a-z][\s\S]*>/i;
 
 const escapeHtml = (value: string) =>
@@ -59,13 +96,27 @@ const sanitizeNode = (node: Node, allowedTags: Set<string>) => {
   const element = node as HTMLElement;
   const tagName = element.tagName.toLowerCase();
 
+  if (DANGEROUS_TAGS.has(tagName)) {
+    element.remove();
+    return;
+  }
+
   if (!allowedTags.has(tagName)) {
+    // Children are sanitized BEFORE they are promoted. Doing it after the
+    // unwrap never worked: inserting a DocumentFragment empties it, so the
+    // recursion that used to run here iterated an empty list and every
+    // promoted child survived untouched. That let
+    // `<div><img src=x onerror=...></div>` through the sanitizer intact -
+    // the wrapper was stripped, the payload was not, and it reached
+    // dangerouslySetInnerHTML in the reader's (including an admin's)
+    // browser. Depth-first means anything promoted here is already clean.
+    Array.from(element.childNodes).forEach((child) => sanitizeNode(child, allowedTags));
+
     const fragment = document.createDocumentFragment();
     while (element.firstChild) {
       fragment.appendChild(element.firstChild);
     }
     element.replaceWith(fragment);
-    Array.from(fragment.childNodes).forEach((child) => sanitizeNode(child, allowedTags));
     return;
   }
 

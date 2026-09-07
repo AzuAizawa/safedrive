@@ -519,7 +519,15 @@ export default async function handler(req: Request) {
     // cost, tied to the renter's chosen payment method) is grossed up on top
     // of the base price - that's an intentionally separate decision from the
     // commission and is unchanged here.
-    const commission = basePrice * commissionRate;
+    // Rounded to centavos like every other money value here (see
+    // paymentProcessingFee below, and booking-extension-action.ts's
+    // extensionCommission). Left unrounded, a rate like 0.125 on a
+    // 1333 base stores 166.625 - and because the per-payment ledger
+    // allocation rounds each slice while the completion and payout
+    // journals round the whole value once, accounts 2010 and 2040 end up
+    // permanently a centavo out. Each journal still balances on its own,
+    // so nothing catches it; only a trial balance would show the drift.
+    const commission = Math.round(basePrice * commissionRate * 100) / 100;
     const processingRate = Math.min(0.25, Math.max(0, Number(settingData?.payment_processing_fee_rate ?? 0)));
     const processingFixed = Math.max(0, Number(settingData?.payment_processing_fixed_centavos ?? 0)) / 100;
     const grossTotal = processingRate < 1 ? (basePrice + processingFixed) / (1 - processingRate) : basePrice;
@@ -679,6 +687,27 @@ export default async function handler(req: Request) {
     const message =
       error instanceof Error ? error.message : "Unknown server error";
     console.error("Create booking error:", message);
+
+    // The overlap check earlier in this handler is a read-then-write, so two
+    // simultaneous requests for the same car and dates can both pass it. The
+    // bookings_no_active_date_overlap exclusion constraint is the real
+    // backstop and correctly stops the second one - but it surfaced as a raw
+    // 500 carrying the Postgres text ("conflicting key value violates
+    // exclusion constraint ..."), which reads as a crash and leaks schema
+    // internals. It is an ordinary "someone got there first", so say that.
+    if (
+      (error as { code?: string })?.code === "23P01" ||
+      /bookings_no_active_date_overlap|exclusion constraint/i.test(message)
+    ) {
+      return jsonResponse(
+        {
+          error:
+            "Those dates were just booked by someone else. Please pick different dates.",
+        },
+        409,
+      );
+    }
+
     return jsonResponse({ error: message }, 500);
   }
 }

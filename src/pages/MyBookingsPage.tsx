@@ -135,16 +135,25 @@ const DEFAULT_REFUND_LATE_RENTER_PERCENT = 50;
 const UNPAID_STATES = ["pending", "awaiting_payment", "confirmed"];
 const PAID_STATES = ["downpayment_paid", "fully_paid"];
 
+// What the system assumes when a booking carries no pickup_time. Shared with
+// the display below on purpose: this default used to exist only inside the
+// timing math, so a booking with no pickup time showed no time at all while
+// every deadline was quietly computed from 09:00. That is how a renter ended
+// up reading "SafeDrive waits until 9:30 AM before you can cancel for no car
+// at pickup" on a booking whose pickup time was never shown to them.
+const DEFAULT_PICKUP_TIME = "09:00";
+
 const getBookingPickupMs = (booking: BookingRow): number | null => {
   const [year, month, day] = (booking.start_date || "")
     .split("-")
     .map((part) => Number(part));
-  const [hour, minute] = (booking.pickup_time || "09:00")
+  const [hour, minute] = (booking.pickup_time || DEFAULT_PICKUP_TIME)
     .split(":")
     .map((part) => Number(part));
   if (!year || !month || !day) return null;
   return Date.UTC(year, month - 1, day, hour || 0, minute || 0) - 8 * 3600 * 1000;
 };
+
 
 
 interface RatingSummary {
@@ -1207,6 +1216,14 @@ export default function MyBookingsPage() {
     return `${startH}:${m.toString().padStart(2, '0')} ${period}`;
   };
 
+  // Always shows the time the deadlines actually use, marked when it is the
+  // assumed default rather than something the renter chose - see
+  // DEFAULT_PICKUP_TIME.
+  const getPickupTimeLabel = (booking: BookingRow) =>
+    booking.pickup_time
+      ? formatTimeAMPM(booking.pickup_time)
+      : `${formatTimeAMPM(DEFAULT_PICKUP_TIME)} (default)`;
+
   const formatDeadlineStamp = (deadline: string | null) => {
     if (!deadline) return null;
     const parsed = new Date(deadline);
@@ -1264,8 +1281,17 @@ export default function MyBookingsPage() {
     }
 
     if (PAID_STATES.includes(apparentState)) {
+      // Explicit null/undefined check, not `|| DEFAULT`. Zero is a valid,
+      // admin-settable value meaning "always refund in full" (the DB check
+      // constraint allows >= 0), and the server honours it - but `0 || 24`
+      // silently became 24 here, so a renter cancelling 2 hours before
+      // pickup was told they'd get ~50% back and was then refunded 100%.
+      // The latePercent check directly below already used this shape.
       const fullHours =
-        Number(booking.refund_full_hours_snapshot) || DEFAULT_REFUND_FULL_HOURS;
+        booking.refund_full_hours_snapshot === null ||
+        booking.refund_full_hours_snapshot === undefined
+          ? DEFAULT_REFUND_FULL_HOURS
+          : Number(booking.refund_full_hours_snapshot);
       const latePercent =
         booking.refund_late_renter_percent_snapshot === null ||
         booking.refund_late_renter_percent_snapshot === undefined
@@ -1780,7 +1806,7 @@ export default function MyBookingsPage() {
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {format(new Date(booking.start_date), "MMM d, yyyy")}
-                    {booking.pickup_time ? ` at ${formatTimeAMPM(booking.pickup_time)}` : ""}
+                    {` at ${getPickupTimeLabel(booking)}`}
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground">
                     {booking.cars.location || "Pickup location not set"}
@@ -1906,7 +1932,14 @@ export default function MyBookingsPage() {
             // here so the button doesn't invite a request that will just be
             // rejected.
             const canRequestEarlyReturn =
-              (apparentState === "fully_paid" || apparentState === "active") &&
+              // "active" only - not fully_paid. An early return means giving
+              // the car back sooner than agreed, which is meaningless before
+              // the renter has it: at fully_paid the handover hasn't happened,
+              // the trip progress still reads "In handoff", and the renter was
+              // being offered "Finishing early?" while standing at the pickup
+              // point waiting for the lister. Shortening a booking that hasn't
+              // started is a cancellation, not an early return.
+              apparentState === "active" &&
               !booking.renter_completed &&
               !booking.owner_completed &&
               !extensionBlocksCompletion &&
@@ -2083,7 +2116,7 @@ export default function MyBookingsPage() {
                             new Date(booking.start_date),
                             "MMM d, yyyy",
                           )}{" "}
-                          {booking.pickup_time ? `at ${formatTimeAMPM(booking.pickup_time)}` : ""}
+                          {`at ${getPickupTimeLabel(booking)}`}
                           - {format(new Date(booking.end_date), "MMM d, yyyy")}{" "}
                           {booking.dropoff_time ? `at ${formatTimeAMPM(booking.dropoff_time)}` : ""}
                           <span className="font-medium text-foreground ml-1">
@@ -2803,7 +2836,16 @@ export default function MyBookingsPage() {
                                     {ownReportsByBooking[booking.id]?.return ? "Return report (submitted)" : "Return report (optional)"}
                                   </Button>
                                 )}
-                                {!booking.renter_return_arrived_at && returnCheckinOpen ? (
+                                {apparentState === "active" &&
+                                !booking.renter_return_arrived_at &&
+                                returnCheckinOpen ? (
+                                  // Requires "active": this block also renders
+                                  // for fully_paid (handover stalled), and the
+                                  // return check-in window opens on the clock
+                                  // regardless of status - so on a short
+                                  // booking this button appeared on a trip that
+                                  // had never started, and the API answered
+                                  // "This booking is not at the return stage."
                                   <Button
                                     size="sm"
                                     onClick={() => handleReturnArrive(booking)}
@@ -2817,7 +2859,18 @@ export default function MyBookingsPage() {
                                     )}
                                     I Have Arrived
                                   </Button>
-                                ) : !booking.renter_return_arrived_at ? null : booking.owner_completed ? (
+                                ) : !booking.renter_return_arrived_at ||
+                                  !booking.lister_return_arrived_at ||
+                                  booking.renter_completed ? null : (
+                                  // The renter's half of the return handshake.
+                                  // It used to wait for booking.owner_completed,
+                                  // which made it unreachable: the lister's
+                                  // confirmation completed the booking outright,
+                                  // and a completed booking rejects this call.
+                                  // Now it opens as soon as both sides have
+                                  // checked in at the return, so the renter can
+                                  // go first - which is also what arms the
+                                  // lister-unresponsive safety net.
                                   <Button
                                     size="sm"
                                     onClick={() => handleComplete(booking)}
@@ -2829,9 +2882,9 @@ export default function MyBookingsPage() {
                                     ) : (
                                       <CheckCircle2 className="w-3.5 h-3.5" />
                                     )}
-                                    Car Confirm
+                                    Car Returned
                                   </Button>
-                                ) : null}
+                                )}
                               </div>
                               {!booking.renter_return_arrived_at && !returnCheckinOpen && returnCheckinOpensMs !== null ? (
                                 <p className="text-[10px] text-muted-foreground text-right leading-tight">
@@ -2861,18 +2914,30 @@ export default function MyBookingsPage() {
                                     </Button>
                                   )}
                                 </div>
+                              ) : booking.renter_completed ? (
+                                <div className="flex flex-col items-end gap-1">
+                                  <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                                    You marked the car returned
+                                  </span>
+                                  <p className="text-[10px] text-muted-foreground text-right leading-tight">
+                                    The lister was notified. If they don't tap "Car Received", the trip
+                                    completes on its own - unless they report that the car was not
+                                    returned, which goes to SafeDrive support instead.
+                                  </p>
+                                </div>
                               ) : booking.owner_completed ? (
                                 <div className="flex flex-col items-end gap-1">
                                   <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
-                                    Car Delivered - lister confirmed receipt
+                                    The lister confirmed they received the car
                                   </span>
                                   <p className="text-[10px] text-muted-foreground text-right leading-tight">
-                                    Tap "Car Confirm" to put your own record on file and finish the trip.
+                                    Tap "Car Returned" to finish the trip.
                                   </p>
                                 </div>
                               ) : (
                                 <p className="text-[10px] text-amber-500 text-right font-medium leading-tight">
-                                  You're both at the return point - waiting for the lister to submit their return photos and confirm receipt.
+                                  You're both at the return point. Add your optional photos, then tap "Car
+                                  Returned" - the lister taps "Car Received" to close the trip.
                                 </p>
                               )}
                             </div>

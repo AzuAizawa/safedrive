@@ -161,9 +161,17 @@ export default async function handler(req: Request) {
           403,
         );
       }
-      if (!["fully_paid", "active"].includes(b.status)) {
+      // Only an active trip. An early return hands the car back sooner than
+      // agreed, which cannot apply before the renter has the car - at
+      // fully_paid the handover has not happened yet. Shortening a booking
+      // that has not started is a cancellation, and that is a different flow
+      // with its own refund policy.
+      if (b.status !== "active") {
         return jsonResponse(
-          { error: "Only a paid or active booking can be shortened." },
+          {
+            error:
+              "An early return can only be requested once the trip is running. Cancel the booking instead if it has not started.",
+          },
           409,
         );
       }
@@ -382,7 +390,34 @@ export default async function handler(req: Request) {
         );
       }
 
-      const goodwill = Math.max(0, Number(payload.goodwillRefundAmount ?? 0) || 0);
+      // The amount arrives straight from the client body, and the floor
+      // below used to be the ONLY bound on it - a lister could approve a
+      // goodwill refund of any size at all, far beyond what the renter ever
+      // paid, and mark-manual-refund.ts would happily release it. Clamp to
+      // what was actually captured for this booking, the same way
+      // api/booking-incident-action.ts already clamps its recommended
+      // refund. Same refundable payment types as
+      // api/lib/cancellationRefundPlan.ts.
+      const { data: bookingPayments, error: bookingPaymentsError } = await supabase
+        .from("payments")
+        .select("amount, payment_type, status")
+        .eq("booking_id", er.booking_id);
+      if (bookingPaymentsError) throw bookingPaymentsError;
+      const capturedTotal = (bookingPayments ?? [])
+        .filter(
+          (payment) =>
+            ["downpayment", "balance"].includes(String(payment.payment_type)) &&
+            payment.status === "completed" &&
+            Number(payment.amount) > 0,
+        )
+        .reduce((total, payment) => total + Number(payment.amount || 0), 0);
+
+      const requestedGoodwill = Math.max(
+        0,
+        Number(payload.goodwillRefundAmount ?? 0) || 0,
+      );
+      const goodwill =
+        Math.round(Math.min(requestedGoodwill, Math.max(capturedTotal, 0)) * 100) / 100;
       const decisionNote = payload.ownerDecisionNote?.trim() || null;
 
       // Deliberately does NOT touch bookings.end_date/dropoff_time - those

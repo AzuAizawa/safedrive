@@ -112,6 +112,12 @@ interface ListerBooking {
   total_price: number;
   base_price: number;
   commission: number;
+  // Snapshotted per booking when it was created. The forfeit shown to the
+  // lister must come from this, not from live platform settings - the
+  // server decides the refund from the snapshot
+  // (api/booking-incident-action.ts), so reading the live value meant the
+  // dialog could promise a percentage the refund would not use.
+  refund_late_renter_percent_snapshot: number | string | null;
   downpayment_amount: number;
   balance_amount: number;
   status: string;
@@ -263,6 +269,13 @@ export default function ListerBookingsPage() {
   const [noShowRefundPercent, setNoShowRefundPercent] = useState(
     DEFAULT_REFUND_LATE_RENTER_PERCENT,
   );
+  // Prefers the booking's own snapshot; the live setting is only the
+  // fallback for a booking created before snapshots existed.
+  const getNoShowForfeitPercent = (booking: ListerBooking | null | undefined) =>
+    booking?.refund_late_renter_percent_snapshot === null ||
+    booking?.refund_late_renter_percent_snapshot === undefined
+      ? noShowRefundPercent
+      : Number(booking.refund_late_renter_percent_snapshot);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedRenter, setSelectedRenter] = useState<ListerBooking | null>(
     null,
@@ -3284,7 +3297,7 @@ export default function ListerBookingsPage() {
                           </p>
                           <p className="mt-1">
                             {noShowState.canReport
-                              ? `Your arrival check-in is on file and the renter has not shown up. You can cancel this booking as a renter no-show — your reliability record is not affected and the renter keeps a ${noShowRefundPercent}% forfeit.`
+                              ? `Your arrival check-in is on file and the renter has not shown up. You can cancel this booking as a renter no-show — your reliability record is not affected and the renter keeps a ${getNoShowForfeitPercent(b)}% forfeit.`
                               : `SafeDrive waits until ${noShowState.reportReadyAt.toLocaleTimeString([], {
                                   hour: "numeric",
                                   minute: "2-digit",
@@ -3454,6 +3467,23 @@ export default function ListerBookingsPage() {
                                   {ownReportsByBooking[b.id]?.return ? "Return report (submitted)" : "Submit return report"}
                                 </Button>
                               </div>
+                            </div>
+                          ) : apparentState !== "active" ? (
+                            // Every branch above is gated on "active", so a
+                            // booking still sitting at fully_paid used to fall
+                            // straight through to the return controls below -
+                            // offering "Return report (required)" and "Confirm
+                            // - Car Received" on a trip that has not started.
+                            // Both 409: the report endpoint requires an active
+                            // booking, and completion demands a return report
+                            // the other endpoint refuses to create. A dead end
+                            // with no way out. Say what is actually needed.
+                            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
+                              <p className="font-semibold text-foreground">The trip has not started yet</p>
+                              <p className="mt-1">
+                                Hand over the car and wait for the renter to confirm they
+                                received it. The return steps open once the trip is running.
+                              </p>
                             </div>
                           ) : (
                             <div className="space-y-1.5">
@@ -4008,7 +4038,7 @@ export default function ListerBookingsPage() {
         )}
         <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
           {incidentTarget?.kind === "renter_no_show"
-            ? `The renter keeps a ${noShowRefundPercent}% forfeit; SafeDrive support releases the rest after confirming the return method. Your completion rate is not affected.`
+            ? `The renter keeps a ${getNoShowForfeitPercent(incidentTarget?.booking)}% forfeit; SafeDrive support releases the rest after confirming the return method. Your completion rate is not affected.`
             : "SafeDrive support contacts the renter and manages recovery. Keep any pickup evidence ready. You can take the car offline from My Vehicles while the case is open."}
         </div>
       </ConfirmDialog>

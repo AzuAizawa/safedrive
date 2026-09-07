@@ -137,7 +137,11 @@ export async function postCompletedPaymentToLedger(
 export async function postSimpleBalancedJournal(
   supabase: ServiceRoleSupabaseClient,
   input: {
-    bookingId: string;
+    // Nullable because not every journal belongs to a booking - a
+    // subscription payment is platform revenue with no booking behind it.
+    // ledger_journals.booking_id has always allowed null; only this type
+    // required one.
+    bookingId: string | null;
     eventKey: string;
     eventType: string;
     providerReference?: string | null;

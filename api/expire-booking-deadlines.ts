@@ -501,12 +501,22 @@ export default async function handler(req: Request) {
       Date.now() - timeoutHours * 60 * 60 * 1000,
     ).toISOString();
 
+    // A silent lister usually means they simply forgot to tap. But it can
+    // also mean the car was never handed back - the renter marked it
+    // returned and the lister has nothing to confirm. Auto-completing on the
+    // renter's unverified word in that case would close the trip, release
+    // the payout and free the car's calendar while the car is still gone.
+    //
+    // report_non_return (api/booking-incident-action.ts) is the lister's way
+    // to say exactly that, and it sets dispute_status='open'. Honour it here:
+    // an open dispute stops this clock and leaves the case to an admin.
     const { data: staleCompletions, error: staleError } = await supabase
       .from("bookings")
       .select("id, owner_id, renter_id, commission, renter_completed_at")
       .in("status", ["fully_paid", "active"])
       .eq("renter_completed", true)
       .eq("owner_completed", false)
+      .neq("dispute_status", "open")
       .not("renter_completed_at", "is", null)
       .lte("renter_completed_at", timeoutCutoff)
       .limit(100);
@@ -525,6 +535,10 @@ export default async function handler(req: Request) {
         .in("status", ["fully_paid", "active"])
         .eq("renter_completed", true)
         .eq("owner_completed", false)
+        // Re-checked at claim time too: the lister may have filed
+        // report_non_return in the moments between the select above and this
+        // update, and that has to win.
+        .neq("dispute_status", "open")
         .select("id")
         .maybeSingle();
       if (error) throw error;
@@ -585,6 +599,7 @@ export default async function handler(req: Request) {
       );
       listerCompletionAuto += 1;
     }
+
 
     // --- Handover stuck-state timeout (2 hours): both sides arrived for
     // pickup, but the mandatory handover sub-sequence (lister required

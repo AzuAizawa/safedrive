@@ -1,6 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ServiceRoleSupabaseClient } from "../lib/supabaseTypes.js";
-import { postCompletedPaymentToLedger, postCompletedRefundToLedger } from "../lib/ledger.js";
+import {
+  postCompletedPaymentToLedger,
+  postCompletedRefundToLedger,
+  postSimpleBalancedJournal,
+} from "../lib/ledger.js";
 import { sendPaymentReceiptEmail, sendRefundReceiptEmail, sendUserNotificationEmail } from "../lib/email.js";
 
 export const config = {
@@ -697,6 +701,25 @@ export default async function handler(req: Request) {
         link: "/subscriptions",
       });
 
+      // Subscription money used to stop here: the subscriptions row was
+      // written and an audit entry logged, but nothing reached the ledger,
+      // so real collected revenue was invisible to every financial report.
+      // Unlike a booking payment there is no lister payable and nothing
+      // deferred - the platform earned it outright - so this is a plain
+      // "cash in, revenue recognised" pair. booking_id stays null; this
+      // revenue has no booking behind it.
+      await postSimpleBalancedJournal(supabase, {
+        bookingId: null,
+        eventKey: `subscription:${checkoutId}`,
+        eventType: "subscription_payment_completed",
+        providerReference: paymongoPaymentMetadata.paymentId || checkoutId,
+        debitAccount: "1010",
+        creditAccount: "4030",
+        amountCentavos: paidAmountInCentavos,
+        partyUserId: userId,
+        memo: `${plan.label} subscription payment`,
+      });
+
       await supabase.from("audit_log").insert({
         user_id: userId,
         action: "subscription_payment_confirmed",
@@ -708,7 +731,13 @@ export default async function handler(req: Request) {
           amount_in_centavos: paidAmountInCentavos,
           reference_number: referenceNumber,
           provider_payment_id: paymongoPaymentMetadata.paymentId,
-          test_mode: true,
+          // Was hardcoded `true`, so the audit trail claimed every
+          // subscription payment was a test - including real ones. The
+          // financial record then could not answer "was this actual money?",
+          // which is the one question an audit log exists to settle. The
+          // real flag comes from the signed event and is already trusted
+          // enough to pick which webhook secret verifies the signature.
+          test_mode: !livemode,
         },
       });
 
@@ -1072,7 +1101,7 @@ export default async function handler(req: Request) {
 
       const { data: booking, error: extensionBookingError } = await supabase
         .from("bookings")
-        .select("id, end_date, total_days, base_price, commission, total_price")
+        .select("id, status, end_date, total_days, base_price, commission, total_price")
         .eq("id", extension.booking_id)
         .single();
 
@@ -1133,7 +1162,12 @@ export default async function handler(req: Request) {
         );
       }
 
-      const { error: bookingUpdateError } = await supabase
+      // The booking update is claimed on status, like every other transition
+      // in this codebase. Without it, an extension paid after the booking was
+      // cancelled (legal while there are no arrivals) or completed still
+      // rewrote end_date, total_days, base_price, commission and total_price,
+      // and credited the lister payable - re-billing a trip that was over.
+      const { data: extendedBooking, error: bookingUpdateError } = await supabase
         .from("bookings")
         .update({
           end_date: extension.requested_end_date,
@@ -1142,11 +1176,51 @@ export default async function handler(req: Request) {
           commission: Number(booking.commission) + extensionCommission,
           total_price: Number(booking.total_price) + Number(extension.total_additional_amount),
         })
-        .eq("id", extension.booking_id);
+        .eq("id", extension.booking_id)
+        .in("status", ["fully_paid", "active"])
+        .select("id")
+        .maybeSingle();
 
       if (bookingUpdateError) {
         console.error("Failed to update booking after extension payment", bookingUpdateError);
         throw bookingUpdateError;
+      }
+
+      // The extension row was already claimed as 'paid' above, so throwing
+      // here would make PayMongo's retry return ALREADY_PROCESSED and the
+      // capture would vanish with no payment row at all. The money is real
+      // either way: record it, and raise it for a human rather than dropping
+      // it. Covers both a booking that left the extendable states and a
+      // date collision taken between approval and payment.
+      if (!extendedBooking) {
+        await insertCompletedPaymentIfMissing(supabase, {
+          bookingId: extension.booking_id,
+          amount: Number(extension.total_additional_amount),
+          paymentType: "extension",
+          paymentMethod: getPaymentMethodLabel(checkoutAttributes),
+          transactionId: checkoutId,
+          notes: buildPaymentNotes(
+            "Extension paid but NOT applied - the booking was no longer extendable. Needs manual review and likely a refund.",
+            paymongoPaymentMetadata,
+          ),
+        }, new URL(req.url).origin, false);
+        await recordWebhookSecurityEvent("failed", {
+          reason: "Extension payment captured but the booking could not be extended",
+          reference_number: referenceNumber,
+          checkout_id: checkoutId,
+          booking_id: extension.booking_id,
+          extension_id: extension.id,
+          booking_status: booking.status,
+          event_id: event.id,
+          livemode,
+        });
+        return new Response(
+          JSON.stringify({
+            statusCode: 200,
+            body: { message: "EXTENSION_NOT_APPLIED_NEEDS_REVIEW" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
       }
 
       // Record the extension payment against the now-updated booking. The

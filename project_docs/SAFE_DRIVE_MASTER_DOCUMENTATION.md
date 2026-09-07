@@ -1314,6 +1314,7 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | Super-admin | `/admin/payouts` | Legacy redirect to the payout tab in `/admin/financial-reviews` |
 | Super-admin | `/admin/refunds` | Legacy redirect to the refund tab in `/admin/financial-reviews` |
 | Super-admin | `/admin/financial-reviews` | `AdminFinancialReviewsPage`; combined lister payout and renter refund review workspace |
+| Super-admin | `/admin/earnings` | `AdminEarningsPage`; what the platform earned from booking commission (ledger `4010`) and lister subscriptions (ledger `4030`), monthly chart, busiest month and weekday. Each total is counted twice - once from the ledger, once from the source records - and flags a mismatch instead of showing one number on trust |
 | Super-admin | `/admin/financial-ledger` | `AdminFinancialLedgerPage`; journals and balanced entries |
 | Super-admin | `/admin/reconciliation` | `AdminReconciliationPage`; provider/local mismatch review |
 | Super-admin | `/admin/retention-requests` | `AdminRetentionRequestsPage`; privacy request decision and lawful holds |

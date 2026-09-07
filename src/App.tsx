@@ -67,6 +67,7 @@ const AdminSupportTicketsPage = lazyWithReload(() => import("@/pages/admin/Admin
 const AdminGuestInquiriesPage = lazyWithReload(() => import("@/pages/admin/AdminGuestInquiriesPage"));
 const AdminSecurityLogsPage = lazyWithReload(() => import("@/pages/admin/AdminSecurityLogsPage"));
 const AdminNotificationsPage = lazyWithReload(() => import("@/pages/admin/AdminNotificationsPage"));
+const AdminEarningsPage = lazyWithReload(() => import("@/pages/admin/AdminEarningsPage"));
 const AdminFinancialLedgerPage = lazyWithReload(() => import("@/pages/admin/AdminFinancialLedgerPage"));
 const AdminReconciliationPage = lazyWithReload(() => import("@/pages/admin/AdminReconciliationPage"));
 const AdminRetentionRequestsPage = lazyWithReload(() => import("@/pages/admin/AdminRetentionRequestsPage"));
@@ -182,6 +183,7 @@ function App() {
                         <Route path="/admin/financial-reviews" element={<AdminFinancialReviewsPage />} />
                         <Route path="/admin/payouts" element={<Navigate to="/admin/financial-reviews?view=payouts" replace />} />
                         <Route path="/admin/refunds" element={<Navigate to="/admin/financial-reviews?view=refunds" replace />} />
+                        <Route path="/admin/earnings" element={<AdminEarningsPage />} />
                         <Route path="/admin/financial-ledger" element={<AdminFinancialLedgerPage />} />
                         <Route path="/admin/reconciliation" element={<AdminReconciliationPage />} />
                         <Route path="/admin/retention-requests" element={<AdminRetentionRequestsPage />} />

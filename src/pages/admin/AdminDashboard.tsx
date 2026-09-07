@@ -54,7 +54,10 @@ export default function AdminDashboard() {
       if (isSuperAdmin) operational.push(
         { label: "Payout attention", count: payouts.data?.length ?? 0, oldest: payouts.data?.[0]?.created_at ?? null, to: "/admin/financial-reviews?view=payouts", icon: CreditCard, finance: true },
         { label: "Refund attention", count: refunds.data?.length ?? 0, oldest: refunds.data?.[0]?.created_at ?? null, to: "/admin/financial-reviews?view=refunds", icon: CreditCard, finance: true },
-        { label: "Privacy requests", count: retention.data?.length ?? 0, oldest: retention.data?.[0]?.created_at ?? null, to: "/admin/retention-requests", icon: ShieldCheck, finance: true },
+        // Not finance-flagged: this queue is Data Privacy Act request
+        // handling, and grouping it with payouts/refunds made it read as a
+        // money screen.
+        { label: "Privacy requests", count: retention.data?.length ?? 0, oldest: retention.data?.[0]?.created_at ?? null, to: "/admin/retention-requests", icon: ShieldCheck },
         { label: "Reconciliation issues", count: reconciliation.data?.length ?? 0, oldest: reconciliation.data?.[0]?.created_at ?? null, to: "/admin/reconciliation", icon: ShieldCheck, finance: true },
       );
       setQueues(operational);

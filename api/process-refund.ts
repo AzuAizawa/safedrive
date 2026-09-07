@@ -58,6 +58,30 @@ export default async function handler(req: Request) {
     const payload = (await req.json().catch(() => ({}))) as ProcessRefundPayload;
 
     if (payload.bookingId) {
+      // The batch path below only ever picks up cancelled bookings, but this
+      // single-booking path used to pass any id straight through - and
+      // processAutomaticRefundForBooking checks no booking status of its
+      // own. A mistyped id, or a retry aimed at the wrong row, could refund
+      // a booking that is mid-trip or already completed, leaving the
+      // lister's payout unfunded. Same guard as the batch query.
+      const { data: refundBooking, error: refundBookingError } = await supabase
+        .from("bookings")
+        .select("id, status")
+        .eq("id", payload.bookingId)
+        .maybeSingle();
+      if (refundBookingError) throw refundBookingError;
+      if (!refundBooking) {
+        return jsonResponse({ error: "Booking not found" }, 404);
+      }
+      if (refundBooking.status !== "cancelled") {
+        return jsonResponse(
+          {
+            error: `Only a cancelled booking can be refunded here (this one is "${refundBooking.status}").`,
+          },
+          409,
+        );
+      }
+
       const result = await processAutomaticRefundForBooking({
         supabase,
         bookingId: payload.bookingId,

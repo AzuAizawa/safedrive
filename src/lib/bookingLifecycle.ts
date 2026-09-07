@@ -44,25 +44,49 @@ type ReturnReminderState = {
   tone: string;
 };
 
+// Dates and times are Manila wall-clock everywhere in this system, and the
+// server builds these instants as Date.UTC(...) - 8h (api/booking-action.ts,
+// api/expire-booking-deadlines.ts). These two used `new Date(y, m, d, h, ...)`,
+// which resolves in the BROWSER's timezone - so on a device not set to
+// UTC+8, the return gates computed here drifted from the server by the
+// device's offset, while pickup gates in MyBookingsPage/ListerBookingsPage
+// (which already used the Date.UTC form) stayed correct. Within one screen,
+// pickup was Manila-anchored and return was device-anchored: the return
+// check-in button could appear while the API still answered 409, or stay
+// hidden when the API would have accepted it.
+const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+const manilaInstant = (
+  dateOnly: string,
+  time: string | null,
+  fallbackTime: string,
+) => {
+  const [year, month, day] = (dateOnly || "").split("-").map(Number);
+  const [hour, minute] = (time || fallbackTime).split(":").map(Number);
+  const [fallbackHour] = fallbackTime.split(":").map(Number);
+
+  return new Date(
+    Date.UTC(
+      year,
+      (month || 1) - 1,
+      day || 1,
+      hour ?? fallbackHour,
+      minute || 0,
+      0,
+      0,
+    ) - MANILA_OFFSET_MS,
+  );
+};
+
 export const getBookingReturnDeadline = (
   endDate: string,
   dropoffTime: string | null,
-) => {
-  const [year, month, day] = endDate.split("-").map(Number);
-  const [hour, minute] = (dropoffTime || "18:00").split(":").map(Number);
-
-  return new Date(year, (month || 1) - 1, day || 1, hour || 18, minute || 0, 0, 0);
-};
+) => manilaInstant(endDate, dropoffTime, "18:00");
 
 export const getBookingPickupTime = (
   startDate: string,
   pickupTime: string | null,
-) => {
-  const [year, month, day] = startDate.split("-").map(Number);
-  const [hour, minute] = (pickupTime || "09:00").split(":").map(Number);
-
-  return new Date(year, (month || 1) - 1, day || 1, hour || 9, minute || 0, 0, 0);
-};
+) => manilaInstant(startDate, pickupTime, "09:00");
 
 // Approving an early return never rewrites bookings.end_date/dropoff_time -
 // those columns permanently mean "the ORIGINAL agreed return date+time" (see

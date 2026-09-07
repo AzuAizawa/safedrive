@@ -87,7 +87,10 @@ export default async function handler(req: Request) {
       .select("id")
       .eq("status", "completed")
       .eq("owner_completed", true)
-      .eq("renter_completed", true)
+      // renter_completed is deliberately not required - see the matching
+      // comment in api/lib/payoutAutomation.ts. Filtering on it here meant
+      // the admin's manual "process payouts" batch skipped every booking
+      // too, so there was no way to release a payout at all.
       .order("updated_at", { ascending: false })
       .limit(10);
 

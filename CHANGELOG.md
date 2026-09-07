@@ -9,6 +9,561 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Both profile guard triggers had never run (CHAPTER 64)
+
+Found while verifying CHAPTER 63 against the live database, and more severe
+than the escalation that chapter was written for.
+
+Both guard triggers on `public.profiles` start by exempting server callers
+with `current_user in ('postgres','service_role','supabase_admin')`. Both
+are `SECURITY DEFINER` owned by `postgres` — confirmed against the live
+database (`prosecdef = true`, `proowner = postgres`). PostgreSQL sets
+`current_user` inside a `SECURITY DEFINER` function to the **function
+owner**, never the caller, so that condition is unconditionally true and
+both functions return on their first statement.
+
+Every check below it has therefore never executed:
+
+- `protect_profile_sensitive_fields()` — "Users cannot change their own
+  role", self-approval of `verified_status`, clearing one's own login
+  block, editing verified identity fields, licence validity, the
+  deleted-profile reactivation guard.
+- `enforce_admin_profile_permission()` — the `users.verify` /
+  `users.moderate` permission split, and everything CHAPTER 63 added.
+
+Impact: the policy `"Users can update own profile"` (`FOR UPDATE USING
+auth.uid() = id`) lets any authenticated user update their own row, the
+grant is table-level over every column, and the trigger meant to stop them
+was inert. **Any logged-in account** — not just an admin — could set its
+own `role` to `super_admin`, self-approve verification, or clear its own
+login block. CHAPTER 63's rules were right; they had simply inherited the
+same broken test.
+
+CHAPTER 64 adds `is_trusted_server_context()`, which reads the PostgREST
+request JWT rather than `current_user`. That setting is per-request and is
+not rewritten by the security context: no JWT means direct SQL (migrations,
+the SQL editor, psql), which is privileged by definition, and a JWT whose
+role is `service_role` is the key every `api/` handler uses. Both trigger
+functions are recreated on top of it, keeping their existing rules
+unchanged. CHAPTER 64 supersedes CHAPTER 63 — running 64 alone is enough.
+
+Also fixed in CHAPTER 63 itself: it used a bare `$$` dollar quote, which
+the Supabase SQL editor mangles into "syntax error at end of input". Named
+tags are the convention here for exactly this reason (see the CHAPTER 57
+and 58 follow-up commits); it now uses `$admin_profile_guard$`.
+
+**Verified against the live database** after applying, by impersonating an
+authenticated session inside a rolled-back transaction (`set local role
+authenticated` + `set local request.jwt.claims`):
+
+- setting your own `role` to `super_admin` → blocked by
+  `enforce_admin_profile_permission()`;
+- clearing your own `login_blocked_until` → blocked by
+  `protect_profile_sensitive_fields()`;
+- self-approving your own `verified_status` → blocked by the same;
+- editing your own `phone` → still succeeds, so ordinary profile editing
+  is unaffected.
+
+The last three are guards that had never once executed before this.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 64 — run
+in Supabase SQL Editor).
+
+---
+
+## 2026-09-07 — "Request early return" before the trip starts, and an invisible 9 AM default
+
+Two problems reported from a live booking sitting in the handoff phase.
+
+**"Finishing early?" was offered before the trip had started.** The
+early-return controls admitted `fully_paid`, so the renter saw "Request
+early return" while standing at the pickup point waiting for the lister
+to arrive — trip progress still reading "In handoff", the car not yet in
+their hands. An early return means handing the car back sooner than
+agreed; it cannot apply before you have the car. Shortening a booking
+that has not started is a cancellation, with its own refund policy. Now
+gated on `active` on both sides — the button and
+`api/booking-early-return-action.ts`, which had the same over-permissive
+status list.
+
+**The 9:30 AM that came out of nowhere.** The renter was told "SafeDrive
+waits until 9:30 AM before you can cancel for no car at pickup" on a
+booking that showed no pickup time at all. Cause: when `pickup_time` is
+null the timing math falls back to 09:00 (+ the 30-minute grace window =
+9:30), but the display printed the time *only if it existed* — so the
+assumption drove every deadline while remaining invisible. The default is
+now a named constant shared by both, and the pickup time always renders,
+marked `(default)` when it is the assumed one rather than a time the
+renter chose. New bookings are unaffected (the booking form requires a
+pickup time); this is about bookings that reach the system without one.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:process-logic`, `check:alignment`, `check:booking-flow`.
+
+Files: `src/pages/MyBookingsPage.tsx`,
+`api/booking-early-return-action.ts`.
+
+---
+
+## 2026-09-07 — The return handshake, and the "car was never returned" case
+
+Clarified by the owner: the return is a handshake. Both sides tap "I Have
+Arrived", the renter adds optional photos and taps **"Car Returned"**, the
+lister taps **"Car Received"**, and neither half may be skipped.
+
+The code did something different. The lister's confirmation set
+`status='completed'` **unilaterally**, with a comment stating their
+completion "finalizes the trip on its own". Three things followed from
+that, all broken:
+
+- **The renter could never record their half.** Their button only appeared
+  once `owner_completed` was true — by which point the booking was already
+  `completed`, and the completion endpoint only accepts `fully_paid` /
+  `active`, so their call was rejected. A dead button, always.
+- **The lister-unresponsive safety net could never fire.** It looks for
+  `renter_completed = true` **and** `owner_completed = false` — a
+  combination the code made unreachable. It is written correctly, with
+  notifications and payout release; it had simply never matched a booking.
+  The renter was still being told, in an incident ticket, that "the trip
+  will auto-complete with payout if the lister remains unresponsive."
+- **A silent lister froze the booking forever.** Status stayed `active`,
+  which keeps the car's calendar blocked by the overlap constraint and the
+  lister's payout unreleased.
+
+The fix is on the renter's side, not the lister's. The lister tapping
+"Car Received" still finalizes the trip on its own — they are the one
+party who can be certain the car is physically back, and they cannot
+reach that tap without having filed both required photo reports. What
+changed is that the renter's button no longer waits for
+`owner_completed`: it opens as soon as **both** sides have checked in at
+the return, is labelled "Car Returned", and the endpoint now requires the
+return check-in rather than the pickup one. The renter can go first —
+which is exactly what arms the safety net.
+
+**An open dispute now stops the auto-completion clock.** Raised while
+working through the scenarios: a silent lister usually means they forgot,
+but it can also mean the car was never handed back — the renter marked it
+returned and the lister has nothing to confirm. Auto-completing on the
+renter's unverified word would close the trip, release the payout and
+free the car's calendar while the car is still gone. `report_non_return`
+is the lister's way to say precisely that and it sets
+`dispute_status='open'`, but the cron never looked at it. It does now, at
+both the select and the claim, so a filed dispute wins and the case goes
+to an admin instead.
+
+**And the lister is now told when the renter goes first.** Notifications
+only ever fired once a booking actually completed, so a lister who forgot
+got no nudge, and a lister who never received the car back got no prompt
+to report it before the timeout ran. Both now get a notification and an
+email: confirm receipt, or report that the car was not handed back.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:process-logic`, `check:financial-logic`, `check:alignment`,
+`check:booking-flow`, `check:api-boundaries`.
+
+Files: `api/booking-action.ts`, `api/expire-booking-deadlines.ts`,
+`src/pages/MyBookingsPage.tsx`.
+
+---
+
+## 2026-09-07 — Remaining lifecycle findings: extension safety, dead-end buttons, timezone
+
+The rest of the booking-lifecycle audit.
+
+**An extension could be applied to a cancelled or completed booking.** The
+webhook's booking update carried no status guard, unlike every other
+transition in the codebase — so an extension paid after the lister
+cancelled (legal while there are no arrivals) still rewrote `end_date`,
+`total_days`, `base_price`, `commission` and `total_price`, and credited
+the lister payable, re-billing a trip that was over. Now claimed on
+`fully_paid`/`active`.
+
+**And when it can't be applied, the money is no longer dropped.** The
+extension row is flipped to `paid` before the booking is touched, so
+throwing there made PayMongo's retry return `ALREADY_PROCESSED` — capture
+kept, `end_date` unchanged, and no payment row written at all. The same
+hole caught a date collision taken between approval and payment. The
+payment is now recorded with a note saying it was not applied, and a
+security event is raised for a human.
+
+**Two dead-end button sets, siblings of the return-report bug.** On the
+lister side, every return-stage branch was gated on `active`, so a booking
+still at `fully_paid` (handover stalled) fell through and was offered
+"Return report (required)" and "Confirm - Car Received" — the report
+endpoint requires an active booking, and completion demands a report that
+endpoint refuses to create, so both 409 with no way forward. It now
+explains that the trip has not started. On the renter side, the return
+"I Have Arrived" button appeared purely on the clock, with no status
+check, so on a short booking it showed on a trip that had never started.
+
+**`findExtensionCollision` scanned every active booking on the platform**
+— no car filter, no renter filter, no limit — so past PostgREST's
+max-rows cap real collisions were silently missed and an overlapping
+extension would be approved. Now narrowed to the same car or the same
+renter.
+
+**An extension and an early return could both be open at once.** The
+early-return endpoint already blocks when an extension is open; the
+reverse check was missing, so a booking could hold an approved early
+return ("back by Sep 3") while an extension pushed `end_date` to Sep 8,
+and the return gate would follow the earlier date. Now symmetric.
+
+**Client return math ran in the device's timezone.** `bookingLifecycle.ts`
+built return/pickup instants with `new Date(y, m, d, h, …)` — browser-local
+— while the pages' own pickup math used the Manila-anchored
+`Date.UTC(...) - 8h`. On a device not set to UTC+8 the return check-in
+button disagreed with the server by the device offset. Both helpers now
+use the Manila construction the server uses.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:process-logic`, `check:financial-logic`,
+`check:reconciliation-logic`, `check:alignment`, `check:booking-flow`,
+`check:api-boundaries`.
+
+Still open, needing decisions rather than a patch: the documented
+lister-absent auto-completion does not exist (`expire-booking-deadlines.ts`
+only fires from `renter_completed`, and the docs say it must also fire
+from `renter_return_arrived_at`); a cron/webhook race can still capture a
+payment seconds after a deadline cancellation with no refund path; and
+"one trip at a time" has no DB constraint behind it.
+
+Files: `api/webhooks/paymongo.ts`, `api/booking-extension-action.ts`,
+`src/pages/ListerBookingsPage.tsx`, `src/pages/MyBookingsPage.tsx`,
+`src/lib/bookingLifecycle.ts`.
+
+---
+
+## 2026-09-07 — Security + lifecycle audit: payout was blocked on every booking (CHAPTER 63)
+
+The two audits that a session limit had killed were re-run. Both came back
+with confirmed criticals; each claim below was re-verified directly before
+being acted on.
+
+### Admin could make themselves super_admin (CHAPTER 63)
+
+The `api/` layer is clean — all 41 handlers re-fetch by id and authorize,
+no IDOR, no client-supplied prices, webhook signatures verified
+constant-time before use, cron secrets fail closed, no secrets in the
+bundle. The hole was one layer down, where the browser talks to PostgREST
+directly, and it needed four things to line up — all four were true:
+the `authenticated` grant is table-level over every column; the "Admins
+can update any profile" policy admits any admin holding `users.verify` or
+`users.moderate`; `protect_profile_sensitive_fields()` — the only function
+carrying the "Users cannot change their own role" guard — returns early
+for admins, so that guard never ran for them; and
+`enforce_admin_profile_permission()` checked only verification and
+login-block columns, never `role`.
+
+A plain admin could therefore `PATCH` their own profile with
+`{"role":"super_admin"}` from an ordinary browser session and gain every
+super-admin power at once, defeating every correct check in `api/`. The
+same policy also let a support-tier admin rewrite another lister's
+`payout_account_number` — the column `payoutAutomation.ts` reads to build
+the transfer — or set `deleted_at`/`admin_disabled_at` on a super admin.
+
+CHAPTER 63 hardens `enforce_admin_profile_permission()`: `role` is no
+longer writable through PostgREST by anyone (admin accounts are created
+and removed by the service-role endpoints, which are exempt), and a plain
+admin can no longer change `deleted_at`, `admin_disabled_at`, or another
+account's payout details. No client code writes `profiles.role`, so
+nothing legitimate breaks.
+
+### Lister payout could never complete — two independent blocks
+
+**`renter_completed` was required but unreachable.** The lister's
+confirmation sets `status='completed'` on its own (by design — their photo
+reports carry the evidence), leaving `renter_completed` false. The
+renter's own complete call only accepts `fully_paid`/`active`, so after
+that it is rejected forever. Yet both `payoutAutomation.ts` and the admin
+batch in `process-payout.ts` required the flag. Every trip emailed the
+lister "your payout is being processed" and then nothing moved. The
+requirement is dropped in both places, matching the documented intent.
+
+**A booking's chat thread blocked its own payout.** The blocker counted
+any `support_tickets` row for the booking with status open/in_progress —
+with no tag filter. Booking conversations are rows in that same table,
+opened automatically the first time anyone taps "I Have Arrived" or files
+a condition report, and nothing ever closes them. So any booking that
+reached check-in was refused with "Open booking support case found". Now
+filtered on `participant_user_id is null`, the codebase's own marker for a
+real support case (`isConversationTicket`, `adminWorkQueue.ts`) — genuine
+disputes still block exactly as before.
+
+### Return reminders were 8 hours wrong
+
+`send-return-reminders.ts` built the deadline with
+`new Date(y, m, d, h, …)`, which uses the runtime timezone — UTC on the
+edge. An 18:00 Manila drop-off became 02:00 the next day, and the email
+then formatted it back in Asia/Manila, so both parties were told a return
+time 8 hours late. The due-soon/overdue windows were shifted the same way,
+skipping genuinely overdue trips. Now uses the `Date.UTC(...) - 8h`
+construction every other handler already uses.
+
+### Double booking returned a raw 500
+
+The exclusion constraint correctly stops the second of two concurrent
+bookings, but the error surfaced as a 500 carrying the Postgres text. Now
+a 409 with "Those dates were just booked by someone else."
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:financial-logic`, `check:alignment`, `check:booking-flow`,
+`check:api-boundaries`.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 63 — run
+in Supabase SQL Editor), `api/lib/payoutAutomation.ts`,
+`api/process-payout.ts`, `api/send-return-reminders.ts`,
+`api/create-booking.ts`.
+
+---
+
+## 2026-09-07 — Cleared the queued audit findings
+
+The remaining code-level findings from the full-system audit.
+
+**Refunding a completed booking double-debited account `2040`**
+(`api/lib/refundAutomation.ts`). At completion the whole commission moves
+`2040 → 4010`. Refund automation blocked only on a *completed payout* — so
+a booking that completed but whose payout **failed** stayed refundable,
+and the refund posting debited `2040` a second time for a liability that
+no longer existed, leaving `2040` negative while `4010` still showed
+revenue that had been handed back. Completed bookings are now blocked from
+automatic refund, with a message telling the admin to record it manually
+so the correcting entry is deliberate.
+
+**The lister's no-show dialog quoted live platform settings**
+(`ListerBookingsPage.tsx`). It read the current `refund_late_renter_percent`
+for every booking, while the server decides the refund from the booking's
+own snapshot (`api/booking-incident-action.ts`). After an admin changed the
+setting, the dialog promised a percentage the refund would not use. It now
+reads the booking's snapshot and falls back to the live value only for
+bookings created before snapshots existed — the field was already being
+fetched by `select("*")`, just missing from the type.
+
+**`refund_full_hours_snapshot = 0` silently became 24**
+(`MyBookingsPage.tsx`). Zero is valid and admin-settable, meaning "always
+refund in full", and the server honours it — but `Number(x) || DEFAULT`
+turned it into 24, so a renter cancelling 2 hours before pickup was shown
+"about 50% back" and then refunded 100%. Now an explicit null check, the
+shape the adjacent `latePercent` line already used.
+
+**Payout Review showed the wrong amount when a trip had a paid extension**
+(`AdminPayoutsPage.tsx`). It displayed `base_price − commission`, but the
+transfer also adds each paid extension's fuel top-up, which is
+deliberately not folded into `base_price`. Once a payout row exists its
+amount *is* the transferred figure, so that is now shown; the estimate is
+kept only for not-yet-paid bookings and labelled "est."
+
+Still open, needing a business decision rather than code: short-notice
+**lister compensation** is withheld from the renter but no code path ever
+pays it to the lister (`api/mark-manual-payout.ts`, which
+`run-reconciliation.ts` and the smoke check both expect, does not exist).
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:financial-logic`, `check:reconciliation-logic`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `api/lib/refundAutomation.ts`, `src/pages/ListerBookingsPage.tsx`,
+`src/pages/MyBookingsPage.tsx`, `src/pages/admin/AdminPayoutsPage.tsx`.
+
+---
+
+## 2026-09-07 — Phase D: plain wording, and the end of the false "unbalanced" alarms
+
+Feedback, roughly: the finance side reads like it was built for an
+accountant, and nobody should complicate wording just to make a system
+look impressive. Fair — the machinery is worth keeping (it is what
+surfaced the Phase A money bugs), but it was on display instead of under
+the hood.
+
+**"Financial Ledger" is now "Money Records."** Each record reads as a
+sentence — "Renter paid ₱5,000", "Paid out to lister ₱4,500",
+"Subscription payment ₱199" — instead of an event key and a debit/credit
+table. Account codes, event keys, the running debit/credit totals and the
+manual correction form now sit behind an **Accounting view** toggle; that
+form asks for debits and credits in centavos and is genuinely dangerous
+for a non-accountant to meet by accident.
+
+**Fixed the false red "unbalanced — payout blocked" badges.** Journals and
+entries were fetched as two independent queries with different limits and
+different sort keys, so any journal whose lines fell outside the entries
+cut-off rendered as zero debits and zero credits — and was labelled
+unbalanced. Entries are now fetched for exactly the journals being shown.
+
+**Same root cause fixed in `api/run-reconciliation.ts`**, where it was
+worse: it raised `ledger_journal_does_not_balance` at **critical**
+severity for healthy journals, on every run. A normal journal has 3-4
+lines, so 1000 journals routinely exceeded the flat 5000-entry cap.
+Entries are now fetched per-journal in chunks, and the job also warns when
+the payment or journal caps are actually hit instead of silently
+reconciling a partial period. `finalize_ledger_journal` refuses to
+finalize anything that does not balance, so a finalized journal is
+balanced by construction — every one of those criticals was noise, and
+noise that teaches admins to ignore critical alerts.
+
+**"Retention Requests" is now "Privacy Requests"** and no longer sits in
+the finance-coloured group on the dashboard. It is Data Privacy Act
+request handling — someone asking for their data, or asking to be deleted
+— on a 30-day clock, and calling it retention made it read as an
+accounting screen. The page copy now says that plainly. The
+`retention_policy_rules` table stays a reference report; there is no
+automated purge job anywhere and none was added.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:financial-logic`,
+`check:reconciliation-logic`, `check:api-boundaries`.
+
+Files: `src/pages/admin/AdminFinancialLedgerPage.tsx`,
+`api/run-reconciliation.ts`,
+`src/pages/admin/AdminRetentionRequestsPage.tsx`,
+`src/components/AdminLayout.tsx`, `src/pages/admin/AdminDashboard.tsx`.
+
+---
+
+## 2026-09-07 — Phase C: an Earnings page, in plain words
+
+Raised directly: the admins are not accountants, could not tell where to
+see what SafeDrive earns, and could not verify financial computations
+themselves. Nothing in the app answered "how much did the platform make?"
+— the Admin Dashboard is a work queue (profiles to verify, payouts
+needing attention) and shows no money at all, and there was no chart
+library installed, so no peak-period view was possible either.
+
+New `/admin/earnings` (super-admin), deliberately written for someone who
+does not read ledgers:
+
+- **From booking commission** and **from subscriptions**, plus the total —
+  in pesos, with the count and average printed under each figure rather
+  than left implicit.
+- **Every total is counted twice.** The headline number comes from the
+  ledger (accounts `4010` and `4030`); an independent second count comes
+  from the source records (commission stored on completed bookings;
+  `subscriptions.amount_centavos`). Agreement is shown as a green tick
+  with the second figure; disagreement shows the gap in pesos and points
+  at Reconciliation. Correctness is demonstrated rather than asserted,
+  which is the point when the reader cannot audit the math.
+- **Monthly bar chart**, hand-rolled with plain divs — no chart library
+  added for one screen — split by commission vs subscriptions.
+- **Busiest month and weekday**, counted from completed bookings by the
+  date the rental starts.
+- **"How these numbers are counted"** in plain language at the bottom,
+  including that reversals subtract so a corrected mistake is not counted
+  twice, and that PayMongo test-mode transactions are not collected cash.
+
+Row caps are explicit: if a query actually hits its limit the page says
+the totals are incomplete instead of quietly showing a short number — the
+failure mode the Financial Ledger page's mismatched limits already
+produce.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/admin/AdminEarningsPage.tsx` (new), `src/App.tsx`,
+`src/components/AdminLayout.tsx`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
+## 2026-09-07 — Phase B: subscription revenue now reaches the books (CHAPTER 62)
+
+Subscription payments are real money — `api/create-subscription-checkout.ts`
+creates a live PayMongo checkout for the PHP 199 / PHP 299 plans, and the
+webhook verifies the paid amount against the plan and guards against
+duplicate events before activating it. But after collection the money went
+nowhere financially: the webhook wrote a `subscriptions` row and an
+`audit_log` entry and stopped. No ledger journal, so collected revenue was
+invisible to every financial report and to reconciliation. At least one
+account had already subscribed, so this was unrecorded real revenue, not a
+hypothetical.
+
+Deliberately **not** routed through `payments`: that table's `booking_id`
+is `NOT NULL` and a subscription has no booking. Making it nullable would
+ripple through RLS policies, every `payments`→`bookings` join, the admin
+payment screens and reconciliation — a large blast radius for no gain,
+since `subscriptions` already records the payment itself
+(`amount_centavos`, `provider_payment_id`, `paid_at`).
+`ledger_journals.booking_id` has always been nullable, so the journal is
+the right home; only `postSimpleBalancedJournal`'s TypeScript signature
+had required a booking id.
+
+A subscription carries no lister payable and nothing deferred — the
+platform earns it outright — so each is a plain "cash in, revenue
+recognised" pair: debit `1010`, credit the new `4030 Subscription
+revenue`. CHAPTER 62 adds that account and backfills journals for
+already-paid subscriptions, keyed identically to what the webhook now
+writes, so it is safe to run more than once.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `check:alignment`.
+
+Files: `api/webhooks/paymongo.ts`, `api/lib/ledger.ts`,
+`database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 62 — run in
+Supabase SQL Editor).
+
+---
+
+## 2026-09-07 — Phase A: stored XSS, double refund, and three money-truth bugs
+
+Found by a full-system audit. Phase A of a four-phase plan; the numbers
+have to be true before any earnings reporting is built on top of them.
+
+**Stored XSS → admin session takeover** (`src/lib/richText.ts`). When a
+tag wasn't on the allowlist the sanitizer unwrapped it — but the
+recursion meant to clean the promoted children ran *after*
+`element.replaceWith(fragment)`, and inserting a DocumentFragment empties
+it. So the loop iterated nothing and every promoted child survived
+unsanitized: `<div><img src=x onerror=…></div>` passed straight through
+into `dangerouslySetInnerHTML`. Write-side sanitizing is client-only and
+messages go to PostgREST directly, so an attacker could skip the composer
+entirely; the payload then ran in the **admin's** browser on
+`AdminSupportTicketsPage`. Children are now sanitized depth-first
+*before* being promoted, and genuinely dangerous tags (script, style,
+iframe, svg, img, form…) are removed outright rather than unwrapped.
+
+**Double refund** (`AdminRefundReviewPage.tsx`, `api/mark-manual-refund.ts`).
+A short-notice cancellation creates a pending `manual_review` row for the
+policy share only. The UI still offered "Retry PayMongo" on it, which
+refunds 100% of captured and doesn't recognise the manual row as covering
+anything — then the manual row could *also* be released. PHP 10,000
+captured at a 50% snapshot could pay out PHP 15,000. The button is now
+hidden for manual rows, and the server rejects any release that would
+push total refunds past what the booking collected.
+
+**Unbounded goodwill refund** (`api/booking-early-return-action.ts`). The
+client-supplied amount had a floor but no ceiling; a lister could approve
+PHP 999,999 on a PHP 3,000 booking. Now clamped to captured, matching
+`api/booking-incident-action.ts`.
+
+**`/api/process-refund` had no state guard** on its single-booking path,
+so an `active` mid-trip booking could be refunded in full. Now guarded
+like the batch path.
+
+**Two missing ledger journals.** The payout callback
+(`api/webhooks/paymongo-payouts.ts`) marked payments completed without
+posting a journal — for InstaPay/PesoNet that's the *normal* path, so the
+ledger permanently overstated both the lister payable and the clearing
+balance, and reconciliation raised a critical nothing could clear. Manual
+refund release (`api/mark-manual-refund.ts`) — the terminal path for every
+manual-review refund — likewise posted nothing. Both now post, idempotent
+on the same event keys reconciliation looks for. Also fixed the
+`payout:null` event key (`api/lib/payoutAutomation.ts`): when PayMongo
+returned no transfer id, the unique key let one booking claim
+`"payout:null"` and silently skipped every later payout's journal.
+
+**Commission rounding** (`api/create-booking.ts`). The only unrounded
+money value in the file; a rate like 0.125 on a 1333 base stored
+166.625, drifting accounts 2010/2040 a centavo out permanently — each
+journal still balanced, so nothing caught it.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:financial-logic`, `check:reconciliation-logic`, `check:alignment`,
+`check:booking-flow`, `check:api-boundaries`.
+
+Files: `src/lib/richText.ts`, `src/pages/admin/AdminRefundReviewPage.tsx`,
+`api/mark-manual-refund.ts`, `api/booking-early-return-action.ts`,
+`api/process-refund.ts`, `api/webhooks/paymongo-payouts.ts`,
+`api/lib/payoutAutomation.ts`, `api/create-booking.ts`.
+
+---
+
 ## 2026-09-07 — Fixed: single-session guard could lock you out of your own account recovery
 
 Reported: signing in on a device while another device held the session

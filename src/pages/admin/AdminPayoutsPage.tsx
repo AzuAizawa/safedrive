@@ -107,6 +107,23 @@ const getLatestPayout = (booking: PayoutBooking) =>
         new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
     )[0] ?? null;
 
+// What the lister actually receives. Once a payout row exists, its amount IS
+// the transferred figure and is the only correct thing to show. base_price
+// minus commission is an estimate only: api/lib/payoutAutomation.ts also adds
+// every paid extension's fuel top-up, which is deliberately NOT folded into
+// base_price - so a booking with a fuel reimbursement was displayed short
+// here even after the larger amount had already been sent.
+const getPayoutAmount = (booking: PayoutBooking) => {
+  const payout = getLatestPayout(booking);
+  if (payout && payout.status === "completed") {
+    return { amount: Math.abs(Number(payout.amount || 0)), exact: true };
+  }
+  return {
+    amount: Number(booking.base_price || 0) - Number(booking.commission || 0),
+    exact: false,
+  };
+};
+
 const describePayoutRelease = (payout: PayoutPaymentRow | null) => {
   if (!payout) return "-";
   const notes = payout.notes ?? "";
@@ -360,7 +377,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
     // api/lib/payoutAutomation.ts) - commission is no longer additional cash
     // collected from the renter, so it must be subtracted here too.
     const released = completed.reduce(
-      (total, booking) => total + Number(booking.base_price || 0) - Number(booking.commission || 0),
+      (total, booking) => total + getPayoutAmount(booking).amount,
       0,
     );
     const waiting = queue.reduce(
@@ -596,7 +613,12 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                       </div>
                       <div className="text-left sm:text-right">
                         <p className="text-lg font-bold text-green-600">
-                          {formatCurrency(Number(booking.base_price) - Number(booking.commission))}
+                          {formatCurrency(getPayoutAmount(booking).amount)}
+                          {!getPayoutAmount(booking).exact && (
+                            <span className="ml-1 text-xs font-normal text-muted-foreground">
+                              est.
+                            </span>
+                          )}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Platform fee kept: {formatCurrency(Number(booking.commission))}
@@ -771,7 +793,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                           </TableCell>
                           <TableCell>{booking.owner.full_name || booking.owner.email}</TableCell>
                           <TableCell className="font-medium">
-                            {formatCurrency(Number(booking.base_price) - Number(booking.commission))}
+                            {formatCurrency(getPayoutAmount(booking).amount)}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {describePayoutRelease(payout)}

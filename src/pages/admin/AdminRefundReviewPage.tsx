@@ -417,6 +417,15 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
           const isPayMongoRefund =
             refund.payment_method?.toLowerCase() === "paymongo" &&
             Boolean(refund.transaction_id);
+          // A manual_review row is a DELIBERATE partial: the short-notice
+          // cancellation policy already decided the renter gets only a
+          // percentage back, and this row carries that share alone.
+          // "Retry PayMongo" refunds 100% of what was captured and does not
+          // recognise this row as covering anything (its blocker check
+          // requires a transaction_id, which a manual row never has), so
+          // offering it here meant a full refund on top of a partial - and
+          // the partial could then still be released separately.
+          const isManualPolicyRefund = refund.payment_method === "manual_review";
 
           return (
             <Card key={refund.id} className="border-border/70">
@@ -485,7 +494,7 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                         )}
                         {isPending ? "Sync PayMongo Status" : "Verify PayMongo Status"}
                       </Button>
-                    ) : isPending ? (
+                    ) : isPending && !isManualPolicyRefund ? (
                       <Button
                         type="button"
                         variant="outline"

@@ -306,6 +306,23 @@ const buildRefundGroups = (
     };
   }
 
+  // A completed booking has already had its commission recognised: at
+  // completion api/lib/bookingCompletion.ts moves the whole commission from
+  // 2040 (deferred platform fees) to 4010 (revenue). Refunding afterwards
+  // debits 2040 a second time (api/lib/ledger.ts's refund posting), for a
+  // liability that no longer exists - leaving 2040 negative and 4010 still
+  // showing revenue that was handed back. The completed-payout check above
+  // caught the usual case, but NOT a booking whose payout failed, which
+  // stays refundable. Refunding a finished trip is an admin decision that
+  // needs a deliberate correcting entry, not an automatic one.
+  if (booking.status === "completed") {
+    return {
+      groups: [] as RefundGroup[],
+      blocker:
+        "This booking already completed and its commission was recognised. Record the refund manually so the ledger correction is explicit.",
+    };
+  }
+
   const alreadyRefundedTransactionIds = new Set(
     booking.payments
       .filter((payment) => payment.payment_type === "refund" && payment.notes)

@@ -9536,4 +9536,401 @@ where st.booking_id = b.id
   and st.tag = 'booking_conversation'
   and st.subject = 'Booking conversation: ' || b.id::text;
 
+-- ============================================================================
+-- CHAPTER 62 - Subscription revenue enters the books
+-- ============================================================================
+-- Gap found while auditing the money side: subscription payments are real
+-- (api/create-subscription-checkout.ts creates a live PayMongo checkout for
+-- the PHP 199 / PHP 299 plans, and the webhook verifies the amount and
+-- guards against duplicate events before activating the plan) - but after
+-- collection the money went nowhere financially. The webhook wrote only a
+-- subscriptions row and an audit_log entry: no ledger journal, so real
+-- collected revenue was invisible to every financial report and to
+-- reconciliation.
+--
+-- Deliberately NOT routed through public.payments: that table's booking_id
+-- is NOT NULL, and a subscription has no booking. Making it nullable would
+-- ripple through RLS policies, every payments->bookings join, the admin
+-- payment screens and the reconciliation job - a large blast radius for no
+-- gain, since public.subscriptions already records the payment itself
+-- (amount_centavos, provider_payment_id, paid_at). ledger_journals.booking_id
+-- has always been nullable, so the journal is the right home.
+--
+-- Unlike a booking payment there is no lister payable and nothing deferred -
+-- the platform earns a subscription outright - so each one is a plain
+-- "cash in, revenue recognised" pair: debit 1010, credit 4030.
+
+insert into public.financial_accounts (code, name, account_type) values
+  ('4030', 'Subscription revenue', 'revenue')
+on conflict (code) do update set name = excluded.name, account_type = excluded.account_type;
+
+-- One-time backfill for subscriptions already paid before the code change
+-- shipped. Idempotent: the event key matches exactly what the webhook now
+-- writes, and any journal already carrying that key is skipped, so this is
+-- safe to run more than once.
+do $backfill_subscription_ledger$
+declare
+  sub record;
+  new_journal_id uuid;
+begin
+  for sub in
+    select s.id, s.user_id, s.plan_type, s.amount_centavos, s.paid_at,
+           s.provider_checkout_id, s.provider_payment_id
+    from public.subscriptions s
+    where s.amount_centavos is not null
+      and s.amount_centavos > 0
+      and s.paid_at is not null
+      and s.provider_checkout_id is not null
+      and not exists (
+        select 1 from public.ledger_journals j
+        where j.event_key = 'subscription:' || s.provider_checkout_id
+      )
+  loop
+    insert into public.ledger_journals (booking_id, event_key, event_type, provider_reference, effective_at)
+    values (
+      null,
+      'subscription:' || sub.provider_checkout_id,
+      'subscription_payment_completed',
+      coalesce(sub.provider_payment_id, sub.provider_checkout_id),
+      sub.paid_at
+    )
+    returning id into new_journal_id;
+
+    insert into public.ledger_entries (journal_id, account_code, debit_centavos, credit_centavos, party_user_id, memo)
+    values
+      (new_journal_id, '1010', sub.amount_centavos, 0, sub.user_id, sub.plan_type || ' subscription payment (backfilled)'),
+      (new_journal_id, '4030', 0, sub.amount_centavos, sub.user_id, sub.plan_type || ' subscription payment (backfilled)');
+
+    -- Same validation path the application uses: refuses to finalize
+    -- anything that does not balance.
+    perform public.finalize_ledger_journal(new_journal_id, null);
+  end loop;
+end;
+$backfill_subscription_ledger$;
+
+-- ============================================================================
+-- CHAPTER 63 - Close the admin -> super_admin privilege escalation
+-- ============================================================================
+-- Found by a security audit of the authorization boundary. The edge functions
+-- in api/ were clean - all 41 re-fetch by id and check ownership, and every
+-- super-admin endpoint checks the role properly. The hole was one layer down,
+-- where the browser talks to PostgREST directly:
+--
+--   1. `grant ... update on all tables in schema public to authenticated` is
+--      table-level, so every column of public.profiles is writable.
+--   2. The "Admins can update any profile" policy lets any admin holding
+--      users.verify OR users.moderate update ANY profile row - and CHAPTER
+--      19.6 backfilled every existing admin with the full key catalog.
+--   3. protect_profile_sensitive_fields() - the only function containing the
+--      "Users cannot change their own role" guard - begins with
+--      `privileged := public.is_admin() or ...; if privileged then return new;`
+--      so that guard never runs for an admin.
+--   4. enforce_admin_profile_permission() - the trigger meant to constrain
+--      admins - only checked verified_status, rejection_reason,
+--      login_blocked_until and login_block_reason. It never checked role.
+--
+-- Net effect: a plain admin could PATCH their own profiles row with
+-- {"role":"super_admin"} using nothing but their ordinary browser session,
+-- and both BEFORE-UPDATE triggers would pass. That single call granted every
+-- super-admin power in the system - payouts, refunds, reconciliation, admin
+-- creation and deletion, platform settings - defeating every correctly
+-- written check in api/ at once.
+--
+-- The same policy also let a support-tier admin rewrite another lister's
+-- payout_account_number (which api/lib/payoutAutomation.ts reads to build the
+-- PayMongo transfer), or set deleted_at / admin_disabled_at on a super admin.
+--
+-- Fixed here rather than in protect_profile_sensitive_fields(), which is
+-- structurally unable to constrain admins - it exempts them by design so that
+-- admin verification work can proceed.
+--
+-- No client code anywhere writes profiles.role (verified by grep across
+-- src/), so blocking it outright breaks nothing: admin accounts are created
+-- and removed by api/admin-create.ts and api/admin-delete.ts, which run as
+-- service_role and are exempted on the first branch below.
+
+-- Named dollar-quote tag, not a bare $$ - same copy-paste safety fix already
+-- applied to CHAPTER 57 and 58. A bare $$ gets mangled on the way into the
+-- Supabase SQL editor and fails with "syntax error at end of input".
+create or replace function public.enforce_admin_profile_permission()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $admin_profile_guard$
+begin
+  -- Server code keeps full access; it carries its own authorization.
+  if current_user in ('postgres', 'service_role', 'supabase_admin') then
+    return new;
+  end if;
+
+  -- Role is not editable through PostgREST by anyone, at any level - not a
+  -- user, not an admin, not a super admin. This is the escalation itself.
+  if new.role is distinct from old.role then
+    raise exception 'Roles are changed only through the admin management endpoints';
+  end if;
+
+  if not public.is_admin() or public.is_super_admin() then
+    return new;
+  end if;
+
+  -- Everything below constrains a PLAIN admin (super admins returned above).
+
+  -- Disabling or deleting an account - including a super admin's - is a
+  -- super-admin action. AdminAdminsPage.tsx's disable toggle is super-admin
+  -- only and still works, because super admins return above.
+  if new.deleted_at is distinct from old.deleted_at
+     or new.admin_disabled_at is distinct from old.admin_disabled_at then
+    raise exception 'Only a super admin can disable or delete an account';
+  end if;
+
+  -- Where a lister's payout actually goes. A lister editing their own payout
+  -- details is normal and still allowed; an admin editing SOMEONE ELSE'S is
+  -- how money gets redirected.
+  if (new.payout_method is distinct from old.payout_method
+      or new.payout_account_name is distinct from old.payout_account_name
+      or new.payout_account_number is distinct from old.payout_account_number)
+     and auth.uid() is distinct from old.id then
+    raise exception 'An admin cannot change another account''s payout details';
+  end if;
+
+  if (new.verified_status  is distinct from old.verified_status
+      or new.rejection_reason is distinct from old.rejection_reason)
+     and not public.admin_can('users.verify') then
+    raise exception 'Changing verification status requires the users.verify permission';
+  end if;
+
+  if (new.login_blocked_until is distinct from old.login_blocked_until
+      or new.login_block_reason is distinct from old.login_block_reason)
+     and not public.admin_can('users.moderate') then
+    raise exception 'Changing a login block requires the users.moderate permission';
+  end if;
+
+  return new;
+end;
+$admin_profile_guard$;
+
+-- Trigger definition is unchanged; recreated only so a fresh run of this
+-- script wires the corrected function.
+drop trigger if exists enforce_admin_profile_permission on public.profiles;
+create trigger enforce_admin_profile_permission
+  before update on public.profiles
+  for each row execute function public.enforce_admin_profile_permission();
+
+-- ============================================================================
+-- CHAPTER 64 - Both profile guard triggers were dead code (current_user in a
+-- SECURITY DEFINER function)
+-- ============================================================================
+-- Found while verifying CHAPTER 63 against the live database. Both guard
+-- triggers on public.profiles begin by exempting server-side callers:
+--
+--   if current_user in ('postgres', 'service_role', 'supabase_admin') then
+--     return new;
+--   end if;
+--
+-- Both functions are SECURITY DEFINER and owned by `postgres` (confirmed:
+-- pg_proc.prosecdef = true, proowner = postgres). Inside a SECURITY DEFINER
+-- function PostgreSQL sets current_user to the FUNCTION OWNER, never the
+-- caller - so that condition is unconditionally true and both functions
+-- return on their first statement. Every check below it has never run:
+--
+--   protect_profile_sensitive_fields()  - "Users cannot change their own
+--     role", self-approval of verified_status, clearing one's own login
+--     block, editing verified identity fields, licence validity, and the
+--     deleted-profile reactivation guard.
+--   enforce_admin_profile_permission()  - the users.verify / users.moderate
+--     permission split, and everything CHAPTER 63 added.
+--
+-- Impact is worse than the admin escalation CHAPTER 63 was written for.
+-- "Users can update own profile" (FOR UPDATE USING auth.uid() = id) lets any
+-- authenticated user update their own row, the grant is table-level over
+-- every column, and the trigger meant to stop them is inert - so ANY logged-in
+-- account could set its own role to 'super_admin', self-approve verification,
+-- or clear its own login block.
+--
+-- CHAPTER 63's logic was right; it just inherited the same broken test. The
+-- fix is a caller check that survives SECURITY DEFINER: the PostgREST request
+-- JWT, which is a per-request setting and is not rewritten by the security
+-- context. No JWT at all means direct SQL (migrations, the SQL editor, psql),
+-- which is privileged by definition; a JWT with role 'service_role' is the
+-- key every api/ handler uses and carries its own authorization.
+
+create or replace function public.is_trusted_server_context()
+returns boolean
+language plpgsql
+stable
+set search_path = public
+as $trusted_ctx$
+declare
+  raw_claims text;
+  jwt_role text;
+begin
+  raw_claims := current_setting('request.jwt.claims', true);
+
+  -- Direct SQL: no PostgREST request behind this statement.
+  if raw_claims is null or raw_claims = '' then
+    return true;
+  end if;
+
+  begin
+    jwt_role := raw_claims::jsonb ->> 'role';
+  exception when others then
+    -- Unparseable claims: treat as untrusted rather than waving it through.
+    return false;
+  end;
+
+  return coalesce(jwt_role, '') = 'service_role';
+end;
+$trusted_ctx$;
+
+-- Left on default EXECUTE permissions on purpose. This helper only reports
+-- whether the CURRENT request is server-side; it exposes no data and grants
+-- no capability, and both callers are triggers that run as the definer
+-- anyway. (An explicit revoke/grant pair here was rejected by the Supabase
+-- SQL editor, and buys nothing.)
+
+-- 64.1  User-facing guard, with a working server-context test.
+create or replace function public.protect_profile_sensitive_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $protect_profile$
+declare
+  privileged boolean;
+begin
+  privileged := public.is_admin() or public.is_trusted_server_context();
+
+  if privileged then
+    return new;
+  end if;
+
+  if auth.uid() is null or auth.uid() <> old.id then
+    raise exception 'Only the owning user or an admin can update this profile';
+  end if;
+
+  if new.role is distinct from old.role then
+    raise exception 'Users cannot change their own role';
+  end if;
+
+  if new.rejection_reason is distinct from old.rejection_reason then
+    raise exception 'Users cannot change verification rejection reasons';
+  end if;
+
+  if new.login_blocked_until is distinct from old.login_blocked_until
+     or new.login_block_reason is distinct from old.login_block_reason then
+    raise exception 'Users cannot change login block settings';
+  end if;
+
+  if new.verified_status is distinct from old.verified_status then
+    if not (
+      old.verified_status in ('unverified', 'rejected')
+      and new.verified_status = 'pending'
+    ) then
+      raise exception 'Users cannot self-approve or directly change verification status';
+    end if;
+  end if;
+
+  if old.verified_status = 'verified' and (
+    new.first_name is distinct from old.first_name
+    or new.middle_name is distinct from old.middle_name
+    or new.last_name is distinct from old.last_name
+    or new.full_name is distinct from old.full_name
+    or new.birthday is distinct from old.birthday
+    or new.driver_license is distinct from old.driver_license
+    or new.national_id is distinct from old.national_id
+    or new.secondary_id_type is distinct from old.secondary_id_type
+  ) then
+    raise exception 'Verified identity fields require admin review to change';
+  end if;
+
+  if new.license_expiry is distinct from old.license_expiry
+     or new.license_transmission is distinct from old.license_transmission
+     or new.license_expiry_notified_at is distinct from old.license_expiry_notified_at then
+    raise exception 'Driver''s licence validity is set by an admin during review';
+  end if;
+
+  if new.license_update_pending is distinct from old.license_update_pending
+     and not (old.license_update_pending = false and new.license_update_pending = true) then
+    raise exception 'Only an admin can clear a pending licence update';
+  end if;
+
+  if new.is_lister is distinct from old.is_lister
+     and old.verified_status <> 'verified' then
+    raise exception 'Only verified users can change lister mode';
+  end if;
+
+  if old.deleted_at is not null
+     and new.deleted_at is distinct from old.deleted_at then
+    raise exception 'Deleted profiles cannot be reactivated by the user';
+  end if;
+
+  return new;
+end;
+$protect_profile$;
+
+drop trigger if exists protect_profile_sensitive_fields on public.profiles;
+create trigger protect_profile_sensitive_fields
+  before update on public.profiles
+  for each row execute function public.protect_profile_sensitive_fields();
+
+-- 64.2  Admin-facing guard, same correction, keeping CHAPTER 63's rules.
+create or replace function public.enforce_admin_profile_permission()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $admin_profile_guard$
+begin
+  if public.is_trusted_server_context() then
+    return new;
+  end if;
+
+  -- Applies to EVERYONE reaching the database through PostgREST - a plain
+  -- user, an admin, a super admin. Roles change only through
+  -- api/admin-create.ts and api/admin-delete.ts, which use the service-role
+  -- key and are exempted above.
+  if new.role is distinct from old.role then
+    raise exception 'Roles are changed only through the admin management endpoints';
+  end if;
+
+  if not public.is_admin() or public.is_super_admin() then
+    return new;
+  end if;
+
+  -- Everything below constrains a PLAIN admin.
+
+  if new.deleted_at is distinct from old.deleted_at
+     or new.admin_disabled_at is distinct from old.admin_disabled_at then
+    raise exception 'Only a super admin can disable or delete an account';
+  end if;
+
+  if (new.payout_method is distinct from old.payout_method
+      or new.payout_account_name is distinct from old.payout_account_name
+      or new.payout_account_number is distinct from old.payout_account_number)
+     and auth.uid() is distinct from old.id then
+    raise exception 'An admin cannot change another account''s payout details';
+  end if;
+
+  if (new.verified_status  is distinct from old.verified_status
+      or new.rejection_reason is distinct from old.rejection_reason)
+     and not public.admin_can('users.verify') then
+    raise exception 'Changing verification status requires the users.verify permission';
+  end if;
+
+  if (new.login_blocked_until is distinct from old.login_blocked_until
+      or new.login_block_reason is distinct from old.login_block_reason)
+     and not public.admin_can('users.moderate') then
+    raise exception 'Changing a login block requires the users.moderate permission';
+  end if;
+
+  return new;
+end;
+$admin_profile_guard$;
+
+drop trigger if exists enforce_admin_profile_permission on public.profiles;
+create trigger enforce_admin_profile_permission
+  before update on public.profiles
+  for each row execute function public.enforce_admin_profile_permission();
+
 -- End of SafeDrive chaptered database master.

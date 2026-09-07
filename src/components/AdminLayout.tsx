@@ -11,6 +11,7 @@ import {
   Users,
   Car,
   CarFront,
+  Coins,
   CreditCard,
   LogOut,
   Shield,
@@ -56,10 +57,15 @@ const allNavItems: AdminNavItem[] = [
   { to: "/admin/security-logs", label: "Security Logs", icon: ShieldCheck, keys: ["security.view"] },
   { to: "/admin/admins", label: "Admin Accounts", icon: UserCheck, superAdminOnly: true },
   { to: "/admin/platform-settings", label: "Platform Settings", icon: Settings2, superAdminOnly: true },
+  { to: "/admin/earnings", label: "Earnings", icon: Coins, superAdminOnly: true },
   { to: "/admin/financial-reviews", label: "Financial Reviews", icon: CreditCard, superAdminOnly: true },
   { to: "/admin/financial-ledger", label: "Financial Ledger", icon: ClipboardList, superAdminOnly: true },
   { to: "/admin/reconciliation", label: "Reconciliation", icon: ShieldCheck, superAdminOnly: true },
-  { to: "/admin/retention-requests", label: "Retention Requests", icon: Settings2, superAdminOnly: true },
+  // Named for what it actually is: Data Privacy Act request handling (a
+  // person asking for their data, or asking to be deleted), on a 30-day
+  // clock. It is not a finance screen and reads as jargon when called
+  // "Retention Requests".
+  { to: "/admin/retention-requests", label: "Privacy Requests", icon: ShieldCheck, superAdminOnly: true },
 ];
 
 export default function AdminLayout() {

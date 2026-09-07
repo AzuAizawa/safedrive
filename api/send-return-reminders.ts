@@ -61,10 +61,24 @@ const getBearerToken = (req: Request) => {
   return authorization.slice("Bearer ".length).trim();
 };
 
+// Dates and times are stored as Manila wall-clock. `new Date(y, m, d, h, ...)`
+// builds the instant in the RUNTIME's timezone, and the edge runtime is UTC -
+// so an 18:00 drop-off became 18:00 UTC, which is 02:00 the next day in
+// Manila. The reminder email then formatted that instant back in
+// Asia/Manila, telling both parties a return time 8 hours later than the one
+// they agreed to, and shifting the due-soon/overdue windows by the same 8
+// hours so genuinely overdue trips were skipped. Same Date.UTC(...) - 8h
+// construction used by expire-booking-deadlines.ts, booking-action.ts and
+// booking-incident-action.ts.
+const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
+
 const getReturnDeadline = (endDate: string, dropoffTime: string | null) => {
   const [year, month, day] = endDate.split("-").map(Number);
   const [hour, minute] = (dropoffTime || "18:00").split(":").map(Number);
-  return new Date(year, (month || 1) - 1, day || 1, hour || 18, minute || 0, 0, 0);
+  return new Date(
+    Date.UTC(year, (month || 1) - 1, day || 1, hour ?? 18, minute || 0, 0, 0) -
+      MANILA_OFFSET_MS,
+  );
 };
 
 const getVehicleLabel = (booking: ReminderBooking) =>

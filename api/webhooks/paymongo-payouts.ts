@@ -1,5 +1,6 @@
 import { createSupabaseAdmin } from "../lib/payoutAutomation";
 import { sendPayoutReceiptEmail } from "../lib/email.js";
+import { postSimpleBalancedJournal } from "../lib/ledger.js";
 
 export const config = {
   runtime: "edge",
@@ -351,6 +352,41 @@ export default async function handler(req: Request) {
           },
           user_id: null,
         });
+
+        // For InstaPay/PesoNet the transfer normally comes back non-terminal,
+        // so processAutomaticPayoutForBooking takes its "pending" branch and
+        // returns WITHOUT posting a journal - this callback is the only place
+        // that learns the money actually moved. Without this, the payment row
+        // flips to completed while the ledger still carries the lister payable
+        // and the clearing balance, and reconciliation raises a permanent
+        // critical that can never be cleared (re-running the payout just
+        // answers "already completed").
+        //
+        // The event key matches the one the synchronous path would have used,
+        // so whichever runs first wins and the other is a no-op. The payment
+        // id is the fallback when PayMongo returns no transfer id - the old
+        // `payout:${id}` template produced the literal key "payout:null" in
+        // that case, which the unique constraint then let ONE booking claim
+        // while silently skipping every other.
+        const payoutJournalKey = transactionId
+          ? `payout:${transactionId}`
+          : `payout:payment:${payment.id}`;
+        const payoutAmountCentavos = Math.round(
+          Math.abs(Number(payment.amount) || 0) * 100,
+        );
+        if (payoutAmountCentavos > 0) {
+          await postSimpleBalancedJournal(supabase, {
+            bookingId,
+            eventKey: payoutJournalKey,
+            eventType: "lister_payout_completed",
+            providerReference: transactionId || referenceNumber,
+            debitAccount: "2010",
+            creditAccount: "1010",
+            amountCentavos: payoutAmountCentavos,
+            partyUserId: listerId,
+            memo: "Lister payout confirmed by PayMongo callback",
+          });
+        }
       }
 
       return jsonResponse({ success: true, state: "completed" });

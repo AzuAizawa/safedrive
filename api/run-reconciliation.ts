@@ -46,17 +46,49 @@ export default async function handler(req: Request) {
     failedRun = { supabase, id: run.id };
 
     const issues: Issue[] = [];
-    const [paymentsResult, journalsResult, entriesResult, subscriptionsResult] = await Promise.all([
-      supabase.from("payments").select("id, booking_id, amount, payment_type, status, transaction_id, notes, created_at").gte("created_at", periodStart).order("created_at", { ascending: false }).limit(500),
-      supabase.from("ledger_journals").select("id, booking_id, event_key, provider_reference, status, created_at").gte("created_at", periodStart).limit(1000),
-      supabase.from("ledger_entries").select("journal_id, debit_centavos, credit_centavos").gte("created_at", periodStart).limit(5000),
+    const PAYMENT_LIMIT = 500;
+    const JOURNAL_LIMIT = 1000;
+    const [paymentsResult, journalsResult, subscriptionsResult] = await Promise.all([
+      supabase.from("payments").select("id, booking_id, amount, payment_type, status, transaction_id, notes, created_at").gte("created_at", periodStart).order("created_at", { ascending: false }).limit(PAYMENT_LIMIT),
+      supabase.from("ledger_journals").select("id, booking_id, event_key, provider_reference, status, created_at").gte("created_at", periodStart).limit(JOURNAL_LIMIT),
       supabase.from("subscriptions").select("id, provider_checkout_id, provider_payment_id, amount_centavos, paid_at, created_at").gte("created_at", periodStart).limit(500),
     ]);
-    const queryError = paymentsResult.error || journalsResult.error || entriesResult.error || subscriptionsResult.error;
+    const queryError = paymentsResult.error || journalsResult.error || subscriptionsResult.error;
     if (queryError) throw queryError;
     const payments = paymentsResult.data ?? [];
     const journals = journalsResult.data ?? [];
-    const entries = entriesResult.data ?? [];
+
+    // Entries are fetched for exactly the journals above, in chunks, instead
+    // of as an independent query with its own row cap. A normal journal has
+    // 3-4 lines, so 1000 journals routinely exceed a flat 5000-entry cap -
+    // and any journal whose lines fell outside it was then scored as
+    // debits === 0 and reported as "ledger_journal_does_not_balance" at
+    // CRITICAL severity. Those alerts were false: finalize_ledger_journal
+    // refuses to finalize anything that does not balance, so a finalized
+    // journal is balanced by construction. Chunked because a 1000-id filter
+    // does not fit in one request URL.
+    const ENTRY_CHUNK = 200;
+    const journalIds = journals.map((journal) => journal.id);
+    const entries: Array<{ journal_id: string; debit_centavos: number; credit_centavos: number }> = [];
+    for (let index = 0; index < journalIds.length; index += ENTRY_CHUNK) {
+      const chunk = journalIds.slice(index, index + ENTRY_CHUNK);
+      const { data: chunkEntries, error: chunkError } = await supabase
+        .from("ledger_entries")
+        .select("journal_id, debit_centavos, credit_centavos")
+        .in("journal_id", chunk);
+      if (chunkError) throw chunkError;
+      entries.push(...((chunkEntries ?? []) as typeof entries));
+    }
+
+    // Say so when a cap is actually reached, rather than reporting on a
+    // partial period as though it were complete. The provider list already
+    // does this; the local queries did not.
+    if (payments.length >= PAYMENT_LIMIT) {
+      issues.push({ issue_type: "local_payment_list_may_be_truncated", severity: "warning", local_reference: `first ${PAYMENT_LIMIT}` });
+    }
+    if (journals.length >= JOURNAL_LIMIT) {
+      issues.push({ issue_type: "ledger_journal_list_may_be_truncated", severity: "warning", local_reference: `first ${JOURNAL_LIMIT}` });
+    }
 
     for (const duplicate of findDuplicateProviderTransactions(payments)) {
       issues.push({ booking_id: duplicate.payments[0].booking_id, issue_type: "duplicate_provider_transaction_id", severity: "critical", provider_reference: duplicate.transactionId, local_reference: duplicate.payments.map((item) => item.id).join(",") });

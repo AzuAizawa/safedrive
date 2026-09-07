@@ -1788,8 +1788,22 @@ export default async function handler(req: Request) {
             409,
           );
         }
-        // The renter's own completion is an optional courtesy record now -
-        // it never blocks, and never blocks on the lister either.
+        // Their half of the return handshake, so it needs the return to have
+        // actually happened - both sides checked in - not just the pickup
+        // arrival. Mirrors the lister guard above.
+        if (
+          bookingRecord.status === "active" &&
+          (!bookingRecord.renter_return_arrived_at ||
+            !bookingRecord.lister_return_arrived_at)
+        ) {
+          return jsonResponse(
+            {
+              error:
+                "Both you and the lister must confirm arrival at the return before you can mark the car returned.",
+            },
+            409,
+          );
+        }
         updatePayload.renter_completed = true;
         updatePayload.renter_completed_at = completionStamp;
         if (bookingRecord.owner_completed) {
@@ -1811,9 +1825,20 @@ export default async function handler(req: Request) {
         }
         updatePayload.owner_completed = true;
         updatePayload.owner_completed_at = completionStamp;
-        // The lister's own completion - backed by their required pickup AND
-        // return live-photo reports - is what finalizes the trip on its own.
-        // The renter's participation at return is optional and never a gate.
+        // The lister tapping "Car Received" finalizes the trip on its own.
+        // They are the one party who can be certain the car is physically
+        // back, and they cannot reach this point without having filed both
+        // required photo reports - so there is nothing left to wait for.
+        //
+        // What was actually broken was the OTHER side: the renter's button
+        // used to be gated on owner_completed, so it only appeared after the
+        // booking was already completed, by which point this endpoint
+        // rejected their call. The renter could never record their half, and
+        // the lister-unresponsive safety net in expire-booking-deadlines.ts
+        // (which needs renter_completed=true AND owner_completed=false) could
+        // never match a booking. That gate is now removed in
+        // MyBookingsPage.tsx - the renter can go first, which is what arms
+        // the safety net.
         nextStatus = "completed";
         updatePayload.status = nextStatus;
       }
@@ -1880,6 +1905,33 @@ export default async function handler(req: Request) {
           transitioned_to: nextStatus,
         },
       });
+
+      // The renter went first and the trip is not closed yet. A clock is now
+      // running: after the lister-completion timeout this auto-completes and
+      // releases the payout. The lister was never told any of that -
+      // notifications only fired once a booking actually completed - so a
+      // lister who simply forgot never got a nudge, and a lister who never
+      // received the car back had no prompt to report it before the timeout
+      // ran. Both need this message.
+      if (renter && !completedByThisRequest) {
+        const returnedTitle = "Renter marked the car returned";
+        const returnedMessage = `The renter marked ${getVehicleLabel(bookingRecord)} as returned. Confirm you received it - or report a problem if the car was not actually handed back to you.`;
+        await supabase.from("notifications").insert({
+          user_id: bookingRecord.owner_id,
+          title: returnedTitle,
+          message: returnedMessage,
+          type: "warning",
+          link: "/lister-bookings",
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: bookingRecord.owner_id,
+          title: returnedTitle,
+          message: returnedMessage,
+          link: "/lister-bookings",
+          baseOrigin: new URL(req.url).origin,
+          eventKey: `renter-marked-returned:${bookingRecord.id}`,
+        });
+      }
 
       if (completedByThisRequest) {
         await runBookingCompletionSideEffects(

@@ -606,7 +606,17 @@ export const processAutomaticPayoutForBooking = async ({
   let payoutAmount = Number(payoutBooking.base_price) - Number(payoutBooking.commission);
   payoutBooking.base_price = payoutAmount;
 
-  if (payoutBooking.status !== "completed" || !payoutBooking.owner_completed || !payoutBooking.renter_completed) {
+  // Deliberately does NOT require renter_completed. The lister's own
+  // completion finalizes the trip on its own - backed by their required
+  // pickup AND return photo reports - and api/booking-action.ts sets
+  // status='completed' the moment they confirm, whether or not the renter
+  // ever tapped anything. Requiring renter_completed here made payout
+  // unreachable on every normal booking: once the lister finalized, the
+  // status was already 'completed', and the renter's own complete call is
+  // rejected because it only accepts fully_paid/active - so the flag could
+  // never be set afterwards. The lister was emailed "your payout is being
+  // processed" and then nothing moved, on every trip.
+  if (payoutBooking.status !== "completed" || !payoutBooking.owner_completed) {
     return { state: "skipped", bookingId, reason: "Booking is not fully completed yet." };
   }
 
@@ -661,10 +671,24 @@ export const processAutomaticPayoutForBooking = async ({
     };
   }
 
+  // Only a genuine support case blocks a payout. A booking's CHAT THREAD is
+  // also a support_tickets row carrying the same booking_id, opened
+  // automatically the first time anyone taps "I Have Arrived" or submits a
+  // condition report, left 'open' forever because nothing ever closes a
+  // conversation. Counting those meant essentially every completed booking
+  // looked like it had an unresolved dispute, and payout was refused with
+  // "Open booking support case found" on trips where nothing was wrong.
+  //
+  // participant_user_id is the codebase's own marker for a conversation
+  // thread (see isConversationTicket in src/lib/supportTickets.ts, and the
+  // same filter in src/lib/adminWorkQueue.ts): the three conversation
+  // creators always set it, and real support/incident/refund tickets never
+  // do - so a dispute still blocks the payout exactly as before.
   const { count: blockingTicketCount } = await supabase
     .from("support_tickets")
     .select("id", { count: "exact", head: true })
     .eq("booking_id", bookingId)
+    .is("participant_user_id", null)
     .in("status", ["open", "in_progress"]);
 
   if ((blockingTicketCount ?? 0) > 0) {
@@ -907,7 +931,16 @@ export const processAutomaticPayoutForBooking = async ({
       );
       await postSimpleBalancedJournal(supabase, {
         bookingId,
-        eventKey: `payout:${walletTransactionId}`,
+        // walletTransactionId is nullable (PayMongo may return no transfer
+        // id). The bare template then produced the literal key
+        // "payout:null" - and since ledger_journals.event_key is UNIQUE,
+        // the first booking to hit that claimed it and every later payout
+        // silently skipped its journal as "already posted". Falling back to
+        // the payment id keeps the key unique per payout; the callback in
+        // api/webhooks/paymongo-payouts.ts builds the same key.
+        eventKey: walletTransactionId
+          ? `payout:${walletTransactionId}`
+          : `payout:payment:${paymentRecord.id}`,
         eventType: "lister_payout_completed",
         providerReference: walletTransactionId,
         actorId: initiatedByUserId,

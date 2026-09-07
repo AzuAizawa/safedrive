@@ -149,7 +149,14 @@ const findExtensionCollision = async (
       "fully_paid",
       "active",
     ])
-    .neq("id", bookingId);
+    .neq("id", bookingId)
+    // Narrowed to the only rows that can possibly collide - this same car, or
+    // this same renter. Without it the query pulled EVERY active booking on
+    // the platform with no limit, so past PostgREST's max-rows cap (1000 by
+    // default) real collisions were silently missed and an overlapping
+    // extension would be approved. Both ids are server-derived from the
+    // booking row, never client input.
+    .or(`car_id.eq.${carId},renter_id.eq.${renterId}`);
   if (error) throw error;
 
   return (activeBookings ?? []).some((other) => {
@@ -267,6 +274,30 @@ export default async function handler(req: Request) {
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+
+      // The mirror of the check api/booking-early-return-action.ts already
+      // does. Without it the two could both be open at once: an approved
+      // early return saying "back by Sep 3" alongside an extension pushing
+      // end_date to Sep 8. getOperativeReturnDeadline prefers the earlier
+      // instant, so the return check-in gate would follow the early date for
+      // a trip that legitimately runs a week longer.
+      const { data: openEarlyReturn } = await supabase
+        .from("booking_early_returns")
+        .select("id")
+        .eq("booking_id", bookingRecord.id)
+        .in("status", ["pending", "approved"])
+        .limit(1)
+        .maybeSingle();
+
+      if (openEarlyReturn) {
+        return jsonResponse(
+          {
+            error:
+              "This booking has an open early-return request. Resolve it before requesting an extension.",
+          },
+          409,
+        );
+      }
 
       if (existingPending) {
         return jsonResponse(
