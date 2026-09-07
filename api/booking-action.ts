@@ -22,12 +22,6 @@ type BookingActionPayload = {
   bookingId?: string;
   action?: BookingAction;
   arrivalPhotoUrl?: string | null;
-  arrivalLocation?: {
-    latitude?: number;
-    longitude?: number;
-    accuracyMeters?: number | null;
-    capturedAt?: string | null;
-  } | null;
   note?: string | null;
   // Set by the lister "take car offline" flow when the reason is stolen /
   // damaged and an incident case is open: the cancellation is still recorded
@@ -142,43 +136,6 @@ const hasRequiredTripPhotos = (
   return LIVE_PHOTO_CATEGORIES.some((category) => categories.has(category));
 };
 const REFUNDABLE_BOOKING_PAYMENT_TYPES = ["downpayment", "balance"];
-
-const normalizeArrivalLocation = (
-  value: BookingActionPayload["arrivalLocation"],
-) => {
-  if (!value) return null;
-
-  const latitude = Number(value.latitude);
-  const longitude = Number(value.longitude);
-  const accuracyMeters =
-    value.accuracyMeters === null || value.accuracyMeters === undefined
-      ? null
-      : Number(value.accuracyMeters);
-  const capturedAt = value.capturedAt ? new Date(value.capturedAt) : new Date();
-
-  if (
-    !Number.isFinite(latitude) ||
-    !Number.isFinite(longitude) ||
-    latitude < -90 ||
-    latitude > 90 ||
-    longitude < -180 ||
-    longitude > 180
-  ) {
-    return null;
-  }
-
-  return {
-    latitude,
-    longitude,
-    accuracyMeters:
-      accuracyMeters !== null && Number.isFinite(accuracyMeters)
-        ? Math.max(0, Math.round(accuracyMeters))
-        : null,
-    capturedAt: Number.isNaN(capturedAt.getTime())
-      ? new Date().toISOString()
-      : capturedAt.toISOString(),
-  };
-};
 
 const getFirstCapturedBookingPaymentAt = (booking: BookingRecord) => {
   const timestamps = booking.payments
@@ -1113,19 +1070,14 @@ export default async function handler(req: Request) {
       // the lister must submit required pickup photos and confirm handover
       // ("handover_confirm"), then the renter must confirm receipt
       // ("handover_receive") - only that last step activates the trip.
+      // Arrival no longer captures a device location. The only consumer that
+      // could act on it compared it against the car's listed pickup pin, and
+      // that pin was retired - so the reading fed nothing, while still costing
+      // the user a location-permission prompt. The columns stay in the table:
+      // bookings that recorded one before this keep their evidence.
       const arrivalTime = new Date().toISOString();
-      const arrivalLocation = normalizeArrivalLocation(payload.arrivalLocation);
       const updatePayload: Record<string, string | number | null> = {};
       const ownArrivalField = renter ? "renter_arrived_at" : "lister_arrived_at";
-      const addLocationEvidence = (prefix: "renter" | "lister") => {
-        if (!arrivalLocation) return;
-        updatePayload[`${prefix}_arrival_latitude`] = arrivalLocation.latitude;
-        updatePayload[`${prefix}_arrival_longitude`] = arrivalLocation.longitude;
-        updatePayload[`${prefix}_arrival_accuracy_meters`] =
-          arrivalLocation.accuracyMeters;
-        updatePayload[`${prefix}_arrival_location_captured_at`] =
-          arrivalLocation.capturedAt;
-      };
 
       let bothArrivedAfterThis = false;
 
@@ -1138,7 +1090,6 @@ export default async function handler(req: Request) {
         }
         updatePayload.renter_arrived_at = arrivalTime;
         updatePayload.renter_arrival_photo_url = payload.arrivalPhotoUrl ?? null;
-        addLocationEvidence("renter");
         if (bookingRecord.lister_arrived_at) {
           bothArrivedAfterThis = true;
         }
@@ -1151,7 +1102,6 @@ export default async function handler(req: Request) {
         }
         updatePayload.lister_arrived_at = arrivalTime;
         updatePayload.lister_arrival_photo_url = payload.arrivalPhotoUrl ?? null;
-        addLocationEvidence("lister");
         if (bookingRecord.renter_arrived_at) {
           bothArrivedAfterThis = true;
         }
@@ -1170,35 +1120,8 @@ export default async function handler(req: Request) {
       const { data: bookingStateChanged, error: updateError } =
         await updateArrival(updatePayload);
 
-      let arrivalLocationStored = Boolean(arrivalLocation);
-      if (updateError) {
-        if (!arrivalLocation) throw updateError;
-
-        const fallbackPayload = Object.fromEntries(
-          Object.entries(updatePayload).filter(
-            ([key]) =>
-              !key.includes("_arrival_latitude") &&
-              !key.includes("_arrival_longitude") &&
-              !key.includes("_arrival_accuracy_meters") &&
-              !key.includes("_arrival_location_captured_at"),
-          ),
-        );
-
-        const { data: fallbackStateChanged, error: fallbackError } =
-          await updateArrival(fallbackPayload);
-
-        if (fallbackError) throw updateError;
-        if (!fallbackStateChanged) {
-          return jsonResponse(
-            {
-              error:
-                "This booking changed state before arrival could be recorded. Please refresh and try again.",
-            },
-            409,
-          );
-        }
-        arrivalLocationStored = false;
-      } else if (!bookingStateChanged) {
+      if (updateError) throw updateError;
+      if (!bookingStateChanged) {
         return jsonResponse(
           {
             error:
@@ -1216,10 +1139,6 @@ export default async function handler(req: Request) {
         details: {
           arrival_time: arrivalTime,
           has_arrival_photo: Boolean(payload.arrivalPhotoUrl),
-          has_arrival_location: Boolean(arrivalLocation),
-          arrival_location_stored: arrivalLocationStored,
-          arrival_location_accuracy_meters:
-            arrivalLocation?.accuracyMeters ?? null,
           both_arrived: bothArrivedAfterThis,
         },
       });
@@ -1228,7 +1147,7 @@ export default async function handler(req: Request) {
 
       const arrivalTitle = renter ? "Renter Arrived for Pickup" : "Lister Arrived for Pickup";
       const arrivalMessage = renter
-        ? `The renter arrived for the pickup of ${getVehicleLabel(bookingRecord)}${arrivalLocation ? " with an optional location check." : "."}`
+        ? `The renter arrived for the pickup of ${getVehicleLabel(bookingRecord)}.`
         : `The lister arrived for the pickup of ${getVehicleLabel(bookingRecord)}. Confirm your own arrival so the lister can hand over the car.`;
       await supabase.from("notifications").insert({
         user_id: counterpartyId,
@@ -1281,13 +1200,10 @@ export default async function handler(req: Request) {
 
         if (conversationTicketId) {
           const roleLabel = renter ? "Renter" : "Lister";
-          const locationLink = arrivalLocation
-            ? ` <a href="https://www.google.com/maps?q=${arrivalLocation.latitude},${arrivalLocation.longitude}">View location</a>`
-            : "";
           await supabase.from("ticket_messages").insert({
             ticket_id: conversationTicketId,
             sender_id: user.id,
-            message: `${roleLabel} arrived at pickup.${locationLink}`,
+            message: `${roleLabel} arrived at pickup.`,
           });
         }
       } catch (chatError) {

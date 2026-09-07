@@ -30,10 +30,7 @@ import { TIME_OPTIONS, formatTimeLabel } from "@/lib/timeOptions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  ArrivalPhotoCapture,
-  type ArrivalLocationEvidence,
-} from "@/components/ArrivalPhotoCapture";
+import { ArrivalPhotoCapture } from "@/components/ArrivalPhotoCapture";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import BookingPagination from "@/components/BookingPagination";
 import { formatDayCount } from "@/lib/formatCount";
@@ -634,7 +631,6 @@ export default function MyBookingsPage() {
     bookingId: string,
     action: "arrive" | "handover_receive" | "return_arrive" | "complete" | "cancel",
     arrivalPhotoUrl?: string | null,
-    arrivalLocation?: ArrivalLocationEvidence | null,
     note?: string | null,
   ) => {
     const res = await fetch("/api/booking-action", {
@@ -647,7 +643,6 @@ export default function MyBookingsPage() {
         bookingId,
         action,
         arrivalPhotoUrl,
-        arrivalLocation,
         note,
       }),
     });
@@ -766,18 +761,11 @@ export default function MyBookingsPage() {
   const handlePayFull = async (booking: BookingRow) => {
     await handleCheckout(booking, "full");
   };
-  const handleArrive = async (
-    bookingId: string,
-    arrivalLocation?: ArrivalLocationEvidence | null,
-  ) => {
+  const handleArrive = async (bookingId: string) => {
     setPayingFor(bookingId);
-    const toastId = toast.loading(
-      arrivalLocation
-        ? "Recording arrival with optional location..."
-        : "Recording arrival...",
-    );
+    const toastId = toast.loading("Recording arrival...");
     try {
-      await runBookingAction(bookingId, "arrive", null, arrivalLocation ?? null);
+      await runBookingAction(bookingId, "arrive");
       toast.success("Arrival recorded successfully!", { id: toastId });
       fetchBookings();
     } catch (err) {
@@ -805,13 +793,10 @@ export default function MyBookingsPage() {
     }
   };
 
-  const handleHandoverReceive = async (
-    bookingId: string,
-    arrivalLocation?: ArrivalLocationEvidence | null,
-  ) => {
+  const handleHandoverReceive = async (bookingId: string) => {
     setPayingFor(bookingId);
     try {
-      await runBookingAction(bookingId, "handover_receive", null, arrivalLocation ?? null);
+      await runBookingAction(bookingId, "handover_receive");
       toast.success("Trip started! You can now use the car.");
       fetchBookings();
     } catch (error) {
@@ -2585,7 +2570,7 @@ export default function MyBookingsPage() {
                           <ArrivalPhotoCapture
                             loading={payingFor === booking.id}
                             disabled={payingFor === booking.id}
-                            onConfirmArrival={(location) => handleArrive(booking.id, location)}
+                            onConfirmArrival={() => void handleArrive(booking.id)}
                           />
                           <div className="mt-2 flex items-center justify-end gap-1.5">
                             <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>
@@ -2599,7 +2584,7 @@ export default function MyBookingsPage() {
                             </span>
                           </div>
                           <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                            Your own pickup photos are optional - the lister files the required "before" report. Arrival location is optional and stored only with your consent.
+                            Your own pickup photos are optional - the lister files the required "before" report.
                           </p>
                         </div>
                       )}
@@ -2618,7 +2603,7 @@ export default function MyBookingsPage() {
                                   label="I Have Received the Car"
                                   loading={payingFor === booking.id}
                                   disabled={payingFor === booking.id}
-                                  onConfirmArrival={(location) => handleHandoverReceive(booking.id, location)}
+                                  onConfirmArrival={() => void handleHandoverReceive(booking.id)}
                                 />
                                 <div className="mt-2 flex items-center justify-end gap-1.5">
                                   <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>

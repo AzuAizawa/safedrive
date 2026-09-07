@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import { processAutomaticRefundForBooking } from "./lib/refundAutomation.js";
 import { sendUserNotificationEmail } from "./lib/email.js";
 
 export const config = {
@@ -82,7 +81,6 @@ const GRACE_MINUTES = 30;
 // from the car listing's pickup pin before a no-show refund claim is
 // diverted from instant automatic to manual admin review. Generous enough
 // to cover typical GPS accuracy plus a short walk from parking.
-const LOCATION_MISMATCH_THRESHOLD_METERS = 500;
 const REFUNDABLE = ["downpayment", "balance"];
 // Renter no-show forfeit share. Snapshot per booking on the same field the
 // short-notice cancellation policy uses (Terms 6.2) - one admin-configurable
@@ -170,46 +168,6 @@ const fetchApprovedEarlyReturn = async (
     .limit(1)
     .maybeSingle();
   return data ?? null;
-};
-
-// Haversine distance in meters between two lat/lng points.
-const distanceMeters = (
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-) => {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const earthRadiusMeters = 6371000;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * earthRadiusMeters * Math.asin(Math.sqrt(a));
-};
-
-// Compares the reporting party's own stored arrival coordinates against the
-// car listing's pickup pin. Returns true only when both exist and are within
-// LOCATION_MISMATCH_THRESHOLD_METERS - anything else (no pin set on the
-// listing, no location captured, permission denied, or a real mismatch) is
-// treated the same: not enough evidence for an instant automatic refund, so
-// the claim is routed to manual admin review instead. This never blocks the
-// underlying report/cancellation itself, only which refund path it takes.
-const isReporterLocationVerified = (
-  reporterLat: number | string | null,
-  reporterLon: number | string | null,
-  pickupLat: number | string | null,
-  pickupLon: number | string | null,
-) => {
-  const rLat = Number(reporterLat);
-  const rLon = Number(reporterLon);
-  const pLat = Number(pickupLat);
-  const pLon = Number(pickupLon);
-  if (![rLat, rLon, pLat, pLon].every(Number.isFinite)) return false;
-  return (
-    distanceMeters(rLat, rLon, pLat, pLon) <= LOCATION_MISMATCH_THRESHOLD_METERS
-  );
 };
 
 const capturedTotal = (b: BookingRow) =>
@@ -417,37 +375,21 @@ export default async function handler(req: Request) {
       }
 
       const hadPayment = capturedTotal(b) > 0;
-      const arrivalLocationVerified = isReporterLocationVerified(
-        b.renter_arrival_latitude,
-        b.renter_arrival_longitude,
-        b.cars?.pickup_latitude ?? null,
-        b.cars?.pickup_longitude ?? null,
-      );
       if (hadPayment) {
-        if (arrivalLocationVerified) {
-          await processAutomaticRefundForBooking({
-            supabase,
-            bookingId: b.id,
-            initiatedByUserId: user.id,
-            reason: "others",
-            note: `Renter reported no vehicle available at pickup${overstay ? " (previous renter overstayed)" : " (lister did not deliver)"}. Full refund.`,
-            allowedPaymentTypes: REFUNDABLE,
-            baseOrigin,
-          });
-        } else {
-          // The renter's arrival location doesn't match the car's pickup
-          // pin closely enough (or no pin/location is on file) - not enough
-          // evidence to release an automatic full refund. Route to the same
-          // manual-review path instead, still recommending the full amount
-          // since the claimed fault (lister no-show) would earn one - an
-          // admin just needs to confirm the claim first.
-          await queueManualRefundReview(
-            supabase,
-            b,
-            capturedTotal(b),
-            `Renter reported no vehicle at pickup${overstay ? " (previous renter overstayed)" : " (lister did not deliver)"}, but their arrival location could not be verified against the car's pickup pin. Recommend a full refund pending admin confirmation of the claim.`,
-          );
-        }
+        // Always manual review. This used to release an instant full refund
+        // when the renter's arrival GPS sat within 500m of the car's listed
+        // pickup pin - but that pin was retired, and arrival check-in no
+        // longer captures a location at all, so the comparison had nothing
+        // on either side to work with. Rather than keep a branch that can
+        // never be taken, the claim goes to an admin, still recommending the
+        // full amount since the claimed fault (lister no-show) would earn
+        // one; an admin just confirms the claim first.
+        await queueManualRefundReview(
+          supabase,
+          b,
+          capturedTotal(b),
+          `Renter reported no vehicle at pickup${overstay ? " (previous renter overstayed)" : " (lister did not deliver)"}. Recommend a full refund pending admin confirmation of the claim.`,
+        );
       }
 
       await supabase.from("booking_cancellations").upsert(

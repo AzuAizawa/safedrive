@@ -9,6 +9,53 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Arrival check-in no longer asks for your location
+
+User feedback: *"Bakit tinatanong yung location kapag nag click ng 'I have
+arrived'? eh kapag nag list ka na ng kotse mo may pickup ka ng nilalagyan
+ng details."*
+
+This is a **different** GPS feature from the car's pickup pin removed
+earlier — that one was set once when listing a car, this one fired on every
+arrival check-in — so the earlier removal never touched it. And removing
+the pin is exactly what broke it: the only consumer that could act on an
+arrival reading was `isReporterLocationVerified()`, which compared it
+against `cars.pickup_latitude`. With no pin on any newly listed car, its
+`every(Number.isFinite)` guard returns false every time. The app was asking
+for a location permission to feed an automation that could no longer run.
+
+Removed end to end: the geolocation call in `ArrivalPhotoCapture`, the
+`arrivalLocation` payload and `normalizeArrivalLocation()` in
+`booking-action.ts` (including the fallback retry that existed only to cope
+with those optional columns being absent), the "with an optional location
+check" notification wording, the map link auto-posted into the booking chat,
+and the consent copy on both booking pages.
+
+In `booking-incident-action.ts`, the "no car at pickup" claim now always
+goes to manual review, and the haversine helpers behind the old comparison
+are gone. That was already the effective behaviour — the instant-refund
+branch could not be reached — so this removes a dead path rather than
+changing an outcome.
+
+The `bookings.*_arrival_latitude` columns stay, and the admin dispute view
+still renders the map link for bookings that recorded one before this; its
+empty-state copy now explains why new ones never will.
+
+`scripts/booking-flow-smoke-check.mjs` asserted this feature's presence, so
+it caught the removal. Its markers now assert the opposite.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:process-logic`,
+`check:financial-logic`, `check:api-boundaries`.
+
+Files: `src/components/ArrivalPhotoCapture.tsx`, `api/booking-action.ts`,
+`api/booking-incident-action.ts`, `src/pages/MyBookingsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`,
+`src/pages/admin/AdminSupportTicketsPage.tsx`,
+`scripts/booking-flow-smoke-check.mjs`.
+
+---
+
 ## 2026-09-08 — Captured money that nobody recorded, and a renter-overlap backstop (CHAPTER 65)
 
 The last two findings from the lifecycle audit.

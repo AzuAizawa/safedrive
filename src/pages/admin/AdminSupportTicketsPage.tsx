@@ -472,7 +472,7 @@ export default function AdminSupportTicketsPage() {
                   ? `, accuracy about ${Math.round(accuracyMeters)}m`
                   : ""
               }.`
-            : "No optional location check was stored for this side."}
+            : "No location stored. Arrival check-in no longer captures one - only bookings from before that change carry this."}
         </p>
       </div>
     );

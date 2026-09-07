@@ -65,21 +65,19 @@ const checks = [
     // against that didn't exist before, which is exactly why capturing it
     // wasn't worth the complexity back then.
     file: "src/components/ArrivalPhotoCapture.tsx",
-    markers: [
+    markers: ["Confirm Arrival Now"],
+    // Arrival check-in no longer captures a device location: the only thing
+    // that consumed it compared it against the car's pickup pin, and that pin
+    // was retired, so it asked for a permission to feed nothing.
+    absentMarkers: [
+      "Confirm With Location",
+      "navigator.geolocation",
       "ArrivalLocationEvidence",
-      "navigator.geolocation.getCurrentPosition",
-      "captureLocationEvidence",
     ],
-    absentMarkers: ["Confirm With Location"],
   },
   {
     file: "api/booking-action.ts",
     markers: [
-      "arrivalLocation",
-      "normalizeArrivalLocation",
-      "arrivalLocationStored",
-      "fallbackPayload",
-      "with an optional location check",
       "getCancellationRefundPlan",
       "renterLateCancellation",
       "short_notice_partial_policy",

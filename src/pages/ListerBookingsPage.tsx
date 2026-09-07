@@ -40,10 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  ArrivalPhotoCapture,
-  type ArrivalLocationEvidence,
-} from "@/components/ArrivalPhotoCapture";
+import { ArrivalPhotoCapture } from "@/components/ArrivalPhotoCapture";
 import { Skeleton } from "@/components/ui/skeleton";
 import BookingPagination from "@/components/BookingPagination";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -759,7 +756,6 @@ export default function ListerBookingsPage() {
     bookingId: string,
     action: "accept" | "reject" | "arrive" | "handover_confirm" | "return_arrive" | "complete" | "cancel",
     arrivalPhotoUrl?: string | null,
-    arrivalLocation?: ArrivalLocationEvidence | null,
     note?: string | null,
   ) => {
     const res = await fetch("/api/booking-action", {
@@ -772,7 +768,6 @@ export default function ListerBookingsPage() {
         bookingId,
         action,
         arrivalPhotoUrl,
-        arrivalLocation,
         note,
       }),
     });
@@ -843,7 +838,7 @@ export default function ListerBookingsPage() {
     }
     setActionLoading(bookingId);
     try {
-      await runBookingAction(bookingId, "reject", null, null, rejectionReason);
+      await runBookingAction(bookingId, "reject", null, rejectionReason);
       toast.success("Booking rejected");
       setRejectingBooking(null);
       setRejectionReason("");
@@ -860,7 +855,7 @@ export default function ListerBookingsPage() {
   const handleListerCancel = async (bookingId: string) => {
     setActionLoading(bookingId);
     try {
-      await runBookingAction(bookingId, "cancel", null, null, cancelReason);
+      await runBookingAction(bookingId, "cancel", null, cancelReason);
       toast.success("Booking cancelled", {
         description: "The renter has been notified and their full refund is being processed.",
       });
@@ -876,18 +871,11 @@ export default function ListerBookingsPage() {
     setActionLoading(null);
   };
 
-  const handleArrive = async (
-    bookingId: string,
-    arrivalLocation?: ArrivalLocationEvidence | null,
-  ) => {
+  const handleArrive = async (bookingId: string) => {
     setActionLoading(bookingId);
-    const toastId = toast.loading(
-      arrivalLocation
-        ? "Recording arrival with optional location..."
-        : "Recording arrival...",
-    );
+    const toastId = toast.loading("Recording arrival...");
     try {
-      await runBookingAction(bookingId, "arrive", null, arrivalLocation ?? null);
+      await runBookingAction(bookingId, "arrive");
       toast.success("Arrival recorded successfully!", { id: toastId });
       fetchBookings();
     } catch (err) {
@@ -3175,7 +3163,7 @@ export default function ListerBookingsPage() {
                           <ArrivalPhotoCapture
                             loading={actionLoading === b.id}
                             disabled={actionLoading === b.id}
-                            onConfirmArrival={(location) => handleArrive(b.id, location)}
+                            onConfirmArrival={() => void handleArrive(b.id)}
                           />
                           {/* The pickup condition report (required for the lister) only
                               becomes the relevant next step once both parties have
@@ -3184,9 +3172,6 @@ export default function ListerBookingsPage() {
                               before arrival is even confirmed, was premature and
                               mislabeled "(optional)" even though it's mandatory by the
                               time it matters. */}
-                          <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                            Arrival location is optional and stored only with your consent.
-                          </p>
                         </div>
                       )}
 
