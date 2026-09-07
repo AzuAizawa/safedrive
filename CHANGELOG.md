@@ -9,6 +9,52 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-07 — Dormant account policy: inactivity indicator + auto-flag, manual execute
+
+Requested: a way to see how long a user account has gone unused, a
+real-world-grounded rule for when it counts dormant, a decision on whether
+crossing that line deletes automatically or notifies an admin, and an
+explicit guarantee that deleting an account never destroys booking/payment
+history needed for future financial reporting.
+
+Turned out most of this already existed. `public.anonymize_user()`
+(Chapter 26) was already the safe "delete an account" mechanism - it
+blanks PII and keeps the `profiles` row's id, so `bookings`/`payments`/
+ledger entries (none of which `CASCADE` from `profiles` - confirmed at the
+database level: `bookings.renter_id`/`owner_id` have no `ON DELETE` clause
+at all, so a real hard delete on a profile with any booking fails outright
+rather than silently cascading) are untouched. `data_retention_requests` +
+`AdminRetentionRequestsPage.tsx` was already a full human-reviewed pipeline
+ending in that same function. This chapter only adds a way to auto-FILE
+into that existing pipeline once an account has been inactive past a
+threshold - a super admin still reviews and executes, exactly like a
+user-submitted request. Nothing is ever deleted unattended.
+
+- New admin-configurable setting `dormant_account_days` (default 365 - a
+  common dormant-account threshold; changeable any time in Admin Platform
+  Settings, no redeploy).
+- New "Last Active" badge on the admin Users tab, measured from
+  `profiles.active_session_started_at` (Chapter 57, stamped at every
+  completed login) falling back to `created_at`.
+- New daily cron (`api/flag-dormant-accounts.ts` → `flag_dormant_accounts()`)
+  auto-files a `deletion` retention request for any account past the
+  threshold with no booking in progress and no existing open request -
+  it never touches bookings/payments/ledger, only queues the account for
+  review.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:api-boundaries`.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 58),
+`src/lib/accountDormancy.ts` (new), `src/lib/platformSettings.ts`,
+`src/pages/admin/AdminUsersPage.tsx`,
+`src/pages/admin/AdminPlatformSettingsPage.tsx`,
+`api/flag-dormant-accounts.ts` (new),
+`.github/workflows/scheduled-workers.yml`, `src/types/database.ts`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-07 — Lister's pickup screen no longer offers "Add pickup photos" before arrival is confirmed
 
 Reported: on the lister's pickup card, "Add pickup photos (optional)"

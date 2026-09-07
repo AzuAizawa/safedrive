@@ -109,6 +109,30 @@ export const fetchPlatformPolicyTimings = async (): Promise<PlatformPolicyTiming
   };
 };
 
+// Dormant-account threshold (Chapter 58). Days of no login activity
+// (profiles.active_session_started_at, falling back to created_at) before
+// an account is auto-flagged into the existing data-retention review queue
+// - a super admin still has to approve and execute the anonymization.
+export const DEFAULT_DORMANT_ACCOUNT_DAYS = 365;
+
+export const fetchDormantAccountDays = async (): Promise<number> => {
+  const { data, error } = await supabase
+    .from("platform_settings")
+    .select("dormant_account_days")
+    .eq("id", "default")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load dormant-account threshold:", error);
+    return DEFAULT_DORMANT_ACCOUNT_DAYS;
+  }
+
+  const days = Number(data?.dormant_account_days);
+  return Number.isFinite(days) && days >= 90 && days <= 3650
+    ? Math.round(days)
+    : DEFAULT_DORMANT_ACCOUNT_DAYS;
+};
+
 export type PlatformPricingSettings = {
   commissionRate: number;
   processingFeeRate: number;

@@ -1387,6 +1387,7 @@ export interface Database {
           lister_completion_timeout_hours: number;
           balance_deadline_hours: number;
           balance_reminder_hours_before: number;
+          dormant_account_days: number;
           contact_email: string;
           user_verification_eta_message: string;
           vehicle_verification_eta_message: string;
@@ -1406,6 +1407,7 @@ export interface Database {
           lister_completion_timeout_hours?: number;
           balance_deadline_hours?: number;
           balance_reminder_hours_before?: number;
+          dormant_account_days?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;
@@ -1425,6 +1427,7 @@ export interface Database {
           lister_completion_timeout_hours?: number;
           balance_deadline_hours?: number;
           balance_reminder_hours_before?: number;
+          dormant_account_days?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;

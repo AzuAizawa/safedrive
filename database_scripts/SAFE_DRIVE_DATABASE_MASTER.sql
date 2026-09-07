@@ -9153,4 +9153,192 @@ alter table public.security_logs
     )
   );
 
+-- ============================================================================
+-- CHAPTER 58 - Dormant account policy: inactivity indicator + auto-flag,
+-- manual execute (financial/booking data is never touched by this)
+-- ============================================================================
+-- Reported need: a way to see how long a user account has gone unused, a
+-- real-world-grounded rule for when it counts as dormant, and a decision on
+-- whether crossing that line deletes automatically or just notifies an
+-- admin. Also an explicit requirement that deleting an account must never
+-- take booking/payment history with it - that data has to survive for
+-- future financial reporting.
+--
+-- Answer, reusing what already existed rather than building a parallel
+-- system: public.anonymize_user() (Chapter 26) was already the safe
+-- "delete an account" mechanism - it blanks PII on the profiles row and
+-- keeps its id, so bookings/payments/ledger entries (none of which CASCADE
+-- from profiles - verified: bookings.renter_id/owner_id have no ON DELETE
+-- action at all, so a real hard DELETE on a profile with any booking fails
+-- outright rather than silently cascading) stay exactly as they are. It
+-- already refuses to run while the user has a booking in progress. And
+-- public.data_retention_requests + AdminRetentionRequestsPage.tsx was
+-- already a full human-reviewed pipeline (submitted -> under_review/
+-- identity_check -> approved/denied/legal_hold -> executed) that calls
+-- anonymize_user() once a super admin approves. This chapter only adds a
+-- way to auto-FILE into that same existing pipeline once an account has
+-- been inactive past a configurable threshold - a human still has to
+-- review and execute, exactly like a user-submitted request.
+--
+-- dormant_account_days defaults to 365 (12 months) - a common dormant-
+-- account threshold in the industry (Google's own inactive-account policy
+-- uses 2 years; many platforms use 6-24 months). Changeable any time via
+-- Admin Platform Settings (same propose/vote flow as balance_deadline_hours
+-- etc.), no redeploy needed. "Inactive" is measured from
+-- profiles.active_session_started_at (Chapter 57 - stamped at every fully
+-- completed login), falling back to created_at for an account that has
+-- never logged in since that column started being populated.
+
+alter table public.platform_settings
+  add column if not exists dormant_account_days integer not null default 365;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_dormant_account_days_check;
+alter table public.platform_settings
+  add constraint platform_settings_dormant_account_days_check
+  check (dormant_account_days >= 90 and dormant_account_days <= 3650);
+
+-- Extend the consensus-vote whitelist so this new key is proposable and
+-- votable through the existing super-admin flow. Every existing branch is
+-- reproduced verbatim; only the new elsif branch is added before the final
+-- "not configurable" guard.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    elsif k = 'dormant_account_days' then
+      if v < 90 or v > 3650 or v <> floor(v) then raise exception 'dormant_account_days must be a whole number 90-3650'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$$;
+
+-- Daily cron helper (api/flag-dormant-accounts.ts, CRON_SECRET): files a
+-- 'deletion' data_retention_requests row for any regular-user account whose
+-- last login predates the configured threshold, unless it already has an
+-- open request or an in-progress booking (the same status list
+-- anonymize_user() itself guards on - no point auto-filing a request that
+-- would just fail at execute time). Never touches bookings/payments/ledger
+-- - only queues the account for the existing human review pipeline.
+create or replace function public.flag_dormant_accounts()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count integer := 0;
+  v_threshold_days integer;
+  v_due_at timestamptz;
+  v_request_id uuid;
+  r record;
+begin
+  select dormant_account_days into v_threshold_days
+  from public.platform_settings where id = 'default';
+  if v_threshold_days is null then
+    v_threshold_days := 365;
+  end if;
+
+  for r in
+    select p.id, p.email,
+      coalesce(p.active_session_started_at, p.created_at) as last_active_at
+    from public.profiles p
+    where p.role = 'user'
+      and p.deleted_at is null
+      and coalesce(p.active_session_started_at, p.created_at)
+          < now() - make_interval(days => v_threshold_days)
+      and not exists (
+        select 1 from public.bookings b
+        where (b.renter_id = p.id or b.owner_id = p.id)
+          and b.status in ('confirmed', 'awaiting_payment', 'downpayment_paid', 'fully_paid', 'active')
+      )
+      and not exists (
+        select 1 from public.data_retention_requests d
+        where d.subject_user_id = p.id
+          and d.status not in ('executed', 'denied', 'cancelled')
+      )
+  loop
+    v_due_at := now() + interval '30 days';
+
+    insert into public.data_retention_requests (
+      subject_user_id, requester_email, request_type, status, request_details, due_at
+    ) values (
+      r.id,
+      coalesce(r.email, 'unknown@safedrive.invalid'),
+      'deletion',
+      'submitted',
+      'System-flagged: no login activity for '
+        || floor(extract(epoch from (now() - r.last_active_at)) / 86400)::int
+        || ' days (threshold: ' || v_threshold_days || ' days).',
+      v_due_at
+    )
+    returning id into v_request_id;
+
+    insert into public.notifications (user_id, title, message, type, link)
+    select admin.id,
+      'Dormant Account Flagged',
+      coalesce(r.email, 'This account') || ' has had no login activity for over '
+        || v_threshold_days || ' days. Review before anonymizing.',
+      'warning',
+      '/admin/retention-requests?request=' || v_request_id
+    from public.profiles admin
+    where admin.role = 'super_admin' and admin.deleted_at is null;
+
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (
+      null,
+      'dormant_account_flagged',
+      'data_retention_request',
+      v_request_id::text,
+      jsonb_build_object(
+        'subject_user_id', r.id,
+        'request_type', 'deletion',
+        'due_at', v_due_at,
+        'dormant_days_threshold', v_threshold_days
+      )
+    );
+
+    v_count := v_count + 1;
+  end loop;
+
+  return v_count;
+end;
+$$;
+revoke all on function public.flag_dormant_accounts() from public, anon, authenticated;
+
 -- End of SafeDrive chaptered database master.

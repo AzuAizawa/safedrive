@@ -14,6 +14,16 @@ import {
   type KycOcrProgress,
   type KycOcrReview,
 } from "@/lib/kycOcr";
+import {
+  daysSinceActive,
+  formatDormancy,
+  getDormancySeverity,
+  dormancySeverityClasses,
+} from "@/lib/accountDormancy";
+import {
+  DEFAULT_DORMANT_ACCOUNT_DAYS,
+  fetchDormantAccountDays,
+} from "@/lib/platformSettings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -127,9 +137,13 @@ export default function AdminUsersPage() {
   const [showLicenseRejectInput, setShowLicenseRejectInput] = useState(false);
   const [licenseRejectReasonDraft, setLicenseRejectReasonDraft] = useState("");
   const [rejectingLicense, setRejectingLicense] = useState(false);
+  const [dormantThresholdDays, setDormantThresholdDays] = useState(
+    DEFAULT_DORMANT_ACCOUNT_DAYS,
+  );
 
   useEffect(() => {
     fetchUsers();
+    void fetchDormantAccountDays().then(setDormantThresholdDays);
   }, []);
 
   useEffect(() => {
@@ -1011,6 +1025,7 @@ export default function AdminUsersPage() {
                 <TableHead>Email</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Joined</TableHead>
+                <TableHead>Last Active</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -1018,7 +1033,7 @@ export default function AdminUsersPage() {
               {filteredUsers.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={6}
                     className="text-center py-10 text-muted-foreground"
                   >
                     No users found
@@ -1074,6 +1089,23 @@ export default function AdminUsersPage() {
                     </TableCell>
                     <TableCell>
                       {format(new Date(u.created_at), "MMM d, yyyy")}
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const days = daysSinceActive(u);
+                        const severity = getDormancySeverity(
+                          days,
+                          dormantThresholdDays,
+                        );
+                        return (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-medium ${dormancySeverityClasses[severity]}`}
+                            title={`Threshold: ${dormantThresholdDays} days`}
+                          >
+                            {formatDormancy(days)}
+                          </span>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button

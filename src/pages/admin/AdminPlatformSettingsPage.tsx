@@ -40,6 +40,7 @@ type SettingsRow = {
   lister_completion_timeout_hours: number;
   balance_deadline_hours: number;
   balance_reminder_hours_before: number;
+  dormant_account_days: number;
 };
 
 type ChangeRequest = {
@@ -62,7 +63,7 @@ const FIELDS: Record<
   {
     label: string;
     hint: string;
-    unit: "%" | "PHP" | "hours";
+    unit: "%" | "PHP" | "hours" | "days";
     toDisplay: (stored: number) => string;
     fromDisplay: (input: string) => number | null;
     formatStored: (stored: number) => string;
@@ -188,6 +189,19 @@ const FIELDS: Record<
     },
     formatStored: (s) => `${Math.round(s)} h`,
   },
+  dormant_account_days: {
+    label: "Dormant account threshold",
+    hint: "Days of no login activity before a regular account is auto-flagged for the Retention Requests queue (90-3650). A super admin still has to review and execute - this only files the request. Applies live.",
+    unit: "days",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return Number.isFinite(n) && n >= 90 && n <= 3650 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} days`,
+  },
 };
 
 const FIELD_KEYS = Object.keys(FIELDS) as (keyof SettingsRow)[];
@@ -242,7 +256,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before",
+          "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days",
         )
         .eq("id", "default")
         .maybeSingle(),
