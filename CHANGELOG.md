@@ -9,6 +9,37 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-07 — Lister's pickup screen no longer offers "Add pickup photos" before arrival is confirmed
+
+Reported: on the lister's pickup card, "Add pickup photos (optional)"
+already appeared right next to "Confirm Arrival Now," before the lister
+had even confirmed arrival. Confusing on two counts: nothing to
+photograph together yet (the renter may not even be there), and it read
+"(optional)" even though the lister's pickup report is already mandatory
+by the time it actually matters.
+
+Verified the rest of the flow already worked as intended and needed no
+change: the "both arrived" block already requires a submitted pickup
+report (which is already required, not optional, for the lister -
+`TripConditionReportPage.tsx`) before "Hand Over the Car" is clickable,
+and `getNextStep()` already switches the card's "NEXT STEP" banner to
+"Hand over the car" / "Submit your pickup condition report with live
+photos..." exactly once both parties have arrived - not before.
+
+Fix: removed the premature "Add pickup photos (optional)" button and its
+tooltip from the pre-arrival block entirely; the required prompt at the
+correct time ("Submit pickup report") was already there and unaffected.
+Also renamed the trip-progress label "Renter confirmed receipt" to
+"Renter received the car" - the old wording read like an actual receipt
+(resibo), which it isn't.
+
+Verified: `tsc -b`, lint, `npm run build`, `check:alignment`,
+`check:booking-flow`.
+
+Files: `src/pages/ListerBookingsPage.tsx`.
+
+---
+
 ## 2026-09-06 — Single active session per account (newest login wins)
 
 Reported: logging into the same account from a second device (e.g. a

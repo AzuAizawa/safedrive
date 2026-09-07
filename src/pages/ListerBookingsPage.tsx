@@ -55,7 +55,6 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
-  Eye,
   XCircle,
   LayoutDashboard,
   Loader2,
@@ -3180,17 +3179,13 @@ export default function ListerBookingsPage() {
                             disabled={actionLoading === b.id}
                             onConfirmArrival={(location) => handleArrive(b.id, location)}
                           />
-                          <div className="mt-2 flex items-center justify-end gap-1.5">
-                            <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${b.id}/pickup`)}>
-                              Add pickup photos (optional)
-                            </Button>
-                            <span
-                              className="inline-flex h-7 w-7 shrink-0 cursor-help items-center justify-center rounded-md text-muted-foreground"
-                              title="Optional, but highly encouraged: if there's ever a dispute, you and the renter both need this evidence."
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                            </span>
-                          </div>
+                          {/* The pickup condition report (required for the lister) only
+                              becomes the relevant next step once both parties have
+                              arrived - see the "both arrived" block below, and
+                              getNextStep()'s "Hand over the car" step. Offering it here,
+                              before arrival is even confirmed, was premature and
+                              mislabeled "(optional)" even though it's mandatory by the
+                              time it matters. */}
                           <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
                             Arrival location is optional and stored only with your consent.
                           </p>
@@ -3295,7 +3290,7 @@ export default function ListerBookingsPage() {
                                 { label: "Renter arrived", done: Boolean(b.renter_arrived_at) },
                                 { label: "You arrived", done: Boolean(b.lister_arrived_at) },
                                 { label: "You handed over the car", done: Boolean(b.lister_handover_confirmed_at) || legacyActivation },
-                                { label: "Renter confirmed receipt", done: Boolean(b.renter_handover_received_at) || legacyActivation },
+                                { label: "Renter received the car", done: Boolean(b.renter_handover_received_at) || legacyActivation },
                                 { label: "Rental in progress", done: b.status === "active" || b.status === "completed" },
                                 { label: "You arrived for return", done: Boolean(b.lister_return_arrived_at) },
                                 { label: "Renter arrived for return", done: Boolean(b.renter_return_arrived_at) },
