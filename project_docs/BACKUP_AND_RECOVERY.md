@@ -107,10 +107,122 @@ Rules:
 
 A leaked backup is a worse outcome than having had no backup at all.
 
-## 5. Restoring
+## 5. EMERGENCY: the system is gone — recover it
 
-The restore is the part that proves the backup is real. Rehearse it; do not
-wait for an emergency to find out.
+Read this one top to bottom. It assumes the worst case: the Supabase project is
+deleted or unrecoverable. Written to be followed while stressed, so each step
+is a single action.
+
+**Before starting, breathe.** Nothing here is a race. The data is already safe
+in three places; this is only the procedure for putting it back.
+
+---
+
+### Step 1 — Get the backup in front of you
+
+From the private cloud drive, download both:
+
+- `safedrive-data-<date>.zip` — the data and files
+- `safedrive-code-<date>.bundle` — the entire code repository
+
+Extract the zip. It produces a folder named for the date it was taken.
+
+*If the development laptop still works, both are already in `backups/`. Skip
+this step.*
+
+### Step 2 — Get the code back
+
+If the laptop and GitHub are both intact, there is nothing to do — the code is
+already there.
+
+If both are gone, one command rebuilds the whole repository from the bundle,
+with every commit and branch:
+
+```bash
+git clone safedrive-code-<date>.bundle safedrive
+cd safedrive
+npm install
+```
+
+### Step 3 — Create a new Supabase project
+
+Any name. Note its **project ref** (the subdomain of its URL) and, from
+**Settings → API**, its **Project URL** and **service_role** key.
+
+### Step 4 — Rebuild the schema
+
+Run `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` in the new project's SQL
+editor. The file is ~440 KB; if the editor struggles, split it at any
+`-- CHAPTER` heading that sits **outside** a `begin;`/`commit;` block and run
+the pieces in order.
+
+Confirm before continuing:
+
+```sql
+select count(*) from information_schema.tables where table_schema = 'public';
+```
+
+Expect **43**.
+
+### Step 5 — Point the app at the new project
+
+In `.env`, replace `VITE_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` with the
+new project's values.
+
+### Step 6 — Restore the data
+
+```bash
+SAFEDRIVE_RESTORE_CONFIRM=<project-ref> node scripts/restore-safedrive.mjs backups/<date-folder>
+```
+
+Compare the row counts it prints against `manifest.json` in the same folder.
+Every booking, payment, ledger entry, photo and identity document comes back.
+
+### Step 7 — Restore the ability to sign in
+
+**This part is manual, and it is the only part that is.** Passwords and MFA
+factors live in Supabase's own `auth` schema and are not in the backup.
+
+- **Every user** signs in through **Forgot password** once. Their account, its
+  history and its verification status are all already there.
+- **The super admin** must be re-created by hand — see *"Restore a super
+  admin"* near the top of `SAFE_DRIVE_DATABASE_MASTER.sql`.
+
+### Step 8 — Redeploy
+
+Re-enter the environment variables in Vercel (names are listed in the master
+documentation) and deploy. Re-register the scheduler for the cron endpoints.
+
+---
+
+### What comes back, and what does not
+
+| Restored automatically | Needs a manual step |
+|---|---|
+| Every booking, payment and ledger entry | User passwords → password reset |
+| Every profile, with verification status | User 2FA → re-enrol |
+| Every photo, KYC document and agreement | Super admin → recreate by hand |
+| Support tickets, notifications, audit log | Vercel env vars → re-enter |
+
+The right way to read that table: **the left column cannot be recreated if it
+is lost. The right column always can.** The backup protects what is
+irreplaceable; everything else is a few minutes of typing.
+
+---
+
+## 5b. Rehearsing the restore
+
+The restore is the part that proves the backup is real. Rehearse it into a
+second free Supabase project; do not wait for an emergency to find out.
+
+**What the first rehearsal found, as an argument for doing it at all:** running
+the master SQL against a genuinely empty database had never been tried. It
+failed three times — a policy created twice with no drop, a scrub referencing a
+column that this file never creates, and, most seriously, two destructive
+one-off tools sitting in the schema path, one of which would have emptied
+`payments`, `ledger_entries`, `ledger_journals` and `bookings` unconditionally.
+All three are fixed. None of them would have surfaced in normal use, and all
+three would have surfaced during a real disaster instead.
 
 1. **Create a new Supabase project.** The free plan allows a second one on the
    same account.
