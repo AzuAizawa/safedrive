@@ -63,6 +63,7 @@ const AdminAuditTrailPage = lazyWithReload(() => import("@/pages/admin/AdminAudi
 const AdminFinancialReviewsPage = lazyWithReload(() => import("@/pages/admin/AdminFinancialReviewsPage"));
 const AdminPlatformSettingsPage = lazyWithReload(() => import("@/pages/admin/AdminPlatformSettingsPage"));
 const AdminLegalContentPage = lazyWithReload(() => import("@/pages/admin/AdminLegalContentPage"));
+const AdminAnnouncementsPage = lazyWithReload(() => import("@/pages/admin/AdminAnnouncementsPage"));
 const AdminSupportTicketsPage = lazyWithReload(() => import("@/pages/admin/AdminSupportTicketsPage"));
 const AdminGuestInquiriesPage = lazyWithReload(() => import("@/pages/admin/AdminGuestInquiriesPage"));
 const AdminSecurityLogsPage = lazyWithReload(() => import("@/pages/admin/AdminSecurityLogsPage"));
@@ -180,6 +181,7 @@ function App() {
                         <Route path="/admin/admins" element={<AdminAdminsPage />} />
                         <Route path="/admin/platform-settings" element={<AdminPlatformSettingsPage />} />
                         <Route path="/admin/legal-content" element={<AdminLegalContentPage />} />
+                        <Route path="/admin/announcements" element={<AdminAnnouncementsPage />} />
                         <Route path="/admin/financial-reviews" element={<AdminFinancialReviewsPage />} />
                         <Route path="/admin/payouts" element={<Navigate to="/admin/financial-reviews?view=payouts" replace />} />
                         <Route path="/admin/refunds" element={<Navigate to="/admin/financial-reviews?view=refunds" replace />} />

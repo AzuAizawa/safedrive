@@ -52,6 +52,7 @@ type ChangeRequest = {
   created_at: string;
   resolved_at: string | null;
   expires_at: string;
+  effective_from: string | null;
 };
 
 type VoteRow = { request_id: string; voter_id: string; vote: "approve" | "reject" };
@@ -196,6 +197,14 @@ const FIELDS: Record<
 
 const FIELD_KEYS = Object.keys(FIELDS) as (keyof SettingsRow)[];
 
+// Manila calendar date, matching how the database compares effective_from -
+// a device in another timezone must not be able to pick "today" and have the
+// server read it as yesterday.
+const manilaToday = () => {
+  const manila = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  return manila.toISOString().slice(0, 10);
+};
+
 const requiredApprovals = (superAdminCount: number) =>
   Math.max(1, Math.ceil((superAdminCount * 2) / 3));
 
@@ -224,6 +233,8 @@ export default function AdminPlatformSettingsPage() {
   const [voting, setVoting] = useState(false);
 
   const [pending, setPending] = useState<ChangeRequest | null>(null);
+  const [scheduled, setScheduled] = useState<ChangeRequest | null>(null);
+  const [effectiveFrom, setEffectiveFrom] = useState("");
   const [pendingVotes, setPendingVotes] = useState<VoteRow[]>([]);
   const [superAdminCount, setSuperAdminCount] = useState(1);
   const [history, setHistory] = useState<ChangeRequest[]>([]);
@@ -242,7 +253,7 @@ export default function AdminPlatformSettingsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [settingsRes, pendingRes, countRes, historyRes, contactRes, etaRes] = await Promise.all([
+    const [settingsRes, pendingRes, scheduledRes, countRes, historyRes, contactRes, etaRes] = await Promise.all([
       supabase
         .from("platform_settings")
         .select(
@@ -256,6 +267,11 @@ export default function AdminPlatformSettingsPage() {
         .eq("status", "pending")
         .maybeSingle(),
       supabase
+        .from("platform_setting_change_requests")
+        .select("*")
+        .eq("status", "scheduled")
+        .maybeSingle(),
+      supabase
         .from("profiles")
         .select("id", { count: "exact", head: true })
         .eq("role", "super_admin")
@@ -263,7 +279,9 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_setting_change_requests")
         .select("*")
-        .neq("status", "pending")
+        // "scheduled" is still in flight and gets its own card above, so it
+        // must not also appear in the finished-changes list.
+        .not("status", "in", "(pending,scheduled)")
         .order("resolved_at", { ascending: false })
         .limit(6),
       supabase.rpc("get_platform_contact_email"),
@@ -312,6 +330,7 @@ export default function AdminPlatformSettingsPage() {
 
     const pendingRow = (pendingRes.data as ChangeRequest | null) ?? null;
     setPending(pendingRow);
+    setScheduled((scheduledRes.data as ChangeRequest | null) ?? null);
     if (pendingRow) {
       const { data: votes } = await supabase
         .from("platform_setting_change_votes")
@@ -359,10 +378,16 @@ export default function AdminPlatformSettingsPage() {
       const { error } = await supabase.rpc("propose_platform_setting_change", {
         p_changes: draftChanges.changes,
         p_reason: reason.trim() || null,
+        p_effective_from: effectiveFrom || null,
       });
       if (error) throw error;
-      toast.success("Change proposed. Other super admins now review it.");
+      toast.success(
+        effectiveFrom
+          ? `Change proposed. Once approved it starts on ${effectiveFrom}.`
+          : "Change proposed. Other super admins now review it.",
+      );
       setReason("");
+      setEffectiveFrom("");
       await load();
     } catch (err) {
       toast.error("Could not propose the change", {
@@ -385,9 +410,11 @@ export default function AdminPlatformSettingsPage() {
       toast.success(
         data === "applied"
           ? "Threshold reached - the change is now live."
-          : data === "rejected"
-            ? "The proposal was rejected."
-            : `Vote recorded (${vote}).`,
+          : data === "scheduled"
+            ? "Approved. It will start on its chosen date."
+            : data === "rejected"
+              ? "The proposal was rejected."
+              : `Vote recorded (${vote}).`,
       );
       await load();
     } catch (err) {
@@ -411,6 +438,28 @@ export default function AdminPlatformSettingsPage() {
       await load();
     } catch (err) {
       toast.error("Could not withdraw the proposal", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setVoting(false);
+    }
+  };
+
+  // Same RPC, different row - a scheduled change is still withdrawable, which
+  // is the escape hatch if the date or the value turns out wrong before it
+  // lands.
+  const handleCancelScheduled = async () => {
+    if (!scheduled) return;
+    setVoting(true);
+    try {
+      const { error } = await supabase.rpc("cancel_platform_setting_change", {
+        p_request_id: scheduled.id,
+      });
+      if (error) throw error;
+      toast.success("Scheduled change withdrawn. Nothing will change on that date.");
+      await load();
+    } catch (err) {
+      toast.error("Could not withdraw the scheduled change", {
         description: err instanceof Error ? err.message : "Please try again.",
       });
     } finally {
@@ -512,6 +561,54 @@ export default function AdminPlatformSettingsPage() {
         </Card>
       ) : (
         <>
+          {scheduled ? (
+            <Card className="border-sky-500/40 bg-sky-500/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Clock className="h-5 w-5 text-sky-500" />
+                  Approved - starts{" "}
+                  {scheduled.effective_from ?? "on its start date"}
+                </CardTitle>
+                <CardDescription>
+                  Already approved, but deliberately not live yet. Nothing
+                  changes for anyone until that date, so a booking sitting in
+                  its pickup window right now keeps the rules it started under.
+                  {scheduled.reason ? ` · "${scheduled.reason}"` : ""}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="space-y-1 text-sm">
+                  {Object.entries(scheduled.changes).map(([key, value]) => {
+                    const field = FIELDS[key as keyof SettingsRow];
+                    return (
+                      <div key={key} className="flex flex-wrap gap-x-2">
+                        <span className="text-muted-foreground">
+                          {field ? field.label : key}:
+                        </span>
+                        <span className="font-medium">
+                          {field
+                            ? field.formatStored(Number(scheduled.snapshot[key]))
+                            : String(scheduled.snapshot[key])}
+                          {" -> "}
+                          {field ? field.formatStored(Number(value)) : String(value)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {isSuperAdmin && scheduled.proposed_by === profile?.id ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCancelScheduled()}
+                  >
+                    Withdraw before it starts
+                  </Button>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
           {pending ? (
             <Card className="border-amber-500/40 bg-amber-500/5">
               <CardHeader>
@@ -644,14 +741,30 @@ export default function AdminPlatformSettingsPage() {
 
               {isSuperAdmin && !pending ? (
                 <>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm">Reason (optional)</Label>
-                    <Input
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      maxLength={500}
-                      placeholder="Why this change is needed"
-                    />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm">Reason (optional)</Label>
+                      <Input
+                        value={reason}
+                        onChange={(e) => setReason(e.target.value)}
+                        maxLength={500}
+                        placeholder="Why this change is needed"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-sm">Start date (optional)</Label>
+                      <Input
+                        type="date"
+                        value={effectiveFrom}
+                        min={manilaToday()}
+                        onChange={(e) => setEffectiveFrom(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {effectiveFrom
+                          ? "Once approved, the change waits until this date. Anyone mid-booking today keeps the current rules."
+                          : "Leave empty to apply as soon as the vote passes. Pick a date to give people notice - pair it with an announcement."}
+                      </p>
+                    </div>
                   </div>
                   <Button
                     onClick={handlePropose}

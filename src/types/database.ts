@@ -1455,10 +1455,31 @@ export interface Database {
           changes: Json;
           snapshot: Json;
           reason: string | null;
-          status: "pending" | "applied" | "rejected" | "expired" | "cancelled";
+          status:
+            | "pending"
+            | "scheduled"
+            | "applied"
+            | "rejected"
+            | "expired"
+            | "cancelled";
           created_at: string;
           resolved_at: string | null;
           expires_at: string;
+          effective_from: string | null;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      platform_announcements: {
+        Row: {
+          id: string;
+          title: string;
+          message: string;
+          audience: "all" | "listers" | "renters";
+          recipient_count: number;
+          created_by: string;
+          created_at: string;
         };
         Insert: Record<string, never>;
         Update: Record<string, never>;
@@ -1730,8 +1751,22 @@ export interface Database {
         Returns: { start_date: string; end_date: string; category: string }[];
       };
       propose_platform_setting_change: {
-        Args: { p_changes: Json; p_reason?: string | null };
+        Args: {
+          p_changes: Json;
+          p_reason?: string | null;
+          // CHAPTER 69 - when set, an approved change waits for this date
+          // instead of applying the moment the vote passes.
+          p_effective_from?: string | null;
+        };
         Returns: string;
+      };
+      promote_scheduled_platform_setting_changes: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      send_platform_announcement: {
+        Args: { p_title: string; p_message: string; p_audience: string };
+        Returns: number;
       };
       vote_platform_setting_change: {
         Args: { p_request_id: string; p_vote: string };

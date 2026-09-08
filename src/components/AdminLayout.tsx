@@ -20,6 +20,7 @@ import {
   Moon,
   ShieldCheck,
   Bell,
+  Megaphone,
   Settings2,
   ClipboardList,
   MessageSquare,
@@ -57,6 +58,7 @@ const allNavItems: AdminNavItem[] = [
   { to: "/admin/security-logs", label: "Security Logs", icon: ShieldCheck, keys: ["security.view"] },
   { to: "/admin/admins", label: "Admin Accounts", icon: UserCheck, superAdminOnly: true },
   { to: "/admin/platform-settings", label: "Platform Settings", icon: Settings2, superAdminOnly: true },
+  { to: "/admin/announcements", label: "Announcements", icon: Megaphone, superAdminOnly: true },
   { to: "/admin/earnings", label: "Earnings", icon: Coins, superAdminOnly: true },
   { to: "/admin/financial-reviews", label: "Financial Reviews", icon: CreditCard, superAdminOnly: true },
   // Matches the page's own heading. The page was renamed to "Money Records"

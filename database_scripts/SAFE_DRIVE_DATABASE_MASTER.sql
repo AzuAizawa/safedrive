@@ -10158,5 +10158,382 @@ begin
 end;
 $validate$;
 
+-- ---------------------------------------------------------------------------
+-- CHAPTER 69 - Settings changes can start on a date, and admins can announce
+-- ---------------------------------------------------------------------------
+-- Two halves of one question: when an admin changes a rule, how does anyone
+-- find out instead of just being surprised by it?
+--
+-- Most of the answer already existed and was worth confirming before adding
+-- anything. Every money term is frozen per booking (bookings.commission,
+-- downpayment_rate_snapshot, refund_full_hours_snapshot,
+-- refund_late_renter_percent_snapshot, and bookings.balance_deadline as a real
+-- timestamp), so changing one cannot move a booking already in flight. And a
+-- live setting is read at the moment it is used, not at booking time, so a
+-- booking three months out already picks up the new value on its own.
+--
+-- That left exactly one gap: a booking sitting in its pickup window at the
+-- instant an admin flips a live timing. Hours wide, but real - the renter
+-- watching "SafeDrive waits until 12:30 AM" would refresh and see 1:00 AM.
+
+-- ---------------------------------------------------------------------------
+-- 69.1  A change can take effect on a chosen date
+-- ---------------------------------------------------------------------------
+-- Rather than snapshotting each timing per booking - a column per setting, and
+-- support having to open a booking to answer what its rule was - the change
+-- itself carries a start date. Support keeps a one-sentence answer: "from
+-- March 1 it is 60 minutes; before that, 30."
+--
+-- effective_from NULL keeps today's behaviour (apply the moment the vote
+-- passes), which has to stay available for correcting a mistake.
+
+alter table public.platform_setting_change_requests
+  add column if not exists effective_from date;
+
+alter table public.platform_setting_change_requests
+  drop constraint if exists platform_setting_change_requests_status_check;
+alter table public.platform_setting_change_requests
+  add constraint platform_setting_change_requests_status_check
+  check (status in ('pending', 'scheduled', 'applied', 'rejected', 'expired', 'cancelled'));
+
+-- At most one scheduled change at a time, mirroring the existing
+-- platform_setting_change_one_pending rule. Two overlapping schedules would
+-- each carry a snapshot taken before the other landed, so the second to apply
+-- would silently describe a state that never existed.
+create unique index if not exists platform_setting_change_one_scheduled
+  on public.platform_setting_change_requests ((status))
+  where status = 'scheduled';
+
+-- ---------------------------------------------------------------------------
+-- 69.2  Resolve: schedule instead of apply when a future date is set
+-- ---------------------------------------------------------------------------
+-- The apply block moves into its own function so the vote path and the
+-- scheduled-promotion path below cannot drift apart.
+
+create or replace function public._apply_platform_setting_change(p_request_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $apply_setting$
+declare
+  req public.platform_setting_change_requests%rowtype;
+  k text;
+begin
+  select * into req from public.platform_setting_change_requests
+    where id = p_request_id for update;
+  if not found or req.status not in ('pending', 'scheduled') then
+    return;
+  end if;
+
+  for k in select jsonb_object_keys(req.changes) loop
+    execute format(
+      'update public.platform_settings set %I = $1, updated_at = now() where id = ''default''',
+      k
+    ) using (req.changes ->> k)::numeric;
+  end loop;
+
+  update public.platform_setting_change_requests
+    set status = 'applied', resolved_at = now() where id = p_request_id;
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (req.proposed_by, 'platform_setting_change_applied', 'platform_settings',
+      p_request_id::text,
+      jsonb_build_object('changes', req.changes, 'snapshot', req.snapshot,
+        'effective_from', req.effective_from));
+end;
+$apply_setting$;
+
+create or replace function public._resolve_platform_setting_change(p_request_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $resolve_setting$
+declare
+  req public.platform_setting_change_requests%rowtype;
+  n int;
+  threshold int;
+  approvals int;
+  rejects int;
+begin
+  select * into req from public.platform_setting_change_requests
+    where id = p_request_id for update;
+  if not found or req.status <> 'pending' then
+    return coalesce(req.status, 'missing');
+  end if;
+
+  if now() > req.expires_at then
+    update public.platform_setting_change_requests
+      set status = 'expired', resolved_at = now() where id = p_request_id;
+    return 'expired';
+  end if;
+
+  select count(*) into n from public.profiles
+    where role = 'super_admin' and deleted_at is null;
+  threshold := greatest(1, ceil(n * 2.0 / 3.0)::int);
+
+  select
+    count(*) filter (where vote = 'approve'),
+    count(*) filter (where vote = 'reject')
+    into approvals, rejects
+  from public.platform_setting_change_votes where request_id = p_request_id;
+
+  if approvals >= threshold then
+    -- The vote has passed either way; the only question is when it lands.
+    if req.effective_from is not null
+       and req.effective_from > (now() at time zone 'Asia/Manila')::date then
+      update public.platform_setting_change_requests
+        set status = 'scheduled' where id = p_request_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (req.proposed_by, 'platform_setting_change_scheduled', 'platform_settings',
+          p_request_id::text,
+          jsonb_build_object('changes', req.changes, 'effective_from', req.effective_from,
+            'approvals', approvals, 'threshold', threshold, 'super_admins', n));
+      return 'scheduled';
+    end if;
+
+    perform public._apply_platform_setting_change(p_request_id);
+    return 'applied';
+  elsif (n - rejects) < threshold then
+    update public.platform_setting_change_requests
+      set status = 'rejected', resolved_at = now() where id = p_request_id;
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+      values (req.proposed_by, 'platform_setting_change_rejected', 'platform_settings',
+        p_request_id::text,
+        jsonb_build_object('changes', req.changes, 'approvals', approvals,
+          'rejects', rejects, 'threshold', threshold, 'super_admins', n));
+    return 'rejected';
+  end if;
+
+  return 'pending';
+end;
+$resolve_setting$;
+
+-- ---------------------------------------------------------------------------
+-- 69.3  Promote a scheduled change once its date arrives
+-- ---------------------------------------------------------------------------
+-- Rides the existing daily cron (api/expire-platform-setting-changes.ts), so
+-- there is no new endpoint and no new scheduler entry to register. A late cron
+-- applies the change late, which for a date-based change is harmless.
+
+create or replace function public.promote_scheduled_platform_setting_changes()
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $promote_settings$
+declare
+  r record;
+  promoted int := 0;
+begin
+  for r in
+    select id from public.platform_setting_change_requests
+    where status = 'scheduled'
+      and effective_from <= (now() at time zone 'Asia/Manila')::date
+    order by effective_from
+  loop
+    perform public._apply_platform_setting_change(r.id);
+    promoted := promoted + 1;
+  end loop;
+  return promoted;
+end;
+$promote_settings$;
+
+-- ---------------------------------------------------------------------------
+-- 69.4  Propose now accepts a start date
+-- ---------------------------------------------------------------------------
+-- Also refuses while a scheduled change is waiting: its snapshot was taken
+-- before that one lands, so a second proposal would describe a state that will
+-- not exist by the time anyone votes on it.
+
+create or replace function public.propose_platform_setting_change(
+  p_changes jsonb, p_reason text default null, p_effective_from date default null
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $propose_setting$
+declare
+  new_id uuid;
+  today_manila date := (now() at time zone 'Asia/Manila')::date;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can propose a settings change';
+  end if;
+  if exists (select 1 from public.platform_setting_change_requests where status = 'pending') then
+    raise exception 'Another settings change is already pending review';
+  end if;
+  if exists (select 1 from public.platform_setting_change_requests where status = 'scheduled') then
+    raise exception 'A scheduled settings change is already waiting for its start date';
+  end if;
+  if p_effective_from is not null then
+    if p_effective_from < today_manila then
+      raise exception 'A start date cannot be in the past';
+    end if;
+    if p_effective_from > today_manila + 180 then
+      raise exception 'A start date must be within 180 days';
+    end if;
+  end if;
+  perform public.validate_platform_setting_change(p_changes);
+
+  insert into public.platform_setting_change_requests
+      (proposed_by, changes, snapshot, reason, effective_from, expires_at)
+    values (auth.uid(), p_changes, public.platform_settings_snapshot(),
+      nullif(trim(p_reason), ''),
+      p_effective_from,
+      -- The 7-day voting deadline must never fall before the start date, or a
+      -- change approved for next month would expire before it could land.
+      greatest(now() + interval '7 days',
+               coalesce(p_effective_from::timestamptz + interval '1 day', now())))
+    returning id into new_id;
+
+  insert into public.platform_setting_change_votes (request_id, voter_id, vote)
+    values (new_id, auth.uid(), 'approve');
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'platform_setting_change_proposed', 'platform_settings',
+      new_id::text, jsonb_build_object('changes', p_changes, 'effective_from', p_effective_from));
+
+  perform public._resolve_platform_setting_change(new_id);
+  return new_id;
+end;
+$propose_setting$;
+
+-- A scheduled change can still be withdrawn - the escape hatch if the date or
+-- the value turns out wrong before it lands.
+create or replace function public.cancel_platform_setting_change(p_request_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $cancel_setting$
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can cancel a proposal';
+  end if;
+  update public.platform_setting_change_requests
+    set status = 'cancelled', resolved_at = now()
+    where id = p_request_id and status in ('pending', 'scheduled')
+      and proposed_by = auth.uid();
+  if not found then
+    raise exception 'Only the proposer can cancel an open or scheduled proposal';
+  end if;
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'platform_setting_change_cancelled', 'platform_settings',
+      p_request_id::text, '{}'::jsonb);
+end;
+$cancel_setting$;
+
+revoke all on function public._apply_platform_setting_change(uuid) from public, anon, authenticated;
+revoke all on function public.promote_scheduled_platform_setting_changes() from public, anon, authenticated;
+grant execute on function public.propose_platform_setting_change(jsonb, text, date) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 69.5  Announcements
+-- ---------------------------------------------------------------------------
+-- There was no broadcast mechanism of any kind. The admin "Notifications" page
+-- is only the admin's own inbox. So the Terms could be rewritten through Admin
+-- Legal Content and nobody would ever learn of it - a larger gap than any
+-- settings change.
+--
+-- No new user-facing surface is needed: notifications already drives the bell
+-- in DashboardLayout (with a realtime subscription, so a new row appears
+-- without a refresh) and the Notifications page. An announcement is just a row
+-- per recipient in the table every other alert already uses.
+--
+-- Bell only, no email. sendUserNotificationEmail sends one address per call
+-- through Resend - 500 users means 500 sequential calls, which times out
+-- inside one request, and a free-tier daily cap would truncate the send
+-- anyway. Doing email properly needs a drain-in-batches queue; that is its own
+-- piece of work, for when the account's real Resend limit is known.
+
+create table if not exists public.platform_announcements (
+  id uuid primary key default gen_random_uuid(),
+  title text not null check (char_length(btrim(title)) between 1 and 120),
+  message text not null check (char_length(btrim(message)) between 1 and 2000),
+  audience text not null check (audience in ('all', 'listers', 'renters')),
+  recipient_count integer not null default 0,
+  created_by uuid not null references public.profiles(id) on delete restrict,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists platform_announcements_created_at_idx
+  on public.platform_announcements (created_at desc);
+
+alter table public.platform_announcements enable row level security;
+
+drop policy if exists "Staff read announcements" on public.platform_announcements;
+create policy "Staff read announcements" on public.platform_announcements
+  for select using (public.is_admin());
+
+-- Audience is decided by what the account actually IS, never by
+-- profiles.is_lister - that column is a per-session UI mode flag reset to
+-- false on every sign-out (see src/lib/listerMode.ts), so targeting it would
+-- mean "whoever happens to be viewing the lister nav right now."
+-- A lister is someone who owns a car.
+create or replace function public.send_platform_announcement(
+  p_title text, p_message text, p_audience text
+) returns integer
+language plpgsql
+security definer
+set search_path = public
+as $announce$
+declare
+  clean_title text := btrim(coalesce(p_title, ''));
+  clean_message text := btrim(coalesce(p_message, ''));
+  new_id uuid;
+  sent integer := 0;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can send an announcement';
+  end if;
+  if char_length(clean_title) = 0 or char_length(clean_title) > 120 then
+    raise exception 'Title must be 1-120 characters';
+  end if;
+  if char_length(clean_message) = 0 or char_length(clean_message) > 2000 then
+    raise exception 'Message must be 1-2000 characters';
+  end if;
+  if p_audience not in ('all', 'listers', 'renters') then
+    raise exception 'Audience must be all, listers or renters';
+  end if;
+
+  insert into public.platform_announcements (title, message, audience, created_by)
+    values (clean_title, clean_message, p_audience, auth.uid())
+    returning id into new_id;
+
+  with recipients as (
+    select p.id
+    from public.profiles p
+    where p.deleted_at is null
+      and p.role = 'user'
+      and (
+        p_audience = 'all'
+        or (p_audience = 'listers'
+            and exists (select 1 from public.cars c where c.owner_id = p.id))
+        or (p_audience = 'renters'
+            and not exists (select 1 from public.cars c where c.owner_id = p.id))
+      )
+  ), inserted as (
+    insert into public.notifications (user_id, title, message, type, link)
+    select r.id, clean_title, clean_message, 'announcement', '/notifications'
+    from recipients r
+    returning 1
+  )
+  select count(*) into sent from inserted;
+
+  update public.platform_announcements
+    set recipient_count = sent where id = new_id;
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'platform_announcement_sent', 'platform_announcements',
+      new_id::text,
+      jsonb_build_object('audience', p_audience, 'recipients', sent, 'title', clean_title));
+
+  return sent;
+end;
+$announce$;
+
+grant execute on function public.send_platform_announcement(text, text, text) to authenticated;
 
 -- End of SafeDrive chaptered database master.

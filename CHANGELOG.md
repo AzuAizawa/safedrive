@@ -9,6 +9,73 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — A settings change can start on a date, and admins can announce (CHAPTER 69)
+
+Both halves of one question: when an admin changes a rule, how does anyone find
+out instead of just being surprised by it?
+
+**Most of it was already handled**, which was worth confirming before adding
+anything. Every money term is frozen per booking — `bookings.commission`,
+`downpayment_rate_snapshot`, `refund_full_hours_snapshot`,
+`refund_late_renter_percent_snapshot`, and `bookings.balance_deadline` as a real
+timestamp — so changing one cannot move a booking already in flight. And a live
+setting is read at the moment it is used, not at booking time, so a booking
+three months out already picks up the new value on its own.
+
+That left exactly one gap: a booking sitting in its pickup window at the instant
+an admin flips a live timing. Hours wide, but real — the renter watching
+"SafeDrive waits until 12:30 AM" would refresh and see 1:00 AM.
+
+**Start dates.** `platform_setting_change_requests.effective_from`. Approved with
+a date, a change sits at `status='scheduled'` and lands when the Manila date
+arrives; left empty it applies the moment the vote passes, which has to stay
+available for correcting a mistake. Promotion rides the existing daily
+`expire-platform-setting-changes` cron, so there is no new endpoint and no new
+scheduler entry — a late run applies it late, harmless for a date-based change.
+
+Chosen over snapshotting each timing per booking: no column per setting, and
+support keeps a one-sentence answer — "from March 1 it is 60 minutes; before
+that, 30" — instead of opening each booking to find out what its rule was. The
+apply step moved into `_apply_platform_setting_change` so the vote path and the
+promotion path cannot drift. Guarded on both ends: at most one scheduled change
+at a time (`platform_setting_change_one_scheduled`, same reasoning as the
+existing one-pending rule — two overlapping schedules each carry a snapshot
+taken before the other landed), and the 7-day voting deadline is extended past
+the start date so a change approved for next month cannot expire before it
+lands. A scheduled change is still withdrawable.
+
+**Announcements.** There was no broadcast mechanism of any kind — the admin
+"Notifications" page is only the admin's own inbox. So the Terms could be
+rewritten through Admin Legal Content and nobody would ever learn of it, a
+larger gap than any settings change. New `/admin/announcements`: title, message,
+audience, send.
+
+No new user-facing surface was needed. `send_platform_announcement` writes one
+`notifications` row per recipient, landing in the bell users already watch —
+realtime-subscribed in `DashboardLayout`, so it appears without a refresh.
+
+Audience is `all`, `listers` (owns at least one car) or `renters` (owns none) —
+deliberately **not** `profiles.is_lister`, which is a per-session UI mode flag
+reset to false on every sign-out. Targeting that would have meant "whoever
+happens to be viewing the lister nav right now."
+
+**Bell only, no email, for a specific reason rather than a preference.**
+`sendUserNotificationEmail` sends one address per Resend call: 500 users is 500
+sequential calls, which times out inside one request, and a free-tier daily cap
+would truncate the send partway through anyway. Doing it properly needs a queue
+that the existing scheduler drains in batches, leaning on the `idempotencyKey`
+dedupe already in `email.ts`. That is its own piece of work, for when the
+account's real Resend limit is known. The bell needs none of it.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 69),
+`src/pages/admin/AdminAnnouncementsPage.tsx` (new),
+`api/expire-platform-setting-changes.ts`,
+`src/pages/admin/AdminPlatformSettingsPage.tsx`, `src/App.tsx`,
+`src/components/AdminLayout.tsx`, `src/types/database.ts`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-08 — Subscriptions kicked listers out of Lister Mode, then blamed them for it
 
 Reported: a verified account in Lister Mode opens **Subscription & Billing**,
