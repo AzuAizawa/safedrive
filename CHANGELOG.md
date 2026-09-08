@@ -9,6 +9,46 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Three statistics that change a decision, and one stale label
+
+Answering "what analytics actually belong here" by adding only figures that
+change something someone does. Nothing new is recorded — all three read
+columns that already exist.
+
+**Admin → Earnings, two new sections.** *Most booked car types* groups
+completed bookings by `car_models.body_type` (the admin-managed catalog
+column), so recruiting is aimed at what renters book. *Cars listed vs
+bookings, by area* puts both counts side by side per region — the region
+segment of `cars.location`, split the same way `MyVehiclesPage` already
+splits it. The row that matters is a region with cars and zero bookings, so
+those rows render amber rather than being sorted out of sight. "Cars listed"
+uses `status in (approved, active)`, the identical filter
+`BrowseCarsPage.tsx:180` uses, so the number is what a renter can really find
+— not a wider internal count that would flatter the comparison.
+
+**Lister → Bookings, earnings per car.** A lister could see their total
+released but not *which* car produced it. The new list shows completed trips
+and amount earned per car, highest first, computed from the bookings and
+payout logs the page already loads. It informs the one recurring decision a
+lister makes: re-price a car that never books, or take it down. A car showing
+trips but PHP 0 is a payout not yet released, and the caption says so rather
+than leaving it looking like a bug.
+
+**The sidebar still said the old name.** The page was renamed to *Money
+Records*; `AdminLayout.tsx` still linked to it as *Financial Ledger*, so the
+menu and the page disagreed. Fixed — that finishes the rename.
+
+Deliberately not added: renter statistics (a renter makes no decision a
+dashboard informs), signup/visit charts (no tracking exists and no decision
+attached), and utilisation or revenue-per-user (real metrics for a company
+with an operations team, jargon to explain at defense here). No SQL chapter —
+no schema change.
+
+Files: `src/pages/admin/AdminEarningsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`, `src/components/AdminLayout.tsx`.
+
+---
+
 ## 2026-09-08 — Super admins are never IP-blocked, and account owners get told
 
 Two gaps in the IP blocking shipped an hour earlier, found by comparing it

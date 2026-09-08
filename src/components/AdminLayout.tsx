@@ -59,7 +59,10 @@ const allNavItems: AdminNavItem[] = [
   { to: "/admin/platform-settings", label: "Platform Settings", icon: Settings2, superAdminOnly: true },
   { to: "/admin/earnings", label: "Earnings", icon: Coins, superAdminOnly: true },
   { to: "/admin/financial-reviews", label: "Financial Reviews", icon: CreditCard, superAdminOnly: true },
-  { to: "/admin/financial-ledger", label: "Financial Ledger", icon: ClipboardList, superAdminOnly: true },
+  // Matches the page's own heading. The page was renamed to "Money Records"
+  // to get the accounting vocabulary out of the admin's way; this label was
+  // missed, so the menu and the screen disagreed.
+  { to: "/admin/financial-ledger", label: "Money Records", icon: ClipboardList, superAdminOnly: true },
   { to: "/admin/reconciliation", label: "Reconciliation", icon: ShieldCheck, superAdminOnly: true },
   // Named for what it actually is: Data Privacy Act request handling (a
   // person asking for their data, or asking to be deleted), on a 30-day

@@ -1641,6 +1641,43 @@ export default function ListerBookingsPage() {
     [bookings, completedPayouts, getApparentStatus],
   );
 
+  // Which car actually earns. The total released is already shown, but not
+  // where it came from - and that is the one recurring decision a lister
+  // makes: drop the price on a car nobody books, or take it off the platform.
+  // Built from state the page already holds; no extra query.
+  const earningsPerCar = useMemo(() => {
+    const payoutByBooking = new Map(
+      completedPayouts.map((payment) => [
+        payment.booking_id,
+        Math.abs(Number(payment.amount || 0)),
+      ]),
+    );
+
+    const perCar = new Map<
+      string,
+      { label: string; plate: string; trips: number; earned: number }
+    >();
+
+    bookings.forEach((booking) => {
+      if (getApparentStatus(booking) !== "completed") return;
+      const key = booking.car_id;
+      const existing =
+        perCar.get(key) ?? {
+          label: `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name}`,
+          plate: booking.cars.plate_number,
+          trips: 0,
+          earned: 0,
+        };
+      existing.trips += 1;
+      existing.earned += payoutByBooking.get(booking.id) ?? 0;
+      perCar.set(key, existing);
+    });
+
+    return Array.from(perCar.values()).sort(
+      (a, b) => b.earned - a.earned || b.trips - a.trips,
+    );
+  }, [bookings, completedPayouts, getApparentStatus]);
+
   const totalPayoutReleased = useMemo(
     () =>
       completedPayouts.reduce(
@@ -2204,6 +2241,36 @@ export default function ListerBookingsPage() {
                 </p>
               </div>
             </div>
+
+            {earningsPerCar.length > 0 && (
+              <div className="rounded-lg border border-border/60 p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Earnings per car
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Completed trips only. A car with trips but no amount yet is
+                  waiting for its payout to be released.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {earningsPerCar.map((car) => (
+                    <div
+                      key={`${car.label}-${car.plate}`}
+                      className="flex items-center justify-between gap-3 border-b border-border/40 pb-2 last:border-0 last:pb-0"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{car.label}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {car.plate} · {car.trips} {car.trips === 1 ? "trip" : "trips"}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-sm font-semibold">
+                        PHP {car.earned.toLocaleString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {payoutLogsLoading ? (
               <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">

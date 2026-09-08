@@ -38,7 +38,13 @@ type LedgerEntryRow = {
   debit_centavos: number;
 };
 type JournalRow = { id: string; effective_at: string };
-type BookingRow = { commission: number | string | null; status: string; start_date: string };
+type BookingRow = {
+  commission: number | string | null;
+  status: string;
+  start_date: string;
+  cars: { location: string | null; car_models: { body_type: string | null } | null } | null;
+};
+type CarRow = { location: string | null; status: string };
 type SubscriptionRow = { amount_centavos: number | null; paid_at: string | null };
 
 type MonthBucket = { key: string; label: string; commission: number; subscription: number };
@@ -48,12 +54,13 @@ export default function AdminEarningsPage() {
   const [entries, setEntries] = useState<LedgerEntryRow[]>([]);
   const [journals, setJournals] = useState<JournalRow[]>([]);
   const [bookings, setBookings] = useState<BookingRow[]>([]);
+  const [cars, setCars] = useState<CarRow[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRow[]>([]);
   const [truncated, setTruncated] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [entryResult, journalResult, bookingResult, subscriptionResult] =
+    const [entryResult, journalResult, bookingResult, carResult, subscriptionResult] =
       await Promise.all([
         supabase
           .from("ledger_entries")
@@ -63,8 +70,20 @@ export default function AdminEarningsPage() {
         supabase.from("ledger_journals").select("id, effective_at").limit(ROW_LIMIT),
         supabase
           .from("bookings")
-          .select("commission, status, start_date")
+          // body_type and the car's location come along so the demand
+          // sections below need no second trip - both are columns that
+          // already exist, nothing new is being recorded.
+          .select(
+            "commission, status, start_date, cars(location, car_models(body_type))",
+          )
           .eq("status", "completed")
+          .limit(ROW_LIMIT),
+        supabase
+          // Every listed car, to sit beside the booking counts per region.
+          // A region with cars and no bookings is the finding that matters.
+          .from("cars")
+          .select("location, status")
+          .in("status", ["approved", "active"])
           .limit(ROW_LIMIT),
         supabase
           .from("subscriptions")
@@ -74,7 +93,11 @@ export default function AdminEarningsPage() {
       ]);
 
     const error =
-      entryResult.error || journalResult.error || bookingResult.error || subscriptionResult.error;
+      entryResult.error ||
+      journalResult.error ||
+      bookingResult.error ||
+      carResult.error ||
+      subscriptionResult.error;
     if (error) {
       toast.error("Earnings could not be loaded", { description: error.message });
       setLoading(false);
@@ -84,16 +107,19 @@ export default function AdminEarningsPage() {
     const entryRows = (entryResult.data ?? []) as LedgerEntryRow[];
     const journalRows = (journalResult.data ?? []) as JournalRow[];
     const bookingRows = (bookingResult.data ?? []) as BookingRow[];
+    const carRows = (carResult.data ?? []) as CarRow[];
     const subscriptionRows = (subscriptionResult.data ?? []) as SubscriptionRow[];
 
     setEntries(entryRows);
     setJournals(journalRows);
     setBookings(bookingRows);
+    setCars(carRows);
     setSubscriptions(subscriptionRows);
     setTruncated(
       entryRows.length >= ROW_LIMIT ||
         journalRows.length >= ROW_LIMIT ||
         bookingRows.length >= ROW_LIMIT ||
+        carRows.length >= ROW_LIMIT ||
         subscriptionRows.length >= ROW_LIMIT,
     );
     setLoading(false);
@@ -190,6 +216,55 @@ export default function AdminEarningsPage() {
       peakDayCount: dayCounts[peakDayIndex] ?? 0,
     };
   }, [entries, journals, bookings, subscriptions]);
+
+  // What renters are actually booking, and where. Both read columns that
+  // already exist - car_models.body_type from the admin catalog, and the
+  // region segment of cars.location, which is stored as
+  // "Region - City - Specific" (same split MyVehiclesPage does).
+  const regionOf = (location: string | null) =>
+    (location ?? "").split(" - ")[0]?.trim() || "Not set";
+
+  const demand = useMemo(() => {
+    const byType = new Map<string, number>();
+    const byRegion = new Map<string, number>();
+
+    bookings.forEach((booking) => {
+      const type = booking.cars?.car_models?.body_type?.trim() || "Not set";
+      byType.set(type, (byType.get(type) ?? 0) + 1);
+      const region = regionOf(booking.cars?.location ?? null);
+      byRegion.set(region, (byRegion.get(region) ?? 0) + 1);
+    });
+
+    const listedByRegion = new Map<string, number>();
+    cars.forEach((car) => {
+      const region = regionOf(car.location);
+      listedByRegion.set(region, (listedByRegion.get(region) ?? 0) + 1);
+    });
+
+    // Every region that has EITHER a car or a booking. A region holding cars
+    // with zero bookings is the whole reason this section exists, so it must
+    // not be dropped for having no bookings.
+    const regionNames = Array.from(
+      new Set([...listedByRegion.keys(), ...byRegion.keys()]),
+    );
+
+    const sortDesc = (map: Map<string, number>) =>
+      Array.from(map.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count);
+
+    return {
+      types: sortDesc(byType),
+      regions: regionNames
+        .map((name) => ({
+          label: name,
+          listed: listedByRegion.get(name) ?? 0,
+          booked: byRegion.get(name) ?? 0,
+        }))
+        .sort((a, b) => b.booked - a.booked || b.listed - a.listed),
+      totalListed: cars.length,
+    };
+  }, [bookings, cars]);
 
   const chartMax = Math.max(
     1,
@@ -380,6 +455,81 @@ export default function AdminEarningsPage() {
             </div>
           </section>
 
+          <section className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border bg-card p-5">
+              <h2 className="font-semibold">Most booked car types</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Completed bookings, counted by the kind of vehicle. Tells you
+                what to look for when recruiting more cars.
+              </p>
+              {demand.types.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No completed bookings yet.
+                </p>
+              ) : (
+                <div className="mt-4 space-y-2">
+                  {demand.types.map((row) => (
+                    <div key={row.label} className="flex items-center gap-3">
+                      <span className="w-28 shrink-0 text-sm">{row.label}</span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary/70"
+                          style={{
+                            width: `${(row.count / demand.types[0].count) * 100}%`,
+                          }}
+                        />
+                      </div>
+                      <span className="w-16 shrink-0 text-right text-sm font-medium">
+                        {row.count} {row.count === 1 ? "trip" : "trips"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border bg-card p-5">
+              <h2 className="font-semibold">Cars listed vs bookings, by area</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {demand.totalListed} car{demand.totalListed === 1 ? "" : "s"}{" "}
+                listed. An area with cars but no bookings is the one to look at
+                - the cars are there and nobody is renting them.
+              </p>
+              {demand.regions.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No cars listed yet.
+                </p>
+              ) : (
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="py-2">Area</th>
+                        <th className="text-right">Cars listed</th>
+                        <th className="text-right">Bookings</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {demand.regions.map((row) => (
+                        <tr key={row.label} className="border-b border-border/40">
+                          <td className="py-2">{row.label}</td>
+                          <td className="text-right">{row.listed}</td>
+                          <td
+                            className={`text-right font-medium ${
+                              row.listed > 0 && row.booked === 0 ? "text-amber-600" : ""
+                            }`}
+                          >
+                            {row.booked}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </section>
+
           <section className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
             <h2 className="font-semibold text-foreground">How these numbers are counted</h2>
             <ul className="mt-2 space-y-1.5">
@@ -404,6 +554,11 @@ export default function AdminEarningsPage() {
               <li>
                 <strong className="text-foreground">Busiest periods</strong> - counted
                 from completed bookings by the date the rental starts.
+              </li>
+              <li>
+                <strong className="text-foreground">Car types and areas</strong> -
+                also from completed bookings. The area is the region chosen on the
+                listing. A car with no area set is grouped under "Not set".
               </li>
             </ul>
             <p className="mt-3">
