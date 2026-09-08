@@ -1,5 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
-import { runBookingCompletionSideEffects } from "./lib/bookingCompletion.js";
+import {
+  fetchNoShowGraceMinutes,
+  runBookingCompletionSideEffects,
+} from "./lib/bookingCompletion.js";
 import {
   createManualRefundReview,
   getCancellationRefundPlan,
@@ -7,7 +10,7 @@ import {
   type RefundableBooking,
 } from "./lib/cancellationRefundPlan.js";
 import { sendUserNotificationEmail } from "./lib/email.js";
-import { fetchNoShowGraceMinutes } from "./lib/noShowGrace.js";
+
 
 export const config = {
   runtime: "edge",
