@@ -192,8 +192,18 @@ const getActorEmail = (log: SecurityLog) => {
   );
 };
 
+type BlockedIp = {
+  ip_address: string;
+  reason: string;
+  blocked_by: string | null;
+  created_at: string;
+  expires_at: string | null;
+};
+
 export default function AdminSecurityLogsPage() {
   const [logs, setLogs] = useState<SecurityLog[]>([]);
+  const [blockedIps, setBlockedIps] = useState<BlockedIp[]>([]);
+  const [blockingIp, setBlockingIp] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<(typeof ROLE_FILTERS)[number]["value"]>("all");
@@ -202,6 +212,74 @@ export default function AdminSecurityLogsPage() {
   );
   const [toDateTime, setToDateTime] = useState(toLocalDateTimeValue(new Date()));
   const [currentPage, setCurrentPage] = useState(1);
+
+  const loadBlockedIps = async () => {
+    const { data, error } = await supabase
+      .from("blocked_ips")
+      .select("ip_address, reason, blocked_by, created_at, expires_at")
+      .order("created_at", { ascending: false });
+    // Before CHAPTER 67 is run the table does not exist. Fail quiet rather
+    // than throwing an error banner over the whole page.
+    if (!error) setBlockedIps((data ?? []) as BlockedIp[]);
+  };
+
+  useEffect(() => {
+    void loadBlockedIps();
+  }, []);
+
+  // An address is blocked only while it has no expiry or the expiry is still
+  // in the future - matches what api/lib/ipBlock.ts enforces.
+  const activeBlocks = useMemo(
+    () =>
+      blockedIps.filter(
+        (row) => !row.expires_at || new Date(row.expires_at).getTime() > Date.now(),
+      ),
+    [blockedIps],
+  );
+  const blockedSet = useMemo(
+    () => new Set(activeBlocks.map((row) => row.ip_address)),
+    [activeBlocks],
+  );
+
+  const blockIp = async (ip: string) => {
+    setBlockingIp(ip);
+    try {
+      // No expiry on a manual block: an admin who blocked deliberately
+      // decides when it ends. Automatic blocks are the ones that expire.
+      const { error } = await supabase.from("blocked_ips").upsert(
+        { ip_address: ip, reason: "Blocked manually from Security Logs", expires_at: null },
+        { onConflict: "ip_address" },
+      );
+      if (error) throw error;
+      toast.success(`${ip} blocked`, {
+        description:
+          "They can still sign in, but every booking, payment and report request from this address is refused.",
+      });
+      await loadBlockedIps();
+    } catch (error) {
+      toast.error("Could not block this address", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setBlockingIp(null);
+    }
+  };
+
+  const unblockIp = async (ip: string) => {
+    setBlockingIp(ip);
+    try {
+      const { error } = await supabase.from("blocked_ips").delete().eq("ip_address", ip);
+      if (error) throw error;
+      toast.success(`${ip} unblocked`);
+      await loadBlockedIps();
+    } catch (error) {
+      toast.error("Could not unblock this address", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setBlockingIp(null);
+    }
+  };
 
   useEffect(() => {
     const fetchLogs = async () => {
@@ -334,6 +412,46 @@ export default function AdminSecurityLogsPage() {
           admin-readable.
         </p>
       </div>
+
+      {activeBlocks.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Blocked addresses</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              A blocked address can still sign in - that runs on Supabase, which
+              this app does not sit in front of. What it cannot do is book, pay,
+              check in, or file a report: every one of those is refused.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {activeBlocks.map((row) => (
+              <div
+                key={row.ip_address}
+                className="flex flex-col gap-2 rounded-lg border bg-card p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="font-mono text-sm">{row.ip_address}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {row.reason}
+                    {row.blocked_by ? " · blocked by an admin" : " · automatic"}
+                    {row.expires_at
+                      ? ` · expires ${new Date(row.expires_at).toLocaleString()}`
+                      : " · no expiry"}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={blockingIp === row.ip_address}
+                  onClick={() => void unblockIp(row.ip_address)}
+                >
+                  Unblock
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="pb-4">
@@ -497,7 +615,28 @@ export default function AdminSecurityLogsPage() {
                               String(log.auth_method ?? details.method ?? "System")}
                           </TableCell>
                           <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
-                            {log.ip_address ?? "—"}
+                            {log.ip_address ? (
+                              <span className="flex items-center gap-2">
+                                {log.ip_address}
+                                {blockedSet.has(log.ip_address) ? (
+                                  <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500">
+                                    blocked
+                                  </span>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 px-2 text-[10px]"
+                                    disabled={blockingIp === log.ip_address}
+                                    onClick={() => void blockIp(log.ip_address as string)}
+                                  >
+                                    Block
+                                  </Button>
+                                )}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
                           </TableCell>
                           <TableCell
                             className="text-xs text-muted-foreground"

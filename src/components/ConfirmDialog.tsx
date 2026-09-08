@@ -19,6 +19,10 @@ type ConfirmDialogProps = {
   cancelText?: string;
   destructive?: boolean;
   isLoading?: boolean;
+  // Lets a caller gate the confirm button on something the dialog itself
+  // cannot know - the typed-email check on account deletion, for instance.
+  // Optional and defaults to enabled, so existing callers are unaffected.
+  confirmDisabled?: boolean;
   children?: ReactNode;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
@@ -32,6 +36,7 @@ export default function ConfirmDialog({
   cancelText = "Cancel",
   destructive = false,
   isLoading = false,
+  confirmDisabled = false,
   children,
   onConfirm,
   onCancel,
@@ -72,7 +77,7 @@ export default function ConfirmDialog({
               onClick={() => {
                 void onConfirm();
               }}
-              disabled={isLoading}
+              disabled={isLoading || confirmDisabled}
             >
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {confirmText}

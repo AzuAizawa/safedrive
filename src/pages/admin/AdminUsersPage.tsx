@@ -58,6 +58,7 @@ import {
   ZoomIn,
   KeyRound,
   Smartphone,
+  Trash2,
 } from "lucide-react";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { toast } from "sonner";
@@ -105,6 +106,14 @@ export default function AdminUsersPage() {
   const [blockReason, setBlockReason] = useState("");
   const [blockDurationHours, setBlockDurationHours] = useState("24");
   const [showPasswordResetInput, setShowPasswordResetInput] = useState(false);
+  // Two-step delete. The first dialog explains what is destroyed; the second
+  // will not enable its button until the admin types the account's own email.
+  // A fixed phrase ("delete user") would become muscle memory and would not
+  // catch having the wrong profile open - the email forces you to look at who
+  // you are actually erasing.
+  const [showDeleteWarning, setShowDeleteWarning] = useState(false);
+  const [showDeleteTypeConfirm, setShowDeleteTypeConfirm] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
   const [showAuthenticatorResetConfirm, setShowAuthenticatorResetConfirm] =
     useState(false);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
@@ -967,6 +976,46 @@ export default function AdminUsersPage() {
       setShowAuthenticatorResetConfirm(false);
     } catch (error) {
       toast.error("Authenticator reset failed", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const closeDeleteDialogs = () => {
+    setShowDeleteWarning(false);
+    setShowDeleteTypeConfirm(false);
+    setDeleteConfirmEmail("");
+  };
+
+  // Reuses public.anonymize_user() - the same routine the Privacy Requests
+  // queue runs. It is super-admin gated in SQL, writes its own audit_log row
+  // even without a linked request, and returns a report of what it touched.
+  const handleAnonymizeUser = async () => {
+    if (!selectedUser || !isSuperAdmin) return;
+    if (deleteConfirmEmail.trim().toLowerCase() !== selectedUser.email.toLowerCase()) {
+      toast.error("The email you typed does not match this account.");
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const { data, error } = await supabase.rpc("anonymize_user", {
+        p_user_id: selectedUser.id,
+      });
+      if (error) throw error;
+
+      toast.success("Account anonymized", {
+        description:
+          "Personal details and verification images are gone. Bookings, payments and ledger records were left untouched.",
+      });
+      closeDeleteDialogs();
+      setSelectedUser(null);
+      fetchUsers();
+      console.info("anonymize_user report", data);
+    } catch (error) {
+      toast.error("Could not anonymize this account", {
         description: error instanceof Error ? error.message : "Please try again.",
       });
     } finally {
@@ -1847,6 +1896,41 @@ export default function AdminUsersPage() {
                   </div>
                 ) : null}
 
+                {isSuperAdmin && !selectedUser.deleted_at ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3 dark:border-red-900/50 dark:bg-red-950/20">
+                    <div>
+                      <p className="text-sm font-semibold flex items-center gap-2 text-red-700 dark:text-red-400">
+                        <Trash2 className="w-4 h-4" />
+                        Delete this account
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        For an account that was abandoned and will never ask to
+                        be deleted itself. Erases the person&apos;s identity;
+                        every booking, payment and ledger record stays exactly
+                        as it is.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowDeleteWarning(true)}
+                      disabled={actionLoading}
+                      className="gap-2 border-red-300 text-red-700 hover:bg-red-100 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/30"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete Account
+                    </Button>
+                  </div>
+                ) : null}
+
+                {selectedUser.deleted_at ? (
+                  <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      This account was already deleted on{" "}
+                      {new Date(selectedUser.deleted_at).toLocaleDateString()}.
+                    </p>
+                  </div>
+                ) : null}
+
                 {selectedUser.verified_status === "rejected" &&
                   selectedUser.rejection_reason && (
                     <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50">
@@ -1940,6 +2024,59 @@ export default function AdminUsersPage() {
         onCancel={() => setShowAuthenticatorResetConfirm(false)}
         onConfirm={handleSuperAdminAuthenticatorReset}
       />
+
+      <ConfirmDialog
+        open={showDeleteWarning}
+        title="Delete this account?"
+        description={
+          selectedUser
+            ? `This erases who ${selectedUser.email} is. Their name, phone, address, licence and ID numbers are overwritten, and their uploaded ID and licence photos are deleted from storage. None of that can be recovered. Their bookings, payments and ledger records are NOT touched - your financial totals do not change.`
+            : ""
+        }
+        confirmText="Continue"
+        cancelText="Cancel"
+        destructive
+        isLoading={actionLoading}
+        onCancel={closeDeleteDialogs}
+        onConfirm={() => {
+          setShowDeleteWarning(false);
+          setDeleteConfirmEmail("");
+          setShowDeleteTypeConfirm(true);
+        }}
+      />
+
+      <ConfirmDialog
+        open={showDeleteTypeConfirm}
+        title="Type the email to confirm"
+        description={
+          selectedUser
+            ? `There is no undo. Type ${selectedUser.email} exactly to delete this account.`
+            : ""
+        }
+        confirmText="Delete Permanently"
+        cancelText="Cancel"
+        destructive
+        isLoading={actionLoading}
+        confirmDisabled={
+          deleteConfirmEmail.trim().toLowerCase() !==
+          (selectedUser?.email ?? "").toLowerCase()
+        }
+        onCancel={closeDeleteDialogs}
+        onConfirm={handleAnonymizeUser}
+      >
+        <Input
+          autoFocus
+          value={deleteConfirmEmail}
+          onChange={(event) => setDeleteConfirmEmail(event.target.value)}
+          placeholder={selectedUser?.email ?? ""}
+          aria-label="Type the account email to confirm deletion"
+        />
+        {deleteConfirmEmail.trim().length > 0 &&
+        deleteConfirmEmail.trim().toLowerCase() !==
+          (selectedUser?.email ?? "").toLowerCase() ? (
+          <p className="mt-2 text-xs text-red-600">Does not match this account.</p>
+        ) : null}
+      </ConfirmDialog>
     </div>
   );
 }

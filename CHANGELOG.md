@@ -9,6 +9,85 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Delete a user from User Management, and block an IP (CHAPTER 67)
+
+Two admin capabilities the owner went looking for and could not find, because
+neither existed.
+
+### Delete a user, with a two-step confirm
+
+Nothing in `AdminUsersPage.tsx` deleted or anonymized — that only happened
+through the Privacy Requests queue, which a user has to file into. The case
+that had no path: an account simply abandoned, whose owner will never ask for
+anything.
+
+(Worth knowing: CHAPTER 58's `flag-dormant-accounts` already runs daily at
+03:58 and auto-files a deletion request after `dormant_account_days`, default
+365. Lowering that setting is a Platform Settings change, not code.)
+
+Super-admin only, reusing `public.anonymize_user()` exactly as the Privacy
+Requests page does — it is super-admin gated in SQL and writes its own
+`audit_log` row even with no linked request, so the paper trail survives.
+Two dialogs: the first states plainly what is destroyed and what is kept, the
+second will not enable its button until the admin types **the account's own
+email**. A fixed phrase like "delete user" becomes muscle memory and would
+not catch having the wrong profile open; the email forces you to look at who
+you are erasing. `ConfirmDialog` gained an optional `confirmDisabled` prop —
+additive, so every existing caller is unchanged.
+
+Verified in the SQL and stated in the dialog: personal fields are
+*overwritten* and verification images are *deleted from storage*, neither
+recoverable — while bookings, payments and ledger rows are untouched.
+`anonymize_user` only nulls arrival photos on bookings and never mentions
+`payments` or the ledger, `bookings.renter_id` has no `ON DELETE CASCADE`,
+and the profile row is soft-deleted rather than removed. No financial total
+moves.
+
+### Block and unblock an IP (CHAPTER 67)
+
+Security Logs recorded an IP on every attempt and could do nothing with it —
+the page only searched and displayed the column.
+
+**What this can and cannot do, stated plainly because it is easy to
+over-promise:** it cannot stop a blocked address from *signing in*. Login goes
+from the browser straight to Supabase Auth, and the server-side
+`password_verification_hook` receives only `user_id` and `valid` — no IP.
+What it does is stop them *doing* anything: `api/lib/ipBlock.ts` runs at the
+top of ten state-changing handlers, so booking, all four checkouts, every
+booking action, and conversation-opening are refused with a 403. Reads that
+go straight to PostgREST are not covered — enforcing there would mean an IP
+test inside policies every table depends on, where one mistake locks out
+everyone.
+
+**A header bug had to be fixed first, or the whole thing was theatre.**
+`record-security-event.ts` and `create-guest-inquiry.ts` both read the
+**left-most** `x-forwarded-for` value — the end the *caller* supplies. Anyone
+could pick the IP recorded against their own failed logins, and walk past both
+the block and the counter behind it. Both now use `x-real-ip`, falling back to
+the right-most hop.
+
+Auto-block lives in `record-security-event.ts`, which already receives every
+failed login: **10 failures from one address within 15 minutes → a block that
+expires in 24 hours.** Ten clears someone who forgot their password; the
+expiry matters because Globe and Smart put many subscribers behind one CGNAT
+address, so a permanent block on one bad actor can be a permanent block on a
+whole neighbourhood. A manual block from the UI has no expiry until an admin
+removes it. Every lookup fails **open** — a blocklist that takes the site down
+when it breaks is worse than one that briefly lets someone through.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:booking-flow`, `check:api-boundaries`,
+`check:process-logic`, `check:financial-logic`.
+
+Files: `src/pages/admin/AdminUsersPage.tsx`, `src/components/ConfirmDialog.tsx`,
+`api/lib/ipBlock.ts` (new), `api/record-security-event.ts`,
+`api/create-guest-inquiry.ts`, ten state-changing handlers,
+`src/pages/admin/AdminSecurityLogsPage.tsx`, `src/types/database.ts`,
+`database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 67 — run in
+Supabase SQL Editor).
+
+---
+
 ## 2026-09-08 — Trip condition photos never appeared in the booking chat
 
 Reported from a booking conversation showing "Lister pickup photo" twice as

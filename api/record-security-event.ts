@@ -1,4 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  AUTO_BLOCK_DURATION_HOURS,
+  AUTO_BLOCK_FAILED_ATTEMPTS,
+  AUTO_BLOCK_WINDOW_MINUTES,
+  getClientIp,
+} from "./lib/ipBlock.js";
 
 export const config = { runtime: "edge" };
 
@@ -137,10 +143,11 @@ export default async function handler(req: Request) {
       : details.method === "magic_link"
         ? "email_otp"
         : null;
-    const ipAddress =
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      req.headers.get("x-real-ip") ||
-      null;
+    // Right-most x-forwarded-for / x-real-ip, not the left-most. See
+    // getClientIp: the left-most hop is supplied by the caller, so reading it
+    // let anyone choose the IP recorded against their own failed logins - and
+    // therefore walk straight past the counter below.
+    const ipAddress = getClientIp(req);
 
     if (!authenticatedUser && ipAddress) {
       const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -171,6 +178,42 @@ export default async function handler(req: Request) {
       },
     });
     if (error) throw error;
+
+    // Auto-block: too many failed logins from one address in a short window.
+    // Counted here because this endpoint already receives every failed
+    // attempt. The block always expires - Globe and Smart put many
+    // subscribers behind one CGNAT address, so a permanent block on a bad
+    // actor can be a permanent block on their whole neighbourhood.
+    if (eventType === "login_failed" && ipAddress) {
+      try {
+        const windowStart = new Date(
+          Date.now() - AUTO_BLOCK_WINDOW_MINUTES * 60 * 1000,
+        ).toISOString();
+        const { count: failedCount } = await supabase
+          .from("security_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("ip_address", ipAddress)
+          .eq("event_type", "login_failed")
+          .gte("created_at", windowStart);
+
+        if ((failedCount ?? 0) >= AUTO_BLOCK_FAILED_ATTEMPTS) {
+          await supabase.from("blocked_ips").upsert(
+            {
+              ip_address: ipAddress,
+              reason: `${failedCount} failed sign-ins within ${AUTO_BLOCK_WINDOW_MINUTES} minutes`,
+              blocked_by: null,
+              expires_at: new Date(
+                Date.now() + AUTO_BLOCK_DURATION_HOURS * 60 * 60 * 1000,
+              ).toISOString(),
+            },
+            { onConflict: "ip_address" },
+          );
+        }
+      } catch (autoBlockError) {
+        // Never let the blocklist break security logging itself.
+        console.error("Auto-block check failed", autoBlockError);
+      }
+    }
 
     return jsonResponse({ success: true }, 201);
   } catch (error) {

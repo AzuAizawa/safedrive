@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getClientIp } from "./lib/ipBlock.js";
 
 export const config = {
   runtime: "edge",
@@ -67,8 +68,10 @@ const toHex = (buffer: ArrayBuffer) =>
     .join("");
 
 const createFingerprint = async (req: Request, secret: string) => {
-  const forwardedFor = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const address = forwardedFor || req.headers.get("x-real-ip") || "unknown";
+  // Right-most hop, not left-most - the caller controls the left end of
+  // x-forwarded-for, so reading it let a spammer rotate their own
+  // fingerprint at will and walk past the rate limit. See getClientIp.
+  const address = getClientIp(req) || "unknown";
   const userAgent = req.headers.get("user-agent") || "unknown";
   const key = await crypto.subtle.importKey(
     "raw",

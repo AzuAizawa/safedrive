@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { blockedIpResponse } from "./lib/ipBlock.js";
 
 export const config = {
   runtime: "edge",
@@ -90,6 +91,11 @@ export default async function handler(req: Request) {
     const paymentMode = payload.paymentMode === "full" ? "full" : "downpayment";
 
     const supabase = getSupabaseAdmin();
+
+    // Refuse anything state-changing from a blocked address (CHAPTER 67).
+    // Placed right after the client so it runs before any work or any write.
+    const ipBlocked = await blockedIpResponse(supabase, req);
+    if (ipBlocked) return ipBlocked;
     const {
       data: { user },
       error: authError,

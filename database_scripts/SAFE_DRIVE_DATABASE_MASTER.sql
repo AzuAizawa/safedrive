@@ -10016,4 +10016,52 @@ set pickup_latitude = null,
 where pickup_latitude is not null
    or pickup_longitude is not null;
 
+-- ============================================================================
+-- CHAPTER 67 - Blocked IP addresses
+-- ============================================================================
+-- Security Logs recorded an IP on every login attempt but could do nothing
+-- with it: the page only ever searched and displayed the column, and no
+-- blocking existed anywhere in the codebase.
+--
+-- Scope, stated plainly because it is easy to over-promise here: this cannot
+-- stop a blocked IP from LOGGING IN. Sign-in goes from the browser straight
+-- to Supabase Auth, which our code never sees, and the server-side
+-- password_verification_hook receives only user_id and valid - no IP. What a
+-- block does is stop the address from DOING anything: api/lib/ipBlock.ts
+-- checks this table at the top of every state-changing handler, so booking,
+-- checkout, payment, arrival, reports and inquiries are all refused. Browsing
+-- and other reads that go straight to PostgREST are not covered; enforcing
+-- there would mean putting an IP test inside policies every table depends on,
+-- where one mistake locks out everyone.
+--
+-- expires_at is what keeps this usable in the Philippines: Globe and Smart
+-- put large numbers of subscribers behind CGNAT, so an "attacker IP" is often
+-- a whole neighbourhood. Automatic blocks always expire (24h); a manual block
+-- by an admin has no expiry until they remove it.
+
+create table if not exists public.blocked_ips (
+  ip_address text primary key,
+  reason text not null,
+  blocked_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz
+);
+
+comment on column public.blocked_ips.blocked_by is
+  'Null means the block was created automatically by the failed-login rule.';
+comment on column public.blocked_ips.expires_at is
+  'Null means it stays until an admin removes it. Automatic blocks set 24h.';
+
+create index if not exists blocked_ips_expires_at_idx
+  on public.blocked_ips (expires_at);
+
+alter table public.blocked_ips enable row level security;
+
+-- Super admins manage the list from Security Logs. The service role reads it
+-- from api/ handlers and writes the automatic blocks; it bypasses RLS anyway,
+-- so no policy is needed for that side.
+drop policy if exists "Super admins manage blocked IPs" on public.blocked_ips;
+create policy "Super admins manage blocked IPs" on public.blocked_ips
+  for all using (public.is_super_admin()) with check (public.is_super_admin());
+
 -- End of SafeDrive chaptered database master.

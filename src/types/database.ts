@@ -1278,6 +1278,15 @@ export interface Database {
         Update: { id?: string; subject_user_id?: string | null; requester_email?: string; request_type?: string; status?: string; request_details?: string; decision_reason?: string | null; legal_hold_reason?: string | null; assigned_to?: string | null; due_at?: string | null; completed_at?: string | null; created_at?: string; updated_at?: string };
         Relationships: [];
       };
+      // CHAPTER 67 - addresses refused by api/lib/ipBlock.ts. blocked_by null
+      // means the failed-login rule created it; expires_at null means it
+      // stays until an admin removes it.
+      blocked_ips: {
+        Row: { ip_address: string; reason: string; blocked_by: string | null; created_at: string; expires_at: string | null };
+        Insert: { ip_address: string; reason: string; blocked_by?: string | null; created_at?: string; expires_at?: string | null };
+        Update: { ip_address?: string; reason?: string; blocked_by?: string | null; created_at?: string; expires_at?: string | null };
+        Relationships: [];
+      };
       retention_policy_rules: {
         Row: { record_category: string; retention_days: number | null; rationale: string; active: boolean; updated_at: string };
         Insert: { record_category: string; retention_days?: number | null; rationale: string; active?: boolean; updated_at?: string };
