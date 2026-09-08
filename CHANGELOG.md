@@ -9,6 +9,46 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — SafeDrive absorbs the gateway fee, and says so by deleting the switch
+
+The two "pass the PayMongo fee to the renter" settings are gone from Admin
+Platform Settings. Removed after following the argument to its end: the fee is
+kept at 0 because the commission is what pays for running the platform, and
+gateway fees are a cost of running the platform. If the economics ever stop
+working, the honest move is to raise the commission — one number with one
+explanation — not to add a second charge for the same thing. Under that
+reasoning there is no scenario where the setting gets switched on, and a
+control nobody will ever use is worse than no control: it invites the question
+of what it is and implies an unfinished feature.
+
+So the decision is now stated by its absence. The renter pays exactly the
+listed price. A ₱1,000 booking: ₱1,000 from the renter, ₱900 to the lister
+(commission comes out of the lister's share, never added to the renter's), ₱100
+to SafeDrive, and the gateway's cut comes out of that ₱100.
+
+**Deliberately kept: the accounting.** Account `4020` and the three-way payment
+split stay. A chart of accounts routinely holds accounts with no activity, and
+rewriting the function that divides every payment — the most sensitive code in
+the system, and one with test coverage — to produce the identical zero would be
+risk bought for nothing. The DB columns and their validator branches stay at 0
+too, so this is a frontend-only change with no chapter to run.
+
+**Also kept: the disclosure row on the booking panel**, still conditional on
+`processingFee > 0`. It can no longer fire through the UI, but it guarantees
+that if a fee ever exists it is shown rather than silently folded into the
+total. Never charge something the screen does not name.
+
+**One gap recorded, not fixed.** Account `5010 'Payment processing fees'`
+(expense) exists and nothing ever posts to it, so the books show ₱100 of
+commission revenue against ₱0 of gateway expense. The PayMongo webhook does not
+report the fee it deducted, so this cannot be automated from what arrives —
+it needs a monthly manual entry read off the PayMongo dashboard. Currently ₱0
+in truth as well, since the account is in test mode.
+
+Files: `src/pages/admin/AdminPlatformSettingsPage.tsx`.
+
+---
+
 ## 2026-09-08 — "3 dayss", and a fee line that was always zero
 
 Two small things on the car booking panel, both reported from the renter side.

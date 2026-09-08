@@ -31,8 +31,6 @@ const isEmailShaped = (value: string) =>
 
 type SettingsRow = {
   commission_rate: number;
-  payment_processing_fee_rate: number;
-  payment_processing_fixed_centavos: number;
   downpayment_rate: number;
   refund_full_hours: number;
   refund_late_renter_percent: number;
@@ -80,28 +78,6 @@ const FIELDS: Record<
       return Number.isFinite(n) && n >= 0 && n <= 100 ? n / 100 : null;
     },
     formatStored: (s) => `${Math.round(s * 10000) / 100}%`,
-  },
-  payment_processing_fee_rate: {
-    label: "Provider percentage passed to renter",
-    hint: "Only for a confirmed PayMongo rate (0-25%). Keep 0 unless verified.",
-    unit: "%",
-    toDisplay: (s) => String(Math.round(s * 10000) / 100),
-    fromDisplay: (i) => {
-      const n = Number(i);
-      return Number.isFinite(n) && n >= 0 && n <= 25 ? n / 100 : null;
-    },
-    formatStored: (s) => `${Math.round(s * 10000) / 100}%`,
-  },
-  payment_processing_fixed_centavos: {
-    label: "Provider fixed charge to renter",
-    hint: "Fixed peso charge per transaction. Keep 0 unless verified.",
-    unit: "PHP",
-    toDisplay: (s) => String(Math.round(s) / 100),
-    fromDisplay: (i) => {
-      const n = Math.round(Number(i) * 100);
-      return Number.isFinite(n) && n >= 0 && n <= 100000 ? n : null;
-    },
-    formatStored: (s) => `PHP ${(Math.round(s) / 100).toLocaleString()}`,
   },
   downpayment_rate: {
     label: "Reservation downpayment",
@@ -270,7 +246,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes",
+          "commission_rate, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes",
         )
         .eq("id", "default")
         .maybeSingle(),
