@@ -5,6 +5,13 @@ import {
   AUTO_BLOCK_WINDOW_MINUTES,
   getClientIp,
 } from "./lib/ipBlock.js";
+import { sendUserNotificationEmail } from "./lib/email.js";
+
+// Failed sign-ins against ONE account before its owner is told. Lower than
+// the IP auto-block threshold on purpose: this is a warning to the real
+// owner, not an enforcement action, and it is the only signal a victim gets
+// that someone is working on their account.
+const OWNER_ALERT_FAILED_ATTEMPTS = 5;
 
 export const config = { runtime: "edge" };
 
@@ -178,6 +185,46 @@ export default async function handler(req: Request) {
       },
     });
     if (error) throw error;
+
+    // Tell the account owner when their account is the one being hammered.
+    // The IP block below acts on the attacker; nothing acted on behalf of the
+    // person being attacked, who had no way to know. Deduped to one message
+    // per account per hour via the email helper's eventKey.
+    if (eventType === "login_failed" && targetEmail) {
+      try {
+        const windowStart = new Date(
+          Date.now() - AUTO_BLOCK_WINDOW_MINUTES * 60 * 1000,
+        ).toISOString();
+        const { count: perAccountFailures } = await supabase
+          .from("security_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("target_email", targetEmail)
+          .eq("event_type", "login_failed")
+          .gte("created_at", windowStart);
+
+        if ((perAccountFailures ?? 0) >= OWNER_ALERT_FAILED_ATTEMPTS) {
+          const { data: targetProfile } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("email", targetEmail)
+            .maybeSingle();
+
+          if (targetProfile?.id) {
+            const hourBucket = new Date().toISOString().slice(0, 13);
+            await sendUserNotificationEmail(supabase, {
+              userId: targetProfile.id,
+              title: "Failed sign-in attempts on your account",
+              message: `There have been ${perAccountFailures} failed sign-in attempts on your SafeDrive account in the last ${AUTO_BLOCK_WINDOW_MINUTES} minutes. If this was you, you can ignore this. If it was not, change your password - and if you have not set up an authenticator app yet, add one.`,
+              link: "/verify",
+              baseOrigin: new URL(req.url).origin,
+              eventKey: `failed-logins:${targetProfile.id}:${hourBucket}`,
+            });
+          }
+        }
+      } catch (alertError) {
+        console.error("Failed-login owner alert could not be sent", alertError);
+      }
+    }
 
     // Auto-block: too many failed logins from one address in a short window.
     // Counted here because this endpoint already receives every failed

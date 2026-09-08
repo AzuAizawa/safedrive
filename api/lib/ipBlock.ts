@@ -75,6 +75,36 @@ export const blockedIpResponse = async (
   const blocked = await isIpBlocked(supabase, getClientIp(req));
   if (!blocked) return null;
 
+  // Super admins are never blocked by IP. Carriers here put large numbers of
+  // subscribers behind one CGNAT address, so an admin can easily share an
+  // address with whoever triggered the auto-block - and being locked out of
+  // payouts and verification while trying to deal with an incident is the
+  // worst possible moment for it. Checked only once the address is already
+  // blocked, so the normal path costs nothing extra.
+  try {
+    const authorization = req.headers.get("Authorization");
+    const token = authorization?.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length).trim()
+      : null;
+
+    if (token) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser(token);
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (profile?.role === "super_admin") return null;
+      }
+    }
+  } catch {
+    // Fall through to the block - failing to confirm an exemption is not a
+    // reason to let a blocked address through.
+  }
+
   return new Response(
     JSON.stringify({
       error:

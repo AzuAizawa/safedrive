@@ -9,6 +9,43 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Super admins are never IP-blocked, and account owners get told
+
+Two gaps in the IP blocking shipped an hour earlier, found by comparing it
+against what a mature setup actually has.
+
+**A super admin could have blocked themselves.** Globe and Smart put large
+numbers of subscribers behind one CGNAT address, so an admin can easily share
+an address with whoever tripped the auto-block — and discovering that while
+trying to release a payout or clear a verification is the worst possible
+moment. `blockedIpResponse` now exempts `super_admin`, checked only *after*
+the address is found blocked, so the normal path costs nothing extra. A
+failure to confirm the exemption falls through to the block rather than
+opening it.
+
+**Nobody told the person being attacked.** The auto-block acts on the
+attacker; the account owner had no signal at all. Five failed sign-ins
+against one account within 15 minutes now emails that owner — deliberately
+lower than the 10-attempt IP threshold, because this is a warning rather than
+an enforcement action, and it is the only way a victim learns someone is
+working on their account. Deduped to one message per account per hour.
+
+**Still a manual step, and the highest-value one:** CHAPTER 24's
+`password_verification_hook` is written and waiting but must be registered in
+the Supabase Dashboard (Authentication → Hooks → Password Verification
+Attempt). That is the real server-side lockout — the localStorage one in
+`src/lib/authLockout.ts` lives on the attacker's own machine and is cleared by
+an incognito window. Until the hook is registered, the genuine brute-force
+defences are Turnstile on the login form and that hook's absence is the
+biggest remaining hole.
+
+Verified: `tsc -b`, `tsc -p tsconfig.api.json`, lint, `npm run build`,
+`check:alignment`, `check:api-boundaries`, `check:booking-flow`.
+
+Files: `api/lib/ipBlock.ts`, `api/record-security-event.ts`.
+
+---
+
 ## 2026-09-08 — Delete a user from User Management, and block an IP (CHAPTER 67)
 
 Two admin capabilities the owner went looking for and could not find, because
