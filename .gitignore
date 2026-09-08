@@ -33,5 +33,11 @@ node_modules
 # Private local material; never publish this folder.
 ETC ETC DO NOT UPLOAD TO GITHUB/
 
+# Database and storage backups (scripts/backup-safedrive.mjs). These contain
+# KYC identity documents, selfies, addresses and payout account numbers -
+# committing one would publish every user's ID. Keep the off-site copy in a
+# PRIVATE cloud drive, never a shared link.
+backups/
+
 .vercel
 .env*

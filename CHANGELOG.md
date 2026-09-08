@@ -9,6 +9,67 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Backup and restore: the data and the files finally have a second copy
+
+The thesis panel asked for a mirror backup and the 3-2-1 rule. Checking before
+building found the project's own checklist already carrying
+`- [ ] Supabase backups and restore test are documented.` — the panel landed on
+a gap that was written down and not done.
+
+**Where it actually stood.** Code and schema were already fine: laptop plus
+GitHub is two copies on two media with one off-site, and
+`SAFE_DRIVE_DATABASE_MASTER.sql` rebuilds every table, policy and bucket. The
+**data** (bookings, payments, ledger, profiles) and the **stored files** (KYC
+documents, vehicle photos, trip photos) each existed in exactly one place, the
+Supabase project, with no copy anywhere.
+
+**`scripts/backup-safedrive.mjs`** writes all 43 tables and all 6 storage
+buckets into a dated folder with a `manifest.json` of row and file counts. It
+reads the table list out of `src/types/database.ts` at run time rather than
+keeping its own — a hand-kept list goes stale, and a backup that silently stops
+covering a new table while still reporting success is the worst possible
+outcome. Every table is paged to exhaustion for the same reason: PostgREST caps
+rows per response, and a backup that stopped at 1,000 rows would look fine. It
+exits non-zero on any failure.
+
+Not `pg_dump` or the Supabase CLI: both are better at schema, and the schema is
+already in git; both would add tooling nobody needs installed to work here.
+This uses the same `.env` parsing and service-role client every other script in
+`scripts/` already uses.
+
+**`scripts/restore-safedrive.mjs`** puts a folder back, with two deliberately
+awkward guards, because a restore script aimed at production would be
+catastrophic: it refuses unless `SAFEDRIVE_RESTORE_CONFIRM` matches the project
+ref in `.env` (typed by hand, on purpose), and it refuses if any target table
+is non-empty, so it can only ever fill a fresh project. Tables insert in
+dependency order — verified to cover all 43 exactly once, no extras, no
+duplicates.
+
+**`backups/` is gitignored**, and that is the part that mattered most to get
+right. The output holds identity documents, selfies, addresses and payout
+account numbers; committing one would publish every user's ID, which is a worse
+outcome than having no backup. Verified by creating a file under `backups/` and
+confirming `git status` stays clean.
+
+**Two limits stated rather than hidden.** `auth.users` — passwords and MFA
+factors — is not reachable through the service-role API, so a restore returns
+all data but existing users must reset their password and a super admin must be
+re-created by hand. And SafeDrive has no continuous mirror: that is Supabase
+read-replicas and PITR, a paid plan, the same wall as CHAPTER 24's auth hook.
+Dated snapshots are the honest free-tier substitute, and a mirror would not have
+helped against a mistaken deletion anyway — it copies deletions faithfully.
+
+**The checklist item stays unticked.** Procedure and tooling are done; the
+restore rehearsal has not been run, and that is the half a reviewer actually
+asks about. It becomes `[x]` when a dated restore into a second Supabase project
+is recorded with its evidence.
+
+Files: `scripts/backup-safedrive.mjs` (new), `scripts/restore-safedrive.mjs`
+(new), `project_docs/BACKUP_AND_RECOVERY.md` (new), `.gitignore`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`.
+
+---
+
 ## 2026-09-08 — A settings change can start on a date, and admins can announce (CHAPTER 69)
 
 Both halves of one question: when an admin changes a rule, how does anyone find

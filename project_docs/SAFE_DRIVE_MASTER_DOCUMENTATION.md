@@ -718,7 +718,18 @@ Do not reverse the local Vite adapter, canonical admin route, database guards, R
 ### Before public hosting/live money
 
 - [ ] Hosting/staging and rollback are proven.
-- [ ] Supabase backups and restore test are documented.
+- [~] Supabase backups and restore test are documented. **Procedure and tooling
+      done** — `project_docs/BACKUP_AND_RECOVERY.md`, plus
+      `scripts/backup-safedrive.mjs` (all 43 tables and all 6 storage buckets
+      into a dated, gitignored folder with a row-count manifest) and
+      `scripts/restore-safedrive.mjs` (guarded: refuses without a typed project
+      ref, and refuses any database that is not empty). **The restore rehearsal
+      has not been run yet** — that is the remaining half, and it is the half a
+      reviewer actually asks about, so this stays unticked until a dated
+      restore into a second Supabase project is recorded with its evidence.
+      Known limitation, documented rather than hidden: `auth.users` cannot be
+      exported through the service-role API, so a restore returns all data but
+      existing users must reset their password.
 - [ ] PayMongo webhooks, refund windows, wallet/Money Movement access, and reconciliation are proven.
 - [ ] Monitoring alerts cover API errors, webhooks, cron, Gmail, uploads, payouts, refunds, and reconciliation.
 - [ ] Privacy notice, terms, refund/cancellation, fees, deposit, agreement, insurance, and complaints are professionally reviewed.
