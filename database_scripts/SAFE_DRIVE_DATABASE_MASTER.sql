@@ -1579,6 +1579,15 @@ ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Participants can update bookings" ON public.bookings;
 
+-- This policy is created earlier in the file too (twice), and this third
+-- CREATE had no DROP of its own - so running the master file top-to-bottom on
+-- a genuinely EMPTY database failed right here with 42710 "policy already
+-- exists". Found the first time anyone actually rebuilt the schema from
+-- scratch, during a restore rehearsal. Every other CREATE POLICY, CREATE
+-- TRIGGER, CREATE INDEX and ADD CONSTRAINT in this file was checked at the
+-- same time and is idempotent; this was the only one.
+DROP POLICY IF EXISTS "Admins can update bookings" ON public.bookings;
+
 CREATE POLICY "Admins can update bookings" ON public.bookings
 FOR UPDATE USING (public.is_admin())
 WITH CHECK (public.is_admin());
@@ -1826,12 +1835,30 @@ ADD COLUMN IF NOT EXISTS fuel_subtype TEXT;
 -- SafeDrive cleanup: stop storing optional secondary ID numbers
 -- Run this on the live database after deploying the app changes.
 
-UPDATE public.profiles
-SET
-  secondary_id_number = NULL,
-  national_id = NULL
-WHERE secondary_id_number IS NOT NULL
-   OR national_id IS NOT NULL;
+-- This scrub was written for the LIVE database, where profiles still had a
+-- secondary_id_number column. That column is never CREATED anywhere in this
+-- file - only dropped, further down - so on a genuinely empty database the
+-- statement referenced a column that had never existed and failed with 42703.
+-- Found the first time the schema was rebuilt from scratch, during a restore
+-- rehearsal. Guarded rather than deleted, so the original intent still runs on
+-- any database that does still carry the column.
+do $scrub_secondary_id$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profiles'
+      and column_name = 'secondary_id_number'
+  ) then
+    execute 'update public.profiles
+               set secondary_id_number = null, national_id = null
+             where secondary_id_number is not null or national_id is not null';
+  else
+    -- Fresh database: the column never existed, so only national_id is here.
+    update public.profiles set national_id = null where national_id is not null;
+  end if;
+end;
+$scrub_secondary_id$;
 
 DROP TRIGGER IF EXISTS on_pii_encrypt ON public.profiles;
 
@@ -2050,103 +2077,120 @@ ALTER TABLE public.profiles
 -- - Related user data is preserved only when every directly linked user on that record is also in the keep list.
 -- - Static lookup tables such as car_brands and car_models are left untouched.
 
-begin;
-
-do $$
-declare
-  keep_emails text[] := array[
-    'superadmin@example.com',
-    'replace-second-account@example.com'
-  ];
-begin
-  create temporary table tmp_keep_users on commit drop as
-  select distinct id
-  from auth.users
-  where lower(email) = any (
-    select lower(email_value)
-    from unnest(keep_emails) as email_value
-  );
-
-  if not exists (select 1 from tmp_keep_users) then
-    raise exception 'No keep users matched the provided email list. Aborting flush.';
-  end if;
-
-  create temporary table tmp_keep_cars on commit drop as
-  select id
-  from public.cars
-  where owner_id in (select id from tmp_keep_users);
-
-  create temporary table tmp_keep_bookings on commit drop as
-  select id
-  from public.bookings
-  where renter_id in (select id from tmp_keep_users)
-    and owner_id in (select id from tmp_keep_users);
-
-  delete from public.ticket_messages
-  where sender_id not in (select id from tmp_keep_users)
-     or ticket_id in (
-       select id
-       from public.support_tickets
-       where user_id not in (select id from tmp_keep_users)
-          or (booking_id is not null and booking_id not in (select id from tmp_keep_bookings))
-     );
-
-  delete from public.support_tickets
-  where user_id not in (select id from tmp_keep_users)
-     or (booking_id is not null and booking_id not in (select id from tmp_keep_bookings));
-
-  delete from public.notifications
-  where user_id not in (select id from tmp_keep_users);
-
-  delete from public.subscriptions
-  where user_id not in (select id from tmp_keep_users);
-
-  delete from public.security_logs
-  where user_id not in (select id from tmp_keep_users);
-
-  delete from public.audit_log
-  where user_id not in (select id from tmp_keep_users);
-
-  delete from public.verification_images
-  where user_id not in (select id from tmp_keep_users);
-
-  delete from public.booking_reviews
-  where booking_id not in (select id from tmp_keep_bookings)
-     or reviewer_id not in (select id from tmp_keep_users)
-     or reviewee_id not in (select id from tmp_keep_users);
-
-  delete from public.payments
-  where booking_id not in (select id from tmp_keep_bookings)
-    and (
-      subscription_id is null
-      or subscription_id not in (
-        select id from public.subscriptions where user_id in (select id from tmp_keep_users)
-      )
-    );
-
-  delete from public.car_documents
-  where car_id not in (select id from tmp_keep_cars);
-
-  delete from public.car_images
-  where car_id not in (select id from tmp_keep_cars);
-
-  delete from public.car_renewals
-  where car_id not in (select id from tmp_keep_cars);
-
-  delete from public.bookings
-  where id not in (select id from tmp_keep_bookings);
-
-  delete from public.cars
-  where id not in (select id from tmp_keep_cars);
-
-  delete from public.profiles
-  where id not in (select id from tmp_keep_users);
-
-  delete from auth.users
-  where id not in (select id from tmp_keep_users);
-end $$;
-
-commit;
+-- ###########################################################################
+-- ## DISABLED - THIS IS A DESTRUCTIVE ONE-OFF TOOL, NOT PART OF THE SCHEMA ##
+-- ###########################################################################
+-- Commented out after a restore rehearsal walked into it. Running the master
+-- file top to bottom hit this and stopped with "No keep users matched the
+-- provided email list. Aborting flush." - which was the guard doing its job,
+-- but it should never have been in the path at all.
+--
+-- What it does: deletes every row belonging to every account EXCEPT a
+-- hardcoded list of emails - across 15 tables, ending with auth.users itself.
+-- It has no place in a script whose job is to build an empty schema, and it
+-- is one careless full-file run away from destroying the live database.
+--
+-- Kept as documentation, disabled as code. To actually use it: copy the lines
+-- below into a NEW query, put real emails in keep_emails, and run it
+-- deliberately, on its own, after taking a backup.
+-- ###########################################################################
+-- begin;
+--
+-- do $$
+-- declare
+--   keep_emails text[] := array[
+--     'superadmin@example.com',
+--     'replace-second-account@example.com'
+--   ];
+-- begin
+--   create temporary table tmp_keep_users on commit drop as
+--   select distinct id
+--   from auth.users
+--   where lower(email) = any (
+--     select lower(email_value)
+--     from unnest(keep_emails) as email_value
+--   );
+--
+--   if not exists (select 1 from tmp_keep_users) then
+--     raise exception 'No keep users matched the provided email list. Aborting flush.';
+--   end if;
+--
+--   create temporary table tmp_keep_cars on commit drop as
+--   select id
+--   from public.cars
+--   where owner_id in (select id from tmp_keep_users);
+--
+--   create temporary table tmp_keep_bookings on commit drop as
+--   select id
+--   from public.bookings
+--   where renter_id in (select id from tmp_keep_users)
+--     and owner_id in (select id from tmp_keep_users);
+--
+--   delete from public.ticket_messages
+--   where sender_id not in (select id from tmp_keep_users)
+--      or ticket_id in (
+--        select id
+--        from public.support_tickets
+--        where user_id not in (select id from tmp_keep_users)
+--           or (booking_id is not null and booking_id not in (select id from tmp_keep_bookings))
+--      );
+--
+--   delete from public.support_tickets
+--   where user_id not in (select id from tmp_keep_users)
+--      or (booking_id is not null and booking_id not in (select id from tmp_keep_bookings));
+--
+--   delete from public.notifications
+--   where user_id not in (select id from tmp_keep_users);
+--
+--   delete from public.subscriptions
+--   where user_id not in (select id from tmp_keep_users);
+--
+--   delete from public.security_logs
+--   where user_id not in (select id from tmp_keep_users);
+--
+--   delete from public.audit_log
+--   where user_id not in (select id from tmp_keep_users);
+--
+--   delete from public.verification_images
+--   where user_id not in (select id from tmp_keep_users);
+--
+--   delete from public.booking_reviews
+--   where booking_id not in (select id from tmp_keep_bookings)
+--      or reviewer_id not in (select id from tmp_keep_users)
+--      or reviewee_id not in (select id from tmp_keep_users);
+--
+--   delete from public.payments
+--   where booking_id not in (select id from tmp_keep_bookings)
+--     and (
+--       subscription_id is null
+--       or subscription_id not in (
+--         select id from public.subscriptions where user_id in (select id from tmp_keep_users)
+--       )
+--     );
+--
+--   delete from public.car_documents
+--   where car_id not in (select id from tmp_keep_cars);
+--
+--   delete from public.car_images
+--   where car_id not in (select id from tmp_keep_cars);
+--
+--   delete from public.car_renewals
+--   where car_id not in (select id from tmp_keep_cars);
+--
+--   delete from public.bookings
+--   where id not in (select id from tmp_keep_bookings);
+--
+--   delete from public.cars
+--   where id not in (select id from tmp_keep_cars);
+--
+--   delete from public.profiles
+--   where id not in (select id from tmp_keep_users);
+--
+--   delete from auth.users
+--   where id not in (select id from tmp_keep_users);
+-- end $$;
+--
+-- commit;
 
 
 -- ============================================================================
@@ -8998,28 +9042,44 @@ for each row execute function public.notify_admins_of_transmission_update();
 --
 -- This is IRREVERSIBLE. Confirm this is really wanted before running it.
 
-begin;
-
-alter table public.ledger_journals disable trigger prevent_finalized_journal_change;
-alter table public.ledger_entries disable trigger prevent_finalized_entry_change;
-
-delete from public.payments;
-delete from public.ledger_entries;
-delete from public.ledger_journals;
-delete from public.bookings;
-
-alter table public.ledger_journals enable trigger prevent_finalized_journal_change;
-alter table public.ledger_entries enable trigger prevent_finalized_entry_change;
-
-commit;
-
--- Sanity check (read-only) - every count below should be 0.
-select
-  (select count(*) from public.bookings) as bookings,
-  (select count(*) from public.payments) as payments,
-  (select count(*) from public.ledger_journals) as ledger_journals,
-  (select count(*) from public.ledger_entries) as ledger_entries,
-  (select count(*) from public.booking_reviews) as booking_reviews;
+-- ###########################################################################
+-- ## DISABLED - THIS IS A DESTRUCTIVE ONE-OFF TOOL, NOT PART OF THE SCHEMA ##
+-- ###########################################################################
+-- Same reason as the user-flush block above, and this one is worse: it has no
+-- guard of any kind. Four unconditional DELETEs that empty payments,
+-- ledger_entries, ledger_journals and bookings - with the append-only ledger
+-- triggers deliberately disabled around them so the protections cannot stop
+-- it. Cascades take out extensions, agreement acceptances, condition reports
+-- and photos, reviews, cancellations and early returns as well.
+--
+-- It survived only because the aborting block above happened to stop every
+-- full-file run before reaching it. That is luck, not safety.
+--
+-- Kept as documentation, disabled as code. To actually use it: copy the lines
+-- below into a NEW query and run it deliberately, after taking a backup.
+-- ###########################################################################
+-- begin;
+--
+-- alter table public.ledger_journals disable trigger prevent_finalized_journal_change;
+-- alter table public.ledger_entries disable trigger prevent_finalized_entry_change;
+--
+-- delete from public.payments;
+-- delete from public.ledger_entries;
+-- delete from public.ledger_journals;
+-- delete from public.bookings;
+--
+-- alter table public.ledger_journals enable trigger prevent_finalized_journal_change;
+-- alter table public.ledger_entries enable trigger prevent_finalized_entry_change;
+--
+-- commit;
+--
+-- -- Sanity check (read-only) - every count below should be 0.
+-- select
+--   (select count(*) from public.bookings) as bookings,
+--   (select count(*) from public.payments) as payments,
+--   (select count(*) from public.ledger_journals) as ledger_journals,
+--   (select count(*) from public.ledger_entries) as ledger_entries,
+--   (select count(*) from public.booking_reviews) as booking_reviews;
 
 -- ============================================================================
 -- CHAPTER 56 - Early return requests support a specific time, with a

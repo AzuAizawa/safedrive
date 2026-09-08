@@ -3,7 +3,11 @@ import path from "node:path";
 import process from "node:process";
 
 const root = process.cwd();
-const excludedDirectories = new Set([".git", "node_modules", "dist", "logs_and_outputs", "ETC ETC DO NOT UPLOAD TO GITHUB"]);
+// "backups" holds database dumps and the split copies of the master SQL used
+// during a restore - gitignored, transient, and not part of the repository
+// being reviewed. Scanning it double-counted the master file and inflated the
+// line total by a third.
+const excludedDirectories = new Set([".git", "node_modules", "dist", "logs_and_outputs", "backups", "ETC ETC DO NOT UPLOAD TO GITHUB"]);
 const textExtensions = new Set([".css", ".example", ".gs", ".html", ".js", ".json", ".md", ".mermaid", ".mjs", ".sql", ".ts", ".tsx"]);
 const textNames = new Set([".gitignore", ".kilocodemodes"]);
 const failures = [];
