@@ -9,6 +9,35 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Subscriptions kicked listers out of Lister Mode, then blamed them for it
+
+Reported: a verified account in Lister Mode opens **Subscription & Billing**,
+gets switched to Renter Mode, and lands on "Subscriptions are only available in
+Lister Mode" with a four-step guide to unlocking it.
+
+Confirmed, and it was unwinnable rather than merely confusing. `/subscriptions`
+was classified as **renter** space in two places — the `<ModeRoute mode="renter">`
+wrapper in `App.tsx` and `RENTER_PREFIXES` in `listerMode.ts` — while
+`SubscriptionPlansPage` refuses to render for anyone whose `is_lister` is false.
+So opening the page forced the account out of the exact mode the page requires,
+and no sequence of clicks could get in: step 3 of its own unlock guide says
+"Switch your account to Lister Mode", which is the state the user was already in
+when they clicked.
+
+Sharper still, both nav entries are gated on `isLister`, so the link is only
+ever shown in Lister Mode. The only people who could see the button were the
+only people it locked out.
+
+A listing subscription buys vehicle slots, so it is lister space. Moved in both
+places, which have to agree — fixing one alone brings the same contradiction
+back in a different form. The `ModeRoute` verification guard still applies, so
+an unverified account is not force-switched and still sees the unlock steps,
+which is what that screen is actually for.
+
+Files: `src/App.tsx`, `src/lib/listerMode.ts`.
+
+---
+
 ## 2026-09-08 — SafeDrive absorbs the gateway fee, and says so by deleting the switch
 
 The two "pass the PayMongo fee to the renter" settings are gone from Admin

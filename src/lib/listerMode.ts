@@ -56,8 +56,15 @@ const LISTER_PREFIXES = [
   "/my-vehicles",
   "/vehicle-availability",
   "/car-renewals",
+  // A listing subscription buys vehicle slots, so this is lister space -
+  // SubscriptionPlansPage itself refuses to render for a renter. It used to
+  // sit in RENTER_PREFIXES, which meant opening it from the lister menu
+  // switched the account to renter mode and the page then announced that
+  // subscriptions are lister-only. The only people shown the link (both nav
+  // entries are gated on isLister) were the only people it locked out.
+  "/subscriptions",
 ];
-const RENTER_PREFIXES = ["/my-bookings", "/subscriptions"];
+const RENTER_PREFIXES = ["/my-bookings"];
 
 /**
  * Which portal mode a destination belongs to, or null when it is neutral

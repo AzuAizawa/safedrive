@@ -127,12 +127,12 @@ function App() {
                       {/* Renter space - a direct entry switches back to renter mode */}
                       <Route element={<ModeRoute mode="renter" />}>
                         <Route path="/my-bookings" element={<MyBookingsPage />} />
-                        <Route path="/subscriptions" element={<SubscriptionPlansPage />} />
                       </Route>
 
                       {/* Lister space - a direct entry switches into lister mode */}
                       <Route element={<ModeRoute mode="lister" />}>
                         <Route path="/my-vehicles" element={<MyVehiclesPage />} />
+                        <Route path="/subscriptions" element={<SubscriptionPlansPage />} />
                         <Route path="/lister-bookings" element={<ListerBookingsPage />} />
                         <Route path="/car-renewals" element={<ListerCarRenewalPage />} />
                         <Route path="/vehicle-availability" element={<VehicleAvailabilityPage />} />
