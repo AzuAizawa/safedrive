@@ -58,7 +58,18 @@ export const normalizeDownpaymentRate = (
 export const DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS = 3;
 export const DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS = 18;
 
-const clampWholeHours = (
+// How long someone waits at the meetup, past the agreed time, before they may
+// report the other side and claim a refund (CHAPTER 68). This is the ONLY
+// default in the client - every gate takes the loaded value as a required
+// argument rather than reaching for a constant of its own, because the number
+// that decides when the button APPEARS has to agree with the one the server
+// uses to decide whether the click is ACCEPTED. See the note on
+// NO_SHOW_GRACE_WINDOW_MINUTES in src/lib/bookingLifecycle.ts.
+export const DEFAULT_NO_SHOW_GRACE_MINUTES = 30;
+export const NO_SHOW_GRACE_MINUTES_MIN = 15;
+export const NO_SHOW_GRACE_MINUTES_MAX = 180;
+
+const clampWholeNumber = (
   value: unknown,
   min: number,
   max: number,
@@ -72,18 +83,20 @@ const clampWholeHours = (
 export type PlatformPolicyTimings = {
   arrivalCheckinLeadHours: number;
   listerCompletionTimeoutHours: number;
+  noShowGraceMinutes: number;
 };
 
 export const fetchPlatformPolicyTimings = async (): Promise<PlatformPolicyTimings> => {
   const fallback: PlatformPolicyTimings = {
     arrivalCheckinLeadHours: DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
     listerCompletionTimeoutHours: DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS,
+    noShowGraceMinutes: DEFAULT_NO_SHOW_GRACE_MINUTES,
   };
 
   const { data, error } = await supabase
     .from("platform_settings")
     .select(
-      "arrival_checkin_lead_hours, lister_completion_timeout_hours",
+      "arrival_checkin_lead_hours, lister_completion_timeout_hours, no_show_grace_minutes",
     )
     .eq("id", "default")
     .maybeSingle();
@@ -94,17 +107,23 @@ export const fetchPlatformPolicyTimings = async (): Promise<PlatformPolicyTiming
   }
 
   return {
-    arrivalCheckinLeadHours: clampWholeHours(
+    arrivalCheckinLeadHours: clampWholeNumber(
       data?.arrival_checkin_lead_hours,
       0,
       48,
       DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
     ),
-    listerCompletionTimeoutHours: clampWholeHours(
+    listerCompletionTimeoutHours: clampWholeNumber(
       data?.lister_completion_timeout_hours,
       1,
       72,
       DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS,
+    ),
+    noShowGraceMinutes: clampWholeNumber(
+      data?.no_show_grace_minutes,
+      NO_SHOW_GRACE_MINUTES_MIN,
+      NO_SHOW_GRACE_MINUTES_MAX,
+      DEFAULT_NO_SHOW_GRACE_MINUTES,
     ),
   };
 };

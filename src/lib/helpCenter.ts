@@ -93,7 +93,7 @@ export const helpArticles: HelpArticle[] = [
     title: "If the other side does not show up",
     question: "What should I do if I arrive but the other person does not?",
     answer:
-      "Record your own arrival first. SafeDrive uses the server-timestamped arrival check-in plus the 30-minute pickup grace window as its main evidence base, together with any optional photo you submit. After the grace window, report the no-show from the booking flow so support can review the dispute quickly.",
+      "Record your own arrival first. SafeDrive uses the server-timestamped arrival check-in plus the pickup grace window as its main evidence base, together with any optional photo you submit. Your booking screen shows exactly how long that wait is and the time it ends. After the grace window, report the no-show from the booking flow so support can review the dispute quickly.",
     relatedTags: ["no-show", "arrival", "pickup", "dispute"],
     suggestedTicketTag: "no_show",
   },

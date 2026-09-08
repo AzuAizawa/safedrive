@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { sendUserNotificationEmail } from "./lib/email.js";
 import { blockedIpResponse } from "./lib/ipBlock.js";
+import { fetchNoShowGraceMinutes } from "./lib/noShowGrace.js";
 
 export const config = {
   runtime: "edge",
@@ -77,7 +78,6 @@ type BookingRow = {
   } | null;
 };
 
-const GRACE_MINUTES = 30;
 // How far (in meters) a reporting party's stored arrival location may be
 // from the car listing's pickup pin before a no-show refund claim is
 // diverted from instant automatic to manual admin review. Generous enough
@@ -146,13 +146,14 @@ type ApprovedEarlyReturn = { requested_end_date: string; requested_end_time: str
 const getOperativeReturnMs = (
   booking: Pick<BookingRow, "end_date" | "dropoff_time" | "renter_return_arrived_at" | "lister_return_arrived_at">,
   approvedEarly: ApprovedEarlyReturn,
+  graceMinutes: number,
 ) => {
   const originalMs = manilaMs(booking.end_date, booking.dropoff_time, "18:00");
   if (!approvedEarly) return originalMs;
   const earlyMs = manilaMs(approvedEarly.requested_end_date, approvedEarly.requested_end_time, "18:00");
   if (earlyMs === null) return originalMs;
   const anyArrived = Boolean(booking.renter_return_arrived_at || booking.lister_return_arrived_at);
-  const missed = !anyArrived && Date.now() >= earlyMs + GRACE_MINUTES * 60_000;
+  const missed = !anyArrived && Date.now() >= earlyMs + graceMinutes * 60_000;
   return missed ? originalMs : earlyMs;
 };
 
@@ -325,6 +326,10 @@ export default async function handler(req: Request) {
       return jsonResponse({ error: "You are not part of this booking" }, 403);
     }
     const note = payload.note?.trim() || null;
+    // One read, one value for every gate and every message below - the client
+    // reads the same column, so the button that appears and the claim that is
+    // accepted can never disagree (CHAPTER 68).
+    const graceMinutes = await fetchNoShowGraceMinutes(supabase);
 
     // --------------------------------------------------------- renter_no_car
     if (payload.action === "renter_no_car") {
@@ -344,7 +349,7 @@ export default async function handler(req: Request) {
         );
       }
       const pickupMs = manilaMs(b.start_date, b.pickup_time, "09:00");
-      if (pickupMs === null || Date.now() < pickupMs + GRACE_MINUTES * 60_000) {
+      if (pickupMs === null || Date.now() < pickupMs + graceMinutes * 60_000) {
         return jsonResponse(
           { error: "Wait until the pickup grace window has passed." },
           409,
@@ -448,7 +453,7 @@ export default async function handler(req: Request) {
         `No vehicle at pickup: ${label(b)}`,
         overstay
           ? `The renter checked in at pickup but the vehicle was still out with a previous renter whose trip ended on ${overstay.end_date}. This booking was cancelled and fully refunded; the overdue trip (${overstay.id}) is flagged. ${note ?? ""}`.trim()
-          : `The renter checked in at pickup, waited past the ${GRACE_MINUTES}-minute grace window, and the lister did not appear with the vehicle. This booking was cancelled and fully refunded. ${note ?? ""}`.trim(),
+          : `The renter checked in at pickup, waited past the ${graceMinutes}-minute grace window, and the lister did not appear with the vehicle. This booking was cancelled and fully refunded. ${note ?? ""}`.trim(),
       );
 
       const noCarRenterTitle = "Booking cancelled — full refund";
@@ -523,7 +528,7 @@ export default async function handler(req: Request) {
         );
       }
       const pickupMs = manilaMs(b.start_date, b.pickup_time, "09:00");
-      if (pickupMs === null || Date.now() < pickupMs + GRACE_MINUTES * 60_000) {
+      if (pickupMs === null || Date.now() < pickupMs + graceMinutes * 60_000) {
         return jsonResponse(
           { error: "Wait until the pickup grace window has passed." },
           409,
@@ -585,7 +590,7 @@ export default async function handler(req: Request) {
         b,
         user.id,
         `Renter no-show at pickup: ${label(b)}`,
-        `The lister checked in at pickup and the renter did not appear within the ${GRACE_MINUTES}-minute grace window. Booking cancelled. ${
+        `The lister checked in at pickup and the renter did not appear within the ${graceMinutes}-minute grace window. Booking cancelled. ${
           captured > 0
             ? `PHP ${captured.toLocaleString()} was captured; policy releases a ${noShowRefundPercent}% refund (PHP ${renterShare.toLocaleString()}) to the renter after admin confirms the return method.`
             : "No captured payment to refund."
@@ -665,8 +670,8 @@ export default async function handler(req: Request) {
           409,
         );
       }
-      const returnMs = getOperativeReturnMs(b, await fetchApprovedEarlyReturn(supabase, b.id));
-      if (returnMs === null || Date.now() < returnMs + GRACE_MINUTES * 60_000) {
+      const returnMs = getOperativeReturnMs(b, await fetchApprovedEarlyReturn(supabase, b.id), graceMinutes);
+      if (returnMs === null || Date.now() < returnMs + graceMinutes * 60_000) {
         return jsonResponse(
           { error: "The return time has not passed yet." },
           409,
@@ -701,7 +706,7 @@ export default async function handler(req: Request) {
         `Vehicle not returned: ${label(b)}`,
         `The lister reports that ${label(b)} was not returned by its scheduled return (${b.end_date}${
           b.dropoff_time ? ` ${b.dropoff_time}` : ""
-        }) and the ${GRACE_MINUTES}-minute grace window has passed. The booking is flagged (dispute_status=open) so the car can be taken offline; any refund stays on hold pending admin review. Reported reason: ${NON_RETURN_REASON_LABELS[nonReturnReason]}. ${note ?? ""}`.trim(),
+        }) and the ${graceMinutes}-minute grace window has passed. The booking is flagged (dispute_status=open) so the car can be taken offline; any refund stays on hold pending admin review. Reported reason: ${NON_RETURN_REASON_LABELS[nonReturnReason]}. ${note ?? ""}`.trim(),
       );
 
       await supabase.from("notifications").insert({
@@ -759,8 +764,8 @@ export default async function handler(req: Request) {
       // can never actually trigger for this caller - it always resolves to
       // the approved early instant, or the original one if none was ever
       // approved.
-      const returnMs = getOperativeReturnMs(b, await fetchApprovedEarlyReturn(supabase, b.id));
-      if (returnMs === null || Date.now() < returnMs + GRACE_MINUTES * 60_000) {
+      const returnMs = getOperativeReturnMs(b, await fetchApprovedEarlyReturn(supabase, b.id), graceMinutes);
+      if (returnMs === null || Date.now() < returnMs + graceMinutes * 60_000) {
         return jsonResponse(
           { error: "Wait until the return grace window has passed." },
           409,
@@ -785,7 +790,7 @@ export default async function handler(req: Request) {
         b,
         user.id,
         `Lister no-show at return: ${label(b)}`,
-        `The renter checked in at the return point and waited past the ${GRACE_MINUTES}-minute grace window, but the lister never arrived to receive ${label(b)}. The booking is flagged for admin visibility; the renter is not penalized, and the trip will auto-complete with payout if the lister remains unresponsive. ${note ?? ""}`.trim(),
+        `The renter checked in at the return point and waited past the ${graceMinutes}-minute grace window, but the lister never arrived to receive ${label(b)}. The booking is flagged for admin visibility; the renter is not penalized, and the trip will auto-complete with payout if the lister remains unresponsive. ${note ?? ""}`.trim(),
       );
 
       await supabase.from("notifications").insert({

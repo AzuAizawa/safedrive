@@ -39,6 +39,7 @@ import { paginateItems } from "@/lib/pagination";
 import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
 import {
   DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+  DEFAULT_NO_SHOW_GRACE_MINUTES,
   fetchPlatformPolicyTimings,
 } from "@/lib/platformSettings";
 import {
@@ -249,6 +250,9 @@ export default function MyBookingsPage() {
   const [arrivalLeadHours, setArrivalLeadHours] = useState(
     DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
   );
+  const [graceMinutes, setGraceMinutes] = useState(
+    DEFAULT_NO_SHOW_GRACE_MINUTES,
+  );
   const [payingFor, setPayingFor] = useState<string | null>(null);
   const [selectedOwner, setSelectedOwner] = useState<BookingRow | null>(null);
   const [ratingBooking, setRatingBooking] = useState<BookingRow | null>(null);
@@ -311,7 +315,10 @@ export default function MyBookingsPage() {
   useEffect(() => {
     let active = true;
     void fetchPlatformPolicyTimings().then((timings) => {
-      if (active) setArrivalLeadHours(timings.arrivalCheckinLeadHours);
+      if (active) {
+        setArrivalLeadHours(timings.arrivalCheckinLeadHours);
+        setGraceMinutes(timings.noShowGraceMinutes);
+      }
     });
     return () => {
       active = false;
@@ -477,8 +484,13 @@ export default function MyBookingsPage() {
       label: `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`,
     }));
 
-    void ensureReturnReminderNotifications(user.id, reminderBookings, "/my-bookings");
-  }, [bookings, user]);
+    void ensureReturnReminderNotifications(
+      user.id,
+      reminderBookings,
+      "/my-bookings",
+      graceMinutes,
+    );
+  }, [bookings, user, graceMinutes]);
 
   useEffect(() => {
     // Published renter->trip ratings only, grouped by car - via the shared RPC
@@ -1414,6 +1426,7 @@ export default function MyBookingsPage() {
           renter_return_arrived_at: booking.renter_return_arrived_at,
           lister_return_arrived_at: booking.lister_return_arrived_at,
         },
+        graceMinutes,
         latestApprovedEarlyReturn(earlyReturnsByBooking[booking.id]),
         new Date(clockNow),
       );
@@ -1940,11 +1953,13 @@ export default function MyBookingsPage() {
             const noShowState = getNoShowWindowState(
               booking,
               "renter",
+              graceMinutes,
               new Date(clockNow),
             );
             const returnNoShowState = getReturnNoShowWindowState(
               booking,
               "renter",
+              graceMinutes,
               latestApprovedEarly,
               new Date(clockNow),
             );
@@ -2637,10 +2652,10 @@ export default function MyBookingsPage() {
                           <p className="mt-1">
                             {noShowState.canReport
                               ? "Your arrival check-in is on file and the lister still has not arrived with the car. You can cancel this booking now for a full refund — this will not affect your reliability record."
-                              : `SafeDrive waits until ${noShowState.reportReadyAt.toLocaleTimeString([], {
+                              : `SafeDrive waits ${noShowState.graceMinutes} minutes after the pickup time — until ${noShowState.reportReadyAt.toLocaleTimeString([], {
                                   hour: "numeric",
                                   minute: "2-digit",
-                                })} before you can cancel for no car at pickup. Add optional pickup photos in the meantime if you want extra evidence.`}
+                                })} — before you can cancel for no car at pickup. Add optional pickup photos in the meantime if you want extra evidence.`}
                           </p>
                           {noShowState.canReport ? (
                             <div className="mt-2">

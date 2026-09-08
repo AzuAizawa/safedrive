@@ -41,6 +41,7 @@ type SettingsRow = {
   balance_deadline_hours: number;
   balance_reminder_hours_before: number;
   dormant_account_days: number;
+  no_show_grace_minutes: number;
 };
 
 type ChangeRequest = {
@@ -63,7 +64,7 @@ const FIELDS: Record<
   {
     label: string;
     hint: string;
-    unit: "%" | "PHP" | "hours" | "days";
+    unit: "%" | "PHP" | "minutes" | "hours" | "days";
     toDisplay: (stored: number) => string;
     fromDisplay: (input: string) => number | null;
     formatStored: (stored: number) => string;
@@ -189,6 +190,19 @@ const FIELDS: Record<
     },
     formatStored: (s) => `${Math.round(s)} h`,
   },
+  no_show_grace_minutes: {
+    label: "Wait time before a no-show can be reported",
+    hint: "How long someone waits at pickup or drop-off, after the agreed time, before they can report the other side and claim a refund (15-180 minutes). Applies live.",
+    unit: "minutes",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return Number.isFinite(n) && n >= 15 && n <= 180 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} min`,
+  },
   dormant_account_days: {
     label: "Dormant account threshold",
     hint: "Days of no login activity before a regular account is auto-flagged for the Retention Requests queue (90-3650). A super admin still has to review and execute - this only files the request. Applies live.",
@@ -256,7 +270,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days",
+          "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes",
         )
         .eq("id", "default")
         .maybeSingle(),

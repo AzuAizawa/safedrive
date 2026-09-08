@@ -7,6 +7,7 @@ import {
   type RefundableBooking,
 } from "./lib/cancellationRefundPlan.js";
 import { sendUserNotificationEmail } from "./lib/email.js";
+import { fetchNoShowGraceMinutes } from "./lib/noShowGrace.js";
 
 export const config = {
   runtime: "edge",
@@ -762,7 +763,11 @@ export default async function handler(req: Request) {
     // period is already consumed by this point, so unlike pickup no-show
     // there is no refund-eligible outcome the same way; this is purely
     // advisory, pointing the arrived party at the incident-report actions.
-    const RETURN_NO_SHOW_GRACE_MINUTES = 30;
+    //
+    // The grace window is the admin setting (CHAPTER 68), not a constant kept
+    // here - this branch used to carry its own copy of 30, three files away
+    // from the client gate it had to agree with.
+    const returnNoShowGraceMinutes = await fetchNoShowGraceMinutes(supabase);
     const { data: returnNoShowCandidates, error: returnNoShowError } = await supabase
       .from("bookings")
       .select(
@@ -821,7 +826,7 @@ export default async function handler(req: Request) {
         ? getInstantMs(approvedEarly.requested_end_date, approvedEarly.requested_end_time)
         : getInstantMs(booking.end_date, booking.dropoff_time);
       if (dropoffMs === null) continue;
-      if (Date.now() < dropoffMs + RETURN_NO_SHOW_GRACE_MINUTES * 60_000) continue;
+      if (Date.now() < dropoffMs + returnNoShowGraceMinutes * 60_000) continue;
 
       const { data: claimed, error: claimError } = await supabase
         .from("bookings")

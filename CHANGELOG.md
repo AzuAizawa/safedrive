@@ -9,6 +9,70 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — The no-show grace window becomes a setting, typed once
+
+**Run CHAPTER 68 BEFORE deploying this.** The client and three API handlers now
+select `no_show_grace_minutes`; until the column exists those reads fail, and
+Admin → Platform Settings fails with them since it selects every column in one
+query. SQL first, then push.
+
+The wait at the meetup — 30 minutes past the agreed time before either side can
+report the other and claim a refund — was **typed out five separate times**:
+`bookingLifecycle.ts` (when the button appears), `booking-incident-action.ts`
+(whether the click is accepted), `expire-booking-deadlines.ts`,
+`send-return-reminders.ts`, and in words inside the help article. Two of them
+carried a comment saying they "mirrored" the first, which is an admission that
+nothing enforced it.
+
+The first two are the dangerous pair. One decides when the button **appears**,
+the other whether the press is **accepted** — let them drift and you ship a
+button that is visible and rejects every click, which is the failure this
+codebase already hit twice (the dead "Car Returned" button, and the arrival
+gate). They agreed only because someone remembered to type 30 five times.
+
+Now there is one column and two readers: `fetchPlatformPolicyTimings()` on the
+client, `fetchNoShowGraceMinutes()` on the server, both clamped 15–180 and both
+falling back to 30 — so even a failed read leaves the two sides agreeing rather
+than disagreeing.
+
+**Threaded as a required parameter, deliberately.** An optional one defaulting
+to 30 would let a call site quietly keep the old number while the server ran on
+the configured value — the same divergence in a new form. Required means `tsc`
+names every call site; it found eight.
+
+**The panel now says why, not just when.** It read "SafeDrive waits until
+12:30 AM" — the time, never the reason — so a changed setting silently showed a
+different time with no explanation. It now reads "waits 30 minutes after the
+pickup time — until 12:30 AM", which explains itself after any change. The help
+article stops naming a number it cannot verify (static text cannot read a
+setting); `buildNoShowSupportPath` and the admin incident notification
+interpolate the live value instead of asserting 30.
+
+**Bounds are 15–180 and they are not arbitrary.** Under 15 a lister one traffic
+light away loses the booking to a full refund with no realistic chance to
+arrive. Over 180 a renter stands on a corner with no car for three hours before
+they can get their money back.
+
+**Checked and deliberately left alone: late arrival past the grace.** Asked
+whether a lister arriving at 1:00 AM for a 12:00 AM pickup can still proceed
+when the renter agrees to wait. It can, already. Nothing auto-cancels at
+pickup — that cancel is entirely the renter's choice. The arrival gate
+(`booking-action.ts:1062`) only asks "is it too early?" with no upper bound, so
+check-in never closes. And the moment the second party checks in,
+`getNoShowWindowState` returns null and the cancel button disappears on its own.
+The grace window forbids nothing; it only unlocks an option.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 68),
+`api/lib/noShowGrace.ts` (new), `api/booking-incident-action.ts`,
+`api/expire-booking-deadlines.ts`, `api/send-return-reminders.ts`,
+`src/lib/bookingLifecycle.ts`, `src/lib/incidents.ts`,
+`src/lib/platformSettings.ts`, `src/lib/helpCenter.ts`,
+`src/lib/supportTickets.ts`, `src/pages/MyBookingsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`,
+`src/pages/admin/AdminPlatformSettingsPage.tsx`, `src/types/database.ts`.
+
+---
+
 ## 2026-09-08 — Three statistics that change a decision, and one stale label
 
 Answering "what analytics actually belong here" by adding only figures that

@@ -166,10 +166,12 @@ export const buildNoShowSupportPath = ({
   bookingId,
   vehicleLabel,
   missingParty,
+  graceMinutes,
 }: {
   bookingId: string;
   vehicleLabel: string;
   missingParty: string;
+  graceMinutes: number;
 }) =>
   buildSupportDraftPath({
     bookingId,
@@ -180,7 +182,7 @@ export const buildNoShowSupportPath = ({
       "",
       "What happened:",
       "- I arrived at the agreed pickup location.",
-      `- The ${missingParty} did not arrive within the 30-minute pickup window.`,
+      `- The ${missingParty} did not arrive within the ${graceMinutes}-minute pickup window.`,
       "",
       "Please review the timestamped arrival record and any submitted evidence for this booking.",
     ].join("\n"),

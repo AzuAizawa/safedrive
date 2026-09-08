@@ -10064,4 +10064,99 @@ drop policy if exists "Super admins manage blocked IPs" on public.blocked_ips;
 create policy "Super admins manage blocked IPs" on public.blocked_ips
   for all using (public.is_super_admin()) with check (public.is_super_admin());
 
+-- ---------------------------------------------------------------------------
+-- CHAPTER 68 - The no-show grace window becomes a setting, not a typed number
+-- ---------------------------------------------------------------------------
+-- How long someone waits at the meetup, past the agreed time, before they may
+-- report the other side and claim a refund. A renter who checked in at a
+-- 12:00 AM pickup could cancel for a full refund from 12:30 AM; a lister whose
+-- renter never returned the car could file a non-return report 30 minutes past
+-- the return deadline.
+--
+-- That 30 was typed out in FIVE separate places - src/lib/bookingLifecycle.ts,
+-- api/booking-incident-action.ts, api/expire-booking-deadlines.ts,
+-- api/send-return-reminders.ts, and in words inside the help article. Two of
+-- them even carried a comment saying they "mirror" the first, which is an
+-- admission that nothing enforced it. The dangerous pair is the first two: one
+-- decides when the button APPEARS, the other decides whether the click is
+-- ACCEPTED. Let those drift and you ship a button that is visible and rejects
+-- every press - the same failure already seen twice here (the dead "Car
+-- Returned" button, and the arrival gate). They agreed only because someone
+-- remembered to type 30 five times.
+--
+-- Read live, never snapshotted per booking, exactly like
+-- arrival_checkin_lead_hours and lister_completion_timeout_hours.
+--
+-- Bounds are 15-180 and they are not arbitrary. Under 15 minutes a lister one
+-- traffic light away loses the booking to a full refund with no realistic
+-- chance to arrive. Over 180 a renter stands on a corner with no car for three
+-- hours before they can get their money back. Both ends are a real person
+-- being treated unfairly.
+
+alter table public.platform_settings
+  add column if not exists no_show_grace_minutes integer not null default 30;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_no_show_grace_minutes_check;
+alter table public.platform_settings
+  add constraint platform_settings_no_show_grace_minutes_check
+  check (no_show_grace_minutes >= 15 and no_show_grace_minutes <= 180);
+
+-- Extend the consensus-vote whitelist so the new key is proposable and votable
+-- through the existing super-admin flow. Every existing branch is reproduced
+-- verbatim from CHAPTER 58's definition; only the new elsif is added, before
+-- the final "not configurable" guard.
+--
+-- The apply path needs no change: it is dynamic
+-- (format('update public.platform_settings set %I = $1 ...')), so a new column
+-- is picked up automatically once it passes validation here.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $validate$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    elsif k = 'dormant_account_days' then
+      if v < 90 or v > 3650 or v <> floor(v) then raise exception 'dormant_account_days must be a whole number 90-3650'; end if;
+    elsif k = 'no_show_grace_minutes' then
+      if v < 15 or v > 180 or v <> floor(v) then raise exception 'no_show_grace_minutes must be a whole number 15-180'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$validate$;
+
+
 -- End of SafeDrive chaptered database master.

@@ -78,6 +78,7 @@ import {
 } from "@/lib/ratings";
 import {
   DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+  DEFAULT_NO_SHOW_GRACE_MINUTES,
   DEFAULT_REFUND_LATE_RENTER_PERCENT,
   fetchPlatformPolicyTimings,
   fetchPlatformPricingSettings,
@@ -263,6 +264,9 @@ export default function ListerBookingsPage() {
   const [arrivalLeadHours, setArrivalLeadHours] = useState(
     DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
   );
+  const [graceMinutes, setGraceMinutes] = useState(
+    DEFAULT_NO_SHOW_GRACE_MINUTES,
+  );
   const [noShowRefundPercent, setNoShowRefundPercent] = useState(
     DEFAULT_REFUND_LATE_RENTER_PERCENT,
   );
@@ -345,7 +349,10 @@ export default function ListerBookingsPage() {
   useEffect(() => {
     let active = true;
     void fetchPlatformPolicyTimings().then((timings) => {
-      if (active) setArrivalLeadHours(timings.arrivalCheckinLeadHours);
+      if (active) {
+        setArrivalLeadHours(timings.arrivalCheckinLeadHours);
+        setGraceMinutes(timings.noShowGraceMinutes);
+      }
     });
     void fetchPlatformPricingSettings().then((pricing) => {
       if (active) setNoShowRefundPercent(pricing.refundLateRenterPercent);
@@ -530,8 +537,13 @@ export default function ListerBookingsPage() {
       label: `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name} (${booking.cars.plate_number})`,
     }));
 
-    void ensureReturnReminderNotifications(user.id, reminderBookings, "/lister-bookings");
-  }, [bookings, getApparentStatus, user]);
+    void ensureReturnReminderNotifications(
+      user.id,
+      reminderBookings,
+      "/lister-bookings",
+      graceMinutes,
+    );
+  }, [bookings, getApparentStatus, user, graceMinutes]);
 
   useEffect(() => {
     const loadRenterReputations = async () => {
@@ -1217,6 +1229,7 @@ export default function ListerBookingsPage() {
           renter_return_arrived_at: booking.renter_return_arrived_at,
           lister_return_arrived_at: booking.lister_return_arrived_at,
         },
+        graceMinutes,
         latestApprovedEarlyReturn(earlyReturnsByBooking[booking.id]),
         new Date(clockNow),
       );
@@ -2654,9 +2667,15 @@ export default function ListerBookingsPage() {
             const noShowState = getNoShowWindowState(
               b,
               "owner",
+              graceMinutes,
               new Date(clockNow),
             );
-            const canReportNonReturnNow = canReportNonReturn(b, latestApprovedEarly, new Date(clockNow));
+            const canReportNonReturnNow = canReportNonReturn(
+              b,
+              graceMinutes,
+              latestApprovedEarly,
+              new Date(clockNow),
+            );
             const nonReturnFlagged = (b.dispute_status ?? "none") === "open";
             const reviewedByOwner = b.booking_reviews?.some(
               (review) =>
@@ -3350,10 +3369,10 @@ export default function ListerBookingsPage() {
                           <p className="mt-1">
                             {noShowState.canReport
                               ? `Your arrival check-in is on file and the renter has not shown up. You can cancel this booking as a renter no-show — your reliability record is not affected and the renter keeps a ${getNoShowForfeitPercent(b)}% forfeit.`
-                              : `SafeDrive waits until ${noShowState.reportReadyAt.toLocaleTimeString([], {
+                              : `SafeDrive waits ${noShowState.graceMinutes} minutes after the pickup time — until ${noShowState.reportReadyAt.toLocaleTimeString([], {
                                   hour: "numeric",
                                   minute: "2-digit",
-                                })} before a renter no-show can be filed. Add optional pickup evidence in the meantime.`}
+                                })} — before a renter no-show can be filed. Add optional pickup evidence in the meantime.`}
                           </p>
                           {noShowState.canReport ? (
                             <div className="mt-2">

@@ -109,6 +109,7 @@ export const getOperativeReturnDeadline = (
     lister_return_arrived_at: string | null;
   },
   approvedEarlyReturn: EarlyReturnDeadlineInput | null | undefined,
+  graceMinutes: number,
   now = new Date(),
 ): { deadline: Date; source: "early" | "original" } => {
   const original = getBookingReturnDeadline(booking.end_date, booking.dropoff_time);
@@ -124,7 +125,7 @@ export const getOperativeReturnDeadline = (
   );
   const missed =
     !anyArrived &&
-    now.getTime() >= early.getTime() + NO_SHOW_GRACE_WINDOW_MINUTES * 60 * 1000;
+    now.getTime() >= early.getTime() + graceMinutes * 60 * 1000;
   return missed ? { deadline: original, source: "original" } : { deadline: early, source: "early" };
 };
 
@@ -147,25 +148,44 @@ export const getReturnCheckinEligibleDeadline = (
 export const getEffectiveReturnDateTime = (
   booking: Parameters<typeof getOperativeReturnDeadline>[0],
   approvedEarlyReturn: EarlyReturnDeadlineInput | null | undefined,
+  graceMinutes: number,
   now = new Date(),
 ): { date: string; time: string | null; source: "early" | "original" } => {
-  const { source } = getOperativeReturnDeadline(booking, approvedEarlyReturn, now);
+  const { source } = getOperativeReturnDeadline(
+    booking,
+    approvedEarlyReturn,
+    graceMinutes,
+    now,
+  );
   if (source === "early" && approvedEarlyReturn) {
     return { date: approvedEarlyReturn.requested_end_date, time: approvedEarlyReturn.requested_end_time, source };
   }
   return { date: booking.end_date, time: booking.dropoff_time, source };
 };
 
-// Independent of NO_SHOW_GRACE_WINDOW_MINUTES (30, below) - that constant
-// gates no-show-*report* eligibility; this one only delays the cosmetic
+// Independent of the no-show grace window - that one gates no-show-*report*
+// eligibility and is now an admin setting; this one only delays the cosmetic
 // "overdue" label on the reminder banner (getReturnReminderState).
 export const RETURN_OVERDUE_LABEL_GRACE_MINUTES = 180;
 
+/**
+ * FALLBACK ONLY (CHAPTER 68). The live value is `no_show_grace_minutes` in
+ * platform_settings, loaded through fetchPlatformPolicyTimings() and passed
+ * into every function below as a REQUIRED argument.
+ *
+ * Required, not an optional parameter defaulting to this: an optional one lets
+ * a call site quietly keep 30 while the server runs on the configured value,
+ * and the two disagreeing is exactly how you ship a button that is visible and
+ * rejects every click. Making it required means the compiler names every call
+ * site that has to be updated. Do not reach for this constant in a gate - use
+ * it only as the value handed to a loader that has not resolved yet.
+ */
 export const NO_SHOW_GRACE_WINDOW_MINUTES = 30;
 
 export const getNoShowWindowState = (
   booking: NoShowBooking,
   actor: "renter" | "owner",
+  graceMinutes: number,
   now = new Date(),
 ) => {
   if (!["fully_paid", "active"].includes(booking.status)) return null;
@@ -179,13 +199,14 @@ export const getNoShowWindowState = (
 
   const pickupAt = getBookingPickupTime(booking.start_date, booking.pickup_time);
   const reportReadyAt = new Date(
-    pickupAt.getTime() + NO_SHOW_GRACE_WINDOW_MINUTES * 60 * 1000,
+    pickupAt.getTime() + graceMinutes * 60 * 1000,
   );
   const msRemaining = reportReadyAt.getTime() - now.getTime();
 
   return {
     pickupAt,
     reportReadyAt,
+    graceMinutes,
     canReport: msRemaining <= 0,
     minutesRemaining: Math.max(0, Math.ceil(msRemaining / 60000)),
   };
@@ -197,6 +218,7 @@ export const getNoShowWindowState = (
 export const getReturnNoShowWindowState = (
   booking: ReturnNoShowBooking,
   actor: "renter" | "owner",
+  graceMinutes: number,
   approvedEarlyReturn?: EarlyReturnDeadlineInput | null,
   now = new Date(),
 ) => {
@@ -213,15 +235,21 @@ export const getReturnNoShowWindowState = (
 
   if (!actorArrived || counterpartyArrived) return null;
 
-  const dropoffAt = getOperativeReturnDeadline(booking, approvedEarlyReturn, now).deadline;
+  const dropoffAt = getOperativeReturnDeadline(
+    booking,
+    approvedEarlyReturn,
+    graceMinutes,
+    now,
+  ).deadline;
   const reportReadyAt = new Date(
-    dropoffAt.getTime() + NO_SHOW_GRACE_WINDOW_MINUTES * 60 * 1000,
+    dropoffAt.getTime() + graceMinutes * 60 * 1000,
   );
   const msRemaining = reportReadyAt.getTime() - now.getTime();
 
   return {
     dropoffAt,
     reportReadyAt,
+    graceMinutes,
     canReport: msRemaining <= 0,
     minutesRemaining: Math.max(0, Math.ceil(msRemaining / 60000)),
   };
@@ -232,12 +260,18 @@ export const getReturnReminderState = (
     ReminderBooking,
     "status" | "end_date" | "dropoff_time" | "renter_return_arrived_at" | "lister_return_arrived_at"
   >,
+  graceMinutes: number,
   approvedEarlyReturn?: EarlyReturnDeadlineInput | null,
   now = new Date(),
 ): ReturnReminderState | null => {
   if (!["fully_paid", "active"].includes(booking.status)) return null;
 
-  const deadline = getOperativeReturnDeadline(booking, approvedEarlyReturn, now).deadline;
+  const deadline = getOperativeReturnDeadline(
+    booking,
+    approvedEarlyReturn,
+    graceMinutes,
+    now,
+  ).deadline;
   const diffMs = deadline.getTime() - now.getTime();
   const diffMinutes = Math.round(diffMs / 60000);
 
@@ -296,11 +330,12 @@ export const ensureReturnReminderNotifications = async (
   userId: string,
   bookings: ReminderBooking[],
   linkBase: string,
+  graceMinutes: number,
 ) => {
   const candidates = bookings
     .map((booking) => ({
       booking,
-      reminder: getReturnReminderState(booking),
+      reminder: getReturnReminderState(booking, graceMinutes),
     }))
     .filter(
       (

@@ -1,5 +1,6 @@
 import { createSupabaseAdmin } from "./lib/payoutAutomation";
 import { sendReturnReminderEmail, type TransactionalEmailResult } from "./lib/email.js";
+import { fetchNoShowGraceMinutes } from "./lib/noShowGrace.js";
 
 export const config = {
   runtime: "edge",
@@ -46,8 +47,6 @@ const BOOKING_SELECT = `
   cars(plate_number, car_models(name, car_brands(name)))
 `;
 
-// Mirrors NO_SHOW_GRACE_WINDOW_MINUTES in src/lib/bookingLifecycle.ts.
-const RETURN_NO_SHOW_GRACE_MINUTES = 30;
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -95,6 +94,7 @@ const getOperativeReturnDeadline = (
     "end_date" | "dropoff_time" | "renter_return_arrived_at" | "lister_return_arrived_at"
   >,
   approvedEarly: ApprovedEarlyReturnRow | undefined,
+  graceMinutes: number,
   now: Date,
 ) => {
   const original = getReturnDeadline(booking.end_date, booking.dropoff_time);
@@ -104,16 +104,17 @@ const getOperativeReturnDeadline = (
     booking.renter_return_arrived_at || booking.lister_return_arrived_at,
   );
   const missed =
-    !anyArrived && now.getTime() >= early.getTime() + RETURN_NO_SHOW_GRACE_MINUTES * 60_000;
+    !anyArrived && now.getTime() >= early.getTime() + graceMinutes * 60_000;
   return missed ? original : early;
 };
 
 const getReminderState = (
   booking: ReminderBooking,
   approvedEarly: ApprovedEarlyReturnRow | undefined,
+  graceMinutes: number,
   now = new Date(),
 ) => {
-  const deadline = getOperativeReturnDeadline(booking, approvedEarly, now);
+  const deadline = getOperativeReturnDeadline(booking, approvedEarly, graceMinutes, now);
   const diffMinutes = Math.round((deadline.getTime() - now.getTime()) / 60000);
 
   if (diffMinutes > 24 * 60) return null;
@@ -198,6 +199,9 @@ export default async function handler(req: Request) {
 
     const supabase = createSupabaseAdmin();
     const now = new Date();
+    // The admin-set grace window (CHAPTER 68), read once per run rather than
+    // typed here again - this file used to keep its own copy of 30.
+    const graceMinutes = await fetchNoShowGraceMinutes(supabase);
     const horizon = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const floor = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
@@ -251,7 +255,12 @@ export default async function handler(req: Request) {
     const candidates = [...baseBookings, ...supplementalBookings]
       .map((booking) => ({
         booking,
-        reminder: getReminderState(booking, approvedEarlyByBooking.get(booking.id), now),
+        reminder: getReminderState(
+          booking,
+          approvedEarlyByBooking.get(booking.id),
+          graceMinutes,
+          now,
+        ),
       }))
       .filter(
         (item): item is { booking: ReminderBooking; reminder: NonNullable<ReturnType<typeof getReminderState>> } =>

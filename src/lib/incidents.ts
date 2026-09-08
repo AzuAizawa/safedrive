@@ -1,6 +1,5 @@
 import {
   getOperativeReturnDeadline,
-  NO_SHOW_GRACE_WINDOW_MINUTES,
   type EarlyReturnDeadlineInput,
 } from "@/lib/bookingLifecycle";
 
@@ -50,17 +49,20 @@ type NonReturnBooking = {
  */
 export const canReportNonReturn = (
   booking: NonReturnBooking,
+  graceMinutes: number,
   approvedEarlyReturn?: EarlyReturnDeadlineInput | null,
   now = new Date(),
 ) => {
   if (booking.status !== "active") return false;
   if (booking.renter_completed || booking.owner_completed) return false;
   if ((booking.dispute_status ?? "none") !== "none") return false;
-  const deadline = getOperativeReturnDeadline(booking, approvedEarlyReturn, now).deadline;
-  return (
-    now.getTime() >=
-    deadline.getTime() + NO_SHOW_GRACE_WINDOW_MINUTES * 60 * 1000
-  );
+  const deadline = getOperativeReturnDeadline(
+    booking,
+    approvedEarlyReturn,
+    graceMinutes,
+    now,
+  ).deadline;
+  return now.getTime() >= deadline.getTime() + graceMinutes * 60 * 1000;
 };
 
 export const runIncidentAction = async (

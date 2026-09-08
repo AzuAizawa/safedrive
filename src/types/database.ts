@@ -1397,6 +1397,7 @@ export interface Database {
           balance_deadline_hours: number;
           balance_reminder_hours_before: number;
           dormant_account_days: number;
+          no_show_grace_minutes: number;
           contact_email: string;
           user_verification_eta_message: string;
           vehicle_verification_eta_message: string;
@@ -1417,6 +1418,7 @@ export interface Database {
           balance_deadline_hours?: number;
           balance_reminder_hours_before?: number;
           dormant_account_days?: number;
+          no_show_grace_minutes?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;
@@ -1437,6 +1439,7 @@ export interface Database {
           balance_deadline_hours?: number;
           balance_reminder_hours_before?: number;
           dormant_account_days?: number;
+          no_show_grace_minutes?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;
