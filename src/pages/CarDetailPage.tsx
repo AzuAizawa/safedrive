@@ -1107,15 +1107,24 @@ export default function CarDetailPage() {
                 <div className="p-4 rounded-lg bg-muted/50 space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">
+                      {/* formatDayCount already pluralises ("3 days"). The
+                          trailing "s" here predates it and was doubling up,
+                          rendering "3 dayss". */}
                       ₱{pricePerDay.toLocaleString()} × {formatDayCount(totalDays)}
-                      {totalDays > 1 ? "s" : ""}
                     </span>
                     <span>₱{basePrice.toLocaleString()}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Payment processing fee</span>
-                    <span>₱{processingFee.toLocaleString()}</span>
-                  </div>
+                  {/* Only shown when there is one. The rate is 0 until a real
+                      PayMongo rate is confirmed (see the "keep 0 unless
+                      verified" hint in Admin Platform Settings), so this line
+                      was a permanent "₱0" that explained nothing and invited
+                      the question of what it even was. */}
+                  {processingFee > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Payment processing fee</span>
+                      <span>₱{processingFee.toLocaleString()}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-semibold border-t border-border pt-2 mt-2">
                     <span>Total</span>
                     <span>₱{totalPrice.toLocaleString()}</span>
@@ -1138,7 +1147,9 @@ export default function CarDetailPage() {
                     </p>
                   )}
                   <p className="text-[11px] text-muted-foreground">
-                    This total is exactly the listed price plus the disclosed payment-processing fee - no other fee is added for you.
+                    {processingFee > 0
+                      ? "This total is exactly the listed price plus the disclosed payment-processing fee - no other fee is added for you."
+                      : "This total is exactly the listed price - no processing fee, and no other fee is added for you."}
                   </p>
                   {showDailyPricingClarifier && (
                     <p className="text-[11px] text-muted-foreground">

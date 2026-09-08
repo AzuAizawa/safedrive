@@ -9,6 +9,37 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — "3 dayss", and a fee line that was always zero
+
+Two small things on the car booking panel, both reported from the renter side.
+
+**"₱1,000 × 3 dayss".** `formatDayCount()` already returns "3 days", but the
+call site still appended its own `{totalDays > 1 ? "s" : ""}` from before that
+helper existed, so every multi-day booking doubled the s. The other three
+`formatDayCount` call sites were checked and are correct.
+
+**"Payment processing fee ₱0".** The rate is 0 and is meant to stay 0 until a
+real PayMongo rate is confirmed — Admin Platform Settings says "Keep 0 unless
+verified" for exactly that reason. So this row rendered a permanent ₱0 that
+explained nothing and prompted the question of what the fee even was. It is now
+shown only when there is one.
+
+The sentence under the total moved with it: it claimed the total was "the
+listed price plus the disclosed payment-processing fee" while pointing at a fee
+no longer on screen. At zero it now reads "exactly the listed price - no
+processing fee".
+
+Worth recording, since the fee looked like a bug and is not: commission is
+computed from `basePrice`, not the total, and the lister's payout is
+`basePrice` minus commission. The processing fee is added on top of what the
+renter pays and touches neither. It exists to pass the gateway's cut to the
+renter; at 0, SafeDrive absorbs it. Keeping the mechanism at 0 is a real
+choice, not an unfinished one.
+
+Files: `src/pages/CarDetailPage.tsx`.
+
+---
+
 ## 2026-09-08 — The no-show grace window becomes a setting, typed once
 
 **Run CHAPTER 68 BEFORE deploying this.** The client and three API handlers now
