@@ -1,5 +1,5 @@
-import { createSupabaseAdmin } from "./lib/payoutAutomation";
-import { sendUserNotificationEmail } from "./lib/email.js";
+import { createSupabaseAdmin } from "../server/payoutAutomation";
+import { sendUserNotificationEmail } from "../server/email.js";
 
 export const config = {
   runtime: "edge",

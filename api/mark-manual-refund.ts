@@ -1,6 +1,6 @@
-import { createSupabaseAdmin } from "./lib/payoutAutomation.js";
-import { sendRefundReceiptEmail } from "./lib/email.js";
-import { postCompletedRefundToLedger } from "./lib/ledger.js";
+import { createSupabaseAdmin } from "../server/payoutAutomation.js";
+import { sendRefundReceiptEmail } from "../server/email.js";
+import { postCompletedRefundToLedger } from "../server/ledger.js";
 
 export const config = {
   runtime: "edge",
@@ -161,7 +161,7 @@ export default async function handler(req: Request) {
     // OTHER refunds on the same booking. If a full refund already went
     // through (for example via a "Retry PayMongo" that ignored this partial
     // row), releasing this one on top of it sends real cash out the door
-    // twice. Same refundable payment types as api/lib/cancellationRefundPlan.ts.
+    // twice. Same refundable payment types as server/cancellationRefundPlan.ts.
     const { data: siblingPayments, error: siblingPaymentsError } = await supabase
       .from("payments")
       .select("id, amount, payment_type, status")

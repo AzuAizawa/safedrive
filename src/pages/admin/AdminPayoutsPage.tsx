@@ -109,7 +109,7 @@ const getLatestPayout = (booking: PayoutBooking) =>
 
 // What the lister actually receives. Once a payout row exists, its amount IS
 // the transferred figure and is the only correct thing to show. base_price
-// minus commission is an estimate only: api/lib/payoutAutomation.ts also adds
+// minus commission is an estimate only: server/payoutAutomation.ts also adds
 // every paid extension's fuel top-up, which is deliberately NOT folded into
 // base_price - so a booking with a fuel reimbursement was displayed short
 // here even after the larger amount had already been sent.
@@ -374,7 +374,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
   );
   const payoutStats = useMemo(() => {
     // The lister's payout is base_price net of SafeDrive's commission (see
-    // api/lib/payoutAutomation.ts) - commission is no longer additional cash
+    // server/payoutAutomation.ts) - commission is no longer additional cash
     // collected from the renter, so it must be subtracted here too.
     const released = completed.reduce(
       (total, booking) => total + getPayoutAmount(booking).amount,

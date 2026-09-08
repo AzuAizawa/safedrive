@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { resolveRentalAgreementStorageLocation } from "./lib/rentalAgreementStorage.js";
+import { resolveRentalAgreementStorageLocation } from "../server/rentalAgreementStorage.js";
 
 export const config = {
   runtime: "edge",

@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getClientIp } from "./lib/ipBlock.js";
+import { getClientIp } from "../server/ipBlock.js";
 
 export const config = {
   runtime: "edge",

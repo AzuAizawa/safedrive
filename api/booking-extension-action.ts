@@ -1,7 +1,7 @@
 import { addDays } from "date-fns";
 import { createClient } from "@supabase/supabase-js";
-import { sendUserNotificationEmail } from "./lib/email.js";
-import { blockedIpResponse } from "./lib/ipBlock.js";
+import { sendUserNotificationEmail } from "../server/email.js";
+import { blockedIpResponse } from "../server/ipBlock.js";
 
 export const config = {
   runtime: "edge",
@@ -282,7 +282,7 @@ export default async function handler(req: Request) {
         Number(bookingRecord.commission) / Math.max(1, bookingRecord.total_days);
       const extensionAmount = Math.round(dailyRate * extensionDays * 100) / 100;
       // Commission is still tracked (needed to recognize platform revenue and
-      // to reduce the lister's payout, api/lib/payoutAutomation.ts) but is no
+      // to reduce the lister's payout, server/payoutAutomation.ts) but is no
       // longer charged to the renter - mirrors api/create-booking.ts.
       const extensionCommission = Math.round(dailyCommission * extensionDays * 100) / 100;
       const totalAdditionalAmount =

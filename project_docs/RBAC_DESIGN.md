@@ -291,7 +291,7 @@ Tables to revisit (currently `is_admin()`): `profiles`, `cars`, `car_documents`,
 ### 5.2 API handlers — shared helper
 
 ```ts
-// api/lib/adminAuth.ts
+// server/adminAuth.ts
 export async function requirePermission(req, res, key: string) {
   const user = await getUserFromReq(req);
   const { data: ok } = await serviceClient.rpc('admin_can_for', { p_uid: user.id, p_key: key });
@@ -366,7 +366,7 @@ Not an app feature. A super admin is added by running the SQL in `SAFE_DRIVE_DAT
 
 1. **Schema + helper + seed + backfill.** — ✅ **DONE (code written, not yet run on the DB).**
    - `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` Chapter 19: 3 tables (`admin_permission_catalog`, `admin_permissions`, `admin_permission_templates`), 2 `profiles` columns, `admin_can()` + `admin_can_for()`, seeded 9 keys + 5 templates, backfill of every existing admin.
-   - `api/lib/adminAuth.ts`: `requirePermission()` / `requireSuperAdmin()` helpers (nothing imports them yet).
+   - `server/adminAuth.ts`: `requirePermission()` / `requireSuperAdmin()` helpers (nothing imports them yet).
    - `src/types/database.ts`: new tables + functions + `ADMIN_PERMISSION_KEYS` typed.
    - **To activate: run Chapter 19's SQL in the Supabase SQL editor** (safe + re-runnable). `npm run build` passes.
 2. **Move platform-settings to super-admin.** Route inside `SuperAdminRoute`, drop from `operationalNavItems`. (Small, do it early.)

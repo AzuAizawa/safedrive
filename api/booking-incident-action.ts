@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
-import { sendUserNotificationEmail } from "./lib/email.js";
-import { blockedIpResponse } from "./lib/ipBlock.js";
-import { fetchNoShowGraceMinutes } from "./lib/bookingCompletion.js";
+import { sendUserNotificationEmail } from "../server/email.js";
+import { blockedIpResponse } from "../server/ipBlock.js";
+import { fetchNoShowGraceMinutes } from "../server/bookingCompletion.js";
 
 export const config = {
   runtime: "edge",

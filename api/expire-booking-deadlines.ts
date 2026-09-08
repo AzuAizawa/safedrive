@@ -2,14 +2,14 @@ import { createClient } from "@supabase/supabase-js";
 import {
   fetchNoShowGraceMinutes,
   runBookingCompletionSideEffects,
-} from "./lib/bookingCompletion.js";
+} from "../server/bookingCompletion.js";
 import {
   createManualRefundReview,
   getCancellationRefundPlan,
   getVehicleLabel,
   type RefundableBooking,
-} from "./lib/cancellationRefundPlan.js";
-import { sendUserNotificationEmail } from "./lib/email.js";
+} from "../server/cancellationRefundPlan.js";
+import { sendUserNotificationEmail } from "../server/email.js";
 
 
 export const config = {
@@ -222,7 +222,7 @@ export default async function handler(req: Request) {
     // Unlike the unpaid-reservation case above, money was already captured -
     // reuse the same late-cancellation refund policy a renter-initiated
     // cancel already goes through (refund_full_hours_snapshot /
-    // refund_late_renter_percent_snapshot via api/lib/cancellationRefundPlan.ts),
+    // refund_late_renter_percent_snapshot via server/cancellationRefundPlan.ts),
     // released through the same manual-refund-review queue in Financial
     // Reviews, not automatically.
     const nowIso = new Date().toISOString();

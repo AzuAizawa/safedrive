@@ -1,4 +1,4 @@
-import { createSupabaseAdmin } from "./lib/payoutAutomation";
+import { createSupabaseAdmin } from "../server/payoutAutomation";
 
 export const config = {
   runtime: "edge",

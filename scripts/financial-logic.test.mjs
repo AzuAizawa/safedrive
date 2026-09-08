@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { calculatePaymentLedgerAllocation } from "../api/lib/ledger.ts";
+import { calculatePaymentLedgerAllocation } from "../server/ledger.ts";
 
 // Commission is deducted from the LISTER's earnings, not added to what the
 // renter pays (api/create-booking.ts) - so totalPrice is basePrice + the

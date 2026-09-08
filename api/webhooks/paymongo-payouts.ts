@@ -1,6 +1,6 @@
-import { createSupabaseAdmin } from "../lib/payoutAutomation";
-import { sendPayoutReceiptEmail } from "../lib/email.js";
-import { postSimpleBalancedJournal } from "../lib/ledger.js";
+import { createSupabaseAdmin } from "../../server/payoutAutomation";
+import { sendPayoutReceiptEmail } from "../../server/email.js";
+import { postSimpleBalancedJournal } from "../../server/ledger.js";
 
 export const config = {
   runtime: "edge",

@@ -400,7 +400,7 @@ Replaces the retired pre-booking "Ask the lister" (a car detail page inquiry wit
 Before this chapter, a booking that reached `downpayment_paid` had no deadline of any kind on the remaining balance - the deadline-expiry cron only ever expired `confirmed`/`awaiting_payment` (pre-any-payment) bookings, and `downpayment_paid` still counts as an active status for overlap purposes, so an unpaid balance permanently blocked the car's dates with no automatic recovery and no reminder.
 
 - **`bookings.balance_deadline`** is stamped once, at the moment the downpayment webhook succeeds (`api/webhooks/paymongo.ts`): `min(now + balance_deadline_hours, pickup time)` - the same "never past pickup" cap already used for the original `payment_deadline`. `platform_settings.balance_deadline_hours` (default 24) and `balance_reminder_hours_before` (default 6) are live operational-timing settings, same category as `arrival_checkin_lead_hours` / `lister_completion_timeout_hours` (read live, never snapshotted per booking - they gate *when* something happens, not a financial promise made at booking time) - both super-admin-configurable through the existing consensus-vote flow on `/admin/platform-settings`.
-- **Expiry** (`api/expire-booking-deadlines.ts`): a `downpayment_paid` booking past its `balance_deadline` is auto-cancelled. The financial consequence reuses the **existing** late-cancellation policy - `refund_full_hours_snapshot` / `refund_late_renter_percent_snapshot`, already snapshotted per booking at `create-booking` time - via the new `api/lib/cancellationRefundPlan.ts` (`getCancellationRefundPlan`, `createManualRefundReview`, extracted so both the user-initiated `cancel` action in `api/booking-action.ts` and this cron share one calculation; `booking-action.ts` keeps its own untouched local copy for its critical payment path, importing nothing new). No new refund percentage was introduced. It is recorded in `booking_cancellations` with `cancelled_by_role='renter'`, so it counts against the renter's reliability the same way any other late cancellation does.
+- **Expiry** (`api/expire-booking-deadlines.ts`): a `downpayment_paid` booking past its `balance_deadline` is auto-cancelled. The financial consequence reuses the **existing** late-cancellation policy - `refund_full_hours_snapshot` / `refund_late_renter_percent_snapshot`, already snapshotted per booking at `create-booking` time - via the new `server/cancellationRefundPlan.ts` (`getCancellationRefundPlan`, `createManualRefundReview`, extracted so both the user-initiated `cancel` action in `api/booking-action.ts` and this cron share one calculation; `booking-action.ts` keeps its own untouched local copy for its critical payment path, importing nothing new). No new refund percentage was introduced. It is recorded in `booking_cancellations` with `cancelled_by_role='renter'`, so it counts against the renter's reliability the same way any other late cancellation does.
 - **Reminder:** a one-time notification (`bookings.balance_reminder_sent_at` dedupes it) fires once the deadline is within `balance_reminder_hours_before`.
 - **Surfaced to both sides:** `/my-bookings` and `/lister-bookings` show a live countdown to `balance_deadline` on the `downpayment_paid` guidance card.
 
@@ -432,7 +432,7 @@ ledger liability account) through CHAPTER 33. **CHAPTER 34 removed it end to
 end** - the `security_deposits` / `security_deposit_claims` tables,
 `cars.security_deposit_amount`, `platform_settings.deposit_claim_window_hours`,
 the `2020` ledger account, the `/security-deposit/:bookingId` and
-`/admin/security-deposits` routes, `api/lib/securityDeposit.ts` and its three
+`/admin/security-deposits` routes, `server/securityDeposit.ts` and its three
 dedicated endpoints, and every gate that referenced any of it (arrival
 check-in, payout automation, booking completion, the PayMongo webhook, refund
 receipts). A pre-removal diagnostic confirmed zero deposits, claims, deposit
@@ -589,7 +589,7 @@ With this on (and a `sk_test_` key, or no key - a live key auto-disables it), Sa
 - **Payouts** - `payoutAutomation.ts`, `sandbox_payout_*` reference, journal `2010 -> 1010`.
 - **Cancellation refunds** - `refundAutomation.ts`, `sandbox_refund_*` reference, `payments` row `refund` completed, reversal journal via `postCompletedRefundToLedger`.
 
-The shared gate is `api/lib/paymongoMode.ts` `isDemoMoneyMovementEnabled`. Set the flag on a thesis/demo deployment; omit it for any launch that moves real money. Never prefix a server secret with `VITE_`.
+The shared gate is `server/paymongoMode.ts` `isDemoMoneyMovementEnabled`. Set the flag on a thesis/demo deployment; omit it for any launch that moves real money. Never prefix a server secret with `VITE_`.
 
 ## 17. Local Run and Test Procedure
 
@@ -1390,11 +1390,11 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 
 | Module | Exported surface | Purpose |
 |---|---|---|
-| `api/lib/ledger.ts` | `calculatePaymentLedgerAllocation`, `postCompletedPaymentToLedger`, `postSimpleBalancedJournal`, `postCompletedRefundToLedger` | Centavo-safe allocations and append-only balanced journal posting |
-| `api/lib/reconciliation.ts` | `paymentLedgerEventKey`, `findDuplicateProviderTransactions`, `groupCompletedCheckoutPayments`, `extractPayMongoPaymentIds` | Idempotency keys, duplicate detection, checkout grouping, and provider-reference parsing |
-| `api/lib/payoutAutomation.ts` | `createSupabaseAdmin`, `processAutomaticPayoutForBooking` | Service client plus payout eligibility/idempotency/provider/simulator flow |
-| `api/lib/refundAutomation.ts` | `processAutomaticRefundForBooking` | Refund eligibility, provider attempt, fallback review, audit, and notification |
-| `api/lib/email.ts` | `sendTransactionalEmail`, receipt (itemized payout), verification, user-notification, and `sendAdminAlertEmail` helpers | Server-only Resend delivery, HTML/text transactional templates, and idempotency keys; admin alerts fire only on money-movement exceptions |
+| `server/ledger.ts` | `calculatePaymentLedgerAllocation`, `postCompletedPaymentToLedger`, `postSimpleBalancedJournal`, `postCompletedRefundToLedger` | Centavo-safe allocations and append-only balanced journal posting |
+| `server/reconciliation.ts` | `paymentLedgerEventKey`, `findDuplicateProviderTransactions`, `groupCompletedCheckoutPayments`, `extractPayMongoPaymentIds` | Idempotency keys, duplicate detection, checkout grouping, and provider-reference parsing |
+| `server/payoutAutomation.ts` | `createSupabaseAdmin`, `processAutomaticPayoutForBooking` | Service client plus payout eligibility/idempotency/provider/simulator flow |
+| `server/refundAutomation.ts` | `processAutomaticRefundForBooking` | Refund eligibility, provider attempt, fallback review, audit, and notification |
+| `server/email.ts` | `sendTransactionalEmail`, receipt (itemized payout), verification, user-notification, and `sendAdminAlertEmail` helpers | Server-only Resend delivery, HTML/text transactional templates, and idempotency keys; admin alerts fire only on money-movement exceptions |
 | `src/contexts/AuthContext.tsx` | `AuthProvider`, `useAuth` | Session/profile/MFA state and auth operations; runs the inactivity timeout (`{scope:"local"}` sign-out, admin 10 min / user 25 min) and, since SQL Ch. 57, the single-active-session guard (`src/lib/singleSession.ts`) that force-signs-out this tab if a newer login on another device supersedes it |
 | `src/lib/accountDormancy.ts` | `daysSinceActive`, `formatDormancy`, `getDormancySeverity`, `dormancySeverityClasses` | "Last Active" badge on `AdminUsersPage.tsx` (SQL Ch. 58) - months/years-scale account inactivity, deliberately separate from the hour-scale `src/lib/queueAge.ts` |
 | `src/lib/adminWorkQueue.ts` | `loadSupportTicketsNeedingAdminReply` | Find support cases where the newest participant message needs an admin answer |
@@ -1427,7 +1427,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 - `ArrivalPhotoCapture` is a functional evidence component. Its exported `ArrivalLocationEvidence` type carries optional latitude, longitude, accuracy, and capture time only after permission/consent.
 - `src/types/database.ts` exports `Json`, the generated-style `Database` interface, row aliases (`Profile`, `Car`, `Booking`, `Payment`, `GuestInquiry`, and others), and composite `CarWithDetails` / `BookingWithDetails` types.
 - The database type surface covers: profiles, verification images, vehicle catalogue/listings/images/documents/renewals, bookings/extensions/reviews, payments, audit logs, guest inquiries, agreement versions/acceptances, vehicle unavailability, trip reports/photos, retention requests/rules, financial accounts/journals/entries, reconciliation runs/items, security logs, platform settings, subscriptions, support tickets/messages, notifications, and the `create_ledger_correction` database function.
-- `api/lib/supabaseTypes.ts` defines the service-role client type used by server-only finance helpers. It must never be imported into browser code.
+- `server/supabaseTypes.ts` defines the service-role client type used by server-only finance helpers. It must never be imported into browser code.
 
 ### G.6 Important external and internal calls
 

@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-import { sendUserNotificationEmail } from "./lib/email.js";
-import { blockedIpResponse } from "./lib/ipBlock.js";
+import { sendUserNotificationEmail } from "../server/email.js";
+import { blockedIpResponse } from "../server/ipBlock.js";
 
 export const config = {
   runtime: "edge",
@@ -519,8 +519,8 @@ export default async function handler(req: Request) {
     const basePrice = pricePerDay * totalDays;
     // Commission is SafeDrive's cut of the LISTER's earnings, not a charge
     // added to the renter - it's still computed and stored here (needed for
-    // ledger/payout math and revenue reporting via api/lib/payoutAutomation.ts
-    // and api/lib/ledger.ts), but it no longer contributes to what the renter
+    // ledger/payout math and revenue reporting via server/payoutAutomation.ts
+    // and server/ledger.ts), but it no longer contributes to what the renter
     // pays. Only the payment-processing fee (a real PayMongo transaction
     // cost, tied to the renter's chosen payment method) is grossed up on top
     // of the base price - that's an intentionally separate decision from the

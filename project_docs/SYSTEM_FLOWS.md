@@ -153,7 +153,7 @@ Server recalculates everything:
   - Re-checks stored checkout id + **exact amount** + payable state; inserts an
     idempotent `payments` row (DB uniqueness index on the event); advances
     booking status (`downpayment_paid` / `fully_paid` / `active`).
-  - Posts a balanced ledger journal (`api/lib/ledger.ts`
+  - Posts a balanced ledger journal (`server/ledger.ts`
     `postCompletedPaymentToLedger` → owner / commission / processing-fee split,
     debit `1010`, credit `2010` + `2040` + `4020`, then `finalize_ledger_journal`).
   - Notifies both parties; sends the renter a **payment receipt** via Resend;
@@ -229,7 +229,7 @@ sections 16-20 don't shift.
 ## 16. Payout — lister gets paid
 
 - `POST /api/process-payout` (super-admin) or auto-triggered on completion →
-  `api/lib/payoutAutomation.ts`
+  `server/payoutAutomation.ts`
   `processAutomaticPayoutForBooking`. **Eligibility gates:**
   1. booking `completed` and both parties completed
   2. no open/in-progress support ticket on the booking
@@ -261,7 +261,7 @@ sections 16-20 don't shift.
 
 - On cancellation (`POST /api/booking-action` `cancel`): if a captured
   `downpayment`/`balance` payment is inside the 24-hour refund window and the
-  trip has not started → `api/lib/refundAutomation.ts`
+  trip has not started → `server/refundAutomation.ts`
   `processAutomaticRefundForBooking`: groups completed refundable payments by
   PayMongo payment/checkout id; blocks if a payout was released or a refund is
   pending; resolves the `pay_…` id (or from the `cs_…` checkout); calls PayMongo

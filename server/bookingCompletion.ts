@@ -76,17 +76,13 @@ export async function runBookingCompletionSideEffects(
  * the click is ACCEPTED - the failure that produced a visible, permanently
  * rejecting button twice before.
  *
- * WHY IT LIVES HERE rather than in its own api/lib/noShowGrace.ts, which is
- * where it belongs: Vercel turns EVERY .ts file under api/ into a serverless
- * function, api/lib helpers included, and this project sits right on the
- * plan's function ceiling. 53 files deploy; 54 fail. Adding one more file for
- * this helper broke three deployments in a row while every local build passed.
- *
- * So the constraint is real and it is not going away on its own: until the
- * api/lib helpers are moved out of api/ entirely (they are shared modules, not
- * endpoints, and should never have been counted as functions), a NEW FILE
- * UNDER api/ WILL BREAK THE DEPLOYMENT. Add shared server code to an existing
- * module instead, as this does.
+ * It lived briefly in api/lib/noShowGrace.ts, which broke three deployments:
+ * Vercel turns EVERY .ts file under api/ into a serverless function, api/lib
+ * helpers included, and one more file crossed the plan's ceiling - 53 deployed,
+ * 54 did not. The shared modules have since moved to server/, out of api/
+ * entirely, taking the function count from 53 to 41, so that ceiling is no
+ * longer close. This helper stayed here rather than moving back to a file of
+ * its own; a booking timing belongs with booking lifecycle either way.
  * ------------------------------------------------------------------------ */
 export const DEFAULT_NO_SHOW_GRACE_MINUTES = 30;
 export const NO_SHOW_GRACE_MINUTES_MIN = 15;

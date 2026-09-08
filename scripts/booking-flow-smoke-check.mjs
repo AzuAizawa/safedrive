@@ -177,7 +177,7 @@ const checks = [
     ],
   },
   {
-    file: "api/lib/bookingCompletion.ts",
+    file: "server/bookingCompletion.ts",
     markers: [
       "runBookingCompletionSideEffects",
       "platform_commission_earned",
@@ -413,7 +413,7 @@ const checks = [
     ],
   },
   {
-    file: "api/lib/payoutAutomation.ts",
+    file: "server/payoutAutomation.ts",
     markers: [
       "PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION",
       "isPayMongoTestKey",
@@ -457,7 +457,7 @@ const checks = [
     ],
   },
   {
-    file: "api/lib/cancellationRefundPlan.ts",
+    file: "server/cancellationRefundPlan.ts",
     markers: [
       "getCancellationRefundPlan",
       "createManualRefundReview",
@@ -466,7 +466,7 @@ const checks = [
     ],
   },
   {
-    file: "api/lib/refundAutomation.ts",
+    file: "server/refundAutomation.ts",
     markers: [
       "Source transaction IDs",
       "A PayMongo refund is already pending for this booking",
@@ -480,7 +480,7 @@ const checks = [
     ],
   },
   {
-    file: "api/lib/ledger.ts",
+    file: "server/ledger.ts",
     markers: [
       "allocationOverride",
       "Ledger allocation override exceeds the captured amount",
@@ -491,7 +491,7 @@ const checks = [
     // lister the commission was "retained separately and not part of this
     // amount" - now it's deducted from their base rental before payout, so
     // the receipt itemizes it as a real deduction instead.
-    file: "api/lib/email.ts",
+    file: "server/email.ts",
     markers: [
       "sendAdminAlertEmail",
       "Trip extension",
@@ -502,7 +502,7 @@ const checks = [
     ],
   },
   {
-    file: "api/lib/paymongoMode.ts",
+    file: "server/paymongoMode.ts",
     markers: [
       "isDemoMoneyMovementEnabled",
       "PAYMONGO_ENABLE_SANDBOX_PAYOUT_COMPLETION",

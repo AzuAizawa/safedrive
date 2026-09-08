@@ -598,7 +598,7 @@ export const processAutomaticPayoutForBooking = async ({
   const payoutBooking = booking as unknown as BookingForPayout;
   // Commission now comes out of the lister's earnings (it's no longer
   // additional cash collected from the renter - see api/create-booking.ts
-  // and api/lib/ledger.ts). Mutate payoutBooking.base_price immediately and
+  // and server/ledger.ts). Mutate payoutBooking.base_price immediately and
   // unconditionally, not just inside the fuel-reimbursement branch below -
   // every later line in this function (the pending payout record, the
   // actual PayMongo transfer payload, every notification/email/audit-log

@@ -4,8 +4,8 @@ import {
   AUTO_BLOCK_FAILED_ATTEMPTS,
   AUTO_BLOCK_WINDOW_MINUTES,
   getClientIp,
-} from "./lib/ipBlock.js";
-import { sendUserNotificationEmail } from "./lib/email.js";
+} from "../server/ipBlock.js";
+import { sendUserNotificationEmail } from "../server/email.js";
 
 // Failed sign-ins against ONE account before its owner is told. Lower than
 // the IP auto-block threshold on purpose: this is a warning to the real

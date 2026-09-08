@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { blockedIpResponse } from "./lib/ipBlock.js";
+import { blockedIpResponse } from "../server/ipBlock.js";
 
 export const config = {
   runtime: "edge",

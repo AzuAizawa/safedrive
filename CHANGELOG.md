@@ -9,6 +9,41 @@ The authoritative detail still lives in
 
 ---
 
+## 2026-09-08 — Shared server modules move out of api/, off Vercel's function ceiling
+
+Vercel turns **every** `.ts` file under `api/` into a serverless function. Twelve
+of those files were never endpoints — `email`, `ledger`, `payoutAutomation`,
+`ipBlock` and the rest are shared modules imported by the handlers — but each
+one still counted against the plan's function limit, and the project was sitting
+on it. 53 files deployed; 54 did not. Adding one small helper broke three
+deployments in a row while every local build passed.
+
+The repository already knew these were not endpoints: the alignment check had
+been excluding `api/lib/` from its handler count all along. Only Vercel could
+not tell the difference.
+
+They now live in `server/`, and the count went **53 → 41**. The ceiling is no
+longer close, and adding an endpoint no longer risks the deployment.
+
+**Two silent coverage losses the move caused, caught and fixed.** Both scans
+keyed on the `api/` prefix, so moving the files quietly took them out of scope:
+the alignment check's environment-variable coverage dropped from 19 names to 16
+the moment the files moved, and `npm run lint` stopped linting them entirely.
+Both now include `server/`, and the env count is back to 19. Worth recording as
+the trap in this kind of move — the code keeps compiling, and it is the
+*checks* that quietly shrink.
+
+`tsconfig.api.json` type-checks `server/` alongside `api/`; the four test
+scripts that import these modules directly were repointed; and 24 stale
+`api/lib/...` path references in comments and documentation were updated so
+nothing points at a folder that no longer exists.
+
+Files: `server/` (12 modules moved from `api/lib/`), 31 `api/` handlers
+(imports), `tsconfig.api.json`, `package.json`, four `scripts/*.mjs`, and the
+project docs.
+
+---
+
 ## 2026-09-08 — Backup and restore: the data and the files finally have a second copy
 
 The thesis panel asked for a mirror backup and the 3-2-1 rule. Checking before

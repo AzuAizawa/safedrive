@@ -1,5 +1,5 @@
-import { createSupabaseAdmin } from "./lib/payoutAutomation";
-import { processAutomaticRefundForBooking } from "./lib/refundAutomation";
+import { createSupabaseAdmin } from "../server/payoutAutomation";
+import { processAutomaticRefundForBooking } from "../server/refundAutomation";
 
 export const config = {
   runtime: "edge",

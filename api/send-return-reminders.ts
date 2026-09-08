@@ -1,6 +1,6 @@
-import { createSupabaseAdmin } from "./lib/payoutAutomation";
-import { sendReturnReminderEmail, type TransactionalEmailResult } from "./lib/email.js";
-import { fetchNoShowGraceMinutes } from "./lib/bookingCompletion.js";
+import { createSupabaseAdmin } from "../server/payoutAutomation";
+import { sendReturnReminderEmail, type TransactionalEmailResult } from "../server/email.js";
+import { fetchNoShowGraceMinutes } from "../server/bookingCompletion.js";
 
 export const config = {
   runtime: "edge",

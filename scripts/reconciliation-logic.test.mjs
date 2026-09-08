@@ -6,7 +6,7 @@ import {
   findDuplicateProviderTransactions,
   groupCompletedCheckoutPayments,
   paymentLedgerEventKey,
-} from "../api/lib/reconciliation.ts";
+} from "../server/reconciliation.ts";
 
 const payment = (overrides = {}) => ({
   id: "payment-1",

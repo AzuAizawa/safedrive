@@ -28,7 +28,7 @@
     "check:api": "tsc -p tsconfig.api.json",
     "check:alignment": "node scripts/repository-alignment-check.mjs",
     "check:all": "npm run lint && npm run check:api && npm run check:booking-flow && npm run check:agreement-storage && npm run check:financial-logic && npm run check:reconciliation-logic && npm run check:process-logic && npm run check:kyc-ocr && npm run check:api-boundaries && npm run check:alignment && npm run check:browser && npm run check:local-env",
-    "lint": "eslint \"src/**/*.{ts,tsx}\" \"api/**/*.ts\" \"*.{js,ts}\"",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" \"api/**/*.ts\" \"server/**/*.ts\" \"*.{js,ts}\"",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort"
   },
   "dependencies": {

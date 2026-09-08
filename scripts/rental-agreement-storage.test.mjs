@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveRentalAgreementStorageLocation } from "../api/lib/rentalAgreementStorage.ts";
+import { resolveRentalAgreementStorageLocation } from "../server/rentalAgreementStorage.ts";
 
 const supabaseUrl = "https://project-ref.supabase.co";
 const carId = "691a2745-d4d4-4726-ba6b-e77c1d0ee45a";

@@ -74,7 +74,7 @@ for (const route of routes) {
 }
 
 const apiFiles = allFiles
-  .filter((file) => relative(file).startsWith("api/") && path.extname(file) === ".ts" && !relative(file).startsWith("api/lib/"))
+  .filter((file) => relative(file).startsWith("api/") && path.extname(file) === ".ts")
   .map(relative)
   .sort();
 for (const file of apiFiles) {
@@ -93,7 +93,7 @@ for (const endpoint of apiReferences) {
 
 const supabaseRelations = new Set();
 for (const [file, content] of contentByFile) {
-  if (!file.startsWith("src/") && !file.startsWith("api/")) continue;
+  if (!file.startsWith("src/") && !file.startsWith("api/") && !file.startsWith("server/")) continue;
   for (const match of content.matchAll(/\.from\(["']([a-z0-9_-]+)["']\)/gi)) supabaseRelations.add(match[1]);
 }
 for (const relation of supabaseRelations) {
@@ -102,7 +102,7 @@ for (const relation of supabaseRelations) {
 
 const envNames = new Set();
 for (const [file, content] of contentByFile) {
-  if (!file.startsWith("src/") && !file.startsWith("api/") && !["vite.config.ts", "vercel.json"].includes(file)) continue;
+  if (!file.startsWith("src/") && !file.startsWith("api/") && !file.startsWith("server/") && !["vite.config.ts", "vercel.json"].includes(file)) continue;
   for (const match of content.matchAll(/(?:process\.env|import\.meta\.env)\.([A-Z][A-Z0-9_]+)/g)) envNames.add(match[1]);
 }
 const documentedEnv = new Set([...envExample.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((match) => match[1]));

@@ -1,9 +1,9 @@
 import { addDays } from "date-fns";
 import { createClient } from "@supabase/supabase-js";
-import { processAutomaticRefundForBooking } from "./lib/refundAutomation.js";
-import { runBookingCompletionSideEffects } from "./lib/bookingCompletion.js";
-import { sendUserNotificationEmail } from "./lib/email.js";
-import { blockedIpResponse } from "./lib/ipBlock.js";
+import { processAutomaticRefundForBooking } from "../server/refundAutomation.js";
+import { runBookingCompletionSideEffects } from "../server/bookingCompletion.js";
+import { sendUserNotificationEmail } from "../server/email.js";
+import { blockedIpResponse } from "../server/ipBlock.js";
 
 export const config = {
   runtime: "edge",

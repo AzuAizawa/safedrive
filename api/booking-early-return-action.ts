@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-import { sendUserNotificationEmail } from "./lib/email.js";
-import { blockedIpResponse } from "./lib/ipBlock.js";
+import { sendUserNotificationEmail } from "../server/email.js";
+import { blockedIpResponse } from "../server/ipBlock.js";
 
 export const config = {
   runtime: "edge",
@@ -417,7 +417,7 @@ export default async function handler(req: Request) {
       // what was actually captured for this booking, the same way
       // api/booking-incident-action.ts already clamps its recommended
       // refund. Same refundable payment types as
-      // api/lib/cancellationRefundPlan.ts.
+      // server/cancellationRefundPlan.ts.
       const { data: bookingPayments, error: bookingPaymentsError } = await supabase
         .from("payments")
         .select("amount, payment_type, status")

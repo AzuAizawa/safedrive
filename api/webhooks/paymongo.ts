@@ -1,11 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
-import type { ServiceRoleSupabaseClient } from "../lib/supabaseTypes.js";
+import type { ServiceRoleSupabaseClient } from "../../server/supabaseTypes.js";
 import {
   postCompletedPaymentToLedger,
   postCompletedRefundToLedger,
   postSimpleBalancedJournal,
-} from "../lib/ledger.js";
-import { sendPaymentReceiptEmail, sendRefundReceiptEmail, sendUserNotificationEmail } from "../lib/email.js";
+} from "../../server/ledger.js";
+import { sendPaymentReceiptEmail, sendRefundReceiptEmail, sendUserNotificationEmail } from "../../server/email.js";
 
 export const config = {
   runtime: "edge",
@@ -179,7 +179,7 @@ const getSupabaseAdmin = () => {
 const DEFAULT_BALANCE_DEADLINE_HOURS = 24;
 
 // Same Manila-correct pattern used across booking-action.ts /
-// booking-incident-action.ts / api/lib/cancellationRefundPlan.ts -
+// booking-incident-action.ts / server/cancellationRefundPlan.ts -
 // start_date is a plain calendar date, pickup time is treated as Manila
 // local time (-8h from the naive UTC instant).
 const getBookingPickupMs = (booking: Pick<BookingRecord, "start_date" | "pickup_time">) => {

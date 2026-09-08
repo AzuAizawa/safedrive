@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { sendVerificationDecisionEmail } from "./lib/email.js";
+import { sendVerificationDecisionEmail } from "../server/email.js";
 
 export const config = {
   runtime: "edge",
