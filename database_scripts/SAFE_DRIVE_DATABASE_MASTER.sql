@@ -12142,4 +12142,120 @@ commit;
 -- select prosrc like '%pending%rejected%' as lister_can_correct from pg_proc
 --   where proname='protect_car_submission_fields';
 
+-- ============================================================================
+-- CHAPTER 80 - Approving a document closes the older ones still waiting for the
+-- same requirement
+-- Apply this chapter only, staging first. One function is replaced and stale
+-- pending rows are resolved. No file is deleted and no approval is undone.
+-- ============================================================================
+begin;
+
+-- Reported: a vehicle showed "Approved - expiry 7/9/2027" and, directly under
+-- it, "Pending review" for the same requirement. The pending row was the
+-- document filed when the car was first listed; it was never reviewed, a
+-- replacement arrived later, and the admin approved that instead. Nothing ever
+-- closed the first one.
+--
+-- Two consequences, both reported as separate bugs. The lister sees a review
+-- that never finishes, and the upload box for that requirement stays locked -
+-- the panel disables it while a pending resubmission exists, and
+-- submit_vehicle_document_update refuses a second one with "A replacement for %
+-- is already awaiting review". So the requirement is satisfied, and the lister
+-- can neither clear the notice nor send anything new.
+--
+-- Approving a document is a decision about the requirement, not only about that
+-- row. Every other pending row for the same requirement is settled with it,
+-- recorded as rejected - the honest outcome, since they were not the version
+-- accepted - with a reason the lister can read.
+create or replace function public.review_vehicle_documents(p_car_id uuid,p_reviews jsonb)
+returns jsonb language plpgsql security definer set search_path=public as $review$
+declare item jsonb; d public.car_documents%rowtype; decision text; rid uuid; has_rejected boolean; replacement_start timestamptz;
+begin
+  if not public.admin_can('vehicles.review') then raise exception 'Vehicle review permission required'; end if;
+  perform 1 from public.cars where id=p_car_id for update;
+  for item in select * from jsonb_array_elements(p_reviews) loop
+    select * into d from public.car_documents where id=(item->>'id')::uuid and car_id=p_car_id for update;
+    if not found then raise exception 'Document not found'; end if;
+    decision:=item->>'status';
+    if decision not in ('approved','rejected','revoked') then raise exception 'Invalid review decision'; end if;
+    if decision in ('rejected','revoked') and coalesce(trim(item->>'reason'),'')='' then raise exception 'A reason is required'; end if;
+    replacement_start:=(item->>'valid_from')::timestamptz;
+    if decision='approved' and d.compliance_status<>'approved' and d.document_type in ('cr','bir')
+      and exists(select 1 from public.car_documents where car_id=p_car_id and document_type=d.document_type and id<>d.id and compliance_status='approved') then
+      replacement_start:=coalesce(replacement_start,now());
+      update public.car_documents set superseded_at=replacement_start-interval '1 millisecond'
+        where car_id=p_car_id and document_type=d.document_type and id<>d.id and compliance_status='approved'
+          and coalesce(valid_from,'-infinity'::timestamptz)<replacement_start
+          and coalesce(superseded_at,'infinity'::timestamptz)>=replacement_start;
+    end if;
+    update public.car_documents set compliance_status=decision,
+      valid_from=case when decision='approved' then replacement_start else valid_from end,
+      valid_until=case when decision='approved'
+        then coalesce((item->>'valid_until')::timestamptz, valid_until) else valid_until end,
+      rental_use_verified=case when decision='approved'
+        then coalesce((item->>'rental_use_verified')::boolean, rental_use_verified) else rental_use_verified end,
+      review_reason=nullif(trim(item->>'reason'),''), reviewed_by=auth.uid(),reviewed_at=now()
+      where id=d.id;
+    -- Settle anything else still waiting on the same requirement.
+    if decision='approved' then
+      update public.car_documents set compliance_status='rejected',
+        review_reason='A different document was approved for this requirement, so this one was not used.',
+        reviewed_by=auth.uid(), reviewed_at=now()
+        where car_id=p_car_id and document_type=d.document_type and id<>d.id
+          and compliance_status='pending';
+    end if;
+    insert into public.audit_log(user_id,action,entity_type,entity_id,details)
+      values(auth.uid(),'vehicle_document_'||decision,'car_document',d.id::text,
+        jsonb_build_object('car_id',p_car_id,'previous_status',d.compliance_status,'review',item));
+  end loop;
+  for rid in select id from public.car_renewals where car_id=p_car_id and document_update and status='pending' loop
+    if not exists(select 1 from public.car_documents where renewal_id=rid and compliance_status='pending') then
+      select exists(select 1 from public.car_documents where renewal_id=rid and compliance_status in ('rejected','revoked')) into has_rejected;
+      update public.car_renewals set status=case when has_rejected then 'rejected' else 'approved' end,reviewed_at=now() where id=rid;
+      insert into public.notifications(user_id,title,message,type,link)
+        select owner_id,'Document resubmission reviewed',
+          case when has_rejected then 'Some documents need correction. Open Document Renewal & Updates for the review reasons.'
+          else 'Your updated documents were approved. Booking availability follows all approved document validity dates.' end,
+          'vehicle','/car-renewals' from public.cars where id=p_car_id;
+    end if;
+  end loop;
+  perform public.refresh_vehicle_compliance(p_car_id);
+  return public.vehicle_compliance_summary(p_car_id,now(),now());
+end;
+$review$;
+revoke all on function public.review_vehicle_documents(uuid,jsonb) from public;
+grant execute on function public.review_vehicle_documents(uuid,jsonb) to authenticated;
+
+-- Settle the ones already stranded: a requirement that has an approved document
+-- has nothing left to decide about its older pending rows.
+update public.car_documents stale
+set compliance_status='rejected',
+    review_reason='A different document was approved for this requirement, so this one was not used.',
+    reviewed_at=now()
+where stale.compliance_status='pending'
+  and exists(
+    select 1 from public.car_documents live
+    where live.car_id=stale.car_id
+      and live.document_type=stale.document_type
+      and live.id<>stale.id
+      and live.compliance_status='approved'
+  );
+
+do $backfill$ declare cid uuid; begin
+  for cid in select id from public.cars loop
+    perform public.refresh_vehicle_compliance(cid);
+  end loop;
+end; $backfill$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select c.plate_number, d.document_type, d.compliance_status
+--   from public.car_documents d join public.cars c on c.id=d.car_id
+--   where d.compliance_status='pending'
+--     and exists(select 1 from public.car_documents a
+--                where a.car_id=d.car_id and a.document_type=d.document_type
+--                  and a.id<>d.id and a.compliance_status='approved');
+--   (expect zero rows)
+
 -- End of SafeDrive chaptered database master.

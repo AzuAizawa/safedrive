@@ -59,12 +59,15 @@ async function fixture() {
   const chapter75=master.split("-- CHAPTER 75 - Seven documents")[1]?.split("-- Read-only verification")[0];
   const chapter77=master.split("-- CHAPTER 77 - Approving a document again")[1]?.split("-- Read-only verification")[0];
   const chapter78=master.split("-- CHAPTER 78 - The lister states each expiry")[1]?.split("-- Read-only verification")[0];
+  const chapter80=master.split("-- CHAPTER 80 - Approving a document closes")[1]?.split("-- Read-only verification")[0];
   assert.ok(chapter75,"CHAPTER 75 exists");
   await db.exec(chapter75.slice(chapter75.indexOf("begin;")));
   assert.ok(chapter77,"CHAPTER 77 exists");
   await db.exec(chapter77.slice(chapter77.indexOf("begin;")));
   assert.ok(chapter78,"CHAPTER 78 exists");
   await db.exec(chapter78.slice(chapter78.indexOf("begin;")));
+  assert.ok(chapter80,"CHAPTER 80 exists");
+  await db.exec(chapter80.slice(chapter80.indexOf("begin;")));
   await reviewer(db);
   return db;
 }
@@ -354,5 +357,42 @@ test("the lister states the expiry, comprehensive insurance is optional",async()
       db.query("select public.submit_vehicle_document_update($1,$2::jsonb)",[CAR,JSON.stringify([{document_type:"dti",storage_path:undated}])]),
       /expiry date shown on the dti document/,
     );
+  }finally{await db.close();}
+});
+
+test("approving one document closes the others still waiting on the same requirement",async()=>{
+  const db=await fixture();try {
+    // The reported shape: the document filed at listing was never reviewed, a
+    // replacement arrived later, and the admin approved that one. The first row
+    // used to stay 'pending' for good - so the lister saw a review that never
+    // finished, and the upload box for that requirement stayed locked.
+    const stale=(await db.query(
+      "insert into car_documents(car_id,document_type,storage_path) values($1,'or',$2) returning id",
+      [CAR,`${OWNER}/${CAR}/or_first.pdf`],
+    )).rows[0].id;
+    const replacement=(await db.query(
+      "insert into car_documents(car_id,document_type,storage_path) values($1,'or',$2) returning id",
+      [CAR,`${OWNER}/${CAR}/or_second.pdf`],
+    )).rows[0].id;
+
+    await db.query("select public.review_vehicle_documents($1,$2::jsonb)",[CAR,JSON.stringify([
+      {id:replacement,status:"approved",valid_until:"2032-12-31T23:59:59.999+08:00"},
+    ])]);
+
+    const rows=Object.fromEntries((await db.query(
+      "select id,compliance_status,review_reason from car_documents where id = any($1::uuid[])",
+      [[stale,replacement]],
+    )).rows.map(r=>[r.id,r]));
+    assert.equal(rows[replacement].compliance_status,"approved");
+    assert.equal(rows[stale].compliance_status,"rejected","the older pending row must not be left hanging");
+    assert.match(rows[stale].review_reason,/different document was approved/);
+
+    // With nothing pending, the lister can send a new one for that requirement.
+    await db.exec(`select set_config('request.jwt.claim.sub','${OWNER}',false),set_config('test.reviewer','false',false)`);
+    const path=`${OWNER}/${CAR}/or_${crypto.randomUUID()}.pdf`;
+    await db.query("insert into storage.objects(bucket_id,name) values('vehicle-private-documents',$1)",[path]);
+    await db.query("select public.submit_vehicle_document_update($1,$2::jsonb)",[CAR,JSON.stringify([
+      {document_type:"or",storage_path:path,valid_until:"2033-12-31T23:59:59.999+08:00"},
+    ])]);
   }finally{await db.close();}
 });
