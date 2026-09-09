@@ -506,6 +506,7 @@ export default function VerificationPage() {
     Record<"license_qr" | "license_front" | "license_back", File | null>
   >({ license_qr: null, license_front: null, license_back: null });
   const [licenseUpdateSubmitting, setLicenseUpdateSubmitting] = useState(false);
+  const [licenseUpdateRevision, setLicenseUpdateRevision] = useState(0);
   const regionOptions = useMemo(
     () => (Array.isArray(regions) ? regions : []),
     [regions],
@@ -1704,6 +1705,7 @@ export default function VerificationPage() {
                   <div key={f.key} className="space-y-1">
                     <Label className="text-xs">{f.label}</Label>
                     <Input
+                      key={`${f.key}:${licenseUpdateRevision}`}
                       type="file"
                       accept="image/jpeg,image/png,image/webp"
                       disabled={licenseUpdateSubmitting}
@@ -1714,6 +1716,27 @@ export default function VerificationPage() {
                         }))
                       }
                     />
+                    {licenseUpdateFiles[f.key] && (
+                      <div className="flex items-center gap-2 rounded-md border bg-secondary px-2 py-1">
+                        <CheckCircle className="h-3.5 w-3.5 shrink-0 text-green-500" />
+                        <span className="min-w-0 flex-1 truncate text-xs">
+                          {licenseUpdateFiles[f.key]?.name}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${f.label}`}
+                          disabled={licenseUpdateSubmitting}
+                          className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                          onClick={() => {
+                            setLicenseUpdateFiles((prev) => ({ ...prev, [f.key]: null }));
+                            // Remount the input so the same file can be chosen again.
+                            setLicenseUpdateRevision((value) => value + 1);
+                          }}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
                 <div className="flex gap-2">
