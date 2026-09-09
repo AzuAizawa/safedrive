@@ -1627,216 +1627,6 @@ export default function MyVehiclesPage() {
                   </p>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>DTI business name registration *</Label>
-                  <div className="flex flex-wrap gap-4 items-start">
-                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
-                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
-                      <span className="text-xs text-muted-foreground text-center px-1">
-                        {dtiFile ? "Change DTI" : "Upload DTI"}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,application/pdf"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          if (!file) {
-                            setDtiFile(null);
-                            return;
-                          }
-                          if (validateUploadFile(file, ALLOWED_BUSINESS_DOCUMENT_TYPES, "DTI document")) {
-                            setDtiFile(file);
-                          } else {
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                    </label>
-                    {dtiFile && (
-                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
-                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
-                        <span className="max-w-[180px] truncate text-sm font-medium">{dtiFile.name}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Expiry date shown on the DTI registration *</Label>
-                    <Input
-                      type="date"
-                      min={new Date().toISOString().slice(0, 10)}
-                      value={form.dti_expiry}
-                      onChange={(event) => setForm({ ...form, dti_expiry: event.target.value })}
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Business / Mayor's Permit *</Label>
-                  <div className="flex flex-wrap gap-4 items-start">
-                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
-                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
-                      <span className="text-xs text-muted-foreground text-center px-1">
-                        {mayorsPermitFile ? "Change Permit" : "Upload Permit"}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,application/pdf"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          if (!file) {
-                            setMayorsPermitFile(null);
-                            return;
-                          }
-                          if (validateUploadFile(file, ALLOWED_BUSINESS_DOCUMENT_TYPES, "Permit document")) {
-                            setMayorsPermitFile(file);
-                          } else {
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                    </label>
-                    {mayorsPermitFile && (
-                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
-                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
-                        <span className="max-w-[180px] truncate text-sm font-medium">{mayorsPermitFile.name}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Expiry date shown on the permit *</Label>
-                    <Input
-                      type="date"
-                      min={new Date().toISOString().slice(0, 10)}
-                      value={form.mayors_permit_expiry}
-                      onChange={(event) => setForm({ ...form, mayors_permit_expiry: event.target.value })}
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>BIR Certificate of Registration *</Label>
-                  <div className="flex flex-wrap gap-4 items-start">
-                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
-                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
-                      <span className="text-xs text-muted-foreground text-center px-1">
-                        {birFile ? "Change BIR" : "Upload BIR"}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,application/pdf"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          if (!file) {
-                            setBirFile(null);
-                            return;
-                          }
-                          if (validateUploadFile(file, ALLOWED_BUSINESS_DOCUMENT_TYPES, "BIR document")) {
-                            setBirFile(file);
-                          } else {
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                    </label>
-                    {birFile && (
-                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
-                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
-                        <span className="max-w-[180px] truncate text-sm font-medium">{birFile.name}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-2">
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
-                      <Upload className="h-3.5 w-3.5" />
-                      {ctplFile ? "Change CTPL" : "Upload CTPL *"}
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          if (!file) {
-                            setCtplFile(null);
-                            return;
-                          }
-                          if (validateUploadFile(file, ALLOWED_IMAGE_TYPES, "CTPL document")) {
-                            setCtplFile(file);
-                          } else {
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                    </label>
-                    {ctplFile && (
-                      <div className="flex min-w-0 items-center gap-2 rounded-lg border bg-secondary p-2">
-                        <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
-                        <span className="max-w-[180px] truncate text-xs font-medium">{ctplFile.name}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Expiry date shown on the CTPL *</Label>
-                    <Input
-                      type="date"
-                      min={new Date().toISOString().slice(0, 10)}
-                      value={form.ctpl_expiry}
-                      onChange={(event) => setForm({ ...form, ctpl_expiry: event.target.value })}
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-
-                  <p className="text-xs text-muted-foreground">Optional for the thesis build, but a missing or expired policy creates an admin warning.</p>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
-                      <Upload className="h-3.5 w-3.5" />
-                      {comprehensiveInsuranceFile ? "Change policy" : "Upload policy"}
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          if (!file) {
-                            setComprehensiveInsuranceFile(null);
-                            return;
-                          }
-                          if (validateUploadFile(file, ALLOWED_IMAGE_TYPES, "comprehensive insurance document")) {
-                            setComprehensiveInsuranceFile(file);
-                          } else {
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                    </label>
-                    {comprehensiveInsuranceFile && (
-                      <div className="flex min-w-0 items-center gap-2 rounded-lg border bg-secondary p-2">
-                        <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
-                        <span className="max-w-[180px] truncate text-xs font-medium">{comprehensiveInsuranceFile.name}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Expiry date shown on the policy (optional)</Label>
-                    <Input
-                      type="date"
-                      min={new Date().toISOString().slice(0, 10)}
-                      value={form.comprehensive_insurance_expiry}
-                      onChange={(event) => setForm({ ...form, comprehensive_insurance_expiry: event.target.value })}
-                    />
-                  </div>
-                </div>
-                <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
-                  <input type="checkbox" className="mt-1" checked={form.insurer_rental_use_confirmed} onChange={(event) => setForm({ ...form, insurer_rental_use_confirmed: event.target.checked })} required />
-                  <span><strong>Rental-use disclosure confirmed.</strong><span className="mt-1 block text-xs text-muted-foreground">I disclosed intended vehicle rental use to the insurer and understand SafeDrive does not guarantee that any policy covers peer-to-peer rental.</span></span>
-                </label>
                 <div className="space-y-4 sm:col-span-2">
                   <div className="space-y-2">
                     <Label>Pickup/Dropoff Region *</Label>
@@ -1996,6 +1786,11 @@ export default function MyVehiclesPage() {
               </div>
 
               <div className="grid sm:grid-cols-2 gap-4">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <h3 className="text-sm font-semibold text-foreground">Vehicle documents</h3>
+                  <p className="text-xs text-muted-foreground">The papers that come with the car itself.</p>
+                </div>
                 <div className="space-y-2">
                   <Label>Official Receipt (OR) *</Label>
                   <div className="flex flex-wrap gap-4 items-start">
@@ -2071,6 +1866,221 @@ export default function MyVehiclesPage() {
                       <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
                         <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
                         <span className="max-w-[180px] truncate text-sm font-medium">{crFile.name}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+                <div className="space-y-2">
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
+                      <Upload className="h-3.5 w-3.5" />
+                      {ctplFile ? "Change CTPL" : "Upload CTPL *"}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setCtplFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_IMAGE_TYPES, "CTPL document")) {
+                            setCtplFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {ctplFile && (
+                      <div className="flex min-w-0 items-center gap-2 rounded-lg border bg-secondary p-2">
+                        <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-xs font-medium">{ctplFile.name}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Expiry date shown on the CTPL *</Label>
+                    <Input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={form.ctpl_expiry}
+                      onChange={(event) => setForm({ ...form, ctpl_expiry: event.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+
+                  <p className="text-xs text-muted-foreground">Optional for the thesis build, but a missing or expired policy creates an admin warning.</p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
+                      <Upload className="h-3.5 w-3.5" />
+                      {comprehensiveInsuranceFile ? "Change policy" : "Upload policy"}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setComprehensiveInsuranceFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_IMAGE_TYPES, "comprehensive insurance document")) {
+                            setComprehensiveInsuranceFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {comprehensiveInsuranceFile && (
+                      <div className="flex min-w-0 items-center gap-2 rounded-lg border bg-secondary p-2">
+                        <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-xs font-medium">{comprehensiveInsuranceFile.name}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Expiry date shown on the policy (optional)</Label>
+                    <Input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={form.comprehensive_insurance_expiry}
+                      onChange={(event) => setForm({ ...form, comprehensive_insurance_expiry: event.target.value })}
+                    />
+                  </div>
+                </div>
+                <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+                  <input type="checkbox" className="mt-1" checked={form.insurer_rental_use_confirmed} onChange={(event) => setForm({ ...form, insurer_rental_use_confirmed: event.target.checked })} required />
+                  <span><strong>Rental-use disclosure confirmed.</strong><span className="mt-1 block text-xs text-muted-foreground">I disclosed intended vehicle rental use to the insurer and understand SafeDrive does not guarantee that any policy covers peer-to-peer rental.</span></span>
+                </label>
+                <div className="sm:col-span-2">
+                  <h3 className="text-sm font-semibold text-foreground">Business documents</h3>
+                  <p className="text-xs text-muted-foreground">Required for every listed vehicle, even if you list more than one.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>DTI business name registration *</Label>
+                  <div className="flex flex-wrap gap-4 items-start">
+                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
+                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
+                      <span className="text-xs text-muted-foreground text-center px-1">
+                        {dtiFile ? "Change DTI" : "Upload DTI"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setDtiFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_BUSINESS_DOCUMENT_TYPES, "DTI document")) {
+                            setDtiFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {dtiFile && (
+                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
+                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-sm font-medium">{dtiFile.name}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Expiry date shown on the DTI registration *</Label>
+                    <Input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={form.dti_expiry}
+                      onChange={(event) => setForm({ ...form, dti_expiry: event.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Business / Mayor's Permit *</Label>
+                  <div className="flex flex-wrap gap-4 items-start">
+                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
+                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
+                      <span className="text-xs text-muted-foreground text-center px-1">
+                        {mayorsPermitFile ? "Change Permit" : "Upload Permit"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setMayorsPermitFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_BUSINESS_DOCUMENT_TYPES, "Permit document")) {
+                            setMayorsPermitFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {mayorsPermitFile && (
+                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
+                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-sm font-medium">{mayorsPermitFile.name}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Expiry date shown on the permit *</Label>
+                    <Input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={form.mayors_permit_expiry}
+                      onChange={(event) => setForm({ ...form, mayors_permit_expiry: event.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>BIR Certificate of Registration *</Label>
+                  <div className="flex flex-wrap gap-4 items-start">
+                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
+                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
+                      <span className="text-xs text-muted-foreground text-center px-1">
+                        {birFile ? "Change BIR" : "Upload BIR"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setBirFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_BUSINESS_DOCUMENT_TYPES, "BIR document")) {
+                            setBirFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {birFile && (
+                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
+                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-sm font-medium">{birFile.name}</span>
                       </div>
                     )}
                   </div>

@@ -400,9 +400,12 @@ export default function ListerBookingsPage() {
       let verificationImagesByUser: Record<string, { image_type: string; storage_path: string }[]> = {};
 
       if (renterIds.length > 0) {
+        // Only the plain selfie is fetched. The selfie_with_id shot shows the
+        // card itself, so its path never needs to reach a lister's browser.
         const { data: imageRows, error: imageError } = await supabase
           .from("verification_images")
           .select("user_id, image_type, storage_path")
+          .eq("image_type", "selfie")
           .in("user_id", renterIds);
 
         if (imageError) {
@@ -3933,19 +3936,20 @@ export default function ListerBookingsPage() {
                 </div>
               </div>
 
-              {/* Renter selfie for meetup verification */}
-              {selectedRenterDisplay.verificationImages.length > 0 && (
+              {/* The plain selfie only. It answers the one question a lister has
+                  at the meetup - is this the person I am handing the car to - and
+                  it is the only verification image that answers it without also
+                  showing the ID card itself: number, address, birth date, all
+                  legible in the selfie_with_id shot. Identity is the admin's job
+                  to verify; the counterparty only needs the face. */}
+              {selectedRenterDisplay.verificationImages.some((img) => img.image_type === "selfie") && (
                 <div>
                   <h4 className="font-semibold text-sm mb-2">
-                    Verification Images
+                    Renter photo
                   </h4>
                   <div className="grid grid-cols-2 gap-2">
                     {selectedRenterDisplay.verificationImages
-                      .filter(
-                        (img) =>
-                          img.image_type === "selfie" ||
-                          img.image_type === "selfie_with_id",
-                      )
+                      .filter((img) => img.image_type === "selfie")
                       .map((img, i) => (
                         <div key={i}>
                           <p className="text-xs text-muted-foreground capitalize mb-1">
