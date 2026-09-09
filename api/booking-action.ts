@@ -1,3 +1,8 @@
+import {
+  bookingCompliance,
+  complianceBlockedResponse,
+  vehicleGuardMessage,
+} from "../server/vehicleCompliance.js";
 import { addDays } from "date-fns";
 import { createClient } from "@supabase/supabase-js";
 import { processAutomaticRefundForBooking } from "../server/refundAutomation.js";
@@ -505,6 +510,16 @@ export default async function handler(req: Request) {
         { error: "You are not allowed to modify this booking" },
         403,
       );
+    }
+
+    if (["accept", "arrive", "handover_confirm", "handover_receive"].includes(payload.action)) {
+      if (!(await bookingCompliance(supabase, bookingRecord.id)).eligible) return complianceBlockedResponse();
+    }
+
+    if ((payload.action === "cancel" && renter) || (payload.action === "complete" && bookingRecord.status !== "active")) {
+      if (!(await bookingCompliance(supabase, bookingRecord.id)).eligible) {
+        return jsonResponse({ error: "This booking needs vehicle document review. Contact support or ask the lister to resolve cancellation/refund; this must not be recorded as a renter no-show or late cancellation.", code: "VEHICLE_DOCUMENTS_REQUIRED" }, 409);
+      }
     }
 
     const auditDetails: Record<string, unknown> = {};
@@ -1307,7 +1322,11 @@ export default async function handler(req: Request) {
         .is("lister_handover_confirmed_at", null)
         .select("id")
         .maybeSingle();
-      if (handoverError) throw handoverError;
+      if (handoverError) {
+        const guarded = vehicleGuardMessage(handoverError);
+        if (guarded) return jsonResponse({ error: guarded }, 409);
+        throw handoverError;
+      }
       if (!handoverChanged) {
         return jsonResponse(
           {
@@ -1391,7 +1410,11 @@ export default async function handler(req: Request) {
         .is("renter_handover_received_at", null)
         .select("id")
         .maybeSingle();
-      if (receiptError) throw receiptError;
+      if (receiptError) {
+        const guarded = vehicleGuardMessage(receiptError);
+        if (guarded) return jsonResponse({ error: guarded }, 409);
+        throw receiptError;
+      }
       if (!receiptChanged) {
         return jsonResponse(
           {
@@ -1878,6 +1901,8 @@ export default async function handler(req: Request) {
 
     return jsonResponse({ error: "Unsupported booking action" }, 400);
   } catch (error: unknown) {
+    const coverageMessage = vehicleGuardMessage(error);
+    if (coverageMessage) return jsonResponse({ error: coverageMessage }, 409);
     const message =
       error instanceof Error ? error.message : "Unknown server error";
     console.error("Booking action error:", message);

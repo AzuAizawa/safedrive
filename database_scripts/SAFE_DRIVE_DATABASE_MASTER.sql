@@ -10596,4 +10596,809 @@ $announce$;
 
 grant execute on function public.send_platform_announcement(text, text, text) to authenticated;
 
+-- ============================================================================
+-- CHAPTER 70 - Per-vehicle compliance documents, resubmissions and trip coverage
+-- Apply this chapter only, staging first. Existing files/bookings are preserved.
+-- Missing business documents immediately prevent NEW bookings. Existing trips
+-- receive a review hold, never a cancellation. No inferred/grandfathered approval.
+-- ============================================================================
+begin;
+
+alter table public.cars
+  add column if not exists business_registration_type text not null default 'dti'
+    check (business_registration_type in ('dti','sec')),
+  add column if not exists ltfrb_requirement text not null default 'pending'
+    check (ltfrb_requirement in ('pending','required','not_required')),
+  add column if not exists ltfrb_review_note text,
+  add column if not exists compliance_previously_approved boolean not null default false;
+
+alter table public.car_documents
+  add column if not exists compliance_status text not null default 'pending'
+    check (compliance_status in ('pending','approved','rejected','revoked')),
+  add column if not exists valid_from timestamptz,
+  add column if not exists valid_until timestamptz,
+  add column if not exists rental_use_verified boolean not null default false,
+  add column if not exists superseded_at timestamptz,
+  add column if not exists storage_bucket text not null default 'vehicle-private-documents',
+  add column if not exists renewal_id uuid references public.car_renewals(id);
+create index if not exists car_document_coverage_idx
+  on public.car_documents(car_id,document_type,compliance_status,valid_from,valid_until);
+
+-- Freeze uploaded evidence once it is referenced. Replacements use unique paths;
+-- an owner cannot overwrite an already-reviewed file in Storage with upsert.
+drop policy if exists "Referenced vehicle evidence is immutable" on storage.objects;
+create policy "Referenced vehicle evidence is immutable" on storage.objects
+  as restrictive for update to authenticated
+  using (not exists(select 1 from public.car_documents d where d.storage_bucket=bucket_id and d.storage_path=name))
+  with check (not exists(select 1 from public.car_documents d where d.storage_bucket=bucket_id and d.storage_path=name));
+drop policy if exists "Referenced vehicle evidence cannot be deleted" on storage.objects;
+create policy "Referenced vehicle evidence cannot be deleted" on storage.objects
+  as restrictive for delete to authenticated
+  using (not exists(select 1 from public.car_documents d where d.storage_bucket=bucket_id and d.storage_path=name));
+
+alter table public.car_renewals
+  alter column orcr_document_path drop not null,
+  alter column current_mileage drop not null,
+  add column if not exists document_update boolean not null default false;
+alter table public.bookings
+  add column if not exists compliance_hold boolean not null default false,
+  add column if not exists compliance_hold_since timestamptz,
+  add column if not exists compliance_hold_reason text;
+
+-- Bring legacy renewal evidence into the same review panel without deleting it.
+insert into public.car_documents(car_id,document_type,storage_path,storage_bucket,renewal_id)
+select r.car_id,v.kind,v.path,'car-documents',r.id from public.car_renewals r
+cross join lateral(values ('orcr',r.orcr_document_path),('ctpl',r.ctpl_document_path),
+  ('comprehensive_insurance',r.comprehensive_document_path)) v(kind,path)
+where nullif(v.path,'') is not null and not exists(
+  select 1 from public.car_documents d where d.renewal_id=r.id and d.document_type=v.kind and d.storage_path=v.path);
+update public.car_renewals set document_update=true
+where exists(select 1 from public.car_documents d where d.renewal_id=car_renewals.id);
+
+-- Internal data read: no documents or merchant identifiers are returned.
+create or replace function public.vehicle_compliance_summary(
+  p_car_id uuid, p_start timestamptz default now(), p_end timestamptz default now()
+) returns jsonb language plpgsql stable security definer set search_path = public as $vc$
+declare
+  c public.cars%rowtype; k text; keys text[]; r record;
+  covered_until timestamptz; limit_at timestamptz := 'infinity';
+  reasons text[] := '{}'; s timestamptz := coalesce(p_start,now());
+  e timestamptz := coalesce(p_end,p_start,now());
+begin
+  select * into c from public.cars where id=p_car_id;
+  if not found or e<s then
+    return jsonb_build_object('eligible',false,'valid_until',null,'reasons',array['invalid_vehicle_or_dates']);
+  end if;
+  keys := array['or','cr','ctpl','comprehensive_insurance',c.business_registration_type,'mayors_permit','bir'];
+  if c.ltfrb_requirement='required' then keys:=array_append(keys,'cpc');
+  elsif c.ltfrb_requirement='not_required' then keys:=array_append(keys,'ltfrb_clarification');
+  else reasons:=array_append(reasons,'ltfrb_review_required'); end if;
+  foreach k in array keys loop
+    covered_until:=null;
+    for r in
+      select coalesce(d.valid_from,'-infinity'::timestamptz) as a,
+        least(coalesce(d.valid_until,'infinity'::timestamptz),coalesce(d.superseded_at,'infinity'::timestamptz)) as z
+      from public.car_documents d
+      where d.car_id=p_car_id and d.compliance_status='approved'
+        and (d.document_type=k or (k in ('or','cr') and d.document_type='orcr'))
+        and (k<>'comprehensive_insurance' or d.rental_use_verified)
+        and (k not in ('or','ctpl','comprehensive_insurance','dti','mayors_permit','cpc') or d.valid_until is not null)
+      order by coalesce(d.valid_from,'-infinity'::timestamptz),coalesce(d.valid_until,'infinity'::timestamptz)
+    loop
+      if r.z<s then continue; end if;
+      if covered_until is null then
+        if r.a>s then exit; end if;
+        covered_until:=r.z;
+      elsif r.a<=covered_until + interval '1 millisecond' then
+        covered_until:=greatest(covered_until,r.z);
+      else exit; end if;
+    end loop;
+    if covered_until is null or covered_until<e then reasons:=array_append(reasons,k||'_coverage_required'); end if;
+    limit_at:=least(limit_at,coalesce(covered_until,s-interval '1 millisecond'));
+  end loop;
+  return jsonb_build_object('eligible',cardinality(reasons)=0,
+    'valid_until',case when limit_at='infinity'::timestamptz then null else limit_at end,'reasons',reasons);
+end;
+$vc$;
+revoke all on function public.vehicle_compliance_summary(uuid,timestamptz,timestamptz) from public;
+grant execute on function public.vehicle_compliance_summary(uuid,timestamptz,timestamptz) to anon,authenticated,service_role;
+
+-- Persist review holds without altering the booking/payment lifecycle.
+create or replace function public.refresh_vehicle_compliance(p_car_id uuid)
+returns void language plpgsql security definer set search_path=public as $refresh$
+declare b record; previous_car record; ok boolean; today_ok boolean; elapsed interval;
+begin
+  -- All writers and booking guards lock the vehicle first.
+  select status,compliance_previously_approved into previous_car from public.cars where id=p_car_id for update;
+  today_ok:=coalesce((public.vehicle_compliance_summary(p_car_id,now(),now())->>'eligible')::boolean,false);
+  -- Compatibility fields are derived from reviewed, currently effective evidence.
+  -- The versioned documents remain the booking authority (including future renewals).
+  update public.cars c set
+    status=case when c.status in ('approved','active') then 'renewal_required' else c.status end,
+    registration_expiry=(select (max(d.valid_until) at time zone 'Asia/Manila')::date from public.car_documents d where d.car_id=c.id and d.document_type in ('or','orcr') and d.compliance_status='approved' and d.valid_from<=now()),
+    ctpl_expiry=(select (max(d.valid_until) at time zone 'Asia/Manila')::date from public.car_documents d where d.car_id=c.id and d.document_type='ctpl' and d.compliance_status='approved' and d.valid_from<=now()),
+    comprehensive_insurance_expiry=(select (max(d.valid_until) at time zone 'Asia/Manila')::date from public.car_documents d where d.car_id=c.id and d.document_type='comprehensive_insurance' and d.compliance_status='approved' and d.valid_from<=now()),
+    insurer_rental_use_confirmed=exists(select 1 from public.car_documents d where d.car_id=c.id and d.document_type='comprehensive_insurance' and d.compliance_status='approved' and d.rental_use_verified),
+    insurance_verification_status=case when today_ok then 'verified' else 'pending' end
+    where c.id=p_car_id;
+  -- Restore only a listing that was already cleared, after legacy date guards
+  -- can see the synchronized fields. Initial/manual-review listings stay pending.
+  update public.cars set
+    compliance_previously_approved=previous_car.compliance_previously_approved or previous_car.status in ('approved','active'),
+    status=case when previous_car.status in ('approved','active','renewal_required') then
+      case when today_ok and (previous_car.compliance_previously_approved or previous_car.status in ('approved','active')) then 'approved' else 'renewal_required' end
+      else previous_car.status end
+    where id=p_car_id;
+  for b in select * from public.bookings where car_id=p_car_id
+    and status in ('pending','confirmed','awaiting_payment','downpayment_paid','fully_paid','active') for update
+  loop
+    ok:=coalesce((public.vehicle_compliance_summary(p_car_id,
+      (b.start_date+coalesce(b.pickup_time::time,'09:00'::time)) at time zone 'Asia/Manila',
+      greatest((b.end_date+coalesce(b.dropoff_time::time,'09:00'::time)) at time zone 'Asia/Manila',
+        case when b.status='active' then now() else '-infinity'::timestamptz end))->>'eligible')::boolean,false);
+    if not ok and not b.compliance_hold then
+      update public.bookings set compliance_hold=true,compliance_hold_since=now(),
+        compliance_hold_reason='Approved vehicle documents do not cover the rental period.' where id=b.id;
+    elsif ok and b.compliance_hold then
+      elapsed:=now()-coalesce(b.compliance_hold_since,now());
+      update public.bookings set compliance_hold=false,compliance_hold_since=null,compliance_hold_reason=null,
+        -- Preserve the time left when the hold began, instead of penalizing the renter.
+        payment_deadline=case when status in ('confirmed','awaiting_payment') and payment_deadline is not null then payment_deadline+elapsed else payment_deadline end,
+        owner_response_deadline=case when status='pending' and owner_response_deadline is not null then owner_response_deadline+elapsed else owner_response_deadline end,
+        balance_deadline=case when status='downpayment_paid' and balance_deadline is not null then balance_deadline+elapsed else balance_deadline end
+        where id=b.id;
+      insert into public.notifications(user_id,title,message,type,link) values
+        (b.renter_id,'Booking documents cleared','The vehicle documents now cover your rental dates. Check your booking for the next step.','success','/my-bookings'),
+        (b.owner_id,'Booking documents cleared','The approved documents cover this booking.','success','/lister-bookings');
+    end if;
+  end loop;
+end;
+$refresh$;
+revoke all on function public.refresh_vehicle_compliance(uuid) from public,anon,authenticated;
+grant execute on function public.refresh_vehicle_compliance(uuid) to service_role;
+
+create or replace function public.protect_vehicle_compliance()
+returns trigger language plpgsql set search_path=public as $protect$
+begin
+  if tg_op='UPDATE' and auth.role()='authenticated' and not public.admin_can('vehicles.review') then
+    if old.ltfrb_requirement is distinct from new.ltfrb_requirement
+      or old.ltfrb_review_note is distinct from new.ltfrb_review_note
+      or old.compliance_previously_approved is distinct from new.compliance_previously_approved
+      or old.business_registration_type is distinct from new.business_registration_type then
+      raise exception 'Only vehicle reviewers can change approved compliance details';
+    end if;
+  elsif tg_op='INSERT' and auth.role()='authenticated' and not public.admin_can('vehicles.review') then
+    new.ltfrb_requirement:='pending'; new.ltfrb_review_note:=null; new.compliance_previously_approved:=false;
+  end if;
+  if new.status in ('approved','active') then
+    if not coalesce((public.vehicle_compliance_summary(new.id,now(),now())->>'eligible')::boolean,false) then
+      raise exception 'Review all required vehicle and business documents before approval';
+    end if;
+    new.compliance_previously_approved:=true;
+  end if;
+  return new;
+end;
+$protect$;
+drop trigger if exists vehicle_compliance_guard on public.cars;
+create trigger vehicle_compliance_guard before insert or update on public.cars
+  for each row execute function public.protect_vehicle_compliance();
+
+create or replace function public.protect_compliance_document()
+returns trigger language plpgsql set search_path=public as $docguard$
+begin
+  perform 1 from public.cars where id=new.car_id for update;
+  if tg_op='INSERT' then
+    if auth.role()='authenticated' and not public.admin_can('vehicles.review') then
+      new.compliance_status:='pending'; new.valid_from:=null; new.valid_until:=null;
+      new.rental_use_verified:=false; new.reviewed_by:=null; new.reviewed_at:=null; new.superseded_at:=null;
+    end if;
+  elsif old.car_id is distinct from new.car_id or old.document_type is distinct from new.document_type
+    or old.storage_path is distinct from new.storage_path or old.storage_bucket is distinct from new.storage_bucket then
+    raise exception 'Upload a replacement document instead of modifying an existing file';
+  end if;
+  if new.compliance_status='approved' then
+    if new.document_type in ('or','orcr','ctpl','comprehensive_insurance','dti','mayors_permit','cpc')
+      and (new.valid_from is null or new.valid_until is null or new.valid_until<new.valid_from) then
+      raise exception 'Effective date and expiry are required for this document';
+    end if;
+    if new.document_type='comprehensive_insurance' and not new.rental_use_verified then
+      raise exception 'Verify rental-use coverage before approving comprehensive insurance';
+    end if;
+  end if;
+  return new;
+end;
+$docguard$;
+drop trigger if exists compliance_document_guard on public.car_documents;
+create trigger compliance_document_guard before insert or update on public.car_documents
+  for each row execute function public.protect_compliance_document();
+
+-- Atomic, partial resubmissions. No renewal of unrelated documents is required.
+create or replace function public.submit_vehicle_document_update(p_car_id uuid,p_documents jsonb)
+returns uuid language plpgsql security definer set search_path=public as $submit$
+declare rid uuid; item jsonb; k text; path text;
+begin
+  if auth.uid() is null or not exists(select 1 from public.cars where id=p_car_id and owner_id=auth.uid()) then
+    raise exception 'Only the vehicle owner can submit documents'; end if;
+  perform 1 from public.cars where id=p_car_id for update;
+  if p_documents is null or jsonb_typeof(p_documents)<>'array' or jsonb_array_length(p_documents)=0 then raise exception 'Upload at least one document'; end if;
+  insert into public.car_renewals(car_id,lister_id,status,document_update)
+    values(p_car_id,auth.uid(),'pending',true) returning id into rid;
+  for item in select * from jsonb_array_elements(p_documents) loop
+    k:=item->>'document_type'; path:=item->>'storage_path';
+    if k is null or k not in ('or','cr','ctpl','comprehensive_insurance','dti','sec','mayors_permit','bir','cpc','ltfrb_clarification') then raise exception 'Unsupported document type'; end if;
+    if path is null or path not like auth.uid()::text||'/'||p_car_id::text||'/%'
+      or not exists(select 1 from storage.objects where bucket_id='vehicle-private-documents' and name=path) then
+      raise exception 'Document must be uploaded to this vehicle private folder'; end if;
+    if exists(select 1 from public.car_documents where car_id=p_car_id and document_type=k and renewal_id is not null and compliance_status='pending') then
+      raise exception 'A replacement for % is already awaiting review',k; end if;
+    insert into public.car_documents(car_id,document_type,storage_path,storage_bucket,renewal_id)
+      values(p_car_id,k,path,'vehicle-private-documents',rid);
+  end loop;
+  return rid;
+end;
+$submit$;
+revoke all on function public.submit_vehicle_document_update(uuid,jsonb) from public;
+grant execute on function public.submit_vehicle_document_update(uuid,jsonb) to authenticated;
+
+-- Review only specified documents; untouched approved versions remain in force.
+create or replace function public.review_vehicle_documents(
+ p_car_id uuid,p_reviews jsonb,p_ltfrb text default null,p_note text default null,p_business_type text default null
+) returns jsonb language plpgsql security definer set search_path=public as $review$
+declare item jsonb; d public.car_documents%rowtype; decision text; rid uuid; has_rejected boolean; replacement_start timestamptz;
+begin
+  if not public.admin_can('vehicles.review') then raise exception 'Vehicle review permission required'; end if;
+  perform 1 from public.cars where id=p_car_id for update;
+  for item in select * from jsonb_array_elements(p_reviews) loop
+    select * into d from public.car_documents where id=(item->>'id')::uuid and car_id=p_car_id for update;
+    if not found then raise exception 'Document not found'; end if;
+    decision:=item->>'status';
+    if decision not in ('approved','rejected','revoked') then raise exception 'Invalid review decision'; end if;
+    if decision in ('rejected','revoked') and coalesce(trim(item->>'reason'),'')='' then raise exception 'A reason is required'; end if;
+    replacement_start:=(item->>'valid_from')::timestamptz;
+    if decision='approved' and d.compliance_status<>'approved' and d.document_type in ('cr','sec','bir','ltfrb_clarification')
+      and exists(select 1 from public.car_documents where car_id=p_car_id and document_type=d.document_type and id<>d.id and compliance_status='approved') then
+      replacement_start:=coalesce(replacement_start,now());
+      update public.car_documents set superseded_at=replacement_start-interval '1 millisecond'
+        where car_id=p_car_id and document_type=d.document_type and id<>d.id and compliance_status='approved'
+          and coalesce(valid_from,'-infinity'::timestamptz)<replacement_start
+          and coalesce(superseded_at,'infinity'::timestamptz)>=replacement_start;
+    end if;
+    update public.car_documents set compliance_status=decision,
+      valid_from=case when decision='approved' then replacement_start else valid_from end,
+      valid_until=case when decision='approved' then (item->>'valid_until')::timestamptz else valid_until end,
+      rental_use_verified=case when decision='approved' then coalesce((item->>'rental_use_verified')::boolean,false) else rental_use_verified end,
+      review_reason=nullif(trim(item->>'reason'),''), reviewed_by=auth.uid(),reviewed_at=now()
+      where id=d.id;
+    insert into public.audit_log(user_id,action,entity_type,entity_id,details)
+      values(auth.uid(),'vehicle_document_'||decision,'car_document',d.id::text,
+        jsonb_build_object('car_id',p_car_id,'previous_status',d.compliance_status,'review',item));
+  end loop;
+  if p_ltfrb is not null then
+    if p_ltfrb not in ('pending','required','not_required') then raise exception 'Invalid LTFRB classification'; end if;
+    if p_ltfrb='not_required' and (coalesce(trim(p_note),'')='' or not exists(
+      select 1 from public.car_documents where car_id=p_car_id and document_type='ltfrb_clarification' and compliance_status='approved'
+    )) then raise exception 'Approved written LTFRB clarification and a review note are required'; end if;
+    -- Status may already be active: move into review before altering requirements.
+    update public.cars set status=case when status in ('approved','active') then 'renewal_required' else status end,
+      ltfrb_requirement=p_ltfrb,ltfrb_review_note=p_note where id=p_car_id;
+  end if;
+  if p_business_type is not null then
+    if p_business_type not in ('dti','sec') then raise exception 'Choose DTI or SEC'; end if;
+    update public.cars set status=case when status in ('approved','active') then 'renewal_required' else status end,
+      business_registration_type=p_business_type where id=p_car_id;
+  end if;
+  if p_ltfrb is not null or p_business_type is not null then
+    insert into public.audit_log(user_id,action,entity_type,entity_id,details)
+      values(auth.uid(),'vehicle_requirements_reviewed','car',p_car_id::text,
+        jsonb_build_object('ltfrb',p_ltfrb,'note',p_note,'business_type',p_business_type));
+  end if;
+  for rid in select id from public.car_renewals where car_id=p_car_id and document_update and status='pending' loop
+    if not exists(select 1 from public.car_documents where renewal_id=rid and compliance_status='pending') then
+      select exists(select 1 from public.car_documents where renewal_id=rid and compliance_status in ('rejected','revoked')) into has_rejected;
+      update public.car_renewals set status=case when has_rejected then 'rejected' else 'approved' end,reviewed_at=now() where id=rid;
+      insert into public.notifications(user_id,title,message,type,link)
+        select owner_id,'Document resubmission reviewed',
+          case when has_rejected then 'Some documents need correction. Open Document Renewal & Updates for the review reasons.'
+          else 'Your updated documents were approved. Booking availability follows all approved document validity dates.' end,
+          'vehicle','/car-renewals' from public.cars where id=p_car_id;
+    end if;
+  end loop;
+  perform public.refresh_vehicle_compliance(p_car_id);
+  return public.vehicle_compliance_summary(p_car_id,now(),now());
+end;
+$review$;
+revoke all on function public.review_vehicle_documents(uuid,jsonb,text,text,text) from public;
+grant execute on function public.review_vehicle_documents(uuid,jsonb,text,text,text) to authenticated;
+
+-- Database guard covers direct writes, too. Payment status writes still succeed:
+-- actual money must be recorded even if coverage changed during checkout.
+create or replace function public.guard_booking_document_coverage()
+returns trigger language plpgsql security definer set search_path=public as $trip$
+declare ok boolean; enforce boolean;
+begin
+  perform 1 from public.cars where id=new.car_id for update;
+  ok:=coalesce((public.vehicle_compliance_summary(new.car_id,
+    (new.start_date+coalesce(new.pickup_time::time,'09:00'::time)) at time zone 'Asia/Manila',
+    (new.end_date+coalesce(new.dropoff_time::time,'09:00'::time)) at time zone 'Asia/Manila')->>'eligible')::boolean,false);
+  enforce:=tg_op='INSERT';
+  if tg_op='UPDATE' then
+    enforce:=old.car_id is distinct from new.car_id or old.start_date is distinct from new.start_date
+      or old.end_date is distinct from new.end_date or old.pickup_time is distinct from new.pickup_time
+      or old.dropoff_time is distinct from new.dropoff_time
+      or (old.status='pending' and new.status in ('confirmed','awaiting_payment'))
+      or (new.status='active' and old.status<>'active')
+      or (old.lister_handover_confirmed_at is null and new.lister_handover_confirmed_at is not null)
+      or (old.renter_handover_received_at is null and new.renter_handover_received_at is not null);
+    -- An earlier return must always remain possible, including an active trip.
+    if new.end_date<old.end_date and new.start_date=old.start_date and new.car_id=old.car_id
+      and new.status=old.status and new.pickup_time is not distinct from old.pickup_time
+      and new.lister_handover_confirmed_at is not distinct from old.lister_handover_confirmed_at
+      and new.renter_handover_received_at is not distinct from old.renter_handover_received_at then enforce:=false; end if;
+  end if;
+  if enforce and not ok then raise exception 'VEHICLE_DOCUMENTS_REQUIRED: approved documents must cover pickup through return'; end if;
+  if enforce and not exists(select 1 from public.cars where id=new.car_id and status in ('approved','active')) then
+    raise exception 'Vehicle is not available for booking'; end if;
+  if not ok and new.status in ('pending','confirmed','awaiting_payment','downpayment_paid','fully_paid','active') then
+    new.compliance_hold:=true;new.compliance_hold_since:=coalesce(new.compliance_hold_since,now());
+    new.compliance_hold_reason:='Approved vehicle documents do not cover the rental period.';
+  end if;
+  return new;
+end;
+$trip$;
+drop trigger if exists booking_document_coverage_guard on public.bookings;
+create trigger booking_document_coverage_guard before insert or update on public.bookings
+  for each row execute function public.guard_booking_document_coverage();
+
+-- Notify on the state transition itself, including a payment callback that
+-- records a real capture after coverage changed between checkout and payment.
+create or replace function public.notify_booking_compliance_hold()
+returns trigger language plpgsql security definer set search_path=public as $hold$
+begin
+  if new.compliance_hold and (tg_op='INSERT' or not old.compliance_hold) then
+    insert into public.notifications(user_id,title,message,type,link) values
+      (new.renter_id,'Booking documents need review','Your booking needs document review. Please contact support; do not proceed to pickup until cleared.','warning','/my-bookings'),
+      (new.owner_id,'Booking documents need review','Update the documents for your booked vehicle before handover.','warning','/car-renewals');
+    insert into public.audit_log(user_id,action,entity_type,entity_id,details)
+      values(new.owner_id,'booking_compliance_hold','booking',new.id::text,jsonb_build_object('car_id',new.car_id));
+    insert into public.notifications(user_id,title,message,type,link)
+      select p.id,'Booking requires document review',
+        'Approved documents no longer cover a booked trip. Review renewal before pickup; preserve the booking and payments.',
+        'warning','/admin/vehicle-renewals' from public.profiles p
+      where p.role in ('admin','super_admin') and p.deleted_at is null;
+  end if;
+  return new;
+end;
+$hold$;
+drop trigger if exists booking_compliance_hold_notice on public.bookings;
+create trigger booking_compliance_hold_notice after insert or update on public.bookings
+  for each row execute function public.notify_booking_compliance_hold();
+
+create table if not exists public.vehicle_compliance_reminders (
+  car_id uuid references public.cars(id) on delete cascade,
+  expires_at timestamptz not null, days_left integer not null,
+  primary key(car_id,expires_at,days_left)
+);
+alter table public.vehicle_compliance_reminders enable row level security;
+
+-- Replaces the legacy current_date-only scan, retaining its return signature.
+create or replace function public.flag_vehicles_needing_renewal()
+returns table(owner_id uuid,car_id uuid,plate_number text)
+language plpgsql security definer set search_path=public as $scan$
+declare c record; summary jsonb; remaining integer; inserted_count integer;
+begin
+  for c in select c0.id,c0.owner_id,c0.plate_number,c0.status from public.cars c0
+    where c0.status in ('approved','active','renewal_required') or exists(select 1 from public.bookings b0 where b0.car_id=c0.id and b0.status in ('pending','confirmed','awaiting_payment','downpayment_paid','fully_paid','active')) loop
+    summary:=public.vehicle_compliance_summary(c.id,now(),now());
+    perform public.refresh_vehicle_compliance(c.id);
+    if not (summary->>'eligible')::boolean and c.status in ('approved','active') then
+      insert into public.notifications(user_id,title,message,type,link)
+        values(c.owner_id,'Vehicle documents required','Review missing or expired documents for '||c.plate_number||'.','vehicle','/car-renewals');
+      owner_id:=c.owner_id;car_id:=c.id;plate_number:=c.plate_number;return next;
+    elsif (summary->>'eligible')::boolean and summary->>'valid_until' is not null then
+      remaining:=((summary->>'valid_until')::timestamptz at time zone 'Asia/Manila')::date-(now() at time zone 'Asia/Manila')::date;
+      if remaining in (30,7,1) then
+        insert into public.vehicle_compliance_reminders values(c.id,(summary->>'valid_until')::timestamptz,remaining) on conflict do nothing;
+        get diagnostics inserted_count=row_count;
+        if inserted_count>0 then
+          insert into public.notifications(user_id,title,message,type,link)
+            values(c.owner_id,'Vehicle documents expire soon',c.plate_number||': approved coverage ends in '||remaining||' day(s). Submit your renewal early.','vehicle','/car-renewals');
+        end if;
+      end if;
+    end if;
+  end loop;
+end;
+$scan$;
+revoke all on function public.flag_vehicles_needing_renewal() from public,anon,authenticated;
+grant execute on function public.flag_vehicles_needing_renewal() to service_role;
+
+-- Initial adoption: preserve files and bookings, but require explicit review.
+update public.cars set compliance_previously_approved=true,status='renewal_required'
+  where status in ('approved','active');
+do $adopt$ declare cid uuid; begin
+  for cid in select id from public.cars where status='renewal_required' loop
+    perform public.refresh_vehicle_compliance(cid);
+  end loop;
+end; $adopt$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select id,plate_number,status,public.vehicle_compliance_summary(id,now(),now()) from public.cars;
+-- select id,car_id,status,compliance_hold,compliance_hold_reason from public.bookings where compliance_hold;
+-- select car_id,document_type,compliance_status,valid_from,valid_until from public.car_documents order by car_id,created_at;
+
+-- ============================================================================
+-- CHAPTER 71 - Listing edits stop rewriting live bookings, and stop taking the
+-- listing offline for changes nobody reviews
+-- Apply this chapter only, staging first. Nothing is destroyed: one nullable
+-- column is added and two trigger functions are replaced.
+-- ============================================================================
+begin;
+
+-- The pickup location was the last term of a booking still read live off the
+-- car. Money (base_price, commission, total_price, and the downpayment/refund
+-- snapshots) and the rental agreement (agreement_version_id +
+-- agreement_storage_path_snapshot) are already frozen per booking for the
+-- reason given in CHAPTER 14 - "a later change never rewrites an existing
+-- booking's terms" - but a lister who edited their location moved the meetup
+-- point of every booking already agreed, changed what an admin sees when
+-- adjudicating a dispute about that very meetup, and retroactively re-bucketed
+-- completed bookings by region on the earnings report. Same pattern, same
+-- reason: snapshot it at creation (api/create-booking.ts) and let reads fall
+-- back to the live column for bookings made before this chapter.
+alter table public.bookings
+  add column if not exists pickup_location_snapshot text;
+
+-- Only the columns an admin can actually check against a document still send a
+-- listing back to review. Dropped from the list: price_per_day, location,
+-- contact_number, additional_info, gps_available, fuel_category, fuel_subtype.
+-- Nothing in /admin/vehicle-approval can verify any of them, and
+-- fuel_category, fuel_subtype and gps_available are not even rendered in the
+-- review modal - so a corrected phone number cost the lister a full OR/CR OCR
+-- re-run and their listing's place in the queue, to have a reviewer confirm a
+-- field they were never shown.
+--
+-- Photos and the rental agreement keep their own review triggers
+-- (return_car_image_change_to_review, queue_rental_agreement_version), so
+-- neither is affected by this narrowing.
+create or replace function public.return_materially_changed_car_to_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- A rejected listing returns to the queue on any edit at all. The lister is
+  -- answering the rejection, and what the admin objected to may well be one of
+  -- the fields that is no longer material below - a blurry photo caption, a
+  -- wrong contact number - so "material" is the wrong test here.
+  --
+  -- This also unsticks a listing that could not be edited at all. The lister's
+  -- own update cannot carry status or rejection_reason: protect_car_submission_fields
+  -- runs first (triggers fire in name order) and rejects both, so a rejected car
+  -- had no path back to review. Setting them here is allowed, because that guard
+  -- only polices what the lister sent.
+  if old.status = 'rejected'
+     and new.status is not distinct from old.status
+     and not (public.is_admin() or current_user in ('postgres', 'service_role', 'supabase_admin'))
+  then
+    new.status := 'pending';
+    new.rejection_reason := null;
+    new.last_verified_at := null;
+    return new;
+  end if;
+
+  if old.status in ('approved', 'active', 'inactive') and (
+    old.model_id is distinct from new.model_id or old.plate_number is distinct from new.plate_number or
+    old.mileage is distinct from new.mileage or
+    old.transmission is distinct from new.transmission or
+    old.registration_expiry is distinct from new.registration_expiry or old.ctpl_expiry is distinct from new.ctpl_expiry or
+    old.comprehensive_insurance_expiry is distinct from new.comprehensive_insurance_expiry or
+    old.insurer_rental_use_confirmed is distinct from new.insurer_rental_use_confirmed
+  ) then
+    new.status := 'pending';
+    new.last_verified_at := null;
+    new.rejection_reason := null;
+    new.insurance_verification_status := 'pending';
+  end if;
+  return new;
+end;
+$$;
+
+-- A booking that has already been paid for must be able to finish its handover
+-- even if the listing went back to admin review in between. A lister replacing
+-- a photo on Friday used to strand both parties at Saturday's meetup: this
+-- raise fires while api/booking-action.ts is writing
+-- lister_handover_confirmed_at, which has no precheck, so it surfaced as a bare
+-- 500 that named nothing - and neither booking page selects cars.status, so
+-- neither side was ever told the listing had gone back into review.
+--
+-- Narrow on purpose. Only the three handover/activation transitions are
+-- exempted, and only out of a fully_paid or active booking. A new booking, a
+-- date change and an extension against a listing under review are all still
+-- refused - those are fresh commitments, not the completion of one already paid
+-- for. The VEHICLE_DOCUMENTS_REQUIRED coverage raise is deliberately left
+-- alone: an expired CTPL or registration must still block a handover, and that
+-- path already warns both sides ahead of time through compliance_hold and the
+-- matching deadline extension.
+create or replace function public.guard_booking_document_coverage()
+returns trigger language plpgsql security definer set search_path=public as $trip$
+declare ok boolean; enforce boolean; handover_step boolean;
+begin
+  perform 1 from public.cars where id=new.car_id for update;
+  ok:=coalesce((public.vehicle_compliance_summary(new.car_id,
+    (new.start_date+coalesce(new.pickup_time::time,'09:00'::time)) at time zone 'Asia/Manila',
+    (new.end_date+coalesce(new.dropoff_time::time,'09:00'::time)) at time zone 'Asia/Manila')->>'eligible')::boolean,false);
+  enforce:=tg_op='INSERT';
+  handover_step:=false;
+  if tg_op='UPDATE' then
+    enforce:=old.car_id is distinct from new.car_id or old.start_date is distinct from new.start_date
+      or old.end_date is distinct from new.end_date or old.pickup_time is distinct from new.pickup_time
+      or old.dropoff_time is distinct from new.dropoff_time
+      or (old.status='pending' and new.status in ('confirmed','awaiting_payment'))
+      or (new.status='active' and old.status<>'active')
+      or (old.lister_handover_confirmed_at is null and new.lister_handover_confirmed_at is not null)
+      or (old.renter_handover_received_at is null and new.renter_handover_received_at is not null);
+    -- An earlier return must always remain possible, including an active trip.
+    if new.end_date<old.end_date and new.start_date=old.start_date and new.car_id=old.car_id
+      and new.status=old.status and new.pickup_time is not distinct from old.pickup_time
+      and new.lister_handover_confirmed_at is not distinct from old.lister_handover_confirmed_at
+      and new.renter_handover_received_at is not distinct from old.renter_handover_received_at then enforce:=false; end if;
+    -- The paid-handover exemption described above.
+    handover_step:=old.status in ('fully_paid','active') and (
+         (new.status='active' and old.status<>'active')
+      or (old.lister_handover_confirmed_at is null and new.lister_handover_confirmed_at is not null)
+      or (old.renter_handover_received_at is null and new.renter_handover_received_at is not null));
+  end if;
+  if enforce and not ok then raise exception 'VEHICLE_DOCUMENTS_REQUIRED: approved documents must cover pickup through return'; end if;
+  if enforce and not handover_step
+     and not exists(select 1 from public.cars where id=new.car_id and status in ('approved','active')) then
+    raise exception 'Vehicle is not available for booking'; end if;
+  if not ok and new.status in ('pending','confirmed','awaiting_payment','downpayment_paid','fully_paid','active') then
+    new.compliance_hold:=true;new.compliance_hold_since:=coalesce(new.compliance_hold_since,now());
+    new.compliance_hold_reason:='Approved vehicle documents do not cover the rental period.';
+  end if;
+  return new;
+end;
+$trip$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select column_name from information_schema.columns
+--   where table_schema='public' and table_name='bookings' and column_name='pickup_location_snapshot';
+-- select id,pickup_location_snapshot from public.bookings order by created_at desc limit 5;
+-- select prosrc from pg_proc where proname='return_materially_changed_car_to_review';
+-- select prosrc from pg_proc where proname='guard_booking_document_coverage';
+
+-- ============================================================================
+-- CHAPTER 72 - A payout account number has to be a number someone can be paid
+-- at, and BPI joins the supported destinations
+-- Apply this chapter only, staging first. Payout details that cannot satisfy
+-- the new shape are cleared and their owner is notified - nothing else is
+-- touched.
+-- ============================================================================
+begin;
+
+-- profiles.payout_account_number is the disbursement target
+-- server/payoutAutomation.ts hands to PayMongo. The old constraint was
+-- '^[0-9]{0,16}$', which accepts the empty string and accepts "00", so a lister
+-- could save a two-character account number and the transfer would be addressed
+-- to it. There was no minimum anywhere: not in the form, not here.
+--
+-- The shape now depends on the destination, matching src/lib/payoutAccount.ts
+-- and server/payoutAccount.ts:
+--   GCash / Maya - a Philippine mobile number, 09 plus nine digits, exactly 11
+--   BPI          - a bank account number, 10 to 16 digits
+--
+-- BPI is new here. It was previously rejected outright by
+-- profiles_payout_method_check, which only allowed GCash and Maya after the
+-- older "Business Bank Account" destination was retired. The difference is that
+-- BPI resolves through the same PayMongo InstaPay institution lookup the
+-- wallets use, so it is a destination the payout path can actually reach,
+-- rather than a label with no transfer behind it.
+alter table public.profiles drop constraint if exists profiles_payout_method_check;
+alter table public.profiles
+  add constraint profiles_payout_method_check
+  check (payout_method is null or payout_method in ('GCash', 'Maya', 'BPI'));
+
+-- Existing rows first: a check constraint validates what is already stored, so
+-- anything that cannot pass has to be cleared before it is added. Only the
+-- payout fields are cleared; the account, its bookings and its history are
+-- untouched, and the lister is told what to do about it.
+insert into public.notifications (user_id, title, message, type, link)
+select
+  p.id,
+  'Re-enter your payout details',
+  'SafeDrive now checks that a payout account number can actually receive a transfer. Your saved '
+    || coalesce(p.payout_method, 'payout') ||
+    ' number did not match the required format, so it was cleared. Add it again before your next payout.',
+  'warning',
+  '/verify'
+from public.profiles p
+where p.payout_account_number is not null
+  and not (
+    (p.payout_method in ('GCash', 'Maya') and p.payout_account_number ~ '^09[0-9]{9}$')
+    or (p.payout_method = 'BPI' and p.payout_account_number ~ '^[0-9]{10,16}$')
+  );
+
+update public.profiles
+set payout_account_number = null,
+    payout_account_name = null
+where payout_account_number is not null
+  and not (
+    (payout_method in ('GCash', 'Maya') and payout_account_number ~ '^09[0-9]{9}$')
+    or (payout_method = 'BPI' and payout_account_number ~ '^[0-9]{10,16}$')
+  );
+
+alter table public.profiles drop constraint if exists profiles_payout_account_number_check;
+alter table public.profiles
+  add constraint profiles_payout_account_number_check
+  check (
+    payout_account_number is null
+    or (payout_method in ('GCash', 'Maya') and payout_account_number ~ '^09[0-9]{9}$')
+    or (payout_method = 'BPI' and payout_account_number ~ '^[0-9]{10,16}$')
+  );
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select payout_method, payout_account_number from public.profiles
+--   where payout_account_number is not null;
+-- Each of these must fail with a check violation:
+--   update public.profiles set payout_method='GCash', payout_account_number='00' where id = '<some id>';
+--   update public.profiles set payout_method='GCash', payout_account_number='12345678901' where id = '<some id>';
+--   update public.profiles set payout_method='BPI', payout_account_number='123456789' where id = '<some id>';
+-- And each of these must succeed:
+--   update public.profiles set payout_method='GCash', payout_account_number='09171234567' where id = '<some id>';
+--   update public.profiles set payout_method='BPI', payout_account_number='1234567890' where id = '<some id>';
+
+-- ============================================================================
+-- CHAPTER 73 - The lister's early-return hours change sides: from "notice the
+-- renter owes me" to "time I get to answer"
+-- Apply this chapter only, staging first. One column is renamed and its check
+-- constraint re-created. No rows are added, removed or rewritten.
+-- ============================================================================
+begin;
+
+-- cars.min_early_return_notice_hours meant the minimum warning a renter had to
+-- give before an early return, and api/booking-early-return-action.ts enforced
+-- it with a 422 before the request row was ever inserted. It now means the
+-- opposite side of the same conversation: how long the LISTER has to answer an
+-- early-return request before it rejects itself.
+--
+-- The auto-reject it now drives already exists - CHAPTER 46's
+-- booking_early_returns.response_deadline, stamped at request time and swept
+-- every 15 minutes by api/expire-booking-deadlines.ts. All that changes is that
+-- the window stops being a hardcoded 24 hours and becomes this per-car number.
+--
+-- Renamed rather than left in place: a column called
+-- min_early_return_notice_hours that means a response window would mislead
+-- every later reader. The stored 1-24 values carry over unchanged and stay
+-- valid under the same range; null still means "unset", which now falls back to
+-- the 24-hour default instead of "no notice required".
+--
+-- The CHAPTER 38 header (this file, around line 7973) and CHAPTER 40 (around
+-- line 8009) both describe the retired meaning and are kept only as the
+-- historical record of what the column used to be.
+--
+-- Given up on purpose, recorded here so it is not rediscovered as a surprise:
+-- with the notice gate gone, a renter may request an early return at any point
+-- before the moment they want the car back. Because response_deadline is capped
+-- at that requested instant, a request made minutes beforehand yields a
+-- response window of minutes - so nothing now guarantees the lister a
+-- meaningful slice of their own setting.
+alter table public.cars
+  rename column min_early_return_notice_hours to early_return_response_window_hours;
+
+alter table public.cars
+  drop constraint if exists cars_min_early_return_notice_hours_check;
+
+alter table public.cars
+  drop constraint if exists cars_early_return_response_window_hours_check,
+  add constraint cars_early_return_response_window_hours_check
+  check (
+    early_return_response_window_hours is null
+    or early_return_response_window_hours between 1 and 24
+  );
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select column_name from information_schema.columns
+--   where table_schema='public' and table_name='cars'
+--     and column_name in ('min_early_return_notice_hours','early_return_response_window_hours');
+--   (expect exactly one row: early_return_response_window_hours)
+-- select conname, pg_get_constraintdef(oid) from pg_constraint
+--   where conname = 'cars_early_return_response_window_hours_check';
+-- select id, plate_number, early_return_response_window_hours from public.cars order by created_at desc limit 10;
+
+-- ============================================================================
+-- CHAPTER 74 - A resubmitted document keeps the same authenticity evidence as
+-- the one it replaces
+-- Apply this chapter only, staging first. One function is replaced. No table,
+-- column, constraint or row changes.
+-- ============================================================================
+begin;
+
+-- The add-vehicle path runs inspectContentProvenance() over every uploaded
+-- document and stores the verdict on car_documents - provenance_status, the
+-- AI-suspicion score, the detector that produced it - and the admin review
+-- screen renders that as a badge beside the file.
+--
+-- submit_vehicle_document_update, the CHAPTER 70 resubmission path, accepted
+-- only {document_type, storage_path}. Every replacement therefore landed on the
+-- column default provenance_status = 'unknown', which is backwards: a
+-- resubmission is exactly where a doctored permit would be substituted, and it
+-- was the path carrying LESS scrutiny than the original listing.
+--
+-- Same signature and the same ownership, path-scoping, type and
+-- duplicate-pending checks as before. The only change is that each item in
+-- p_documents may now also carry the provenance fields and a content hash.
+--
+-- Both enumerated values are clamped to their existing check constraints
+-- (car_documents_provenance_status_check, car_documents_review_flag_check,
+-- around line 2552 of this file) instead of being trusted: a value outside the
+-- allowed set would otherwise abort the whole resubmission with a raw
+-- constraint error the lister cannot act on.
+--
+-- review_reason is deliberately NOT accepted here. The compliance flow reuses
+-- that column for the admin's own decision note (review_vehicle_documents), and
+-- the panel renders it as "Review: ...". Machine text must not occupy the place
+-- a human judgement is shown.
+create or replace function public.submit_vehicle_document_update(p_car_id uuid,p_documents jsonb)
+returns uuid language plpgsql security definer set search_path=public as $submit$
+declare rid uuid; item jsonb; k text; path text;
+begin
+  if auth.uid() is null or not exists(select 1 from public.cars where id=p_car_id and owner_id=auth.uid()) then
+    raise exception 'Only the vehicle owner can submit documents'; end if;
+  perform 1 from public.cars where id=p_car_id for update;
+  if p_documents is null or jsonb_typeof(p_documents)<>'array' or jsonb_array_length(p_documents)=0 then raise exception 'Upload at least one document'; end if;
+  insert into public.car_renewals(car_id,lister_id,status,document_update)
+    values(p_car_id,auth.uid(),'pending',true) returning id into rid;
+  for item in select * from jsonb_array_elements(p_documents) loop
+    k:=item->>'document_type'; path:=item->>'storage_path';
+    if k is null or k not in ('or','cr','ctpl','comprehensive_insurance','dti','sec','mayors_permit','bir','cpc','ltfrb_clarification') then raise exception 'Unsupported document type'; end if;
+    if path is null or path not like auth.uid()::text||'/'||p_car_id::text||'/%'
+      or not exists(select 1 from storage.objects where bucket_id='vehicle-private-documents' and name=path) then
+      raise exception 'Document must be uploaded to this vehicle private folder'; end if;
+    if exists(select 1 from public.car_documents where car_id=p_car_id and document_type=k and renewal_id is not null and compliance_status='pending') then
+      raise exception 'A replacement for % is already awaiting review',k; end if;
+    insert into public.car_documents(
+      car_id,document_type,storage_path,storage_bucket,renewal_id,
+      content_sha256,provenance_status,provenance_source,provenance_summary,
+      ai_suspicion_score,ai_detector_name,ai_detector_version,review_flag)
+    values(
+      p_car_id,k,path,'vehicle-private-documents',rid,
+      nullif(item->>'content_sha256',''),
+      case when item->>'provenance_status' in
+        ('unknown','credential_present','credential_missing','credential_invalid')
+        then item->>'provenance_status' else 'unknown' end,
+      nullif(item->>'provenance_source',''),
+      nullif(item->>'provenance_summary',''),
+      case when (item->>'ai_suspicion_score') ~ '^[0-9]*\.?[0-9]+$'
+        and (item->>'ai_suspicion_score')::numeric between 0 and 1
+        then (item->>'ai_suspicion_score')::numeric else null end,
+      nullif(item->>'ai_detector_name',''),
+      nullif(item->>'ai_detector_version',''),
+      case when item->>'review_flag' in
+        ('none','needs_admin_review','approved_after_review','rejected_after_review')
+        then item->>'review_flag' else 'none' end);
+  end loop;
+  return rid;
+end;
+$submit$;
+revoke all on function public.submit_vehicle_document_update(uuid,jsonb) from public;
+grant execute on function public.submit_vehicle_document_update(uuid,jsonb) to authenticated;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select provenance_status, count(*) from public.car_documents
+--   where renewal_id is not null group by 1;
+--   (resubmissions filed after this chapter should stop being all 'unknown')
+-- select id, document_type, provenance_status, content_sha256, review_flag
+--   from public.car_documents where renewal_id is not null
+--   order by created_at desc limit 10;
+
 -- End of SafeDrive chaptered database master.

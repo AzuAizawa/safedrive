@@ -34,7 +34,7 @@ type BookingRecord = {
   renter_return_arrived_at: string | null;
   cars: {
     plate_number: string;
-    min_early_return_notice_hours: number | string | null;
+    early_return_response_window_hours: number | string | null;
     car_models: { name: string; car_brands: { name: string } };
   } | null;
 };
@@ -152,7 +152,7 @@ export default async function handler(req: Request) {
           `
           id, car_id, renter_id, owner_id, status, start_date, end_date, dropoff_time,
           base_price, renter_completed, owner_completed, renter_return_arrived_at,
-          cars ( plate_number, min_early_return_notice_hours, car_models ( name, car_brands ( name ) ) )
+          cars ( plate_number, early_return_response_window_hours, car_models ( name, car_brands ( name ) ) )
         `,
         )
         .eq("id", payload.bookingId)
@@ -236,21 +236,12 @@ export default async function handler(req: Request) {
         );
       }
 
-      // The car's configured minimum early-return notice was shown to the
-      // renter but never actually enforced - a renter could request an
-      // effectively same-day early return, giving the lister no real time
-      // to prepare for the impromptu meetup.
-      const minNoticeHours = Number(b.cars?.min_early_return_notice_hours);
-      if (Number.isFinite(minNoticeHours) && minNoticeHours > 0) {
-        if (requestedInstant - Date.now() < minNoticeHours * 60 * 60 * 1000) {
-          return jsonResponse(
-            {
-              error: `This car requires at least ${minNoticeHours} hour${minNoticeHours === 1 ? "" : "s"} of notice for an early return. Choose a later date or time.`,
-            },
-            422,
-          );
-        }
-      }
+      // This car's hours setting used to be a minimum-notice gate here, which
+      // refused a request that gave the lister too little warning. It now means
+      // the other side of the same conversation - how long the lister has to
+      // answer before the request rejects itself - so the gate is gone and a
+      // renter may ask at any point before the moment they want the car back.
+      // See the response_deadline stamp below.
 
       // Reported rule: once an early return is approved, that's the one
       // shot at it - if it doesn't happen, the fallback (this file's
@@ -300,12 +291,24 @@ export default async function handler(req: Request) {
         );
       }
 
-      // The lister must decide within 24h, capped at the requested (earlier)
-      // return instant itself - deciding after the renter already wanted
-      // the car back is moot. Same "never past the moment that matters" cap
-      // already used for payment_deadline/balance_deadline.
+      // How long the lister has to decide is their own per-car setting now
+      // (cars.early_return_response_window_hours), falling back to
+      // RESPONSE_WINDOW_HOURS for a listing that predates it. Still capped at
+      // the requested (earlier) return instant itself - deciding after the
+      // renter already wanted the car back is moot. Same "never past the moment
+      // that matters" cap already used for payment_deadline/balance_deadline.
+      //
+      // Consequence of the retired notice gate above, stated plainly: a request
+      // made minutes before the requested instant now produces a window of
+      // minutes, because the cap wins. Nothing guarantees the lister a
+      // meaningful slice of their own setting any more.
+      const configuredWindow = Number(b.cars?.early_return_response_window_hours);
+      const windowHours =
+        Number.isInteger(configuredWindow) && configuredWindow >= 1 && configuredWindow <= 24
+          ? configuredWindow
+          : RESPONSE_WINDOW_HOURS;
       const responseDeadline = new Date(
-        Math.min(Date.now() + RESPONSE_WINDOW_HOURS * 60 * 60 * 1000, requestedInstant),
+        Math.min(Date.now() + windowHours * 60 * 60 * 1000, requestedInstant),
       ).toISOString();
 
       const { data: row, error: insertError } = await supabase

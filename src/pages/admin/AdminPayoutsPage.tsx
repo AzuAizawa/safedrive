@@ -11,6 +11,10 @@ import {
 import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  getPayoutAccountNumberError,
+  isSupportedPayoutMethod,
+} from "@/lib/payoutAccount";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import AdminSectionTabs from "@/components/AdminSectionTabs";
@@ -150,12 +154,26 @@ const getAutomationSupport = (
     };
   }
 
-  if (booking.owner.payout_method === "GCash" || booking.owner.payout_method === "Maya") {
+  if (isSupportedPayoutMethod(booking.owner.payout_method)) {
+    // A supported destination with an unusable number is worse than no
+    // destination at all: it reads as ready right up until the transfer is
+    // addressed to a number that cannot receive it.
+    const accountError = getPayoutAccountNumberError(
+      booking.owner.payout_method,
+      booking.owner.payout_account_number,
+    );
+    if (accountError) {
+      return {
+        state: "missing",
+        label: "Payout account number is not valid",
+        description: `${accountError} The lister has to correct it before this payout can be sent.`,
+      };
+    }
     return {
       state: "ready",
       label: "Auto payout ready",
       description:
-        "This method can be sent through the current PayMongo wallet-disbursement flow when the environment is configured.",
+        "This destination can be sent through the current PayMongo InstaPay disbursement flow when the environment is configured.",
     };
   }
 

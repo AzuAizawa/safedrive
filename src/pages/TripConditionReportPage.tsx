@@ -28,6 +28,59 @@ import {
 // report at either phase is optional, kept for their own protection.
 const MAX_LIVE_PHOTOS = 4;
 
+// submit-trip-condition-report checks these only at submit time, so this page
+// reached outside its normal flow - a typed URL, a bookmark, the back button -
+// used to walk the reporter through the whole camera form and fail on the very
+// last tap, throwing away every photo they had just taken. Same rules, checked
+// before the camera can open.
+//
+// Deliberately not symmetrical. The renter's pickup report also waits for the
+// lister's check-in, matching the button on their bookings card, which only
+// appears once both sides have tapped "I have arrived". Every other combination
+// needs the reporter's own check-in alone: the lister's pickup report is
+// mandatory and must never be hard-blocked by the other party, and either side
+// may legitimately file a return report while still waiting for the other.
+type ReadinessBooking = {
+  status: string;
+  renter_arrived_at: string | null;
+  lister_arrived_at: string | null;
+  renter_return_arrived_at: string | null;
+  lister_return_arrived_at: string | null;
+};
+
+function getNotReadyReason(
+  booking: ReadinessBooking,
+  role: "renter" | "lister",
+  phase: "pickup" | "return",
+): string | null {
+  if (phase === "pickup" && !["fully_paid", "active"].includes(booking.status)) {
+    return "Pickup evidence is only accepted once the booking is fully paid, and before the trip is completed.";
+  }
+  if (phase === "return" && booking.status !== "active") {
+    return "Return evidence is only accepted while the trip is running.";
+  }
+
+  const ownArrival =
+    phase === "pickup"
+      ? role === "lister"
+        ? booking.lister_arrived_at
+        : booking.renter_arrived_at
+      : role === "lister"
+        ? booking.lister_return_arrived_at
+        : booking.renter_return_arrived_at;
+  if (!ownArrival) {
+    return phase === "pickup"
+      ? "Confirm your own arrival at the pickup first - these photos are timestamped proof that you were there."
+      : "Confirm your own arrival at the return first - these photos are timestamped proof that you were there.";
+  }
+
+  if (phase === "pickup" && role === "renter" && !booking.lister_arrived_at) {
+    return "Wait for the lister to check in at the pickup as well. Your pickup photos open once you are both there.";
+  }
+
+  return null;
+}
+
 export default function TripConditionReportPage() {
   const { bookingId = "", phase = "" } = useParams();
   const navigate = useNavigate();
@@ -40,6 +93,7 @@ export default function TripConditionReportPage() {
   const [damageNotes, setDamageNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [reporterRole, setReporterRole] = useState<"renter" | "lister" | null>(null);
+  const [notReadyReason, setNotReadyReason] = useState<string | null>(null);
 
   const [livePhotos, setLivePhotos] = useState<File[]>([]);
   const [livePhotoPreviews, setLivePhotoPreviews] = useState<string[]>([]);
@@ -55,11 +109,18 @@ export default function TripConditionReportPage() {
   useEffect(() => {
     if (!user?.id || !bookingId || !validPhase) return;
     void (async () => {
-      const { data: booking } = await supabase.from("bookings").select("id, renter_id, owner_id").eq("id", bookingId).maybeSingle();
+      const { data: booking } = await supabase
+        .from("bookings")
+        .select(
+          "id, renter_id, owner_id, status, renter_arrived_at, lister_arrived_at, renter_return_arrived_at, lister_return_arrived_at",
+        )
+        .eq("id", bookingId)
+        .maybeSingle();
       setBookingAllowed(Boolean(booking && [booking.renter_id, booking.owner_id].includes(user.id)));
-      setReporterRole(
-        booking?.renter_id === user.id ? "renter" : booking?.owner_id === user.id ? "lister" : null,
-      );
+      const role =
+        booking?.renter_id === user.id ? "renter" : booking?.owner_id === user.id ? "lister" : null;
+      setReporterRole(role);
+      setNotReadyReason(booking && role ? getNotReadyReason(booking, role, validPhase) : null);
       const { data: report } = await supabase.from("trip_condition_reports").select("id").eq("booking_id", bookingId).eq("reporter_id", user.id).eq("phase", validPhase).maybeSingle();
       setAlreadySubmitted(Boolean(report));
     })();
@@ -257,6 +318,18 @@ export default function TripConditionReportPage() {
   if (!validPhase) return <div className="rounded-xl border p-8">Invalid report phase.</div>;
   if (bookingAllowed === false) return <div className="rounded-xl border p-8">You are not a participant in this booking.</div>;
   if (alreadySubmitted) return <div className="mx-auto max-w-xl rounded-xl border border-green-500/30 bg-green-500/10 p-8 text-center"><CheckCircle2 className="mx-auto h-10 w-10 text-green-500" /><h1 className="mt-3 text-xl font-semibold">Report already submitted</h1><p className="mt-2 text-sm text-muted-foreground">The server timestamp and evidence are stored with this booking.</p><Link className={cn(buttonVariants(), "mt-5")} to={returnTo}>Return to bookings</Link></div>;
+
+  if (notReadyReason)
+    return (
+      <div className="mx-auto max-w-xl rounded-xl border border-border/60 bg-muted/20 p-8 text-center">
+        <Info className="mx-auto h-10 w-10 text-muted-foreground" />
+        <h1 className="mt-3 text-xl font-semibold">Not ready for this report yet</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{notReadyReason}</p>
+        <Link className={cn(buttonVariants(), "mt-5")} to={returnTo}>
+          Return to bookings
+        </Link>
+      </div>
+    );
 
   return (
     <form onSubmit={submit} className="mx-auto max-w-3xl space-y-6">

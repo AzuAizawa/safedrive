@@ -1,4 +1,5 @@
-﻿import { useState, useEffect, useCallback, useMemo } from "react";
+import BookingComplianceNotice from "@/components/BookingComplianceNotice";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
@@ -101,6 +102,8 @@ const getBookingPickupMs = (booking: {
 
 
 interface ListerBooking {
+  compliance_hold?: boolean;
+  compliance_hold_reason?: string | null;
   id: string;
   car_id: string;
   renter_id: string;
@@ -131,6 +134,8 @@ interface ListerBooking {
   dropoff_time: string | null;
   created_at: string;
   agreement_storage_path_snapshot: string | null;
+  // The pickup point as it stood when the renter booked - see CHAPTER 71.
+  pickup_location_snapshot: string | null;
   renter_arrived_at: string | null;
   renter_return_arrived_at: string | null;
   lister_return_arrived_at: string | null;
@@ -2121,7 +2126,9 @@ export default function ListerBookingsPage() {
                     Renter: {booking.renter?.full_name || booking.renter?.email || "Unknown renter"}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {booking.cars.location || "Pickup location not set"}
+                    {booking.pickup_location_snapshot ||
+                      booking.cars.location ||
+                      "Pickup location not set"}
                   </p>
                 </div>
               ))}
@@ -2781,6 +2788,7 @@ export default function ListerBookingsPage() {
                           </Button>
                         </div>
                 <CardContent className="max-h-[75vh] space-y-4 overflow-y-auto p-5 [&_.justify-end]:justify-start [&_.text-right]:text-left">
+                          <BookingComplianceNotice hold={b.compliance_hold} reason={b.compliance_hold_reason} />
                   <div className="space-y-4">
                     <div className="space-y-2 flex-1">
                       <div className="flex items-center gap-3 flex-wrap">
@@ -2882,9 +2890,10 @@ export default function ListerBookingsPage() {
                           ({formatDayCount(b.total_days)})
                         </span>
                       </p>
-                      {b.cars.location && (
+                      {(b.pickup_location_snapshot || b.cars.location) && (
                         <p className="text-sm text-muted-foreground flex items-center gap-1">
-                          <MapPin className="w-3.5 h-3.5" /> {b.cars.location}
+                          <MapPin className="w-3.5 h-3.5" />{" "}
+                          {b.pickup_location_snapshot || b.cars.location}
                         </p>
                       )}
                       {getAgreementUrl(b.agreement_storage_path_snapshot) &&

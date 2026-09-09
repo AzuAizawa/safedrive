@@ -1,3 +1,4 @@
+import { getVehicleCompliance, rentalInstant, complianceBlockedResponse } from "../server/vehicleCompliance.js";
 import { createClient } from "@supabase/supabase-js";
 import { sendUserNotificationEmail } from "../server/email.js";
 import { blockedIpResponse } from "../server/ipBlock.js";
@@ -63,6 +64,7 @@ type CarRecord = {
   owner_id: string;
   status: string | null;
   price_per_day: number | string;
+  location: string | null;
   plate_number: string;
   car_models:
     | {
@@ -406,6 +408,7 @@ export default async function handler(req: Request) {
         owner_id,
         status,
         price_per_day,
+        location,
         plate_number,
         car_models (
           name,
@@ -424,6 +427,11 @@ export default async function handler(req: Request) {
     if (!["approved", "active"].includes(car.status ?? "")) {
       return jsonResponse({ error: "This car is not available for booking" }, 409);
     }
+
+    const documentCoverage = await getVehicleCompliance(supabase, carId,
+      rentalInstant(startDate.iso, payload.pickupTime, "09:00"),
+      rentalInstant(endDate.iso, payload.dropoffTime, "09:00"));
+    if (!documentCoverage.eligible) return complianceBlockedResponse();
 
     // Transmission gate (separate query, same graceful-degradation reason as
     // the licence read): only an explicit automatic-only licence against an
@@ -621,6 +629,12 @@ export default async function handler(req: Request) {
         agreement_version_id: agreementVersion.id,
         agreement_storage_path_snapshot: agreementVersion.storage_path,
         agreement_sha256_snapshot: agreementVersion.content_sha256,
+        // The meetup point the renter is agreeing to right now. Frozen for the
+        // same reason as the money and the agreement above (CHAPTER 14): a
+        // lister editing their listing later must not move the pickup of a
+        // booking already made. Reads fall back to cars.location so bookings
+        // created before CHAPTER 71 still render.
+        pickup_location_snapshot: car.location,
         payment_processing_fee: paymentProcessingFee,
         downpayment_rate_snapshot: downpaymentRate,
         refund_full_hours_snapshot: refundFullHours,

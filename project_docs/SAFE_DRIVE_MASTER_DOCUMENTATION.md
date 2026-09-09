@@ -1833,3 +1833,56 @@ The group may say:
 - **Transport counsel/LTO/LTFRB and insurer:** confirm whether the exact operating model is permitted and insured. This is required before public real-money vehicle rental.
 - **Accessibility tester:** verify the completed flows with keyboard, screen reader, zoom/reflow, multiple browsers, Android, and iOS; record defects and retests.
 - **Hosting provider, later:** prove Node-compatible APIs, public HTTPS callbacks, raw webhook body access, encrypted server secrets, SPA fallback, cron authorization, logs/alerts, backups, restore, and rollback.
+# Vehicle compliance documents and booking coverage (2026-09-09)
+
+Implementation is prepared in database master **Chapter 70** and the corresponding
+application code. Apply only Chapter 70 to a staging copy of the existing schema,
+review its read-only verification queries, and exercise admin/lister flows before
+production activation. The historical SQL master contains destructive setup
+chapters and must not be executed in full. No live migration is part of this change.
+
+Every vehicle, including subsequent cars from the same business, uploads its own
+OR, CR, CTPL, comprehensive insurance covering rental use, DTI (sole proprietor) or
+SEC (corporation/partnership), Mayor's Permit and BIR registration. LTFRB authority
+is an admin classification: pending, required (CPC covering that vehicle), or not
+required with approved written LTFRB clarification and a review note. The software
+does not infer a legal self-drive exemption. These are platform review controls;
+legal applicability still requires the relevant authority's clarification.
+
+The admin records effective dates and actual expiry for registration/OR, CTPL,
+comprehensive insurance, DTI, Mayor's Permit and CPC. Date-only expiry lasts through
+23:59:59.999 in Manila; a stated time overrides it. CR, BIR, SEC and written
+clarification have no recurring expiry but remain available for optional updates.
+Document Renewal & Updates accepts one or more replacement uploads, without
+requiring unrelated files or mileage. Pending replacements appear as Resubmission.
+Approval/rejection/revocation is audited; rejection/revocation requires a reason.
+Private evidence is immutable once referenced, and older versions remain available.
+An approved non-expiring replacement supersedes the prior version from its effective
+date. An expiring renewal contributes a separate interval of approved coverage.
+
+`vehicle_compliance_summary` requires continuous approved coverage from pickup to
+return. October 31 expiry permits October 20-25, blocks October-November crossings
+and November bookings, and permits them after approval of a continuous renewal.
+`server/vehicleCompliance.ts`, booking/payment/extension handlers, and a database
+booking trigger enforce this rule. The car detail calendar displays the available
+coverage horizon; pending uploads never extend it.
+
+Existing approved listings without the new reviewed requirements immediately enter
+renewal-required status. Existing trips are preserved with `compliance_hold`,
+participant/admin notifications and audit evidence. New payments and handover pause;
+deadline sweeps skip held pre-trip bookings. Approved coverage clears the hold and
+restores the remaining payment/response time. Lister/support cancellation and refund
+review remain available if documents cannot be corrected. Active-trip return and
+completion remain available. Actual payment callbacks still record captured money;
+an extension payment that cannot be applied enters manual refund review.
+
+The existing booking-deadline worker refreshes compliance and sends deduplicated
+30/7/1-day expiry reminders. Its existing authenticated scheduler must be enabled.
+`VehicleCompliancePanel` serves lister updates and admin document review;
+`AdminComplianceQueue` lists resubmissions and held bookings.
+
+Validation: `npm run check:vehicle-compliance` executes the actual migration in
+PGlite (local PostgreSQL) and tests expiry boundaries, independent cars, continuous
+renewals/gaps, partial updates, revoked evidence, atomic review, ownership guards
+and reminders. Also run `npm run build` and `npm run check:all`. Local fixtures do
+not replace staging checks of existing Supabase RLS, Storage and authenticated UI.

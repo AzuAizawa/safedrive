@@ -3,6 +3,15 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-09 - Per-vehicle document review, updates and booking limits
+
+Added business-document uploads to every vehicle, admin validity review and optional
+partial document resubmissions. Booking dates must be fully covered by approved
+documents, including continuous future renewals. Existing affected trips are held
+for review with notifications instead of automatic cancellation; actual payments
+remain recorded. Database master Chapter 70 must be applied in staging before
+activation. Added local PostgreSQL coverage tests via `check:vehicle-compliance`.
+
 The authoritative detail still lives in
 `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md` and
 `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql`. This file is the quick index.

@@ -1,3 +1,4 @@
+import { bookingCompliance, complianceBlockedResponse } from "../server/vehicleCompliance.js";
 import { createClient } from "@supabase/supabase-js";
 import { blockedIpResponse } from "../server/ipBlock.js";
 
@@ -8,6 +9,7 @@ export const config = {
 type ExtensionRecord = {
   id: string;
   booking_id: string;
+  requested_end_date: string;
   renter_id: string;
   owner_id: string;
   status: string;
@@ -113,6 +115,7 @@ export default async function handler(req: Request) {
         `
         id,
         booking_id,
+        requested_end_date,
         renter_id,
         owner_id,
         status,
@@ -142,6 +145,8 @@ export default async function handler(req: Request) {
     if (extensionRecord.renter_id !== user.id) {
       return jsonResponse({ error: "You are not allowed to pay for this extension" }, 403);
     }
+
+    if (!(await bookingCompliance(supabase, extensionRecord.booking_id, extensionRecord.requested_end_date)).eligible) return complianceBlockedResponse();
 
     if (
       extensionRecord.status === "approved" &&

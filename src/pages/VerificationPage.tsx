@@ -9,6 +9,14 @@ import {
   licenseExpiryState,
   type LicenseTransmission,
 } from "@/lib/driversLicense";
+import {
+  getPayoutAccountNumberError,
+  getPayoutMethodRule,
+  isSupportedPayoutMethod,
+  PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH,
+  PAYOUT_METHOD_RULES,
+  sanitizePayoutAccountNumber,
+} from "@/lib/payoutAccount";
 import { useVerificationEtaMessages } from "@/lib/platformSettings";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -399,12 +407,6 @@ const normalizeDriverLicenseInput = (value: string) => {
 
 const isValidDriverLicense = (value: string) => /^[A-Z]\d{2}-\d{2}-\d{6}$/.test(value);
 
-// GCash/Maya wallet numbers are digits only; 16 covers every supported
-// destination with headroom, and matches the DB check constraint.
-const PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH = 16;
-const sanitizePayoutAccountNumber = (value: string) =>
-  value.replace(/[^\d]/g, "").slice(0, PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH);
-
 export default function VerificationPage() {
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
@@ -536,9 +538,9 @@ export default function VerificationPage() {
   const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [isEditingPayout, setIsEditingPayout] = useState(false);
   const normalizeSupportedPayoutMethod = (value?: string | null) =>
-    value === "Maya" ? "Maya" : "GCash";
+    isSupportedPayoutMethod(value) ? value : "GCash";
   const getSupportedPayoutMethodLabel = (value?: string | null) =>
-    value === "GCash" || value === "Maya" ? value : "Update required";
+    getPayoutMethodRule(value)?.label ?? "Update required";
 
   const [payoutMethod, setPayoutMethod] = useState(
     normalizeSupportedPayoutMethod(profile?.payout_method),
@@ -546,6 +548,16 @@ export default function VerificationPage() {
   const [payoutAccountName, setPayoutAccountName] = useState(profile?.payout_account_name || "");
   const [payoutAccountNumber, setPayoutAccountNumber] = useState(profile?.payout_account_number || "");
   const [isSavingPayout, setIsSavingPayout] = useState(false);
+  // The account number is the actual disbursement target, so the form
+  // refuses a shape PayMongo could never reach instead of leaving it to be
+  // discovered on payout day.
+  const payoutMethodRule = getPayoutMethodRule(payoutMethod);
+  const payoutAccountNumberError = getPayoutAccountNumberError(
+    payoutMethod,
+    payoutAccountNumber,
+  );
+  const canSavePayoutDetails =
+    Boolean(payoutAccountName.trim()) && payoutAccountNumberError === null;
   const hasStructuredAddress =
     typeof profile?.address === "string" && profile.address.includes(",");
   const isPrivilegedAccount =
@@ -983,6 +995,13 @@ export default function VerificationPage() {
 
   const handleUpdatePayoutDetails = async () => {
     if (!user) return;
+    // Checked here as well as on the button: the database constraint rejects
+    // a bad number outright, and a raw constraint violation is not something
+    // to put in front of a lister.
+    if (payoutAccountNumberError) {
+      toast.error("Check the account number", { description: payoutAccountNumberError });
+      return;
+    }
     setIsSavingPayout(true);
     try {
       const { error } = await supabase.from("profiles").update({
@@ -1464,7 +1483,7 @@ export default function VerificationPage() {
                 </Button>
               ) : (
                 <div className="flex items-center gap-2">
-                  <Button type="button" size="sm" disabled={isSavingPayout || !payoutAccountName || !payoutAccountNumber} onClick={handleUpdatePayoutDetails}>
+                  <Button type="button" size="sm" disabled={isSavingPayout || !canSavePayoutDetails} onClick={handleUpdatePayoutDetails}>
                     {isSavingPayout ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
                     Save
                   </Button>
@@ -1492,11 +1511,14 @@ export default function VerificationPage() {
                 {isEditingPayout ? (
                   <select
                     value={payoutMethod}
-                    onChange={(e) => setPayoutMethod(e.target.value)}
+                    onChange={(e) => setPayoutMethod(normalizeSupportedPayoutMethod(e.target.value))}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   >
-                    <option value="GCash">GCash</option>
-                    <option value="Maya">Maya</option>
+                    {PAYOUT_METHOD_RULES.map((rule) => (
+                      <option key={rule.value} value={rule.value}>
+                        {rule.label}
+                      </option>
+                    ))}
                   </select>
                 ) : (
                   <p className="text-lg font-semibold">{getSupportedPayoutMethodLabel(profile.payout_method)}</p>
@@ -1517,12 +1539,30 @@ export default function VerificationPage() {
                   Account Number
                 </p>
                 {isEditingPayout ? (
-                  <Input
-                    value={payoutAccountNumber}
-                    onChange={(e) => setPayoutAccountNumber(sanitizePayoutAccountNumber(e.target.value))}
-                    maxLength={PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH}
-                    placeholder="Wallet or account number"
-                  />
+                  <>
+                    <Input
+                      value={payoutAccountNumber}
+                      onChange={(e) =>
+                        setPayoutAccountNumber(
+                          sanitizePayoutAccountNumber(e.target.value, payoutMethod),
+                        )
+                      }
+                      maxLength={payoutMethodRule?.maxLength ?? PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH}
+                      placeholder={payoutMethodRule?.hint ?? "Wallet or account number"}
+                      aria-invalid={payoutAccountNumberError !== null}
+                    />
+                    <p
+                      className={
+                        payoutAccountNumber && payoutAccountNumberError
+                          ? "text-xs text-red-500"
+                          : "text-xs text-muted-foreground"
+                      }
+                    >
+                      {payoutAccountNumber && payoutAccountNumberError
+                        ? payoutAccountNumberError
+                        : payoutMethodRule?.hint}
+                    </p>
+                  </>
                 ) : (
                   <p className="text-lg font-semibold break-all">{profile.payout_account_number || "Not set"}</p>
                 )}
@@ -1975,6 +2015,13 @@ export default function VerificationPage() {
       toast.error("Driver's License required", {
         description:
           "Please enter a valid driver's license number using the format X00-00-000000.",
+      });
+      return;
+    }
+
+    if (payoutAccountNumber && payoutAccountNumberError) {
+      toast.error("Check your payout account number", {
+        description: payoutAccountNumberError,
       });
       return;
     }
@@ -2564,11 +2611,14 @@ export default function VerificationPage() {
               <select
                 id="payout_method"
                 value={payoutMethod}
-                onChange={(e) => setPayoutMethod(e.target.value)}
+                onChange={(e) => setPayoutMethod(normalizeSupportedPayoutMethod(e.target.value))}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
-                <option value="GCash">GCash</option>
-                <option value="Maya">Maya</option>
+                {PAYOUT_METHOD_RULES.map((rule) => (
+                  <option key={rule.value} value={rule.value}>
+                    {rule.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="space-y-2">
@@ -2585,10 +2635,26 @@ export default function VerificationPage() {
               <Input
                 id="payout_account_number"
                 value={payoutAccountNumber}
-                onChange={(e) => setPayoutAccountNumber(sanitizePayoutAccountNumber(e.target.value))}
-                maxLength={PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH}
-                placeholder="Wallet or account number"
+                onChange={(e) =>
+                  setPayoutAccountNumber(
+                    sanitizePayoutAccountNumber(e.target.value, payoutMethod),
+                  )
+                }
+                maxLength={payoutMethodRule?.maxLength ?? PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH}
+                placeholder={payoutMethodRule?.hint ?? "Wallet or account number"}
+                aria-invalid={Boolean(payoutAccountNumber) && payoutAccountNumberError !== null}
               />
+              <p
+                className={
+                  payoutAccountNumber && payoutAccountNumberError
+                    ? "text-xs text-red-500"
+                    : "text-xs text-muted-foreground"
+                }
+              >
+                {payoutAccountNumber && payoutAccountNumberError
+                  ? payoutAccountNumberError
+                  : payoutMethodRule?.hint}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -3025,11 +3091,14 @@ export default function VerificationPage() {
                   <Label>Payout Method</Label>
                   <select 
                     value={payoutMethod} 
-                    onChange={(e) => setPayoutMethod(e.target.value)}
+                    onChange={(e) => setPayoutMethod(normalizeSupportedPayoutMethod(e.target.value))}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <option value="GCash">GCash</option>
-                    <option value="Maya">Maya</option>
+                    {PAYOUT_METHOD_RULES.map((rule) => (
+                      <option key={rule.value} value={rule.value}>
+                        {rule.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-2">
@@ -3045,15 +3114,31 @@ export default function VerificationPage() {
                   <Label>Account Number</Label>
                   <Input
                     type="text"
-                    placeholder="e.g., 09123456789"
+                    placeholder={payoutMethodRule?.hint ?? "e.g., 09123456789"}
                     value={payoutAccountNumber}
-                    onChange={(e) => setPayoutAccountNumber(sanitizePayoutAccountNumber(e.target.value))}
-                    maxLength={PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH}
+                    onChange={(e) =>
+                      setPayoutAccountNumber(
+                        sanitizePayoutAccountNumber(e.target.value, payoutMethod),
+                      )
+                    }
+                    maxLength={payoutMethodRule?.maxLength ?? PAYOUT_ACCOUNT_NUMBER_MAX_LENGTH}
+                    aria-invalid={Boolean(payoutAccountNumber) && payoutAccountNumberError !== null}
                   />
+                  <p
+                    className={
+                      payoutAccountNumber && payoutAccountNumberError
+                        ? "text-xs text-red-500"
+                        : "text-xs text-muted-foreground"
+                    }
+                  >
+                    {payoutAccountNumber && payoutAccountNumberError
+                      ? payoutAccountNumberError
+                      : payoutMethodRule?.hint}
+                  </p>
                 </div>
                 <Button 
                    className="w-full"
-                   disabled={isSavingPayout || !payoutAccountName || !payoutAccountNumber}
+                   disabled={isSavingPayout || !canSavePayoutDetails}
                    onClick={handleUpdatePayoutDetails}
                 >
                    {isSavingPayout ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}

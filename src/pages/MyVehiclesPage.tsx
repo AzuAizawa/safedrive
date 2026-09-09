@@ -1,9 +1,12 @@
+import { BusinessDocumentFields } from "@/components/VehicleCompliancePanel";
+import { documentLabel } from "@/lib/vehicleCompliance";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import {
+  hashFileSha256,
   inspectContentProvenance,
   type ContentProvenanceResult,
 } from "@/lib/contentProvenance";
@@ -61,15 +64,14 @@ import {
 } from "@/lib/vehicleValidation";
 
 const MAX_LISTING_PRICE = 100000;
-// Displayed to the renter as a hint before they send an early-return request
-// (CHAPTER 38) - not an enforced block; the lister can still accept or
-// decline any request regardless of notice given.
-const MIN_EARLY_RETURN_NOTICE_HOURS = 1;
-const MAX_EARLY_RETURN_NOTICE_HOURS = 24;
-const EARLY_RETURN_NOTICE_HOUR_OPTIONS = Array.from(
-  { length: MAX_EARLY_RETURN_NOTICE_HOURS - MIN_EARLY_RETURN_NOTICE_HOURS + 1 },
-  (_, index) => MIN_EARLY_RETURN_NOTICE_HOURS + index,
-);
+// How long the lister has to answer an early-return request before it rejects
+// itself. This setting used to mean the opposite - the minimum notice the
+// RENTER owed the lister, enforced with a 422 in
+// api/booking-early-return-action.ts. It was a picklist because the free-text
+// box it replaced (CHAPTER 40) was left blank or misunderstood; it is typed
+// again now, but stays required and range-checked so that cannot come back.
+const MIN_EARLY_RETURN_RESPONSE_HOURS = 1;
+const MAX_EARLY_RETURN_RESPONSE_HOURS = 24;
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const ALLOWED_PDF_TYPES = ["application/pdf"];
@@ -145,7 +147,7 @@ interface VehicleRow {
   plate_number: string;
   mileage: number | null;
   price_per_day: number;
-  min_early_return_notice_hours: number | null;
+  early_return_response_window_hours: number | null;
   location: string | null;
   pickup_latitude: number | null;
   pickup_longitude: number | null;
@@ -311,11 +313,6 @@ const isMissingProvenanceColumnError = (message: string) =>
   message.toLowerCase().includes("review_flag") ||
   message.toLowerCase().includes("ai_suspicion");
 
-const hashFileSha256 = async (file: File) => {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-};
-
 
 export default function MyVehiclesPage() {
   const { user, profile, session } = useAuth();
@@ -337,7 +334,7 @@ export default function MyVehiclesPage() {
 
   const [editVehicle, setEditVehicle] = useState<VehicleRow | null>(null);
   const [editPrice, setEditPrice] = useState("");
-  const [editMinEarlyReturnNoticeHours, setEditMinEarlyReturnNoticeHours] = useState("");
+  const [editEarlyReturnResponseWindowHours, setEditEarlyReturnResponseWindowHours] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [editCity, setEditCity] = useState("");
   const [editSpecificLocation, setEditSpecificLocation] = useState("");
@@ -368,7 +365,7 @@ export default function MyVehiclesPage() {
     plate_number: "",
     mileage: "",
     price_per_day: "",
-    min_early_return_notice_hours: "24",
+    early_return_response_window_hours: "24",
     location: "",
     city: "",
     specific_location: "",
@@ -388,6 +385,8 @@ export default function MyVehiclesPage() {
   const [carImages, setCarImages] = useState<File[]>([]);
   const [orFile, setOrFile] = useState<File | null>(null);
   const [crFile, setCrFile] = useState<File | null>(null);
+  const [businessType, setBusinessType] = useState("dti");
+  const [businessFiles, setBusinessFiles] = useState<Record<string, File | null>>({});
   const [ctplFile, setCtplFile] = useState<File | null>(null);
   const [comprehensiveInsuranceFile, setComprehensiveInsuranceFile] = useState<File | null>(null);
   const [rentalAgreementFile, setRentalAgreementFile] = useState<File | null>(
@@ -634,21 +633,21 @@ export default function MyVehiclesPage() {
     }
     const pricePerDay = Number(form.price_per_day);
 
-    let minEarlyReturnNoticeHours: number | null = null;
+    let earlyReturnResponseWindowHours: number | null = null;
     {
-      const parsed = Number(form.min_early_return_notice_hours);
+      const parsed = Number(form.early_return_response_window_hours);
       if (
-        form.min_early_return_notice_hours.trim() === "" ||
+        form.early_return_response_window_hours.trim() === "" ||
         !Number.isInteger(parsed) ||
-        parsed < MIN_EARLY_RETURN_NOTICE_HOURS ||
-        parsed > MAX_EARLY_RETURN_NOTICE_HOURS
+        parsed < MIN_EARLY_RETURN_RESPONSE_HOURS ||
+        parsed > MAX_EARLY_RETURN_RESPONSE_HOURS
       ) {
-        toast.error("Select a minimum early-return notice", {
-          description: `Choose a whole number of hours from ${MIN_EARLY_RETURN_NOTICE_HOURS} to ${MAX_EARLY_RETURN_NOTICE_HOURS}.`,
+        toast.error("Set your early-return response limit", {
+          description: `Enter a whole number of hours from ${MIN_EARLY_RETURN_RESPONSE_HOURS} to ${MAX_EARLY_RETURN_RESPONSE_HOURS}.`,
         });
         return;
       }
-      minEarlyReturnNoticeHours = parsed;
+      earlyReturnResponseWindowHours = parsed;
     }
 
     if (carImages.length < 1 || carImages.length > 5) {
@@ -663,6 +662,15 @@ export default function MyVehiclesPage() {
 
     if (!ctplFile) {
       toast.error("CTPL document photo is required.");
+      return;
+    }
+
+    if (!comprehensiveInsuranceFile || !form.comprehensive_insurance_expiry) {
+      toast.error("Comprehensive insurance and its expiry are required.");
+      return;
+    }
+    if (![businessType, "mayors_permit", "bir"].every(type => businessFiles[type])) {
+      toast.error("Upload business registration, Mayor permit and BIR certificate for this vehicle.");
       return;
     }
 
@@ -697,11 +705,12 @@ export default function MyVehiclesPage() {
         .from("cars")
         .insert({
           owner_id: user.id,
+          business_registration_type: businessType,
           model_id: form.model_id,
           plate_number: form.plate_number,
           mileage: form.mileage ? parseInt(form.mileage) : null,
           price_per_day: pricePerDay,
-          min_early_return_notice_hours: minEarlyReturnNoticeHours,
+          early_return_response_window_hours: earlyReturnResponseWindowHours,
           location: form.location ? [
             form.location,
             form.city || null,
@@ -741,6 +750,7 @@ export default function MyVehiclesPage() {
       }
 
       const vehicleDocuments = [
+        ...Object.entries(businessFiles).filter(([type, file]) => file && (!["dti", "sec"].includes(type) || type === businessType)).map(([type, file]) => ({file, type, label: documentLabel(type)})),
         { file: orFile, type: "or", label: "OR" },
         { file: crFile, type: "cr", label: "CR" },
         { file: ctplFile, type: "ctpl", label: "CTPL" },
@@ -750,7 +760,7 @@ export default function MyVehiclesPage() {
       for (const document of vehicleDocuments) {
         if (!document.file) continue;
         toast.loading(`Uploading ${document.label}...`, { id: toastId });
-        const path = `${user.id}/${carData.id}/${document.type}`;
+        const path = `${user.id}/${carData.id}/${document.type}_${crypto.randomUUID()}.${document.file.name.split(".").pop()?.toLowerCase() || "pdf"}`;
         const provenance = await inspectContentProvenance(document.file);
         const result = await uploadFile(document.file, "vehicle-private-documents", path);
         if (!result.success) throw new Error(result.error || "Upload failed");
@@ -791,7 +801,7 @@ export default function MyVehiclesPage() {
         plate_number: "",
         mileage: "",
         price_per_day: "",
-        min_early_return_notice_hours: "24",
+        early_return_response_window_hours: "24",
         location: "",
         city: "",
         specific_location: "",
@@ -813,6 +823,7 @@ export default function MyVehiclesPage() {
       setCrFile(null);
       setCtplFile(null);
       setComprehensiveInsuranceFile(null);
+      setBusinessFiles({});
       setRentalAgreementFile(null);
       fetchVehicles();
     } catch (err: unknown) {
@@ -842,21 +853,21 @@ export default function MyVehiclesPage() {
     }
     const nextPrice = Number(editPrice);
 
-    let nextMinEarlyReturnNoticeHours: number | null = null;
+    let nextEarlyReturnResponseWindowHours: number | null = null;
     {
-      const parsed = Number(editMinEarlyReturnNoticeHours);
+      const parsed = Number(editEarlyReturnResponseWindowHours);
       if (
-        editMinEarlyReturnNoticeHours.trim() === "" ||
+        editEarlyReturnResponseWindowHours.trim() === "" ||
         !Number.isInteger(parsed) ||
-        parsed < MIN_EARLY_RETURN_NOTICE_HOURS ||
-        parsed > MAX_EARLY_RETURN_NOTICE_HOURS
+        parsed < MIN_EARLY_RETURN_RESPONSE_HOURS ||
+        parsed > MAX_EARLY_RETURN_RESPONSE_HOURS
       ) {
-        toast.error("Select a minimum early-return notice", {
-          description: `Choose a whole number of hours from ${MIN_EARLY_RETURN_NOTICE_HOURS} to ${MAX_EARLY_RETURN_NOTICE_HOURS}.`,
+        toast.error("Set your early-return response limit", {
+          description: `Enter a whole number of hours from ${MIN_EARLY_RETURN_RESPONSE_HOURS} to ${MAX_EARLY_RETURN_RESPONSE_HOURS}.`,
         });
         return;
       }
-      nextMinEarlyReturnNoticeHours = parsed;
+      nextEarlyReturnResponseWindowHours = parsed;
     }
 
     if (!editRentalUseConfirmed) {
@@ -905,32 +916,50 @@ export default function MyVehiclesPage() {
       }
 
       toast.loading("Updating details...", { id: toastId });
-      const { error } = await supabase
+      // Business fields only. This used to also send status: "pending",
+      // rejection_reason: null, last_verified_at: null and
+      // insurance_verification_status - all review fields the database reserves
+      // for an administrator, so protect_car_submission_fields rejected the
+      // whole update and an approved or rejected listing could not be edited at
+      // all. It only ever appeared to work when a new photo or rental agreement
+      // was staged in the same save, because those triggers had already demoted
+      // the row and the values then matched.
+      //
+      // Whether this edit costs the lister their approval is
+      // return_materially_changed_car_to_review()'s decision, in one place,
+      // rather than something the form asserts. transmission is gone for the
+      // same reason: it is admin-set (CHAPTER 54) and rendered read-only above.
+      const { data: updatedVehicle, error } = await supabase
         .from("cars")
         .update({
           price_per_day: nextPrice,
-          min_early_return_notice_hours: nextMinEarlyReturnNoticeHours,
+          early_return_response_window_hours: nextEarlyReturnResponseWindowHours,
           location:
             [editLocation, editCity, editSpecificLocation]
               .filter(Boolean)
               .join(" - ") || null,
           fuel_category: editFuelCategory || null,
           fuel_subtype: editFuelSubtype || null,
-          transmission: editTransmission || null,
           gps_available: editGpsAvailable,
           contact_number: editContact || null,
           additional_info: editAdditionalInfo || null,
           insurer_rental_use_confirmed: editRentalUseConfirmed,
-          insurance_verification_status: "pending",
-          status: "pending",
-          rejection_reason: null,
-          last_verified_at: null,
         })
-        .eq("id", editVehicle.id);
+        .eq("id", editVehicle.id)
+        .select("status")
+        .single();
 
       if (error) throw error;
-      
-      toast.success("Vehicle changes submitted for admin review.", { id: toastId });
+
+      // Ask the row what actually happened instead of promising a review that
+      // a contact-number change no longer triggers.
+      const backInReview = (updatedVehicle as { status: string } | null)?.status === "pending";
+      toast.success(
+        backInReview
+          ? "Vehicle changes submitted for admin review."
+          : "Vehicle changes saved.",
+        { id: toastId },
+      );
       setEditVehicle(null);
       fetchVehicles();
     } catch (error) {
@@ -1568,30 +1597,31 @@ export default function MyVehiclesPage() {
                   )}
                 </div>
                 <div className="space-y-2">
-                  <Label>Minimum early-return notice (hours) *</Label>
-                  <select
-                    value={form.min_early_return_notice_hours}
-                    onChange={(e) =>
-                      setForm({ ...form, min_early_return_notice_hours: e.target.value })
-                    }
+                  <Label>Early-return response limit (hours) *</Label>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_EARLY_RETURN_RESPONSE_HOURS}
+                    max={MAX_EARLY_RETURN_RESPONSE_HOURS}
+                    step={1}
                     required
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    {EARLY_RETURN_NOTICE_HOUR_OPTIONS.map((hour) => (
-                      <option key={hour} value={hour}>
-                        {hour} hour{hour === 1 ? "" : "s"}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder={`${MIN_EARLY_RETURN_RESPONSE_HOURS}-${MAX_EARLY_RETURN_RESPONSE_HOURS}`}
+                    value={form.early_return_response_window_hours}
+                    onChange={(e) =>
+                      setForm({ ...form, early_return_response_window_hours: e.target.value })
+                    }
+                  />
                   <p className="text-xs text-muted-foreground">
-                    Shown to the renter before they request an early return. You can still
-                    accept or decline any request regardless of the notice given.
+                    How long you have to answer an early-return request, from{" "}
+                    {MIN_EARLY_RETURN_RESPONSE_HOURS} to {MAX_EARLY_RETURN_RESPONSE_HOURS} hours. Past
+                    this it rejects itself and the original return date stands.
                   </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Registration expiry *</Label>
                   <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.registration_expiry} onChange={(event) => setForm({ ...form, registration_expiry: event.target.value })} required />
                 </div>
+                <div className="md:col-span-2"><BusinessDocumentFields files={businessFiles} businessType={businessType} onBusinessType={setBusinessType} onChange={(type, file) => setBusinessFiles(old => ({...old, [type]: file}))} /></div>
                 <div className="space-y-2">
                   <Label>CTPL expiry *</Label>
                   <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.ctpl_expiry} onChange={(event) => setForm({ ...form, ctpl_expiry: event.target.value })} required />
@@ -1626,7 +1656,7 @@ export default function MyVehiclesPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Comprehensive insurance expiry</Label>
+                  <Label>Comprehensive insurance expiry *</Label>
                   <Input type="date" value={form.comprehensive_insurance_expiry} onChange={(event) => setForm({ ...form, comprehensive_insurance_expiry: event.target.value })} />
                   <p className="text-xs text-muted-foreground">Optional for the thesis build, but a missing or expired policy creates an admin warning.</p>
                   <div className="flex flex-wrap items-center gap-3">
@@ -2043,11 +2073,11 @@ export default function MyVehiclesPage() {
                         </span>
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Early-return notice:{" "}
+                        Early-return response limit:{" "}
                         <span className="font-medium text-foreground">
-                          {v.min_early_return_notice_hours != null
-                            ? `${v.min_early_return_notice_hours}h`
-                            : "None set"}
+                          {v.early_return_response_window_hours != null
+                            ? `${v.early_return_response_window_hours}h`
+                            : "24h (default)"}
                         </span>
                       </p>
                       <p
@@ -2161,12 +2191,12 @@ export default function MyVehiclesPage() {
                         const parsedLocation = parseStoredLocation(v.location);
                         setEditVehicle(v);
                         setEditPrice(v.price_per_day.toString());
-                        setEditMinEarlyReturnNoticeHours(
-                          v.min_early_return_notice_hours != null &&
-                            v.min_early_return_notice_hours >= MIN_EARLY_RETURN_NOTICE_HOURS &&
-                            v.min_early_return_notice_hours <= MAX_EARLY_RETURN_NOTICE_HOURS
-                            ? String(v.min_early_return_notice_hours)
-                            : String(MAX_EARLY_RETURN_NOTICE_HOURS),
+                        setEditEarlyReturnResponseWindowHours(
+                          v.early_return_response_window_hours != null &&
+                            v.early_return_response_window_hours >= MIN_EARLY_RETURN_RESPONSE_HOURS &&
+                            v.early_return_response_window_hours <= MAX_EARLY_RETURN_RESPONSE_HOURS
+                            ? String(v.early_return_response_window_hours)
+                            : String(MAX_EARLY_RETURN_RESPONSE_HOURS),
                         );
                         setEditLocation(parsedLocation.region);
                         setEditCity(parsedLocation.city);
@@ -2299,22 +2329,22 @@ export default function MyVehiclesPage() {
                     )}
                   </div>
                   <div className="space-y-2">
-                    <Label>Minimum early-return notice (hours) *</Label>
-                    <select
-                      value={editMinEarlyReturnNoticeHours}
-                      onChange={(e) => setEditMinEarlyReturnNoticeHours(e.target.value)}
+                    <Label>Early-return response limit (hours) *</Label>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={MIN_EARLY_RETURN_RESPONSE_HOURS}
+                      max={MAX_EARLY_RETURN_RESPONSE_HOURS}
+                      step={1}
                       required
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    >
-                      {EARLY_RETURN_NOTICE_HOUR_OPTIONS.map((hour) => (
-                        <option key={hour} value={hour}>
-                          {hour} hour{hour === 1 ? "" : "s"}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder={`${MIN_EARLY_RETURN_RESPONSE_HOURS}-${MAX_EARLY_RETURN_RESPONSE_HOURS}`}
+                      value={editEarlyReturnResponseWindowHours}
+                      onChange={(e) => setEditEarlyReturnResponseWindowHours(e.target.value)}
+                    />
                     <p className="text-xs text-muted-foreground">
-                      Shown to the renter before they request an early return. You can still
-                      accept or decline any request regardless of the notice given.
+                      How long you have to answer an early-return request, from{" "}
+                      {MIN_EARLY_RETURN_RESPONSE_HOURS} to {MAX_EARLY_RETURN_RESPONSE_HOURS} hours.
+                      Past this it rejects itself and the original return date stands.
                     </p>
                   </div>
                   <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">

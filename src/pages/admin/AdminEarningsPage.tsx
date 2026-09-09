@@ -42,6 +42,10 @@ type BookingRow = {
   commission: number | string | null;
   status: string;
   start_date: string;
+  // Where the trip actually started, frozen at booking time. Reading the live
+  // car meant a lister who moved provinces silently re-bucketed every one of
+  // their completed bookings into the new region.
+  pickup_location_snapshot: string | null;
   cars: { location: string | null; car_models: { body_type: string | null } | null } | null;
 };
 type CarRow = { location: string | null; status: string };
@@ -74,7 +78,7 @@ export default function AdminEarningsPage() {
           // sections below need no second trip - both are columns that
           // already exist, nothing new is being recorded.
           .select(
-            "commission, status, start_date, cars(location, car_models(body_type))",
+            "commission, status, start_date, pickup_location_snapshot, cars(location, car_models(body_type))",
           )
           .eq("status", "completed")
           .limit(ROW_LIMIT),
@@ -231,7 +235,9 @@ export default function AdminEarningsPage() {
     bookings.forEach((booking) => {
       const type = booking.cars?.car_models?.body_type?.trim() || "Not set";
       byType.set(type, (byType.get(type) ?? 0) + 1);
-      const region = regionOf(booking.cars?.location ?? null);
+      const region = regionOf(
+        booking.pickup_location_snapshot ?? booking.cars?.location ?? null,
+      );
       byRegion.set(region, (byRegion.get(region) ?? 0) + 1);
     });
 

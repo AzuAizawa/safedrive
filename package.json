@@ -9,6 +9,7 @@
     "clean": "node scripts/clean-build.mjs",
     "build": "tsc -b && npm run check:api && vite build",
     "build:clean": "npm run clean && npm run build",
+    "check:vehicle-compliance": "tsx --test scripts/vehicle-compliance.test.mjs",
     "check:booking-flow": "node scripts/booking-flow-smoke-check.mjs",
     "check:agreement-storage": "tsx --test scripts/rental-agreement-storage.test.mjs",
     "check:financial-logic": "tsx --test scripts/financial-logic.test.mjs",
@@ -27,7 +28,7 @@
     "check:targeted-ui": "tsx scripts/targeted-authenticated-ui-check.mjs",
     "check:api": "tsc -p tsconfig.api.json",
     "check:alignment": "node scripts/repository-alignment-check.mjs",
-    "check:all": "npm run lint && npm run check:api && npm run check:booking-flow && npm run check:agreement-storage && npm run check:financial-logic && npm run check:reconciliation-logic && npm run check:process-logic && npm run check:kyc-ocr && npm run check:api-boundaries && npm run check:alignment && npm run check:browser && npm run check:local-env",
+    "check:all": "npm run lint && npm run check:api && npm run check:booking-flow && npm run check:vehicle-compliance && npm run check:agreement-storage && npm run check:financial-logic && npm run check:reconciliation-logic && npm run check:process-logic && npm run check:kyc-ocr && npm run check:api-boundaries && npm run check:alignment && npm run check:browser && npm run check:local-env",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"api/**/*.ts\" \"server/**/*.ts\" \"*.{js,ts}\"",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort"
   },
@@ -55,6 +56,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@eslint/js": "^9.15.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.10.1",

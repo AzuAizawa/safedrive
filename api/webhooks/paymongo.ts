@@ -1195,7 +1195,7 @@ export default async function handler(req: Request) {
 
       const { data: booking, error: extensionBookingError } = await supabase
         .from("bookings")
-        .select("id, status, end_date, total_days, base_price, commission, total_price")
+        .select("id, renter_id, status, end_date, total_days, base_price, commission, total_price")
         .eq("id", extension.booking_id)
         .single();
 
@@ -1276,8 +1276,10 @@ export default async function handler(req: Request) {
         .maybeSingle();
 
       if (bookingUpdateError) {
-        console.error("Failed to update booking after extension payment", bookingUpdateError);
-        throw bookingUpdateError;
+        // The payment was already captured and the extension claimed. Preserve
+        // it in the existing unapplied-payment review flow, including a document
+        // validity race or an overlap discovered by a database guard.
+        console.error("Extension payment needs review; booking update failed", bookingUpdateError);
       }
 
       // The extension row was already claimed as 'paid' above, so throwing
@@ -1294,10 +1296,18 @@ export default async function handler(req: Request) {
           paymentMethod: getPaymentMethodLabel(checkoutAttributes),
           transactionId: checkoutId,
           notes: buildPaymentNotes(
-            "Extension paid but NOT applied - the booking was no longer extendable. Needs manual review and likely a refund.",
+            "Extension paid but NOT applied - booking availability or document coverage changed. Needs manual review and likely a refund.",
             paymongoPaymentMetadata,
           ),
         }, new URL(req.url).origin, false);
+        const { error: reviewTicketError } = await supabase.from("support_tickets").insert({
+          user_id: booking.renter_id,
+          subject: `Paid extension could not be applied (${extension.id})`,
+          tag: "manual_refund",
+          booking_id: extension.booking_id,
+          status: "open",
+        });
+        if (reviewTicketError) console.error("Could not queue paid extension for refund review", reviewTicketError);
         await recordWebhookSecurityEvent("failed", {
           reason: "Extension payment captured but the booking could not be extended",
           reference_number: referenceNumber,

@@ -53,6 +53,7 @@ export default function InstallButton({ className }: { className?: string }) {
   return (
     <Button
       type="button"
+      aria-label="Install SafeDrive"
       variant="outline"
       size="sm"
       className={cn("gap-1.5", className)}

@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import {
+  getPayoutAccountNumberError as getClientPayoutAccountNumberError,
+  PAYOUT_METHOD_RULES as CLIENT_PAYOUT_METHOD_RULES,
+  sanitizePayoutAccountNumber as sanitizeClientPayoutAccountNumber,
+} from "../src/lib/payoutAccount.ts";
+import {
+  getPayoutAccountNumberError as getServerPayoutAccountNumberError,
+  PAYOUT_METHOD_RULES as SERVER_PAYOUT_METHOD_RULES,
+} from "../server/payoutAccount.ts";
+
 import { isMissingTopicsColumn } from "../api/create-guest-inquiry.ts";
 import { isMissingResolvedAtColumn } from "../api/reply-guest-inquiry.ts";
 
@@ -219,4 +229,84 @@ test("support rich-text helpers recognize empty markup and escape plain text", (
   } finally {
     globalThis.window = browserWindow;
   }
+});
+
+// The number saved here is what server/payoutAutomation.ts hands to PayMongo
+// as the transfer target, so "it is only a form field" is not true of it.
+test("payout account numbers are rejected unless they can actually receive a transfer", () => {
+  const cases = [
+    // [method, value, expected valid?]
+    ["GCash", "09934086208", true],
+    ["GCash", "00", false], // the reported case: two digits, silently accepted before
+    ["GCash", "", false],
+    ["GCash", "0993408620", false], // ten digits
+    ["GCash", "099340862081", false], // twelve digits
+    ["GCash", "12345678901", false], // right length, not a mobile number
+    ["Maya", "09171234567", true],
+    ["Maya", "9171234567", false],
+    ["BPI", "1234567890", true], // ten, the minimum
+    ["BPI", "1234567890123456", true], // sixteen, the maximum
+    ["BPI", "123456789", false], // nine
+    ["BPI", "12345678901234567", false], // seventeen
+    ["BPI", "00", false],
+    ["Business Bank Account", "1234567890", false], // retired destination
+    [null, "09934086208", false],
+  ];
+
+  for (const [method, value, expected] of cases) {
+    const error = getClientPayoutAccountNumberError(method, value);
+    assert.equal(
+      error === null,
+      expected,
+      `${method} / ${JSON.stringify(value)} should be ${expected ? "valid" : "rejected"}` +
+        (error ? ` (got: ${error})` : ""),
+    );
+  }
+});
+
+// api/ and server/ cannot import from src/, so the rules exist twice. If they
+// ever disagree, the form and the payout path disagree about who can be paid.
+test("the client and server copies of the payout rules agree", () => {
+  assert.deepEqual(
+    CLIENT_PAYOUT_METHOD_RULES,
+    SERVER_PAYOUT_METHOD_RULES,
+    "src/lib/payoutAccount.ts and server/payoutAccount.ts have drifted apart",
+  );
+
+  const samples = [
+    "",
+    "00",
+    "09934086208",
+    "12345678901",
+    "1234567890",
+    "1234567890123456",
+    "12345678901234567",
+    "0917 123 4567",
+  ];
+  for (const method of ["GCash", "Maya", "BPI", "Business Bank Account", null]) {
+    for (const sample of samples) {
+      assert.equal(
+        getClientPayoutAccountNumberError(method, sample),
+        getServerPayoutAccountNumberError(method, sample),
+        `client and server disagree about ${method} / ${JSON.stringify(sample)}`,
+      );
+    }
+  }
+});
+
+test("typing into the account number field strips non-digits and caps at the destination length", () => {
+  assert.equal(
+    sanitizeClientPayoutAccountNumber("0993-408 6208", "GCash"),
+    "09934086208",
+  );
+  // A GCash number cannot be longer than eleven, so the extra keystroke is
+  // dropped at the input rather than saved and rejected later.
+  assert.equal(
+    sanitizeClientPayoutAccountNumber("099340862081234", "GCash"),
+    "09934086208",
+  );
+  assert.equal(
+    sanitizeClientPayoutAccountNumber("12345678901234567890", "BPI"),
+    "1234567890123456",
+  );
 });

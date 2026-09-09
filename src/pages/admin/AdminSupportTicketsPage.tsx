@@ -54,6 +54,9 @@ type BookingArrivalEvidence = {
   id: string;
   start_date: string;
   pickup_time: string | null;
+  // The meetup point as agreed, not as the listing reads today - a dispute
+  // about where the parties were told to meet has to be judged on the former.
+  pickup_location_snapshot: string | null;
   renter_arrived_at: string | null;
   lister_arrived_at: string | null;
   renter_arrival_photo_url: string | null;
@@ -325,6 +328,7 @@ export default function AdminSupportTicketsPage() {
       id,
       start_date,
       pickup_time,
+      pickup_location_snapshot,
       renter_arrived_at,
       lister_arrived_at,
       renter_arrival_photo_url,
@@ -995,8 +999,13 @@ export default function AdminSupportTicketsPage() {
                           {displayedBookingEvidence.pickup_time ? (
                             <p>Time: {displayedBookingEvidence.pickup_time}</p>
                           ) : null}
-                          {displayedBookingEvidence.cars?.location ? (
-                            <p>Place: {displayedBookingEvidence.cars.location}</p>
+                          {displayedBookingEvidence.pickup_location_snapshot ||
+                          displayedBookingEvidence.cars?.location ? (
+                            <p>
+                              Place:{" "}
+                              {displayedBookingEvidence.pickup_location_snapshot ||
+                                displayedBookingEvidence.cars?.location}
+                            </p>
                           ) : null}
                         </div>
                       </div>

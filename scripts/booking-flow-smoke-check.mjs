@@ -13,6 +13,7 @@ const checks = [
       "RESPONSE_WINDOW_HOURS",
       "requestedInstant",
       "response_deadline",
+      "early_return_response_window_hours",
       "This early-return request expired before it was decided.",
     ],
   },

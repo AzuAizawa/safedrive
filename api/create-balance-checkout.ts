@@ -1,3 +1,4 @@
+import { bookingCompliance, complianceBlockedResponse } from "../server/vehicleCompliance.js";
 import { createClient } from "@supabase/supabase-js";
 import { blockedIpResponse } from "../server/ipBlock.js";
 
@@ -174,6 +175,8 @@ export default async function handler(req: Request) {
         );
       }
     }
+
+    if (!(await bookingCompliance(supabase, bookingRecord.id)).eligible) return complianceBlockedResponse();
 
     if (bookingRecord.status !== "downpayment_paid") {
       return jsonResponse(

@@ -1,3 +1,4 @@
+import { complianceReason, type ComplianceSummary } from "@/lib/vehicleCompliance";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
@@ -111,6 +112,23 @@ export default function CarDetailPage() {
   // drop-off is now derived, not independently chosen. Enforced again
   // server-side in api/create-booking.ts.
   const [dropoffTime, setDropoffTime] = useState("");
+  const [documentCoverage, setDocumentCoverage] = useState<ComplianceSummary | null>(null);
+  const [documentCoverageError, setDocumentCoverageError] = useState("");
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setDocumentCoverage(null);
+    setDocumentCoverageError("");
+    const start = dateRange?.from ? `${format(dateRange.from, "yyyy-MM-dd")}T${pickupTime || "09:00"}+08:00` : new Date().toISOString();
+    const end = dateRange?.to ? `${format(dateRange.to, "yyyy-MM-dd")}T${dropoffTime || "09:00"}+08:00` : start;
+    void supabase.rpc("vehicle_compliance_summary", {p_car_id:id,p_start:start,p_end:end}).then(({data,error}) => {
+      if (cancelled) return;
+      if (error) setDocumentCoverageError("Vehicle document verification is unavailable. Please try again later.");
+      else setDocumentCoverage(data as unknown as ComplianceSummary);
+    });
+    return () => {cancelled = true;};
+  }, [id, dateRange, pickupTime, dropoffTime]);
+
 
   useEffect(() => {
     setDropoffTime(pickupTime);
@@ -399,6 +417,11 @@ export default function CarDetailPage() {
       return;
     }
 
+    if (!documentCoverage?.eligible) {
+      toast.error(documentCoverageError || "Approved vehicle documents must cover your entire rental period.");
+      return;
+    }
+
     if (isOverlapping) {
       toast.error("Selected dates overlap an existing booking or an owner-blocked period.");
       return;
@@ -650,6 +673,7 @@ export default function CarDetailPage() {
     availabilityWindow, // Keep requests within the advance-booking / trip-length ceilings
     ...bookedDayRanges,
     ...blackoutDayRanges,
+    ...(documentCoverage?.valid_until ? [{ after: new Date(new Date(documentCoverage.valid_until).toLocaleDateString("en-CA", {timeZone:"Asia/Manila"}) + "T00:00:00") }] : []),
   ];
 
   return (
@@ -1264,6 +1288,10 @@ export default function CarDetailPage() {
                 </div>
               )}
 
+              <div className="mb-3 rounded-lg border p-3 text-sm" role="status">
+                {documentCoverageError || (documentCoverage ? complianceReason(documentCoverage) : "Checking vehicle document coverage...")}
+                {documentCoverage?.valid_until && documentCoverage.eligible && <p className="text-muted-foreground">Approved coverage through {new Date(documentCoverage.valid_until).toLocaleString("en-PH",{timeZone:"Asia/Manila"})} (Manila).</p>}
+              </div>
               {profile?.role === "lister" ? (
                 <Button
                   disabled
@@ -1288,6 +1316,7 @@ export default function CarDetailPage() {
                     submitting ||
                     agreementLoading ||
                     !agreementAccess ||
+                    !documentCoverage?.eligible ||
                     Boolean(licenceGateReason) ||
                     !dateRange?.from ||
                     !dateRange?.to ||
@@ -1311,6 +1340,7 @@ export default function CarDetailPage() {
                     submitting ||
                     agreementLoading ||
                     !agreementAccess ||
+                    !documentCoverage?.eligible ||
                     Boolean(licenceGateReason) ||
                     !dateRange?.from ||
                     !dateRange?.to ||

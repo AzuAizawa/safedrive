@@ -250,6 +250,15 @@ project_docs/SAFEDRIVE_ACTION_AND_LAUNCH_CHECKLIST.docx
 
 ## Current Booking Flow Notes
 
+- Per-vehicle document review and booking coverage are prepared in database
+  master **Chapter 70**. Apply that chapter in staging before deploying the
+  matching application; never execute the complete historical master as a migration.
+  Each car needs its own uploads and review. Existing unverified listings stop
+  accepting new bookings; existing trips receive a compliance review hold.
+  See the master documentation's vehicle compliance section for activation checks.
+- `npm run check:vehicle-compliance` runs the Chapter 70 migration and coverage
+  tests in local embedded PostgreSQL. It does not connect to the live database.
+
 - A trip can start as early as the next calendar day (same-day starts stay
   disabled). The lister has 24 hours to accept and the renter then has 24 hours
   to pay, but both deadlines are capped at the pickup time; a request that is not

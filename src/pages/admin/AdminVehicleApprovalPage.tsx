@@ -1,3 +1,4 @@
+import VehicleCompliancePanel from "@/components/VehicleCompliancePanel";
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router";
@@ -458,11 +459,9 @@ export default function AdminVehicleApprovalPage() {
         .from("car_documents")
         .update({
           review_flag: "approved_after_review",
-          review_reason: "Vehicle documents approved by admin after manual review.",
-          reviewed_by: adminUser.id,
-          reviewed_at: new Date().toISOString(),
         })
-        .eq("car_id", selected.id);
+        .eq("car_id", selected.id)
+        .eq("compliance_status", "approved");
       if (documentReviewError) {
         console.warn(
           "Unable to stamp vehicle document review:",
@@ -507,6 +506,8 @@ export default function AdminVehicleApprovalPage() {
       setSelected(null);
       setManualOcrOverride(false);
       fetchCars();
+    } else {
+      toast.error("Vehicle approval blocked", { description: error.message });
     }
     setActionLoading(false);
   };
@@ -915,6 +916,7 @@ export default function AdminVehicleApprovalPage() {
                 </div>
               )}
 
+              <VehicleCompliancePanel key={selected.id} carId={selected.id} admin />
               <div className={`rounded-lg border p-4 ${selected.registration_expiry && selected.ctpl_expiry && selected.insurer_rental_use_confirmed ? "border-green-500/30 bg-green-500/5" : "border-red-500/30 bg-red-500/5"}`}>
                 <h4 className="font-semibold">Registration & insurance review</h4>
                 <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">

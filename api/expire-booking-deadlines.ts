@@ -10,6 +10,7 @@ import {
   type RefundableBooking,
 } from "../server/cancellationRefundPlan.js";
 import { sendUserNotificationEmail } from "../server/email.js";
+import { vehicleGuardMessage } from "../server/vehicleCompliance.js";
 
 
 export const config = {
@@ -133,11 +134,14 @@ export default async function handler(req: Request) {
     }
 
     const supabase = getSupabaseAdmin();
+    const { error: complianceError } = await supabase.rpc("flag_vehicles_needing_renewal");
+    if (complianceError) throw complianceError;
     const baseOrigin = new URL(req.url).origin;
     const now = new Date().toISOString();
     const { data: unansweredBookings, error: unansweredError } = await supabase
       .from("bookings")
       .select("id, renter_id, owner_id, status")
+      .eq("compliance_hold", false)
       .eq("status", "pending")
       .not("owner_response_deadline", "is", null)
       .lte("owner_response_deadline", now)
@@ -148,6 +152,7 @@ export default async function handler(req: Request) {
     const { data: unpaidBookings, error: unpaidError } = await supabase
       .from("bookings")
       .select("id, renter_id, owner_id, car_id, status")
+      .eq("compliance_hold", false)
       .in("status", ["confirmed", "awaiting_payment"])
       .not("payment_deadline", "is", null)
       .lte("payment_deadline", now)
@@ -163,6 +168,7 @@ export default async function handler(req: Request) {
         .from("bookings")
         .update({ status: "rejected", owner_response_deadline: null })
         .eq("id", booking.id)
+        .eq("compliance_hold", false)
         .eq("status", "pending")
         .lte("owner_response_deadline", now)
         .select("id")
@@ -180,6 +186,7 @@ export default async function handler(req: Request) {
         .from("bookings")
         .update({ status: "cancelled", payment_deadline: null })
         .eq("id", booking.id)
+        .eq("compliance_hold", false)
         .in("status", ["confirmed", "awaiting_payment"])
         .lte("payment_deadline", now)
         .select("id")
@@ -231,6 +238,7 @@ export default async function handler(req: Request) {
       .select(
         "id, renter_id, owner_id, car_id, start_date, pickup_time, refund_full_hours_snapshot, refund_late_renter_percent_snapshot, payments(payment_type, status, amount), cars(plate_number, car_models(name, car_brands(name)))",
       )
+      .eq("compliance_hold", false)
       .eq("status", "downpayment_paid")
       .not("balance_deadline", "is", null)
       .lte("balance_deadline", nowIso)
@@ -244,6 +252,7 @@ export default async function handler(req: Request) {
         .from("bookings")
         .update({ status: "cancelled", payment_deadline: null, balance_deadline: null })
         .eq("id", rawBooking.id)
+        .eq("compliance_hold", false)
         .eq("status", "downpayment_paid")
         .lte("balance_deadline", nowIso)
         .select("id")
@@ -364,6 +373,7 @@ export default async function handler(req: Request) {
     const { data: reminderBookings, error: reminderError } = await supabase
       .from("bookings")
       .select("id, renter_id, balance_deadline, cars(plate_number, car_models(name, car_brands(name)))")
+      .eq("compliance_hold", false)
       .eq("status", "downpayment_paid")
       .is("balance_reminder_sent_at", null)
       .not("balance_deadline", "is", null)
@@ -381,6 +391,7 @@ export default async function handler(req: Request) {
         .from("bookings")
         .update({ balance_reminder_sent_at: new Date().toISOString() })
         .eq("id", booking.id)
+        .eq("compliance_hold", false)
         .is("balance_reminder_sent_at", null)
         .select("id")
         .maybeSingle();
@@ -536,7 +547,7 @@ export default async function handler(req: Request) {
           status: "completed",
         })
         .eq("id", booking.id)
-        .in("status", ["fully_paid", "active"])
+          .in("status", ["fully_paid", "active"])
         .eq("renter_completed", true)
         .eq("owner_completed", false)
         // Re-checked at claim time too: the lister may have filed
@@ -624,6 +635,7 @@ export default async function handler(req: Request) {
       .select(
         "id, renter_id, owner_id, lister_handover_confirmed_at, handover_stall_notified_at, cars(plate_number, car_models(name, car_brands(name)))",
       )
+      .eq("compliance_hold", false)
       .eq("status", "fully_paid")
       .not("renter_arrived_at", "is", null)
       .not("lister_arrived_at", "is", null)
@@ -653,11 +665,18 @@ export default async function handler(req: Request) {
             status: "active",
           })
           .eq("id", booking.id)
+        .eq("compliance_hold", false)
           .eq("status", "fully_paid")
           .is("renter_handover_received_at", null)
           .select("id")
           .maybeSingle();
-        if (activateError) throw activateError;
+        if (activateError) {
+          // One vehicle whose documents lapsed must not abort the whole sweep.
+          // The booking simply stays at fully_paid; the compliance hold and its
+          // deadline extension are what handle this case properly.
+          if (vehicleGuardMessage(activateError)) continue;
+          throw activateError;
+        }
         if (!activated) continue;
 
         await supabase.from("audit_log").insert({
@@ -709,6 +728,7 @@ export default async function handler(req: Request) {
           .from("bookings")
           .update({ handover_stall_notified_at: new Date().toISOString() })
           .eq("id", booking.id)
+        .eq("compliance_hold", false)
           .is("handover_stall_notified_at", null)
           .select("id")
           .maybeSingle();
@@ -835,7 +855,7 @@ export default async function handler(req: Request) {
         .from("bookings")
         .update({ return_no_show_reminder_sent_at: new Date().toISOString() })
         .eq("id", booking.id)
-        .is("return_no_show_reminder_sent_at", null)
+          .is("return_no_show_reminder_sent_at", null)
         .select("id")
         .maybeSingle();
       if (claimError) throw claimError;

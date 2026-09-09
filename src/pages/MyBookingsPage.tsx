@@ -1,3 +1,4 @@
+import BookingComplianceNotice from "@/components/BookingComplianceNotice";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
@@ -62,6 +63,8 @@ import type { Payment } from "@/types/database";
 import { fetchCarRatingSummaries, fetchRenterReputation } from "@/lib/ratings";
 
 interface BookingRow {
+  compliance_hold?: boolean;
+  compliance_hold_reason?: string | null;
   id: string;
   car_id: string;
   owner_id: string;
@@ -86,10 +89,13 @@ interface BookingRow {
   dropoff_time: string | null;
   created_at: string;
   agreement_storage_path_snapshot: string | null;
+  // The pickup point as it stood when this booking was made. cars.location is
+  // still selected as the fallback for bookings created before CHAPTER 71.
+  pickup_location_snapshot: string | null;
   cars: {
     plate_number: string;
     location: string | null;
-    min_early_return_notice_hours: number | null;
+    early_return_response_window_hours: number | null;
     car_models: {
       name: string;
       car_brands: { name: string };
@@ -344,7 +350,7 @@ export default function MyBookingsPage() {
           `
           *,
           cars (
-            plate_number, location, min_early_return_notice_hours,
+            plate_number, location, early_return_response_window_hours,
             car_models (name, car_brands (name)),
             car_documents (document_type, storage_path)
           ),
@@ -1812,7 +1818,9 @@ export default function MyBookingsPage() {
                     {` at ${getPickupTimeLabel(booking)}`}
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    {booking.cars.location || "Pickup location not set"}
+                    {booking.pickup_location_snapshot ||
+                      booking.cars.location ||
+                      "Pickup location not set"}
                   </p>
                 </div>
               ))}
@@ -1980,6 +1988,11 @@ export default function MyBookingsPage() {
             );
             const isManualRefundReview = latestRefund?.payment_method === "manual_review";
             const showTripProgress = ["fully_paid", "active", "completed"].includes(apparentState);
+            // Gates the whole pickup handover group - the lister's hand-over, the
+            // renter's receipt confirmation and the renter's optional pickup photos
+            // all appear together, and only once both sides have checked in.
+            const bothArrived =
+              Boolean(booking.renter_arrived_at) && Boolean(booking.lister_arrived_at);
             const isOpen = openBookingId === booking.id;
             const carTitle = `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name}`;
             const bookingPickupMs = getBookingPickupMs(booking);
@@ -2091,6 +2104,7 @@ export default function MyBookingsPage() {
                           </Button>
                         </div>
                         <CardContent className="max-h-[75vh] space-y-5 overflow-y-auto p-5 [&_.justify-end]:justify-start [&_.text-right]:text-left">
+                          <BookingComplianceNotice hold={booking.compliance_hold} reason={booking.compliance_hold_reason} />
                   <div className="space-y-3">
                     <div className="space-y-2">
                       <div className="flex items-center gap-3 flex-wrap">
@@ -2131,9 +2145,10 @@ export default function MyBookingsPage() {
                             ({formatDayCount(booking.total_days)})
                           </span>
                         </p>
-                        {booking.cars.location && (
+                        {(booking.pickup_location_snapshot || booking.cars.location) && (
                           <p className="mt-1 flex items-center gap-1">
-                            <span aria-hidden="true">Location:</span> {booking.cars.location}
+                            <span aria-hidden="true">Location:</span>{" "}
+                            {booking.pickup_location_snapshot || booking.cars.location}
                           </p>
                         )}
                       </div>
@@ -2595,52 +2610,83 @@ export default function MyBookingsPage() {
                             disabled={payingFor === booking.id}
                             onConfirmArrival={() => void handleArrive(booking.id)}
                           />
-                          <div className="mt-2 flex items-center justify-end gap-1.5">
-                            <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>
-                              Add pickup photos (optional)
-                            </Button>
-                            <span
-                              className="inline-flex h-7 w-7 shrink-0 cursor-help items-center justify-center rounded-md text-muted-foreground"
-                              title="Optional, but highly encouraged: if there's ever a dispute, you and the lister both need this evidence."
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                            Your own pickup photos are optional - the lister files the required "before" report.
-                          </p>
+                          {/* The renter's own pickup photos belong with the handover
+                              controls, not here - see the "both arrived" block below.
+                              They only make sense once both sides have checked in and
+                              the car is actually in front of you, and offering them
+                              here was a dead end anyway: submit-trip-condition-report
+                              rejects a pickup report before the renter's own arrival
+                              check-in is on file, so this walked them through the whole
+                              camera form and then 409'd at submit. Mirrors the same
+                              removal already done on the lister side. */}
                         </div>
                       )}
 
                       {apparentState === "fully_paid" &&
-                        booking.renter_arrived_at &&
-                        booking.lister_arrived_at &&
-                        !booking.renter_handover_received_at && (
-                          <div className="mt-2 text-right">
-                            {booking.lister_handover_confirmed_at ? (
-                              <>
-                                <p className="mb-2 text-xs font-medium text-foreground">
-                                  The lister handed over the car - confirm you received it
-                                </p>
-                                <ArrivalPhotoCapture
-                                  label="I Have Received the Car"
-                                  loading={payingFor === booking.id}
-                                  disabled={payingFor === booking.id}
-                                  onConfirmArrival={() => void handleHandoverReceive(booking.id)}
-                                />
-                                <div className="mt-2 flex items-center justify-end gap-1.5">
-                                  <Button size="sm" variant="outline" onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}>
-                                    Add pickup photos (optional)
-                                  </Button>
-                                </div>
-                              </>
-                            ) : (
-                              <p className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                                You've both arrived. Please wait for the lister to submit pickup photos and hand over the car.
+                        bothArrived &&
+                        !booking.renter_handover_received_at &&
+                        (() => {
+                          const pickupReportSubmitted = Boolean(
+                            ownReportsByBooking[booking.id]?.pickup,
+                          );
+                          // One button, rendered in both branches below: the renter's
+                          // optional photos open the moment both sides have tapped "I
+                          // have arrived", alongside the lister's hand-over and the
+                          // renter's receipt confirmation - not before, and not only
+                          // once the lister has handed over.
+                          const pickupPhotoButton = (
+                            <div className="mt-2 flex items-center justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant={pickupReportSubmitted ? "ghost" : "outline"}
+                                className={pickupReportSubmitted ? "gap-1 text-green-600" : undefined}
+                                onClick={() => navigate(`/trip-report/${booking.id}/pickup`)}
+                                disabled={pickupReportSubmitted}
+                              >
+                                {pickupReportSubmitted && <CheckCircle2 className="w-3.5 h-3.5" />}
+                                {pickupReportSubmitted
+                                  ? "Pickup photos (submitted)"
+                                  : "Add pickup photos (optional)"}
+                              </Button>
+                              {pickupReportSubmitted ? null : (
+                                <span
+                                  className="inline-flex h-7 w-7 shrink-0 cursor-help items-center justify-center rounded-md text-muted-foreground"
+                                  title="Optional, but highly encouraged: if there's ever a dispute, you and the lister both need this evidence."
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                </span>
+                              )}
+                            </div>
+                          );
+                          return (
+                            <div className="mt-2 text-right">
+                              {booking.lister_handover_confirmed_at ? (
+                                <>
+                                  <p className="mb-2 text-xs font-medium text-foreground">
+                                    The lister handed over the car - confirm you received it
+                                  </p>
+                                  <ArrivalPhotoCapture
+                                    label="I Have Received the Car"
+                                    loading={payingFor === booking.id}
+                                    disabled={payingFor === booking.id}
+                                    onConfirmArrival={() => void handleHandoverReceive(booking.id)}
+                                  />
+                                  {pickupPhotoButton}
+                                </>
+                              ) : (
+                                <>
+                                  <p className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                                    You've both arrived. Please wait for the lister to submit pickup photos and hand over the car.
+                                  </p>
+                                  {pickupPhotoButton}
+                                </>
+                              )}
+                              <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
+                                Your own pickup photos are optional - the lister files the required "before" report.
                               </p>
-                            )}
-                          </div>
-                        )}
+                            </div>
+                          );
+                        })()}
 
                       {noShowState ? (
                         <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
@@ -2655,7 +2701,7 @@ export default function MyBookingsPage() {
                               : `SafeDrive waits ${noShowState.graceMinutes} minutes after the pickup time — until ${noShowState.reportReadyAt.toLocaleTimeString([], {
                                   hour: "numeric",
                                   minute: "2-digit",
-                                })} — before you can cancel for no car at pickup. Add optional pickup photos in the meantime if you want extra evidence.`}
+                                })} — before you can cancel for no car at pickup.`}
                           </p>
                           {noShowState.canReport ? (
                             <div className="mt-2">
@@ -2683,7 +2729,6 @@ export default function MyBookingsPage() {
                           </div>
                           <div className="grid gap-1.5">
                             {(() => {
-                              const bothArrived = Boolean(booking.renter_arrived_at) && Boolean(booking.lister_arrived_at);
                               // Bookings that went active before this handover
                               // gate existed will never have these two new
                               // timestamps set - treat that as vacuously done
@@ -3140,12 +3185,13 @@ export default function MyBookingsPage() {
                   automatic refund for the unused days — the lister may choose to
                   give a goodwill refund.
                 </p>
-                {earlyReturnModalBooking.cars.min_early_return_notice_hours != null && (
+                {earlyReturnModalBooking.cars.early_return_response_window_hours != null && (
                   <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                    This lister prefers at least{" "}
-                    {earlyReturnModalBooking.cars.min_early_return_notice_hours} hour
-                    {earlyReturnModalBooking.cars.min_early_return_notice_hours === 1 ? "" : "s"}{" "}
-                    of notice, though they may still accept a shorter one.
+                    This lister has{" "}
+                    {earlyReturnModalBooking.cars.early_return_response_window_hours} hour
+                    {earlyReturnModalBooking.cars.early_return_response_window_hours === 1 ? "" : "s"}{" "}
+                    to respond. After that the request rejects itself and your
+                    original return date stands.
                   </p>
                 )}
               </div>

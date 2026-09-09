@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { postSimpleBalancedJournal } from "./ledger.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { sendAdminAlertEmail, sendPayoutReceiptEmail } from "./email.js";
+import { getPayoutAccountNumberError } from "./payoutAccount.js";
 import { isPayMongoTestKey } from "./paymongoMode.js";
 
 type PaymentRecord = {
@@ -184,15 +185,21 @@ const matchInstitution = async (
   secretKey: string,
 ): Promise<InstitutionMatch | null> => {
   const normalized = payoutMethod.trim().toLowerCase();
-  if (!["gcash", "maya"].includes(normalized)) {
+  // InstaPay lists banks alongside the wallets, so a bank destination goes
+  // through the same lookup - only the name to match for differs. When
+  // PayMongo does not return the institution the caller skips the payout
+  // with a reason, rather than sending money somewhere unresolved.
+  const matchers: Record<string, RegExp> = {
+    gcash: /gcash/i,
+    maya: /\bmaya\b|paymaya/i,
+    bpi: /\bbpi\b|bank of the philippine islands/i,
+  };
+  const matcher = matchers[normalized];
+  if (!matcher) {
     return null;
   }
 
   const institutions = await fetchReceivingInstitutions(secretKey, "instapay");
-  const matcher =
-    normalized === "gcash"
-      ? /gcash/i
-      : /\bmaya\b|paymaya/i;
 
   const entry = (institutions.data ?? []).find((item) => {
     const attributes = item.attributes ?? item;
@@ -708,6 +715,23 @@ export const processAutomaticPayoutForBooking = async ({
       state: "skipped",
       bookingId,
       reason: "Lister payout details are incomplete.",
+    };
+  }
+
+  // Present is not the same as usable. This number is handed to PayMongo as
+  // the disbursement target, and rows saved before the account-number rules
+  // existed can hold anything at all - "00" included. Checking here is what
+  // protects money already in flight; the form only protects what is typed
+  // from now on.
+  const payoutAccountError = getPayoutAccountNumberError(
+    payoutBooking.owner.payout_method,
+    payoutBooking.owner.payout_account_number,
+  );
+  if (payoutAccountError) {
+    return {
+      state: "skipped",
+      bookingId,
+      reason: `Lister payout account number is not usable for ${payoutBooking.owner.payout_method}. ${payoutAccountError} Ask the lister to correct it, then retry.`,
     };
   }
 

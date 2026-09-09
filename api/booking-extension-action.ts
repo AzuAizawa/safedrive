@@ -1,3 +1,4 @@
+import { bookingCompliance, complianceBlockedResponse } from "../server/vehicleCompliance.js";
 import { addDays } from "date-fns";
 import { createClient } from "@supabase/supabase-js";
 import { sendUserNotificationEmail } from "../server/email.js";
@@ -268,6 +269,8 @@ export default async function handler(req: Request) {
         );
       }
 
+      if (!(await bookingCompliance(supabase, bookingRecord.id, payload.requestedEndDate)).eligible) return complianceBlockedResponse();
+
       const extensionDays = diffDays(bookingRecord.end_date, payload.requestedEndDate);
       if (!extensionDays || extensionDays <= 0) {
         return jsonResponse(
@@ -498,6 +501,8 @@ export default async function handler(req: Request) {
       if (extensionRecord.status !== "pending") {
         return jsonResponse({ error: "Only pending extensions can be approved." }, 409);
       }
+
+      if (!(await bookingCompliance(supabase, extensionRecord.booking_id, extensionRecord.requested_end_date)).eligible) return complianceBlockedResponse();
 
       // Re-validate calendar availability - the calendar could have changed
       // since the renter first submitted this request.

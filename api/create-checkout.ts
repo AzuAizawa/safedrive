@@ -1,3 +1,4 @@
+import { bookingCompliance, complianceBlockedResponse } from "../server/vehicleCompliance.js";
 import { createClient } from "@supabase/supabase-js";
 import { blockedIpResponse } from "../server/ipBlock.js";
 
@@ -138,6 +139,8 @@ export default async function handler(req: Request) {
     if (bookingRecord.renter_id !== user.id) {
       return jsonResponse({ error: "You are not allowed to pay for this booking" }, 403);
     }
+
+    if (!(await bookingCompliance(supabase, bookingRecord.id)).eligible) return complianceBlockedResponse();
 
     // Second driver's-licence checkpoint: block payment if the renter's licence
     // expired between the request and now. Separate query so a pre-CHAPTER-29

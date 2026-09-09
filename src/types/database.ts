@@ -321,13 +321,17 @@ export interface Database {
       };
       cars: {
         Row: {
+          business_registration_type: string;
+          ltfrb_requirement: string;
+          ltfrb_review_note: string | null;
+          compliance_previously_approved: boolean;
           id: string;
           owner_id: string;
           model_id: string;
           plate_number: string;
           mileage: number | null;
           price_per_day: number;
-          min_early_return_notice_hours: number | null;
+          early_return_response_window_hours: number | null;
           pickup_latitude: number | null;
           pickup_longitude: number | null;
           location: string | null;
@@ -350,13 +354,17 @@ export interface Database {
           updated_at: string;
         };
         Insert: {
+          compliance_previously_approved?: boolean;
+          ltfrb_review_note?: string | null;
+          ltfrb_requirement?: string;
+          business_registration_type?: string;
           id?: string;
           owner_id: string;
           model_id: string;
           plate_number: string;
           mileage?: number | null;
           price_per_day: number;
-          min_early_return_notice_hours?: number | null;
+          early_return_response_window_hours?: number | null;
           pickup_latitude?: number | null;
           pickup_longitude?: number | null;
           location?: string | null;
@@ -379,13 +387,17 @@ export interface Database {
           updated_at?: string;
         };
         Update: {
+          compliance_previously_approved?: boolean;
+          ltfrb_review_note?: string | null;
+          ltfrb_requirement?: string;
+          business_registration_type?: string;
           id?: string;
           owner_id?: string;
           model_id?: string;
           plate_number?: string;
           mileage?: number | null;
           price_per_day?: number;
-          min_early_return_notice_hours?: number | null;
+          early_return_response_window_hours?: number | null;
           pickup_latitude?: number | null;
           pickup_longitude?: number | null;
           location?: string | null;
@@ -426,15 +438,16 @@ export interface Database {
       };
       car_renewals: {
         Row: {
+          document_update: boolean;
           id: string;
           car_id: string;
           lister_id: string;
-          orcr_document_path: string;
+          orcr_document_path: string | null;
           lto_receipt_path: string | null;
           mvir_path: string | null;
           emission_test_path: string | null;
           updated_car_photos_path: string | null;
-          current_mileage: number;
+          current_mileage: number | null;
           registration_expiry: string | null;
           ctpl_expiry: string | null;
           comprehensive_insurance_expiry: string | null;
@@ -446,15 +459,16 @@ export interface Database {
           reviewed_at: string | null;
         };
         Insert: {
+          document_update?: boolean;
           id?: string;
           car_id: string;
           lister_id: string;
-          orcr_document_path: string;
+          orcr_document_path: string | null;
           lto_receipt_path?: string | null;
           mvir_path?: string | null;
           emission_test_path?: string | null;
           updated_car_photos_path?: string | null;
-          current_mileage: number;
+          current_mileage: number | null;
           registration_expiry?: string | null;
           ctpl_expiry?: string | null;
           comprehensive_insurance_expiry?: string | null;
@@ -466,15 +480,16 @@ export interface Database {
           reviewed_at?: string | null;
         };
         Update: {
+          document_update?: boolean;
           id?: string;
           car_id?: string;
           lister_id?: string;
-          orcr_document_path?: string;
+          orcr_document_path?: string | null;
           lto_receipt_path?: string | null;
           mvir_path?: string | null;
           emission_test_path?: string | null;
           updated_car_photos_path?: string | null;
-          current_mileage?: number;
+          current_mileage?: number | null;
           registration_expiry?: string | null;
           ctpl_expiry?: string | null;
           comprehensive_insurance_expiry?: string | null;
@@ -536,6 +551,13 @@ export interface Database {
       };
       car_documents: {
         Row: {
+          superseded_at: string | null;
+          renewal_id: string | null;
+          storage_bucket: string;
+          rental_use_verified: boolean;
+          valid_until: string | null;
+          valid_from: string | null;
+          compliance_status: string;
           id: string;
           car_id: string;
           document_type: string;
@@ -554,6 +576,13 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          superseded_at?: string | null;
+          renewal_id?: string | null;
+          storage_bucket?: string;
+          rental_use_verified?: boolean;
+          valid_until?: string | null;
+          valid_from?: string | null;
+          compliance_status?: string;
           id?: string;
           car_id: string;
           document_type: string;
@@ -572,6 +601,13 @@ export interface Database {
           created_at?: string;
         };
         Update: {
+          superseded_at?: string | null;
+          renewal_id?: string | null;
+          storage_bucket?: string;
+          rental_use_verified?: boolean;
+          valid_until?: string | null;
+          valid_from?: string | null;
+          compliance_status?: string;
           id?: string;
           car_id?: string;
           document_type?: string;
@@ -601,6 +637,9 @@ export interface Database {
       };
       bookings: {
         Row: {
+          compliance_hold_reason: string | null;
+          compliance_hold_since: string | null;
+          compliance_hold: boolean;
           id: string;
           car_id: string;
           renter_id: string;
@@ -649,11 +688,21 @@ export interface Database {
           agreement_version_id: string | null;
           agreement_storage_path_snapshot: string | null;
           agreement_sha256_snapshot: string | null;
+          pickup_location_snapshot: string | null;
+          // Written by api/create-booking.ts alongside the agreement snapshot
+          // above. These three existed in the database from CHAPTER 14 but were
+          // never declared here.
+          downpayment_rate_snapshot: number | null;
+          refund_full_hours_snapshot: number | null;
+          refund_late_renter_percent_snapshot: number | null;
           payment_processing_fee: number;
           created_at: string;
           updated_at: string;
         };
         Insert: {
+          compliance_hold_reason?: string | null;
+          compliance_hold_since?: string | null;
+          compliance_hold?: boolean;
           id?: string;
           car_id: string;
           renter_id: string;
@@ -702,11 +751,18 @@ export interface Database {
           agreement_version_id?: string | null;
           agreement_storage_path_snapshot?: string | null;
           agreement_sha256_snapshot?: string | null;
+          pickup_location_snapshot?: string | null;
+          downpayment_rate_snapshot?: number | null;
+          refund_full_hours_snapshot?: number | null;
+          refund_late_renter_percent_snapshot?: number | null;
           payment_processing_fee?: number;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
+          compliance_hold_reason?: string | null;
+          compliance_hold_since?: string | null;
+          compliance_hold?: boolean;
           id?: string;
           car_id?: string;
           renter_id?: string;
@@ -755,6 +811,10 @@ export interface Database {
           agreement_version_id?: string | null;
           agreement_storage_path_snapshot?: string | null;
           agreement_sha256_snapshot?: string | null;
+          pickup_location_snapshot?: string | null;
+          downpayment_rate_snapshot?: number | null;
+          refund_full_hours_snapshot?: number | null;
+          refund_late_renter_percent_snapshot?: number | null;
           payment_processing_fee?: number;
           created_at?: string;
           updated_at?: string;
@@ -1717,6 +1777,18 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      vehicle_compliance_summary: {
+        Args: { p_car_id: string; p_start?: string; p_end?: string };
+        Returns: Json;
+      };
+      submit_vehicle_document_update: {
+        Args: { p_car_id: string; p_documents: Json };
+        Returns: string;
+      };
+      review_vehicle_documents: {
+        Args: { p_car_id: string; p_reviews: Json; p_ltfrb?: string | null; p_note?: string | null; p_business_type?: string | null };
+        Returns: Json;
+      };
       expire_timed_out_bookings: { Args: never; Returns: undefined };
       finalize_ledger_journal: { Args: { p_journal_id: string; p_actor?: string }; Returns: undefined };
       create_ledger_correction: {

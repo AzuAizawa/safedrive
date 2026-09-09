@@ -10,6 +10,16 @@ export type ReviewFlag =
   | "approved_after_review"
   | "rejected_after_review";
 
+/**
+ * Content hash stored alongside a document so a later copy can be proved to be
+ * the same file that was reviewed. Lives here rather than in a page because
+ * both the add-vehicle flow and the compliance resubmission panel record it.
+ */
+export const hashFileSha256 = async (file: File) => {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
 export interface ContentProvenanceResult {
   provenance_status: ProvenanceStatus;
   provenance_source: string | null;

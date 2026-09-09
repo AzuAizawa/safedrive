@@ -1,3 +1,4 @@
+import AdminComplianceQueue from "@/components/AdminComplianceQueue";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CarFront, FileWarning, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -49,6 +50,7 @@ export default function AdminVehicleRenewalsPage() {
       supabase
         .from("car_renewals")
         .select("*")
+        .eq("document_update", false)
         .eq("status", "pending")
         .order("submitted_at", { ascending: true }),
       supabase
@@ -389,6 +391,7 @@ export default function AdminVehicleRenewalsPage() {
 
   return (
     <div className="space-y-8">
+      <AdminComplianceQueue />
       <div>
         <h1 className="flex items-center gap-2 text-3xl font-bold">
           <FileWarning className="h-7 w-7" /> Vehicle Renewals
@@ -467,7 +470,7 @@ export default function AdminVehicleRenewalsPage() {
                     </h3>
                     <p className="text-sm text-muted-foreground">
                       {row.listerName || row.listerEmail || "Lister"} · odometer{" "}
-                      {row.current_mileage.toLocaleString()} km · submitted{" "}
+                      {(row.current_mileage ?? 0).toLocaleString()} km · submitted{" "}
                       {new Date(row.submitted_at).toLocaleDateString()}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
