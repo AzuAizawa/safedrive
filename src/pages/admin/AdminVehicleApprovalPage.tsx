@@ -279,13 +279,32 @@ export default function AdminVehicleApprovalPage() {
         .select(
           "*, car_models(name, body_type, seats, fuel_type, car_brands(name)), car_images(*), car_documents(*), profiles!cars_owner_id_fkey(id, full_name, email, phone, first_name, last_name, driver_license, national_id, address)",
         );
+      // A resubmission does not change the car's status - it files a pending
+      // car_documents row while the listing stays where it is. The separate
+      // renewals page used to be the only place those surfaced; now they
+      // belong here, alongside the listings already waiting for review.
+      let resubmittedIds: string[] = [];
+      if (activeTab === "pending") {
+        const { data: resubmitted } = await supabase
+          .from("car_documents")
+          .select("car_id")
+          .eq("compliance_status", "pending")
+          .not("renewal_id", "is", null);
+        resubmittedIds = Array.from(
+          new Set(((resubmitted ?? []) as Array<{ car_id: string }>).map((row) => row.car_id)),
+        );
+      }
       const scopedQuery =
         activeTab === "transmission"
           ? baseQuery.eq("transmission_update_pending", true)
-          : baseQuery.in(
-              "status",
-              activeTab === "pending" ? ["pending"] : ["approved", "active"],
-            );
+          : activeTab === "pending"
+            ? baseQuery.or(
+                [
+                  "status.in.(pending,renewal_required)",
+                  ...(resubmittedIds.length ? [`id.in.(${resubmittedIds.join(",")})`] : []),
+                ].join(","),
+              )
+            : baseQuery.in("status", ["approved", "active"]);
       const { data, error } = await scopedQuery.order("created_at", {
         ascending: false,
       });
@@ -706,7 +725,7 @@ export default function AdminVehicleApprovalPage() {
         onChange={setActiveTab}
         ariaLabel="Vehicle management view"
         tabs={[
-          { value: "pending", label: "Pending approvals" },
+          { value: "pending", label: "Pending & resubmissions" },
           { value: "active", label: "Active cars" },
           {
             value: "transmission",
@@ -727,7 +746,7 @@ export default function AdminVehicleApprovalPage() {
           <Car className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
           <h3 className="text-lg font-semibold">
             {activeTab === "pending"
-              ? "No pending car approvals"
+              ? "Nothing waiting for review"
               : activeTab === "active"
                 ? "No active cars"
                 : "No pending transmission corrections"}
@@ -735,7 +754,9 @@ export default function AdminVehicleApprovalPage() {
           <p className="text-muted-foreground text-sm">
             {activeTab === "transmission"
               ? "Listers see this only when they flag a car's transmission type for admin correction."
-              : "Waiting for new vehicle submissions."}
+              : activeTab === "pending"
+                ? "New listings and document resubmissions both appear here."
+                : "Waiting for new vehicle submissions."}
           </p>
         </div>
       ) : (

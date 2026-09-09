@@ -1,5 +1,3 @@
-import { BusinessDocumentFields } from "@/components/VehicleCompliancePanel";
-import { documentLabel } from "@/lib/vehicleCompliance";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router";
 import { createPortal } from "react-dom";
@@ -75,6 +73,10 @@ const MAX_EARLY_RETURN_RESPONSE_HOURS = 24;
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const ALLOWED_PDF_TYPES = ["application/pdf"];
+// A permit or a BIR certificate is as often a PDF scan as a photo, so these
+// three accept either. validateUploadFile picks its error wording from the
+// list it is handed, hence the explicit third entry below.
+const ALLOWED_BUSINESS_DOCUMENT_TYPES = [...ALLOWED_IMAGE_TYPES, ...ALLOWED_PDF_TYPES];
 const VEHICLE_REGION_OPTIONS = [
   "Metro Manila",
   "Metro Cebu",
@@ -288,7 +290,9 @@ const validateUploadFile = (
     const expectedLabel =
       allowedTypes === ALLOWED_PDF_TYPES
         ? "PDF"
-        : "WEBP, JPG, or PNG image";
+        : allowedTypes === ALLOWED_BUSINESS_DOCUMENT_TYPES
+          ? "PDF, WEBP, JPG, or PNG"
+          : "WEBP, JPG, or PNG image";
     toast.error(`Invalid ${label} file`, {
       description: `Please upload a ${expectedLabel} file.`,
     });
@@ -385,8 +389,9 @@ export default function MyVehiclesPage() {
   const [carImages, setCarImages] = useState<File[]>([]);
   const [orFile, setOrFile] = useState<File | null>(null);
   const [crFile, setCrFile] = useState<File | null>(null);
-  const [businessType, setBusinessType] = useState("dti");
-  const [businessFiles, setBusinessFiles] = useState<Record<string, File | null>>({});
+  const [dtiFile, setDtiFile] = useState<File | null>(null);
+  const [mayorsPermitFile, setMayorsPermitFile] = useState<File | null>(null);
+  const [birFile, setBirFile] = useState<File | null>(null);
   const [ctplFile, setCtplFile] = useState<File | null>(null);
   const [comprehensiveInsuranceFile, setComprehensiveInsuranceFile] = useState<File | null>(null);
   const [rentalAgreementFile, setRentalAgreementFile] = useState<File | null>(
@@ -669,8 +674,8 @@ export default function MyVehiclesPage() {
       toast.error("Comprehensive insurance and its expiry are required.");
       return;
     }
-    if (![businessType, "mayors_permit", "bir"].every(type => businessFiles[type])) {
-      toast.error("Upload business registration, Mayor permit and BIR certificate for this vehicle.");
+    if (!dtiFile || !mayorsPermitFile || !birFile) {
+      toast.error("DTI registration, Business/Mayor's Permit and BIR certificate are required.");
       return;
     }
 
@@ -705,7 +710,6 @@ export default function MyVehiclesPage() {
         .from("cars")
         .insert({
           owner_id: user.id,
-          business_registration_type: businessType,
           model_id: form.model_id,
           plate_number: form.plate_number,
           mileage: form.mileage ? parseInt(form.mileage) : null,
@@ -750,7 +754,9 @@ export default function MyVehiclesPage() {
       }
 
       const vehicleDocuments = [
-        ...Object.entries(businessFiles).filter(([type, file]) => file && (!["dti", "sec"].includes(type) || type === businessType)).map(([type, file]) => ({file, type, label: documentLabel(type)})),
+        { file: dtiFile, type: "dti", label: "DTI registration" },
+        { file: mayorsPermitFile, type: "mayors_permit", label: "Business/Mayor's Permit" },
+        { file: birFile, type: "bir", label: "BIR certificate" },
         { file: orFile, type: "or", label: "OR" },
         { file: crFile, type: "cr", label: "CR" },
         { file: ctplFile, type: "ctpl", label: "CTPL" },
@@ -823,7 +829,9 @@ export default function MyVehiclesPage() {
       setCrFile(null);
       setCtplFile(null);
       setComprehensiveInsuranceFile(null);
-      setBusinessFiles({});
+      setDtiFile(null);
+      setMayorsPermitFile(null);
+      setBirFile(null);
       setRentalAgreementFile(null);
       fetchVehicles();
     } catch (err: unknown) {
@@ -1621,7 +1629,108 @@ export default function MyVehiclesPage() {
                   <Label>Registration expiry *</Label>
                   <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.registration_expiry} onChange={(event) => setForm({ ...form, registration_expiry: event.target.value })} required />
                 </div>
-                <div className="md:col-span-2"><BusinessDocumentFields files={businessFiles} businessType={businessType} onBusinessType={setBusinessType} onChange={(type, file) => setBusinessFiles(old => ({...old, [type]: file}))} /></div>
+                <div className="space-y-2">
+                  <Label>DTI business name registration *</Label>
+                  <div className="flex flex-wrap gap-4 items-start">
+                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
+                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
+                      <span className="text-xs text-muted-foreground text-center px-1">
+                        {dtiFile ? "Change DTI" : "Upload DTI"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setDtiFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_BUSINESS_DOCUMENT_TYPES, "DTI document")) {
+                            setDtiFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {dtiFile && (
+                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
+                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-sm font-medium">{dtiFile.name}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Business / Mayor's Permit *</Label>
+                  <div className="flex flex-wrap gap-4 items-start">
+                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
+                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
+                      <span className="text-xs text-muted-foreground text-center px-1">
+                        {mayorsPermitFile ? "Change Permit" : "Upload Permit"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setMayorsPermitFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_BUSINESS_DOCUMENT_TYPES, "Permit document")) {
+                            setMayorsPermitFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {mayorsPermitFile && (
+                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
+                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-sm font-medium">{mayorsPermitFile.name}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>BIR Certificate of Registration *</Label>
+                  <div className="flex flex-wrap gap-4 items-start">
+                    <label className="flex flex-col items-center justify-center w-[150px] h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors shrink-0">
+                      <Upload className="w-5 h-5 text-muted-foreground mb-1" />
+                      <span className="text-xs text-muted-foreground text-center px-1">
+                        {birFile ? "Change BIR" : "Upload BIR"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          if (!file) {
+                            setBirFile(null);
+                            return;
+                          }
+                          if (validateUploadFile(file, ALLOWED_BUSINESS_DOCUMENT_TYPES, "BIR document")) {
+                            setBirFile(file);
+                          } else {
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                    {birFile && (
+                      <div className="flex min-w-0 items-center gap-2 p-3 bg-secondary rounded-lg border">
+                        <CheckCircle className="w-5 h-5 shrink-0 text-green-500" />
+                        <span className="max-w-[180px] truncate text-sm font-medium">{birFile.name}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <div className="space-y-2">
                   <Label>CTPL expiry *</Label>
                   <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.ctpl_expiry} onChange={(event) => setForm({ ...form, ctpl_expiry: event.target.value })} required />

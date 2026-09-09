@@ -53,12 +53,12 @@ async function fixture() {
   const insurance=master.match(/create or replace function public\.enforce_vehicle_insurance_approval\(\)[\s\S]*?\$\$;/i)?.[0];
   assert.ok(insurance);
   await db.exec(insurance+"\ncreate trigger enforce_vehicle_insurance_approval before update of status on cars for each row execute function public.enforce_vehicle_insurance_approval();");
-  // CHAPTER 74 replaces submit_vehicle_document_update so a resubmission keeps
-  // the same authenticity evidence the add-vehicle path records. The last
-  // definition in the file is the operative one.
-  const submits=master.match(/create or replace function public\.submit_vehicle_document_update[\s\S]*?\$submit\$;/gi);
-  assert.ok(submits && submits.length>=2,"CHAPTER 74 replaces submit_vehicle_document_update");
-  await db.exec(submits[submits.length-1]);
+  // CHAPTER 75 removes the LTFRB classification gate and the DTI/SEC choice,
+  // and CHAPTER 74 before it widened submit_vehicle_document_update. Applying
+  // the chapter wholesale keeps this fixture honest about what production runs.
+  const chapter75=master.split("-- CHAPTER 75 - Seven documents")[1]?.split("-- Read-only verification")[0];
+  assert.ok(chapter75,"CHAPTER 75 exists");
+  await db.exec(chapter75.slice(chapter75.indexOf("begin;")));
   await reviewer(db);
   return db;
 }
@@ -70,13 +70,13 @@ async function coverage(db,start="2030-10-20T09:00:00+08:00",end="2030-10-25T09:
 }
 async function approveDocument(db,type,end="2030-10-31T23:59:59.999+08:00",start="2020-01-01T00:00:00+08:00",car=CAR,renewal=null) {
   const {rows}=await db.query("insert into car_documents(car_id,document_type,storage_path,renewal_id) values($1,$2,$3,$4) returning id",[car,type,`${OWNER}/${car}/${type}_${crypto.randomUUID()}.pdf`,renewal]);
-  const exp=["or","ctpl","comprehensive_insurance","dti","mayors_permit","cpc"].includes(type);
+  const exp=["or","ctpl","comprehensive_insurance","dti","mayors_permit"].includes(type);
   await db.query("select public.review_vehicle_documents($1,$2::jsonb)",[car,JSON.stringify([{id:rows[0].id,status:"approved",valid_from:start,valid_until:exp?end:null,rental_use_verified:true}])]);
   return rows[0].id;
 }
 async function completeDocuments(db) {
-  for(const type of ["or","cr","ctpl","comprehensive_insurance","dti","mayors_permit","bir","cpc"]) await approveDocument(db,type,type==="mayors_permit"?undefined:"2032-12-31T23:59:59.999+08:00");
-  await db.query("select public.review_vehicle_documents($1,'[]','required')",[CAR]);
+  for(const type of ["or","cr","ctpl","comprehensive_insurance","dti","mayors_permit","bir"]) await approveDocument(db,type,type==="mayors_permit"?undefined:"2032-12-31T23:59:59.999+08:00");
+  // No classification step: the seven approved documents are enough on their own.
   await db.query("update cars set status='approved' where id=$1",[CAR]);
 }
 
@@ -86,7 +86,7 @@ test("Manila expiry conversion is independent of the machine timezone",()=>{
   assert.equal(manilaInputToIso(""),null);
 });
 
-test("migration executes; every car independently needs documents and LTFRB review",async()=>{
+test("migration executes; every car independently needs its own approved documents",async()=>{
   const db=await fixture();try {
     assert.equal((await coverage(db)).eligible,false);
     await completeDocuments(db);
@@ -152,15 +152,6 @@ test("database blocks date bypass; revoked permit flags existing booking and pre
   }finally{await db.close();}
 });
 
-test("LTFRB waiver requires reviewed written evidence; non-expiring docs cannot bypass it",async()=>{
-  const db=await fixture();try {
-    await assert.rejects(db.query("select public.review_vehicle_documents($1,'[]','not_required','self-drive')",[CAR]),/written LTFRB/);
-    await approveDocument(db,"ltfrb_clarification");
-    await db.query("select public.review_vehicle_documents($1,'[]','not_required','Applicable written clarification checked')",[CAR]);
-    assert.ok(!(await coverage(db)).reasons.includes("ltfrb_review_required"));
-    assert.equal((await coverage(db)).eligible,false);
-  }finally{await db.close();}
-});
 
 test("invalid multi-document review rolls back; approving a replacement removes fallback to outdated BIR",async()=>{
   const db=await fixture();try {
@@ -184,7 +175,6 @@ test("owner uploads cannot forge approval or overwrite referenced evidence",asyn
     const d=(await db.query("insert into car_documents(car_id,document_type,storage_path,compliance_status,rental_use_verified) values($1,'bir','test.pdf','approved',true) returning id,compliance_status,rental_use_verified",[CAR])).rows[0];
     assert.equal(d.compliance_status,"pending");assert.equal(d.rental_use_verified,false);
     await assert.rejects(db.query("update car_documents set storage_path='replacement.pdf' where id=$1",[d.id]),/Upload a replacement/);
-    await assert.rejects(db.query("update cars set ltfrb_requirement='not_required' where id=$1",[CAR]),/Only vehicle reviewers/);
   }finally{await db.close();}
 });
 
@@ -265,5 +255,29 @@ test("a resubmission carries its authenticity evidence, and out-of-range values 
 
     // Everything CHAPTER 70 guarded still holds.
     await assert.rejects(db.query("select public.submit_vehicle_document_update($1,$2::jsonb)",[CAR,JSON.stringify([{document_type:"bir",storage_path:`${ADMIN}/${CAR}/bir.pdf`}])]),/private folder/);
+  }finally{await db.close();}
+});
+
+test("the seven approved documents are enough - no classification step remains",async()=>{
+  const db=await fixture();try {
+    // CHAPTER 70 shipped an LTFRB gate that no listing could pass: while
+    // ltfrb_requirement was 'pending' the summary always carried a reason, so
+    // eligible could never be true and every car fell to renewal_required.
+    assert.equal((await coverage(db)).eligible,false);
+    await completeDocuments(db);
+    const summary=await coverage(db);
+    assert.equal(summary.eligible,true,JSON.stringify(summary.reasons));
+    assert.deepEqual(summary.reasons,[],"no reason may survive a complete document set");
+
+    // The retired columns and document types are gone for good.
+    assert.equal((await db.query(`select count(*)::int as n from information_schema.columns
+      where table_schema='public' and table_name='cars' and column_name in
+      ('ltfrb_requirement','ltfrb_review_note','business_registration_type')`)).rows[0].n,0);
+    await db.exec(`select set_config('request.jwt.claim.sub','${OWNER}',false),set_config('test.reviewer','false',false)`);
+    await db.query("insert into storage.objects(bucket_id,name) values('vehicle-private-documents',$1)",[`${OWNER}/${CAR}/cpc.pdf`]);
+    await assert.rejects(
+      db.query("select public.submit_vehicle_document_update($1,$2::jsonb)",[CAR,JSON.stringify([{document_type:"cpc",storage_path:`${OWNER}/${CAR}/cpc.pdf`}])]),
+      /Unsupported document type/,
+    );
   }finally{await db.close();}
 });

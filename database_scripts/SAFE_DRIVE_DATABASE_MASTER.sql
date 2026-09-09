@@ -11401,4 +11401,303 @@ commit;
 --   from public.car_documents where renewal_id is not null
 --   order by created_at desc limit 10;
 
+-- ============================================================================
+-- CHAPTER 75 - Seven documents, no classification step: LTFRB and the
+-- business-type choice are removed
+-- Apply this chapter only, staging first. Three unused columns are dropped and
+-- four functions are replaced. No document, booking or account is touched.
+-- ============================================================================
+begin;
+
+-- CHAPTER 70 shipped with a classification gate that no listing could pass.
+-- vehicle_compliance_summary appended 'ltfrb_review_required' to reasons
+-- whenever cars.ltfrb_requirement was 'pending', and eligible is
+-- cardinality(reasons)=0 - so a vehicle could never be eligible. 'pending' was
+-- both the column default AND force-reset on every owner insert by
+-- protect_vehicle_compliance. From that one flag: no vehicle could be approved,
+-- refresh_vehicle_compliance demoted every approved car to renewal_required,
+-- and guard_booking_document_coverage put a compliance hold on live bookings.
+-- Escaping to 'not_required' required an already-approved ltfrb_clarification
+-- document, which no individual owner of a self-drive car can produce.
+--
+-- SafeDrive lists vehicles owned by individuals, so the DTI/SEC choice was
+-- likewise a question with one answer. Both go.
+--
+-- The requirement set is now fixed and knowable: OR, CR, CTPL, comprehensive
+-- insurance, DTI, Business/Mayor's Permit, BIR. Of those, CR and BIR do not
+-- expire.
+alter table public.cars
+  drop column if exists ltfrb_requirement,
+  drop column if exists ltfrb_review_note,
+  drop column if exists business_registration_type;
+
+-- Coverage also stops being a stitched interval. An admin now records only the
+-- expiry printed on the document; valid_from stays null, which the coalesce
+-- below reads as '-infinity'. A renewal therefore cannot leave a gap, and the
+-- question the summary answers becomes "does the latest approved expiry for
+-- each required document reach the end of this trip".
+create or replace function public.vehicle_compliance_summary(
+  p_car_id uuid, p_start timestamptz default now(), p_end timestamptz default now()
+) returns jsonb language plpgsql stable security definer set search_path = public as $vc$
+declare
+  c public.cars%rowtype; k text; keys text[]; r record;
+  covered_until timestamptz; limit_at timestamptz := 'infinity';
+  reasons text[] := '{}'; s timestamptz := coalesce(p_start,now());
+  e timestamptz := coalesce(p_end,p_start,now());
+begin
+  select * into c from public.cars where id=p_car_id;
+  if not found or e<s then
+    return jsonb_build_object('eligible',false,'valid_until',null,'reasons',array['invalid_vehicle_or_dates']);
+  end if;
+  keys := array['or','cr','ctpl','comprehensive_insurance','dti','mayors_permit','bir'];
+  foreach k in array keys loop
+    covered_until:=null;
+    for r in
+      select coalesce(d.valid_from,'-infinity'::timestamptz) as a,
+        least(coalesce(d.valid_until,'infinity'::timestamptz),coalesce(d.superseded_at,'infinity'::timestamptz)) as z
+      from public.car_documents d
+      where d.car_id=p_car_id and d.compliance_status='approved'
+        and (d.document_type=k or (k in ('or','cr') and d.document_type='orcr'))
+        and (k<>'comprehensive_insurance' or d.rental_use_verified)
+        and (k not in ('or','ctpl','comprehensive_insurance','dti','mayors_permit') or d.valid_until is not null)
+      order by coalesce(d.valid_from,'-infinity'::timestamptz),coalesce(d.valid_until,'infinity'::timestamptz)
+    loop
+      if r.z<s then continue; end if;
+      if covered_until is null then
+        if r.a>s then exit; end if;
+        covered_until:=r.z;
+      elsif r.a<=covered_until + interval '1 millisecond' then
+        covered_until:=greatest(covered_until,r.z);
+      else exit; end if;
+    end loop;
+    if covered_until is null or covered_until<e then reasons:=array_append(reasons,k||'_coverage_required'); end if;
+    limit_at:=least(limit_at,coalesce(covered_until,s-interval '1 millisecond'));
+  end loop;
+  return jsonb_build_object('eligible',cardinality(reasons)=0,
+    'valid_until',case when limit_at='infinity'::timestamptz then null else limit_at end,'reasons',reasons);
+end;
+$vc$;
+revoke all on function public.vehicle_compliance_summary(uuid,timestamptz,timestamptz) from public;
+grant execute on function public.vehicle_compliance_summary(uuid,timestamptz,timestamptz) to anon,authenticated,service_role;
+
+-- Without the LTFRB and business-type columns there is nothing here for a
+-- non-reviewer to tamper with; the approval gate is what remains.
+create or replace function public.protect_vehicle_compliance()
+returns trigger language plpgsql set search_path=public as $protect$
+begin
+  if new.status in ('approved','active') then
+    if not coalesce((public.vehicle_compliance_summary(new.id,now(),now())->>'eligible')::boolean,false) then
+      raise exception 'Review all required vehicle and business documents before approval';
+    end if;
+    new.compliance_previously_approved:=true;
+  end if;
+  return new;
+end;
+$protect$;
+
+-- Approval now needs only the expiry. valid_from is no longer collected, so
+-- requiring it would make every approval impossible.
+create or replace function public.protect_compliance_document()
+returns trigger language plpgsql set search_path=public as $docguard$
+begin
+  perform 1 from public.cars where id=new.car_id for update;
+  if tg_op='INSERT' then
+    if auth.role()='authenticated' and not public.admin_can('vehicles.review') then
+      new.compliance_status:='pending'; new.valid_from:=null; new.valid_until:=null;
+      new.rental_use_verified:=false; new.reviewed_by:=null; new.reviewed_at:=null; new.superseded_at:=null;
+    end if;
+  elsif old.car_id is distinct from new.car_id or old.document_type is distinct from new.document_type
+    or old.storage_path is distinct from new.storage_path or old.storage_bucket is distinct from new.storage_bucket then
+    raise exception 'Upload a replacement document instead of modifying an existing file';
+  end if;
+  if new.compliance_status='approved' then
+    if new.document_type in ('or','orcr','ctpl','comprehensive_insurance','dti','mayors_permit')
+      and new.valid_until is null then
+      raise exception 'The expiry printed on this document is required';
+    end if;
+    if new.valid_from is not null and new.valid_until is not null and new.valid_until<new.valid_from then
+      raise exception 'Expiry cannot precede the effective date';
+    end if;
+    if new.document_type='comprehensive_insurance' and not new.rental_use_verified then
+      raise exception 'Verify rental-use coverage before approving comprehensive insurance';
+    end if;
+  end if;
+  return new;
+end;
+$docguard$;
+
+-- Same as CHAPTER 70/74 minus the retired document types and the whole
+-- classification block. The signature loses p_ltfrb, p_note and
+-- p_business_type; the old five-argument version is dropped so a stale client
+-- fails loudly rather than silently calling a function that ignores them.
+drop function if exists public.review_vehicle_documents(uuid,jsonb,text,text,text);
+create or replace function public.review_vehicle_documents(p_car_id uuid,p_reviews jsonb)
+returns jsonb language plpgsql security definer set search_path=public as $review$
+declare item jsonb; d public.car_documents%rowtype; decision text; rid uuid; has_rejected boolean; replacement_start timestamptz;
+begin
+  if not public.admin_can('vehicles.review') then raise exception 'Vehicle review permission required'; end if;
+  perform 1 from public.cars where id=p_car_id for update;
+  for item in select * from jsonb_array_elements(p_reviews) loop
+    select * into d from public.car_documents where id=(item->>'id')::uuid and car_id=p_car_id for update;
+    if not found then raise exception 'Document not found'; end if;
+    decision:=item->>'status';
+    if decision not in ('approved','rejected','revoked') then raise exception 'Invalid review decision'; end if;
+    if decision in ('rejected','revoked') and coalesce(trim(item->>'reason'),'')='' then raise exception 'A reason is required'; end if;
+    replacement_start:=(item->>'valid_from')::timestamptz;
+    if decision='approved' and d.compliance_status<>'approved' and d.document_type in ('cr','bir')
+      and exists(select 1 from public.car_documents where car_id=p_car_id and document_type=d.document_type and id<>d.id and compliance_status='approved') then
+      replacement_start:=coalesce(replacement_start,now());
+      update public.car_documents set superseded_at=replacement_start-interval '1 millisecond'
+        where car_id=p_car_id and document_type=d.document_type and id<>d.id and compliance_status='approved'
+          and coalesce(valid_from,'-infinity'::timestamptz)<replacement_start
+          and coalesce(superseded_at,'infinity'::timestamptz)>=replacement_start;
+    end if;
+    update public.car_documents set compliance_status=decision,
+      valid_from=case when decision='approved' then replacement_start else valid_from end,
+      valid_until=case when decision='approved' then (item->>'valid_until')::timestamptz else valid_until end,
+      rental_use_verified=case when decision='approved' then coalesce((item->>'rental_use_verified')::boolean,false) else rental_use_verified end,
+      review_reason=nullif(trim(item->>'reason'),''), reviewed_by=auth.uid(),reviewed_at=now()
+      where id=d.id;
+    insert into public.audit_log(user_id,action,entity_type,entity_id,details)
+      values(auth.uid(),'vehicle_document_'||decision,'car_document',d.id::text,
+        jsonb_build_object('car_id',p_car_id,'previous_status',d.compliance_status,'review',item));
+  end loop;
+  for rid in select id from public.car_renewals where car_id=p_car_id and document_update and status='pending' loop
+    if not exists(select 1 from public.car_documents where renewal_id=rid and compliance_status='pending') then
+      select exists(select 1 from public.car_documents where renewal_id=rid and compliance_status in ('rejected','revoked')) into has_rejected;
+      update public.car_renewals set status=case when has_rejected then 'rejected' else 'approved' end,reviewed_at=now() where id=rid;
+      insert into public.notifications(user_id,title,message,type,link)
+        select owner_id,'Document resubmission reviewed',
+          case when has_rejected then 'Some documents need correction. Open Document Renewal & Updates for the review reasons.'
+          else 'Your updated documents were approved. Booking availability follows all approved document validity dates.' end,
+          'vehicle','/car-renewals' from public.cars where id=p_car_id;
+    end if;
+  end loop;
+  perform public.refresh_vehicle_compliance(p_car_id);
+  return public.vehicle_compliance_summary(p_car_id,now(),now());
+end;
+$review$;
+revoke all on function public.review_vehicle_documents(uuid,jsonb) from public;
+grant execute on function public.review_vehicle_documents(uuid,jsonb) to authenticated;
+
+-- CHAPTER 74's version, minus the retired document types.
+create or replace function public.submit_vehicle_document_update(p_car_id uuid,p_documents jsonb)
+returns uuid language plpgsql security definer set search_path=public as $submit$
+declare rid uuid; item jsonb; k text; path text;
+begin
+  if auth.uid() is null or not exists(select 1 from public.cars where id=p_car_id and owner_id=auth.uid()) then
+    raise exception 'Only the vehicle owner can submit documents'; end if;
+  perform 1 from public.cars where id=p_car_id for update;
+  if p_documents is null or jsonb_typeof(p_documents)<>'array' or jsonb_array_length(p_documents)=0 then raise exception 'Upload at least one document'; end if;
+  insert into public.car_renewals(car_id,lister_id,status,document_update)
+    values(p_car_id,auth.uid(),'pending',true) returning id into rid;
+  for item in select * from jsonb_array_elements(p_documents) loop
+    k:=item->>'document_type'; path:=item->>'storage_path';
+    if k is null or k not in ('or','cr','ctpl','comprehensive_insurance','dti','mayors_permit','bir') then raise exception 'Unsupported document type'; end if;
+    if path is null or path not like auth.uid()::text||'/'||p_car_id::text||'/%'
+      or not exists(select 1 from storage.objects where bucket_id='vehicle-private-documents' and name=path) then
+      raise exception 'Document must be uploaded to this vehicle private folder'; end if;
+    if exists(select 1 from public.car_documents where car_id=p_car_id and document_type=k and renewal_id is not null and compliance_status='pending') then
+      raise exception 'A replacement for % is already awaiting review',k; end if;
+    insert into public.car_documents(
+      car_id,document_type,storage_path,storage_bucket,renewal_id,
+      content_sha256,provenance_status,provenance_source,provenance_summary,
+      ai_suspicion_score,ai_detector_name,ai_detector_version,review_flag)
+    values(
+      p_car_id,k,path,'vehicle-private-documents',rid,
+      nullif(item->>'content_sha256',''),
+      case when item->>'provenance_status' in
+        ('unknown','credential_present','credential_missing','credential_invalid')
+        then item->>'provenance_status' else 'unknown' end,
+      nullif(item->>'provenance_source',''),
+      nullif(item->>'provenance_summary',''),
+      case when (item->>'ai_suspicion_score') ~ '^[0-9]*\.?[0-9]+$'
+        and (item->>'ai_suspicion_score')::numeric between 0 and 1
+        then (item->>'ai_suspicion_score')::numeric else null end,
+      nullif(item->>'ai_detector_name',''),
+      nullif(item->>'ai_detector_version',''),
+      case when item->>'review_flag' in
+        ('none','needs_admin_review','approved_after_review','rejected_after_review')
+        then item->>'review_flag' else 'none' end);
+  end loop;
+  return rid;
+end;
+$submit$;
+revoke all on function public.submit_vehicle_document_update(uuid,jsonb) from public;
+grant execute on function public.submit_vehicle_document_update(uuid,jsonb) to authenticated;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select column_name from information_schema.columns where table_schema='public'
+--   and table_name='cars' and column_name in
+--   ('ltfrb_requirement','ltfrb_review_note','business_registration_type');
+--   (expect zero rows)
+-- select prosrc not like '%ltfrb%' as ltfrb_gone from pg_proc
+--   where proname='vehicle_compliance_summary';
+-- select id, plate_number, status,
+--        public.vehicle_compliance_summary(id, now(), now()) as summary
+--   from public.cars order by created_at desc limit 10;
+
+-- ============================================================================
+-- CHAPTER 76 - Admins review resubmissions where they review listings
+-- Apply this chapter only, staging first. Two notification triggers are
+-- replaced and existing notification links are repointed. No document, booking
+-- or account is touched.
+-- ============================================================================
+begin;
+
+-- /admin/vehicle-renewals is gone. A resubmission is the same kind of work as a
+-- new listing - look at the document, type the expiry printed on it, approve -
+-- so it belongs in the queue the admin already watches. Everything that used to
+-- send them to the renewals page now sends them to /admin/vehicle-approval.
+--
+-- Note the listing side is unchanged: a lister still resubmits at
+-- /car-renewals, which is their own page and still exists.
+update public.notifications
+set link = '/admin/vehicle-approval'
+where link = '/admin/vehicle-renewals';
+
+create or replace function public.notify_car_renewal_submitted()
+returns trigger language plpgsql security definer set search_path = public as $notify$
+begin
+  insert into public.notifications (user_id, title, message, type, link)
+  select p.id,
+    'Vehicle renewal submitted',
+    'A lister submitted updated compliance documents for review.',
+    'vehicle',
+    '/admin/vehicle-approval'
+  from public.profiles p
+  where p.role in ('admin', 'super_admin') and p.deleted_at is null;
+  return new;
+end;
+$notify$;
+
+create or replace function public.notify_booking_compliance_hold()
+returns trigger language plpgsql security definer set search_path=public as $hold$
+begin
+  if new.compliance_hold and (tg_op='INSERT' or not old.compliance_hold) then
+    insert into public.notifications(user_id,title,message,type,link) values
+      (new.renter_id,'Booking documents need review','Your booking needs document review. Please contact support; do not proceed to pickup until cleared.','warning','/my-bookings'),
+      (new.owner_id,'Booking documents need review','Update the documents for your booked vehicle before handover.','warning','/car-renewals');
+    insert into public.audit_log(user_id,action,entity_type,entity_id,details)
+      values(new.owner_id,'booking_compliance_hold','booking',new.id::text,jsonb_build_object('car_id',new.car_id));
+    insert into public.notifications(user_id,title,message,type,link)
+      select p.id,'Booking requires document review',
+        'Approved documents no longer cover a booked trip. Review the vehicle before pickup; preserve the booking and payments.',
+        'warning','/admin/vehicle-approval' from public.profiles p
+      where p.role in ('admin','super_admin') and p.deleted_at is null;
+  end if;
+  return new;
+end;
+$hold$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select count(*) as stale_links from public.notifications where link='/admin/vehicle-renewals';
+--   (expect 0)
+-- select proname, prosrc like '%vehicle-approval%' as repointed from pg_proc
+--   where proname in ('notify_car_renewal_submitted','notify_booking_compliance_hold');
+
 -- End of SafeDrive chaptered database master.

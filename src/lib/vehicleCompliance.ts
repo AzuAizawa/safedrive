@@ -4,11 +4,8 @@ export const COMPLIANCE_DOCUMENTS = [
   { type: "ctpl", label: "CTPL insurance", expires: true },
   { type: "comprehensive_insurance", label: "Comprehensive insurance (rental use)", expires: true },
   { type: "dti", label: "DTI business name registration", expires: true },
-  { type: "sec", label: "SEC registration", expires: false },
   { type: "mayors_permit", label: "Business / Mayor's Permit", expires: true },
   { type: "bir", label: "BIR Certificate of Registration (Form 2303)", expires: false },
-  { type: "cpc", label: "LTFRB authority / CPC covering this vehicle", expires: true },
-  { type: "ltfrb_clarification", label: "Written LTFRB clarification", expires: false },
 ] as const;
 
 export type ComplianceDocumentType = typeof COMPLIANCE_DOCUMENTS[number]["type"];

@@ -321,9 +321,6 @@ export interface Database {
       };
       cars: {
         Row: {
-          business_registration_type: string;
-          ltfrb_requirement: string;
-          ltfrb_review_note: string | null;
           compliance_previously_approved: boolean;
           id: string;
           owner_id: string;
@@ -355,9 +352,6 @@ export interface Database {
         };
         Insert: {
           compliance_previously_approved?: boolean;
-          ltfrb_review_note?: string | null;
-          ltfrb_requirement?: string;
-          business_registration_type?: string;
           id?: string;
           owner_id: string;
           model_id: string;
@@ -388,9 +382,6 @@ export interface Database {
         };
         Update: {
           compliance_previously_approved?: boolean;
-          ltfrb_review_note?: string | null;
-          ltfrb_requirement?: string;
-          business_registration_type?: string;
           id?: string;
           owner_id?: string;
           model_id?: string;
@@ -1786,7 +1777,7 @@ export interface Database {
         Returns: string;
       };
       review_vehicle_documents: {
-        Args: { p_car_id: string; p_reviews: Json; p_ltfrb?: string | null; p_note?: string | null; p_business_type?: string | null };
+        Args: { p_car_id: string; p_reviews: Json };
         Returns: Json;
       };
       expire_timed_out_bookings: { Args: never; Returns: undefined };
