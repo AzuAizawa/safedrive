@@ -165,7 +165,6 @@ interface VehicleRow {
   insurer_rental_use_confirmed: boolean;
   insurance_verification_status: string;
   transmission: string | null;
-  transmission_update_pending: boolean;
   status: string;
   rejection_reason: string | null;
   created_at: string | null;
@@ -906,6 +905,11 @@ export default function MyVehiclesPage() {
       nextEarlyReturnResponseWindowHours = parsed;
     }
 
+    if (["pending", "rejected"].includes(editVehicle.status) && !["automatic", "manual"].includes(editTransmission)) {
+      toast.error("Select the vehicle transmission (Automatic or Manual).");
+      return;
+    }
+
     if (!editRentalUseConfirmed) {
       toast.error("Rental-use confirmation is required", {
         description: "Confirm that the intended rental use was disclosed to the insurer before resubmitting.",
@@ -976,6 +980,7 @@ export default function MyVehiclesPage() {
               .join(" - ") || null,
           fuel_category: editFuelCategory || null,
           fuel_subtype: editFuelSubtype || null,
+          transmission: editTransmission || null,
           gps_available: editGpsAvailable,
           contact_number: editContact || null,
           additional_info: editAdditionalInfo || null,
@@ -1063,38 +1068,6 @@ export default function MyVehiclesPage() {
     }
   };
 
-  const handleFlagTransmissionForReview = async (vehicle: VehicleRow) => {
-    if (!user || vehicle.transmission_update_pending) return;
-    setVehicleActionId(vehicle.id);
-    const toastId = toast.loading("Sending to admin for review...");
-    try {
-      const { error } = await supabase
-        .from("cars")
-        .update({ transmission_update_pending: true })
-        .eq("id", vehicle.id)
-        .eq("owner_id", user.id);
-      if (error) throw error;
-      toast.success("Sent to SafeDrive admin for review.", {
-        id: toastId,
-        description:
-          "Your listing stays live while this is reviewed. An admin will set the correct transmission type.",
-      });
-      setEditVehicle((prev) =>
-        prev && prev.id === vehicle.id
-          ? { ...prev, transmission_update_pending: true }
-          : prev,
-      );
-      fetchVehicles();
-    } catch (error) {
-      toast.error("Could not submit for review", {
-        id: toastId,
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setVehicleActionId(null);
-    }
-  };
 
   const openDisableFlow = async (vehicle: VehicleRow) => {
     if (!user) return;
@@ -2275,23 +2248,6 @@ export default function MyVehiclesPage() {
                               : "Not specified"}
                         </span>
                       </p>
-                      {v.transmission_update_pending ? (
-                        <p className="mt-1 flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
-                          <Clock className="h-3 w-3 shrink-0" />
-                          Transmission correction sent to admin for review.
-                        </p>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleFlagTransmissionForReview(v)}
-                          disabled={vehicleActionId === v.id}
-                          className="mt-1 text-xs font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
-                        >
-                          {v.transmission
-                            ? "Report incorrect transmission type"
-                            : "Ask admin to set transmission type"}
-                        </button>
-                      )}
                       <div className="mt-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                           Documents
@@ -2607,29 +2563,36 @@ export default function MyVehiclesPage() {
                       placeholder="e.g. STI Novaliches, building entrance, mall pickup bay"
                     />
                   </div>
-                  <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-                    <p className="font-medium text-foreground">Transmission</p>
-                    <p className="mt-1">
-                      {editTransmission === "automatic" ? "Automatic" : editTransmission === "manual" ? "Manual" : "Not specified"} - locked after listing. This is a fixed vehicle spec, not something that changes after approval.
-                    </p>
-                    {editVehicle.transmission_update_pending ? (
-                      <p className="mt-2 flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                        <Clock className="h-3 w-3 shrink-0" />
-                        Transmission correction sent to admin for review.
-                      </p>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleFlagTransmissionForReview(editVehicle)}
-                        disabled={vehicleActionId === editVehicle.id}
-                        className="mt-2 font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                  {/* Correctable while the listing is under review or was sent
+                      back, and fixed once it is live - changing it on an approved
+                      car silently changes who is licensed to drive it. The admin
+                      compares this against the CR and rejects a mismatch. */}
+                  {["pending", "rejected"].includes(editVehicle.status) ? (
+                    <div className="space-y-2">
+                      <Label>Transmission *</Label>
+                      <select
+                        value={editTransmission}
+                        onChange={(event) => setEditTransmission(event.target.value)}
+                        required
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       >
-                        {editTransmission
-                          ? "Report incorrect transmission type"
-                          : "Ask admin to set transmission type"}
-                      </button>
-                    )}
-                  </div>
+                        <option value="">Select transmission</option>
+                        <option value="automatic">Automatic</option>
+                        <option value="manual">Manual</option>
+                      </select>
+                      <p className="text-xs text-muted-foreground">
+                        Must match the Certificate of Registration. It locks once the
+                        listing is approved.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+                      <p className="font-medium text-foreground">Transmission</p>
+                      <p className="mt-1">
+                        {editTransmission === "automatic" ? "Automatic" : editTransmission === "manual" ? "Manual" : "Not specified"} - locked while the listing is live, because it decides which licences may book this car.
+                      </p>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label>Fuel Category</Label>
                     <Select

@@ -60,7 +60,6 @@ interface PendingCar {
   insurer_rental_use_confirmed: boolean;
   insurance_verification_status: string;
   transmission: string | null;
-  transmission_update_pending: boolean;
   car_models: {
     name: string;
     body_type: string;
@@ -202,15 +201,13 @@ export default function AdminVehicleApprovalPage() {
     national_id: null as string | null,
   });
   const [searchParams] = useSearchParams();
-  const validTabs = ["pending", "active", "transmission"] as const;
+  const validTabs = ["pending", "active"] as const;
   type VehicleTab = (typeof validTabs)[number];
   const requestedTab = searchParams.get("tab");
   const initialTab: VehicleTab = validTabs.includes(requestedTab as VehicleTab)
     ? (requestedTab as VehicleTab)
     : "pending";
   const [activeTab, setActiveTab] = useState<VehicleTab>(initialTab);
-  const [transmissionDraft, setTransmissionDraft] = useState("");
-  const [transmissionPendingCount, setTransmissionPendingCount] = useState(0);
 
   useEffect(() => {
     if (!selected) {
@@ -295,10 +292,8 @@ export default function AdminVehicleApprovalPage() {
         );
       }
       const scopedQuery =
-        activeTab === "transmission"
-          ? baseQuery.eq("transmission_update_pending", true)
-          : activeTab === "pending"
-            ? baseQuery.or(
+        activeTab === "pending"
+          ? baseQuery.or(
                 [
                   "status.in.(pending,renewal_required)",
                   ...(resubmittedIds.length ? [`id.in.(${resubmittedIds.join(",")})`] : []),
@@ -335,18 +330,6 @@ export default function AdminVehicleApprovalPage() {
   useEffect(() => {
     fetchCars();
   }, [activeTab, fetchCars]);
-
-  const fetchTransmissionPendingCount = useCallback(async () => {
-    const { count, error } = await supabase
-      .from("cars")
-      .select("id", { count: "exact", head: true })
-      .eq("transmission_update_pending", true);
-    if (!error) setTransmissionPendingCount(count ?? 0);
-  }, []);
-
-  useEffect(() => {
-    fetchTransmissionPendingCount();
-  }, [activeTab, fetchTransmissionPendingCount]);
 
   const getUrl = useCallback((bucket: string, path: string) => {
     // backwards compat: if path is already a full URL (old entries stored full URL), return directly
@@ -642,45 +625,6 @@ export default function AdminVehicleApprovalPage() {
     setActionLoading(false);
   };
 
-  const handleSaveTransmission = async () => {
-    if (!selected || !adminUser) return;
-    if (!["automatic", "manual"].includes(transmissionDraft)) {
-      toast.error("Select Automatic or Manual before saving.");
-      return;
-    }
-    setActionLoading(true);
-    const { error } = await supabase
-      .from("cars")
-      .update({
-        transmission: transmissionDraft,
-        transmission_update_pending: false,
-      })
-      .eq("id", selected.id);
-    if (!error) {
-      await supabase.from("notifications").insert({
-        user_id: selected.profiles.id,
-        title: "Transmission type updated",
-        message: `SafeDrive admin set the transmission for your ${selected.car_models.car_brands.name} ${selected.car_models.name} to ${transmissionDraft === "automatic" ? "Automatic" : "Manual"}.`,
-        type: "success",
-        link: "/my-vehicles",
-      });
-      await supabase.from("audit_log").insert({
-        user_id: adminUser.id,
-        action: "admin_set_vehicle_transmission",
-        entity_type: "car",
-        entity_id: selected.id,
-        details: { plate: selected.plate_number, transmission: transmissionDraft },
-      });
-      toast.success("Transmission saved.");
-      setSelected(null);
-      fetchCars();
-      fetchTransmissionPendingCount();
-    } else {
-      toast.error("Failed to save transmission", { description: error.message });
-    }
-    setActionLoading(false);
-  };
-
   const handleDeleteVehicle = async () => {
     if (!selected || !adminUser) return;
     setActionLoading(true);
@@ -727,11 +671,6 @@ export default function AdminVehicleApprovalPage() {
         tabs={[
           { value: "pending", label: "Pending & resubmissions" },
           { value: "active", label: "Active cars" },
-          {
-            value: "transmission",
-            label: "Transmission review",
-            count: transmissionPendingCount,
-          },
         ]}
       />
 
@@ -745,18 +684,12 @@ export default function AdminVehicleApprovalPage() {
         <div className="text-center py-20">
           <Car className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
           <h3 className="text-lg font-semibold">
-            {activeTab === "pending"
-              ? "Nothing waiting for review"
-              : activeTab === "active"
-                ? "No active cars"
-                : "No pending transmission corrections"}
+            {activeTab === "pending" ? "Nothing waiting for review" : "No active cars"}
           </h3>
           <p className="text-muted-foreground text-sm">
-            {activeTab === "transmission"
-              ? "Listers see this only when they flag a car's transmission type for admin correction."
-              : activeTab === "pending"
-                ? "New listings and document resubmissions both appear here."
-                : "Waiting for new vehicle submissions."}
+            {activeTab === "pending"
+              ? "New listings and document resubmissions both appear here."
+              : "Waiting for new vehicle submissions."}
           </p>
         </div>
       ) : (
@@ -784,7 +717,6 @@ export default function AdminVehicleApprovalPage() {
                     setShowRevoke(false);
                     setRevokeReason("");
                     setManualOcrOverride(false);
-                    setTransmissionDraft(car.transmission || "");
                   }}
                 >
                   <TableCell className="font-medium">
@@ -801,11 +733,6 @@ export default function AdminVehicleApprovalPage() {
                   </TableCell>
                   <TableCell className="capitalize">
                     {car.status}
-                    {car.transmission_update_pending && (
-                      <span className="ml-2 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
-                        Transmission review
-                      </span>
-                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button size="sm" variant="ghost">
@@ -890,6 +817,15 @@ export default function AdminVehicleApprovalPage() {
                     <span className="text-muted-foreground">Price/Day:</span>{" "}
                     <span className="font-medium">
                       ₱{Number(selected.price_per_day).toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    {/* Shown so a reviewer can compare it with the CR. It used to be
+                        absent, which made the separate correction tab impossible to
+                        use well - you cannot check a value you cannot see. */}
+                    <span className="text-muted-foreground">Transmission:</span>{" "}
+                    <span className="font-medium capitalize">
+                      {selected.transmission || "Not specified"}
                     </span>
                   </div>
                   <div>
@@ -1314,59 +1250,6 @@ export default function AdminVehicleApprovalPage() {
                 </div>
               </div>
 
-              {/* Transmission correction request */}
-              {selected.transmission_update_pending && (
-                <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4">
-                  <h4 className="font-semibold flex items-center gap-2 text-blue-700 dark:text-blue-400">
-                    <AlertCircle className="w-4 h-4" />
-                    Transmission correction requested
-                  </h4>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    The lister flagged this vehicle&apos;s transmission type for admin
-                    correction. Current value:{" "}
-                    <strong>
-                      {selected.transmission === "automatic"
-                        ? "Automatic"
-                        : selected.transmission === "manual"
-                          ? "Manual"
-                          : "Not specified"}
-                    </strong>
-                    . This is a fixed vehicle spec - only an admin can set it, and only
-                    this action clears the request.
-                  </p>
-                  {canReview && (
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-                      <div className="space-y-1">
-                        <Label htmlFor="transmission-draft">Correct transmission</Label>
-                        <select
-                          id="transmission-draft"
-                          value={transmissionDraft}
-                          onChange={(e) => setTransmissionDraft(e.target.value)}
-                          className="flex h-9 w-48 rounded-md border border-input bg-background px-3 text-sm"
-                        >
-                          <option value="">Select transmission</option>
-                          <option value="automatic">Automatic</option>
-                          <option value="manual">Manual</option>
-                        </select>
-                      </div>
-                      <Button
-                        onClick={handleSaveTransmission}
-                        disabled={
-                          actionLoading || !["automatic", "manual"].includes(transmissionDraft)
-                        }
-                        className="gap-2"
-                      >
-                        {actionLoading ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <CheckCircle className="w-4 h-4" />
-                        )}
-                        Save & Clear Request
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* Rejection reason */}
               {showReject && (

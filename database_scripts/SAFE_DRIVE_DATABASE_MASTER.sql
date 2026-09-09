@@ -12038,4 +12038,108 @@ commit;
 -- select plate_number, status, registration_expiry, ctpl_expiry,
 --        comprehensive_insurance_expiry from public.cars order by created_at desc limit 10;
 
+-- ============================================================================
+-- CHAPTER 79 - Transmission is checked like every other detail: the lister
+-- states it, the admin compares it to the CR
+-- Apply this chapter only, staging first. One column and one notification
+-- trigger are dropped; one guard is replaced. No document or booking is touched.
+-- ============================================================================
+begin;
+
+-- CHAPTER 29 let the lister pick the transmission when listing, CHAPTER 54 then
+-- froze it and gave the admin a separate "Transmission review" tab to correct
+-- it, reached by the lister raising cars.transmission_update_pending.
+--
+-- That tab was the only place the value could be fixed - and the admin review
+-- screen never displayed the transmission at all, so a reviewer could not see
+-- what they were being asked to correct, nor notice a wrong one on their own.
+--
+-- It now works like every other detail on the listing: the lister states it, the
+-- admin sees it beside the plate and the mileage and compares it to the CR, and
+-- a mismatch is a rejection with a reason. For that to be actionable the lister
+-- has to be able to change their answer, so the freeze lifts while a listing is
+-- 'pending' or 'rejected' - the two states where they are being asked to fix
+-- something. Once approved it is locked again, because changing it afterwards
+-- silently changes who is licensed to drive the car:
+-- api/create-booking.ts refuses a manual vehicle to an automatic-only licence.
+create or replace function public.protect_car_submission_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  privileged boolean;
+begin
+  privileged := public.is_admin()
+    or current_user in ('postgres', 'service_role', 'supabase_admin');
+
+  if privileged then
+    return new;
+  end if;
+
+  if auth.uid() is null or new.owner_id <> auth.uid() then
+    raise exception 'Only the listing owner can create or update this vehicle';
+  end if;
+
+  if not exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and verified_status = 'verified'
+      and deleted_at is null
+  ) then
+    raise exception 'Identity verification is required before listing a vehicle';
+  end if;
+
+  if tg_op = 'INSERT' then
+    new.status := 'pending';
+    new.rejection_reason := null;
+    new.last_verified_at := null;
+    return new;
+  end if;
+
+  if new.owner_id is distinct from old.owner_id then
+    raise exception 'Vehicle ownership cannot be changed by the lister';
+  end if;
+
+  if new.rejection_reason is distinct from old.rejection_reason
+     or new.last_verified_at is distinct from old.last_verified_at then
+    raise exception 'Vehicle review fields can only be changed by an administrator';
+  end if;
+
+  if new.status is distinct from old.status then
+    if not (
+      (old.status = 'rejected' and new.status = 'pending')
+      or (old.status = 'approved' and new.status = 'inactive')
+      or (old.status = 'inactive' and new.status = 'approved')
+    ) then
+      raise exception 'Listers cannot change vehicle approval status';
+    end if;
+  end if;
+
+  -- Correctable while the listing is being reviewed or has been sent back;
+  -- fixed once it is live.
+  if new.transmission is distinct from old.transmission
+     and old.status not in ('pending', 'rejected') then
+    raise exception 'Transmission can only be corrected while the listing is pending or rejected';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists notify_admins_of_transmission_update on public.cars;
+drop function if exists public.notify_admins_of_transmission_update();
+alter table public.cars drop column if exists transmission_update_pending;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select column_name from information_schema.columns where table_schema='public'
+--   and table_name='cars' and column_name='transmission_update_pending';
+--   (expect zero rows)
+-- select prosrc like '%pending%rejected%' as lister_can_correct from pg_proc
+--   where proname='protect_car_submission_fields';
+
 -- End of SafeDrive chaptered database master.
