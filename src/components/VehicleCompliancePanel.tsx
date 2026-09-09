@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { createPrivateStorageUrl } from "@/lib/privateStorage";
+import { createPrivateStorageUrl, createPrivateStorageUrlMap } from "@/lib/privateStorage";
 import { useAuth } from "@/contexts/AuthContext";
 import { hashFileSha256, inspectContentProvenance } from "@/lib/contentProvenance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FileText, Upload } from "lucide-react";
+import { FileText, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   COMPLIANCE_DOCUMENTS,
@@ -30,7 +30,7 @@ export function validateComplianceUpload(file: File): boolean {
 // Shows the file the lister just picked, before it is sent. An image gets a real
 // thumbnail so a wrong page or an upside-down scan is caught here rather than by
 // an admin a day later; anything else shows its name and size.
-function ChosenFilePreview({ file }: { file: File | null }) {
+function ChosenFilePreview({ file, onRemove }: { file: File | null; onRemove: () => void }) {
   const [preview, setPreview] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,9 +57,30 @@ function ChosenFilePreview({ file }: { file: File | null }) {
           {(file.size / 1024 / 1024).toFixed(2)} MB
         </p>
       </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${file.name}`}
+        className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        <X className="h-4 w-4" />
+      </button>
     </div>
   );
 }
+
+// What the lister needs to see at a glance: whether the file they sent is
+// still waiting, already accepted, or was sent back. The bare status word was
+// easy to miss inside a collapsed row - "Resubmission" in particular never
+// said "pending" anywhere.
+const STATUS_BADGES: Record<string, { label: string; className: string }> = {
+  pending: { label: "Pending review", className: "bg-amber-500/15 text-amber-700 dark:text-amber-300" },
+  approved: { label: "Approved", className: "bg-green-500/15 text-green-700 dark:text-green-400" },
+  rejected: { label: "Needs correction", className: "bg-red-500/15 text-red-700 dark:text-red-400" },
+  revoked: { label: "Approval revoked", className: "bg-red-500/15 text-red-700 dark:text-red-400" },
+};
+
+const isImagePath = (path: string) => /\.(jpe?g|png|webp|gif)$/i.test(path.split("?")[0]);
 
 // A legacy combined OR/CR row satisfies both the OR and the CR requirement -
 // vehicle_compliance_summary treats it that way, and the panel has to agree or
@@ -77,40 +98,33 @@ function DocumentReview({
   onReviewed: () => Promise<void>;
 }) {
   const expires = requiresExpiry(document.document_type) || document.document_type === "orcr";
-  const [end, setEnd] = useState(isoToManilaInput(document.valid_until).slice(0, 10));
-  const [rental, setRental] = useState(document.rental_use_verified);
+  const stated = isoToManilaInput(document.valid_until).slice(0, 10);
+  // Documents filed before the lister supplied their own dates have none. Rather
+  // than making every lister resubmit a file that is otherwise fine, the admin
+  // may fill that one in - but only when it is genuinely absent.
+  const [legacyDate, setLegacyDate] = useState("");
   const [reason, setReason] = useState(document.review_reason ?? "");
   const [busy, setBusy] = useState(false);
 
   const review = async (status: string) => {
-    if (status === "approved" && expires && !end) {
-      toast.error("Enter the expiry date printed on the document.");
+    if (status === "approved" && expires && !stated && !legacyDate) {
+      toast.error("Enter the expiry date printed on this document.", {
+        description: "It was filed before listers supplied their own dates.",
+      });
       return;
     }
     if (status !== "approved" && !reason.trim()) {
-      toast.error("Enter the reason for this decision.");
-      return;
-    }
-    if (status === "approved" && document.document_type === "comprehensive_insurance" && !rental) {
-      toast.error("Verify rental-use coverage first.");
+      toast.error("Say what is wrong, so the lister knows what to resubmit.");
       return;
     }
     setBusy(true);
     try {
-      // Only an expiry is recorded now. valid_from is left null, which
-      // vehicle_compliance_summary reads as "covers everything up to the
-      // expiry" - so an approved renewal can no longer leave a gap.
+      // The lister stated the expiry when they uploaded the file. The review is
+      // a comparison, not a transcription: agree with what they wrote, or send
+      // it back with a reason. Nothing about the date is sent from here.
       const { error } = await supabase.rpc("review_vehicle_documents", {
         p_car_id: document.car_id,
-        p_reviews: [
-          {
-            id: document.id,
-            status,
-            reason,
-            valid_until: expires ? expiryDateToIso(end) : null,
-            rental_use_verified: rental,
-          },
-        ],
+        p_reviews: [{ id: document.id, status, reason, valid_until: stated ? null : expiryDateToIso(legacyDate) }],
       });
       if (error) throw error;
       toast.success("Document review saved");
@@ -124,21 +138,27 @@ function DocumentReview({
 
   return (
     <div className="mt-3 space-y-3 rounded-lg border bg-muted/20 p-3">
-      {expires && (
-        <label className="block text-xs">
-          Expiry date printed on the document *
-          <Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
-        </label>
-      )}
-      {document.document_type === "comprehensive_insurance" && (
-        <label className="flex gap-2 text-sm">
-          <input type="checkbox" checked={rental} onChange={(e) => setRental(e.target.checked)} />
-          Rental/self-drive use explicitly covered by the insurer
-        </label>
-      )}
+      {expires &&
+        (stated ? (
+          <p className="text-sm">
+            Expiry stated by the lister: <strong>{stated}</strong>
+            <span className="ml-2 text-xs text-muted-foreground">
+              Approve only if this matches the document above.
+            </span>
+          </p>
+        ) : (
+          <label className="block text-xs">
+            No expiry on file - read it off the document and enter it *
+            <Input type="date" value={legacyDate} onChange={(e) => setLegacyDate(e.target.value)} />
+          </label>
+        ))}
       <label className="block text-xs">
-        Review note / rejection reason
-        <Input value={reason} onChange={(e) => setReason(e.target.value)} />
+        Reason (required when sending it back)
+        <Input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. the expiry on the permit reads 2027-06-30"
+        />
       </label>
       <div className="flex flex-wrap gap-2">
         <Button type="button" disabled={busy} onClick={() => void review("approved")}>
@@ -170,9 +190,14 @@ export default function VehicleCompliancePanel({
   const [documents, setDocuments] = useState<ComplianceDocument[]>([]);
   const [summary, setSummary] = useState<ComplianceSummary | null>(null);
   const [files, setFiles] = useState<Record<string, File | null>>({});
+  // The expiry the lister reads off each replacement, sent with it.
+  const [expiries, setExpiries] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  // Resolved once per load so a submitted document can be shown in place,
+  // instead of only behind a button that opens a new tab.
+  const [documentUrls, setDocumentUrls] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setError("");
@@ -185,8 +210,16 @@ export default function VehicleCompliancePanel({
       setError(failure.message);
       return;
     }
-    setDocuments((results[0].data ?? []) as unknown as ComplianceDocument[]);
+    const rows = (results[0].data ?? []) as unknown as ComplianceDocument[];
+    setDocuments(rows);
     setSummary(results[1].data as unknown as ComplianceSummary);
+    setDocumentUrls(
+      await createPrivateStorageUrlMap(
+        "vehicle-private-documents",
+        rows.map((row) => row.storage_path),
+        "vehicle-documents",
+      ),
+    );
   }, [carId]);
 
   useEffect(() => {
@@ -211,6 +244,13 @@ export default function VehicleCompliancePanel({
       toast.error("Choose at least one document to update.");
       return;
     }
+    const undated = updates.find(([type]) => requiresExpiry(type) && !expiries[type]);
+    if (undated) {
+      toast.error("Enter the expiry date", {
+        description: `${documentLabel(undated[0])} shows an expiry date - type it in before submitting.`,
+      });
+      return;
+    }
     setBusy(true);
     const uploaded: string[] = [];
     let submitted = false;
@@ -232,6 +272,7 @@ export default function VehicleCompliancePanel({
         payload.push({
           document_type: type,
           storage_path: path,
+          valid_until: expiries[type] ? expiryDateToIso(expiries[type]) : null,
           content_sha256: contentSha256,
           provenance_status: provenance.provenance_status,
           provenance_source: provenance.provenance_source,
@@ -249,6 +290,7 @@ export default function VehicleCompliancePanel({
       if (submitError) throw submitError;
       submitted = true;
       setFiles({});
+      setExpiries({});
       setRevision((v) => v + 1);
       toast.success("Resubmission sent for admin review");
       await reviewed();
@@ -329,21 +371,40 @@ export default function VehicleCompliancePanel({
                     className="rounded border p-2"
                   >
                     <summary className="cursor-pointer text-sm">
-                      {d.compliance_status === "pending" && d.renewal_id ? "Resubmission" : d.compliance_status} ·{" "}
+                      <span
+                        className={`mr-2 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                          STATUS_BADGES[d.compliance_status]?.className ?? "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {STATUS_BADGES[d.compliance_status]?.label ?? d.compliance_status}
+                      </span>
+                      {d.renewal_id && d.compliance_status === "pending" ? "Replacement you sent · " : ""}
                       {new Date(d.created_at).toLocaleDateString()}
                       {d.valid_until
                         ? ` · expiry ${new Date(d.valid_until).toLocaleDateString("en-PH", { timeZone: "Asia/Manila" })}`
                         : ""}
                     </summary>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="mt-2"
-                      onClick={() => void open(d)}
-                    >
-                      View document
-                    </Button>
+                    <div className="mt-2 flex flex-wrap items-start gap-3">
+                      {documentUrls[d.storage_path] && isImagePath(d.storage_path) ? (
+                        <img
+                          src={documentUrls[d.storage_path]}
+                          alt={`${documentLabel(d.document_type)} preview`}
+                          className="h-28 w-28 rounded border object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-28 w-28 items-center justify-center rounded border bg-muted/30">
+                          <FileText className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void open(d)}
+                      >
+                        View full document
+                      </Button>
+                    </div>
                     {d.review_reason && <p className="mt-2 text-sm">Review: {d.review_reason}</p>}
                     {d.superseded_at && (
                       <p className="mt-2 text-xs text-muted-foreground">
@@ -396,7 +457,30 @@ export default function VehicleCompliancePanel({
                           }}
                         />
                       </label>
-                      <ChosenFilePreview file={files[type.type] ?? null} />
+                      <ChosenFilePreview
+                        file={files[type.type] ?? null}
+                        onRemove={() => {
+                          setFiles((old) => ({ ...old, [type.type]: null }));
+                          setRevision((v) => v + 1);
+                        }}
+                      />
+                      {requiresExpiry(type.type) && (
+                        <div className="space-y-1">
+                          <span className="block text-xs text-muted-foreground">
+                            Expiry date on the new document *
+                          </span>
+                          <Input
+                            type="date"
+                            className="w-[190px]"
+                            disabled={busy || pending}
+                            min={new Date().toISOString().slice(0, 10)}
+                            value={expiries[type.type] ?? ""}
+                            onChange={(e) =>
+                              setExpiries((old) => ({ ...old, [type.type]: e.target.value }))
+                            }
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

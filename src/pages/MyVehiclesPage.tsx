@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { expiryDateToIso } from "@/lib/vehicleCompliance";
 import {
   hashFileSha256,
   inspectContentProvenance,
@@ -383,6 +384,8 @@ export default function MyVehiclesPage() {
     registration_expiry: "",
     ctpl_expiry: "",
     comprehensive_insurance_expiry: "",
+    dti_expiry: "",
+    mayors_permit_expiry: "",
     insurer_rental_use_confirmed: false,
     rental_agreement: "",
   });
@@ -417,12 +420,17 @@ export default function MyVehiclesPage() {
     storagePath: string,
     provenance: ContentProvenanceResult,
     contentSha256?: string | null,
+    validUntil?: string | null,
   ) => {
     const { error } = await supabase.from("car_documents").insert({
       car_id: carId,
       document_type: documentType,
       storage_path: storagePath,
       content_sha256: contentSha256 || null,
+      // The expiry the lister read off the document. It is only a proposal -
+      // protect_compliance_document keeps the row 'pending' until an admin
+      // agrees it matches the file.
+      valid_until: validUntil || null,
       ...provenance,
     });
 
@@ -670,12 +678,23 @@ export default function MyVehiclesPage() {
       return;
     }
 
-    if (!comprehensiveInsuranceFile || !form.comprehensive_insurance_expiry) {
-      toast.error("Comprehensive insurance and its expiry are required.");
+    // Optional cover, but half of it is worse than none: a policy with no
+    // stated expiry cannot be reviewed, and a date with no document cannot be
+    // checked against anything.
+    if (Boolean(comprehensiveInsuranceFile) !== Boolean(form.comprehensive_insurance_expiry)) {
+      toast.error("Comprehensive insurance is optional", {
+        description: "Give both the document and its expiry date, or leave both blank.",
+      });
       return;
     }
     if (!dtiFile || !mayorsPermitFile || !birFile) {
       toast.error("DTI registration, Business/Mayor's Permit and BIR certificate are required.");
+      return;
+    }
+    if (!form.dti_expiry || !form.mayors_permit_expiry) {
+      toast.error("Enter the expiry dates", {
+        description: "The DTI registration and the Business/Mayor's Permit both show an expiry date.",
+      });
       return;
     }
 
@@ -754,13 +773,13 @@ export default function MyVehiclesPage() {
       }
 
       const vehicleDocuments = [
-        { file: dtiFile, type: "dti", label: "DTI registration" },
-        { file: mayorsPermitFile, type: "mayors_permit", label: "Business/Mayor's Permit" },
-        { file: birFile, type: "bir", label: "BIR certificate" },
-        { file: orFile, type: "or", label: "OR" },
-        { file: crFile, type: "cr", label: "CR" },
-        { file: ctplFile, type: "ctpl", label: "CTPL" },
-        { file: comprehensiveInsuranceFile, type: "comprehensive_insurance", label: "comprehensive insurance" },
+        { file: dtiFile, type: "dti", label: "DTI registration", expiry: form.dti_expiry },
+        { file: mayorsPermitFile, type: "mayors_permit", label: "Business/Mayor's Permit", expiry: form.mayors_permit_expiry },
+        { file: birFile, type: "bir", label: "BIR certificate", expiry: "" },
+        { file: orFile, type: "or", label: "OR", expiry: form.registration_expiry },
+        { file: crFile, type: "cr", label: "CR", expiry: "" },
+        { file: ctplFile, type: "ctpl", label: "CTPL", expiry: form.ctpl_expiry },
+        { file: comprehensiveInsuranceFile, type: "comprehensive_insurance", label: "comprehensive insurance", expiry: form.comprehensive_insurance_expiry },
       ];
 
       for (const document of vehicleDocuments) {
@@ -771,7 +790,14 @@ export default function MyVehiclesPage() {
         const result = await uploadFile(document.file, "vehicle-private-documents", path);
         if (!result.success) throw new Error(result.error || "Upload failed");
 
-        await insertCarDocument(carData.id, document.type, path, provenance);
+        await insertCarDocument(
+          carData.id,
+          document.type,
+          path,
+          provenance,
+          null,
+          document.expiry ? expiryDateToIso(document.expiry) : null,
+        );
       }
 
       // Upload rental agreement
@@ -821,6 +847,8 @@ export default function MyVehiclesPage() {
         registration_expiry: "",
         ctpl_expiry: "",
         comprehensive_insurance_expiry: "",
+        dti_expiry: "",
+        mayors_permit_expiry: "",
         insurer_rental_use_confirmed: false,
         rental_agreement: "",
       });
@@ -1625,10 +1653,7 @@ export default function MyVehiclesPage() {
                     this it rejects itself and the original return date stands.
                   </p>
                 </div>
-                <div className="space-y-2">
-                  <Label>Registration expiry *</Label>
-                  <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.registration_expiry} onChange={(event) => setForm({ ...form, registration_expiry: event.target.value })} required />
-                </div>
+
                 <div className="space-y-2">
                   <Label>DTI business name registration *</Label>
                   <div className="flex flex-wrap gap-4 items-start">
@@ -1661,6 +1686,16 @@ export default function MyVehiclesPage() {
                         <span className="max-w-[180px] truncate text-sm font-medium">{dtiFile.name}</span>
                       </div>
                     )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Expiry date shown on the DTI registration *</Label>
+                    <Input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={form.dti_expiry}
+                      onChange={(event) => setForm({ ...form, dti_expiry: event.target.value })}
+                      required
+                    />
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -1695,6 +1730,16 @@ export default function MyVehiclesPage() {
                         <span className="max-w-[180px] truncate text-sm font-medium">{mayorsPermitFile.name}</span>
                       </div>
                     )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Expiry date shown on the permit *</Label>
+                    <Input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={form.mayors_permit_expiry}
+                      onChange={(event) => setForm({ ...form, mayors_permit_expiry: event.target.value })}
+                      required
+                    />
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -1732,8 +1777,7 @@ export default function MyVehiclesPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>CTPL expiry *</Label>
-                  <Input type="date" min={new Date().toISOString().slice(0, 10)} value={form.ctpl_expiry} onChange={(event) => setForm({ ...form, ctpl_expiry: event.target.value })} required />
+
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
                       <Upload className="h-3.5 w-3.5" />
@@ -1763,10 +1807,19 @@ export default function MyVehiclesPage() {
                       </div>
                     )}
                   </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Expiry date shown on the CTPL *</Label>
+                    <Input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={form.ctpl_expiry}
+                      onChange={(event) => setForm({ ...form, ctpl_expiry: event.target.value })}
+                      required
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Comprehensive insurance expiry *</Label>
-                  <Input type="date" value={form.comprehensive_insurance_expiry} onChange={(event) => setForm({ ...form, comprehensive_insurance_expiry: event.target.value })} />
+
                   <p className="text-xs text-muted-foreground">Optional for the thesis build, but a missing or expired policy creates an admin warning.</p>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="flex h-10 w-[150px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2 text-xs text-muted-foreground transition-colors hover:border-primary/50">
@@ -1796,6 +1849,15 @@ export default function MyVehiclesPage() {
                         <span className="max-w-[180px] truncate text-xs font-medium">{comprehensiveInsuranceFile.name}</span>
                       </div>
                     )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Expiry date shown on the policy (optional)</Label>
+                    <Input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={form.comprehensive_insurance_expiry}
+                      onChange={(event) => setForm({ ...form, comprehensive_insurance_expiry: event.target.value })}
+                    />
                   </div>
                 </div>
                 <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
@@ -1993,6 +2055,16 @@ export default function MyVehiclesPage() {
                         <span className="max-w-[180px] truncate text-sm font-medium">{orFile.name}</span>
                       </div>
                     )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Registration expiry shown on the OR *</Label>
+                    <Input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={form.registration_expiry}
+                      onChange={(event) => setForm({ ...form, registration_expiry: event.target.value })}
+                      required
+                    />
                   </div>
                 </div>
 

@@ -57,8 +57,14 @@ async function fixture() {
   // and CHAPTER 74 before it widened submit_vehicle_document_update. Applying
   // the chapter wholesale keeps this fixture honest about what production runs.
   const chapter75=master.split("-- CHAPTER 75 - Seven documents")[1]?.split("-- Read-only verification")[0];
+  const chapter77=master.split("-- CHAPTER 77 - Approving a document again")[1]?.split("-- Read-only verification")[0];
+  const chapter78=master.split("-- CHAPTER 78 - The lister states each expiry")[1]?.split("-- Read-only verification")[0];
   assert.ok(chapter75,"CHAPTER 75 exists");
   await db.exec(chapter75.slice(chapter75.indexOf("begin;")));
+  assert.ok(chapter77,"CHAPTER 77 exists");
+  await db.exec(chapter77.slice(chapter77.indexOf("begin;")));
+  assert.ok(chapter78,"CHAPTER 78 exists");
+  await db.exec(chapter78.slice(chapter78.indexOf("begin;")));
   await reviewer(db);
   return db;
 }
@@ -68,7 +74,10 @@ async function reviewer(db) {
 async function coverage(db,start="2030-10-20T09:00:00+08:00",end="2030-10-25T09:00:00+08:00",car=CAR) {
   return (await db.query("select public.vehicle_compliance_summary($1,$2,$3) as result",[car,start,end])).rows[0].result;
 }
-async function approveDocument(db,type,end="2030-10-31T23:59:59.999+08:00",start="2020-01-01T00:00:00+08:00",car=CAR,renewal=null) {
+// start defaults to null because that is what the admin panel now sends: since
+// CHAPTER 75 it collects only the expiry printed on the document. Tests that
+// specifically exercise coverage windows pass an explicit start.
+async function approveDocument(db,type,end="2030-10-31T23:59:59.999+08:00",start=null,car=CAR,renewal=null) {
   const {rows}=await db.query("insert into car_documents(car_id,document_type,storage_path,renewal_id) values($1,$2,$3,$4) returning id",[car,type,`${OWNER}/${car}/${type}_${crypto.randomUUID()}.pdf`,renewal]);
   const exp=["or","ctpl","comprehensive_insurance","dti","mayors_permit"].includes(type);
   await db.query("select public.review_vehicle_documents($1,$2::jsonb)",[car,JSON.stringify([{id:rows[0].id,status:"approved",valid_from:start,valid_until:exp?end:null,rental_use_verified:true}])]);
@@ -245,13 +254,15 @@ test("a resubmission carries its authenticity evidence, and out-of-range values 
     const bogus=`${OWNER}/${CAR}/ctpl_${crypto.randomUUID()}.pdf`;
     await db.query("insert into storage.objects(bucket_id,name) values('vehicle-private-documents',$1)",[bogus]);
     await db.query("select public.submit_vehicle_document_update($1,$2::jsonb)",[CAR,JSON.stringify([{
-      document_type:"ctpl",storage_path:bogus,
+      document_type:"ctpl",storage_path:bogus,valid_until:"2031-12-31T23:59:59.999+08:00",
       provenance_status:"totally-made-up",ai_suspicion_score:"not-a-number",review_flag:"nonsense",
     }])]);
-    const clamped=(await db.query("select provenance_status,ai_suspicion_score,review_flag from car_documents where storage_path=$1",[bogus])).rows[0];
+    const clamped=(await db.query("select provenance_status,ai_suspicion_score,review_flag,valid_until from car_documents where storage_path=$1",[bogus])).rows[0];
     assert.equal(clamped.provenance_status,"unknown");
     assert.equal(clamped.ai_suspicion_score,null);
     assert.equal(clamped.review_flag,"none");
+    // CHAPTER 78: the expiry the lister stated travels with the file.
+    assert.ok(clamped.valid_until,"the stated expiry must be stored on the pending row");
 
     // Everything CHAPTER 70 guarded still holds.
     await assert.rejects(db.query("select public.submit_vehicle_document_update($1,$2::jsonb)",[CAR,JSON.stringify([{document_type:"bir",storage_path:`${ADMIN}/${CAR}/bir.pdf`}])]),/private folder/);
@@ -278,6 +289,70 @@ test("the seven approved documents are enough - no classification step remains",
     await assert.rejects(
       db.query("select public.submit_vehicle_document_update($1,$2::jsonb)",[CAR,JSON.stringify([{document_type:"cpc",storage_path:`${OWNER}/${CAR}/cpc.pdf`}])]),
       /Unsupported document type/,
+    );
+  }finally{await db.close();}
+});
+
+test("approving documents fills the legacy expiry columns the approval guard reads",async()=>{
+  const db=await fixture();try {
+    // CHAPTER 75 stopped collecting valid_from, but refresh_vehicle_compliance
+    // still filtered the compatibility dates on `valid_from <= now()`. NULL
+    // never satisfies that, so cars.registration_expiry / ctpl_expiry stayed
+    // null and enforce_vehicle_insurance_approval refused the listing with
+    // "Current registration expiry is required before approval" - even though
+    // the admin had just approved those very documents.
+    await completeDocuments(db);
+    const car=(await db.query("select registration_expiry,ctpl_expiry,comprehensive_insurance_expiry,insurer_rental_use_confirmed from cars where id=$1",[CAR])).rows[0];
+    assert.ok(car.registration_expiry,"OR approval must fill registration_expiry");
+    assert.ok(car.ctpl_expiry,"CTPL approval must fill ctpl_expiry");
+    assert.ok(car.comprehensive_insurance_expiry,"insurance approval must fill its expiry");
+    assert.equal(car.insurer_rental_use_confirmed,true);
+
+    // And with those in place the legacy guard lets the listing through.
+    await db.query("update cars set status='approved' where id=$1",[CAR]);
+    assert.equal((await db.query("select status from cars where id=$1",[CAR])).rows[0].status,"approved");
+  }finally{await db.close();}
+});
+
+test("the lister states the expiry, comprehensive insurance is optional",async()=>{
+  const db=await fixture();try {
+    // Six required documents - comprehensive insurance is deliberately not one.
+    for(const type of ["or","cr","ctpl","dti","mayors_permit","bir"]) {
+      await approveDocument(db,type,type==="mayors_permit"?undefined:"2032-12-31T23:59:59.999+08:00");
+    }
+    const summary=await coverage(db);
+    assert.equal(summary.eligible,true,JSON.stringify(summary.reasons));
+    assert.ok(!summary.reasons.includes("comprehensive_insurance_coverage_required"));
+
+    // A lister submits a replacement with the expiry printed on it. The admin
+    // approves without retyping anything, and that date is what stands.
+    await db.exec(`select set_config('request.jwt.claim.sub','${OWNER}',false),set_config('test.reviewer','false',false)`);
+    const path=`${OWNER}/${CAR}/ctpl_${crypto.randomUUID()}.pdf`;
+    await db.query("insert into storage.objects(bucket_id,name) values('vehicle-private-documents',$1)",[path]);
+    await db.query("select public.submit_vehicle_document_update($1,$2::jsonb)",[CAR,JSON.stringify([
+      {document_type:"ctpl",storage_path:path,valid_until:"2033-06-30T23:59:59.999+08:00"},
+    ])]);
+    const proposed=(await db.query("select id,compliance_status,valid_until from car_documents where storage_path=$1",[path])).rows[0];
+    assert.equal(proposed.compliance_status,"pending","a lister's own submission is never in force");
+    assert.ok(proposed.valid_until,"the stated expiry is stored with the file");
+
+    await reviewer(db);
+    await db.query("select public.review_vehicle_documents($1,$2::jsonb)",[CAR,JSON.stringify([{id:proposed.id,status:"approved"}])]);
+    const approved=(await db.query("select compliance_status,valid_until from car_documents where id=$1",[proposed.id])).rows[0];
+    assert.equal(approved.compliance_status,"approved");
+    assert.equal(
+      new Date(approved.valid_until).toISOString(),
+      new Date("2033-06-30T23:59:59.999+08:00").toISOString(),
+      "approval must keep the date the lister stated",
+    );
+
+    // An expiring document sent without a date is refused outright.
+    await db.exec(`select set_config('request.jwt.claim.sub','${OWNER}',false),set_config('test.reviewer','false',false)`);
+    const undated=`${OWNER}/${CAR}/dti_${crypto.randomUUID()}.pdf`;
+    await db.query("insert into storage.objects(bucket_id,name) values('vehicle-private-documents',$1)",[undated]);
+    await assert.rejects(
+      db.query("select public.submit_vehicle_document_update($1,$2::jsonb)",[CAR,JSON.stringify([{document_type:"dti",storage_path:undated}])]),
+      /expiry date shown on the dti document/,
     );
   }finally{await db.close();}
 });
