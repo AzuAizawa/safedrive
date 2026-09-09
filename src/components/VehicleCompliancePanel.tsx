@@ -99,17 +99,21 @@ function DocumentReview({
 }) {
   const expires = requiresExpiry(document.document_type) || document.document_type === "orcr";
   const stated = isoToManilaInput(document.valid_until).slice(0, 10);
-  // Documents filed before the lister supplied their own dates have none. Rather
-  // than making every lister resubmit a file that is otherwise fine, the admin
-  // may fill that one in - but only when it is genuinely absent.
-  const [legacyDate, setLegacyDate] = useState("");
-  const [reason, setReason] = useState(document.review_reason ?? "");
+  // A document that needs an expiry but arrived without one cannot be approved:
+  // the reviewer's job is to agree with the date the lister read off the file,
+  // and there is nothing to agree with. It is sent back instead. This only
+  // affects submissions made before listers supplied their own dates.
+  const missingExpiry = expires && !stated;
+  // Deliberately not seeded from review_reason: that column also carries the
+  // blanket note the approval page stamps on every document, and pre-filling it
+  // would put someone else's words into a rejection.
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
 
   const review = async (status: string) => {
-    if (status === "approved" && expires && !stated && !legacyDate) {
-      toast.error("Enter the expiry date printed on this document.", {
-        description: "It was filed before listers supplied their own dates.",
+    if (status === "approved" && missingExpiry) {
+      toast.error("This document arrived without an expiry date.", {
+        description: "Send it back and ask the lister to resubmit it with the date shown on it.",
       });
       return;
     }
@@ -124,7 +128,7 @@ function DocumentReview({
       // it back with a reason. Nothing about the date is sent from here.
       const { error } = await supabase.rpc("review_vehicle_documents", {
         p_car_id: document.car_id,
-        p_reviews: [{ id: document.id, status, reason, valid_until: stated ? null : expiryDateToIso(legacyDate) }],
+        p_reviews: [{ id: document.id, status, reason }],
       });
       if (error) throw error;
       toast.success("Document review saved");
@@ -137,7 +141,7 @@ function DocumentReview({
   };
 
   return (
-    <div className="mt-3 space-y-3 rounded-lg border bg-muted/20 p-3">
+    <div className="mt-3 space-y-3 border-t pt-3">
       {expires &&
         (stated ? (
           <p className="text-sm">
@@ -147,10 +151,10 @@ function DocumentReview({
             </span>
           </p>
         ) : (
-          <label className="block text-xs">
-            No expiry on file - read it off the document and enter it *
-            <Input type="date" value={legacyDate} onChange={(e) => setLegacyDate(e.target.value)} />
-          </label>
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            No expiry date was submitted with this document, so it cannot be approved. Send it
+            back and ask for it again with the date shown on the file.
+          </p>
         ))}
       <label className="block text-xs">
         Reason (required when sending it back)
@@ -161,7 +165,7 @@ function DocumentReview({
         />
       </label>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" disabled={busy} onClick={() => void review("approved")}>
+        <Button type="button" disabled={busy || missingExpiry} onClick={() => void review("approved")}>
           Approve document
         </Button>
         <Button
@@ -368,7 +372,7 @@ export default function VehicleCompliancePanel({
                   <details
                     key={d.id}
                     open={admin ? d.compliance_status === "pending" : index === 0}
-                    className="rounded border p-2"
+                    className={index === 0 ? "pt-1" : "border-t pt-3"}
                   >
                     <summary className="cursor-pointer text-sm">
                       <span
@@ -405,7 +409,9 @@ export default function VehicleCompliancePanel({
                         View full document
                       </Button>
                     </div>
-                    {d.review_reason && <p className="mt-2 text-sm">Review: {d.review_reason}</p>}
+                    {d.review_reason && (
+                      <p className="mt-2 text-xs text-muted-foreground">Review note: {d.review_reason}</p>
+                    )}
                     {d.superseded_at && (
                       <p className="mt-2 text-xs text-muted-foreground">
                         Historical version: replaced from{" "}
