@@ -703,6 +703,12 @@ const checks = [
     absentMarkers: [
       // Merged into the InquiryWidget floating button - see that file's entry.
       "My Inquiries",
+      // A deliberate mode switch must not refresh the profile in place before
+      // its hard redirect: the ModeRoute wrapping the page being left would
+      // see the new flag contradict its own route and write the old mode
+      // straight back, landing "Switch to Renter" on /browse still flagged
+      // as a lister.
+      "await refreshProfile()",
     ],
   },
   {

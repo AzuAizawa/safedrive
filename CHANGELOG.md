@@ -3,6 +3,37 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-10 - "Switch to Renter" no longer gets undone on the way out
+
+Reported: switching to renter landed on Browse Cars - the renter page, showing
+renter listings - while the header badge still read "LISTER MODE".
+
+The switch itself worked. What undid it was the line right after it.
+`handleToggleMode` wrote `is_lister = false`, then called `refreshProfile()`,
+and only then set `window.location.href`. That refresh updated the profile in
+React state while the lister page the user was leaving was still mounted - and
+every lister page sits inside a `<ModeRoute mode="lister">`, whose whole job is
+to repair a profile whose mode contradicts its route. It saw renter on a lister
+route, did exactly what it is built to do, and wrote `is_lister = true` back
+before the browser finished navigating. The reload then read the restored flag,
+so `/browse` - a neutral route, where the badge falls back to the stored flag -
+announced Lister Mode over the renter screen.
+
+The refresh was dead weight to begin with: the hard redirect reloads the app and
+refetches the profile from the database anyway. Removed it. The other direction
+had the same collision from `/my-bookings`, but healed itself because
+`/lister-bookings` is lister-prefixed - which is why only this direction was
+ever reported.
+
+Files: `src/components/DashboardLayout.tsx`,
+`scripts/booking-flow-smoke-check.mjs` (forbids `await refreshProfile()` in that
+file so the line cannot come back).
+
+No migration. Accounts left stuck at `is_lister = true` clear themselves on the
+next sign-in - `LoginPage` already resets every fresh session to renter.
+
+---
+
 ## 2026-09-09 - Per-vehicle document review, updates and booking limits
 
 Added business-document uploads to every vehicle, admin validity review and optional

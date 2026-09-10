@@ -36,7 +36,7 @@ import { toast } from "sonner";
 import InstallButton from "@/components/InstallButton";
 
 export default function DashboardLayout() {
-  const { user, profile, signOut, refreshProfile } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
@@ -92,7 +92,15 @@ export default function DashboardLayout() {
       .update({ is_lister: !profileIsLister })
       .eq("id", user.id);
     if (!error) {
-      await refreshProfile();
+      // The profile in React state is deliberately NOT refreshed here. The
+      // hard redirect below reloads the app and refetches the profile from
+      // the database anyway, so refreshing in place buys nothing - what it
+      // does do is hand the ModeRoute still mounted on the page being left
+      // (every lister page sits inside one) a profile that now contradicts
+      // its own route. That is exactly the mismatch ModeRoute exists to
+      // repair, so it writes the old mode straight back before the
+      // navigation commits, and "Switch to Renter" lands on /browse with
+      // the account still flagged as a lister.
       // Hard redirect to clear all react states and avoid routing missing pages (404/blank)
       if (!profileIsLister) {
         window.location.href = "/lister-bookings";
@@ -104,7 +112,7 @@ export default function DashboardLayout() {
         description: error.message || "Database error",
       });
     }
-  }, [user, profile, profileIsLister, isVerified, refreshProfile, navigate]);
+  }, [user, profile, profileIsLister, isVerified, navigate]);
 
   const handleUnlockListerMode = useCallback(() => {
     toast.info("How to unlock Lister Mode", {
