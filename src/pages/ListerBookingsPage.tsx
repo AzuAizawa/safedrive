@@ -33,6 +33,7 @@ import {
 } from "@/lib/earlyReturns";
 import { formatTimeLabel } from "@/lib/timeOptions";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
@@ -254,6 +255,10 @@ const getListerBookingStatus = (booking: ListerBooking) => {
 
 export default function ListerBookingsPage() {
   const { user, session, profile } = useAuth();
+  // Which flagged booking is being closed out, and the note explaining how it
+  // ended. Kept per-booking so opening one does not arm the others.
+  const [closingCaseId, setClosingCaseId] = useState<string | null>(null);
+  const [closingCaseNote, setClosingCaseNote] = useState("");
   const navigate = useNavigate();
   const [bookings, setBookings] = useState<ListerBooking[]>([]);
   const [verificationImageUrls, setVerificationImageUrls] = useState<Record<string, string>>({});
@@ -937,6 +942,36 @@ export default function ListerBookingsPage() {
       toast.error("Could not record your arrival at the return", {
         description: error instanceof Error ? error.message : "Please try again.",
       });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // The lister closing their own non-return case. They are the one who knows
+  // how it ended, and until this existed a case could only ever be opened -
+  // dispute_status had a 'resolved' value that nothing in SafeDrive wrote.
+  const handleResolveNonReturn = async (bookingId: string) => {
+    if (closingCaseNote.trim().length < 10) {
+      toast.error("Say how this ended", {
+        description: "A sentence is enough. It becomes the record of what happened.",
+      });
+      return;
+    }
+    setActionLoading(bookingId);
+    try {
+      await runIncidentAction(session?.access_token, {
+        bookingId,
+        action: "resolve_non_return",
+        note: closingCaseNote.trim(),
+      });
+      toast.success("Case closed", {
+        description: "The booking is complete. Your payout follows if it has not already been released.",
+      });
+      setClosingCaseId(null);
+      setClosingCaseNote("");
+      await fetchBookings();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not close the case");
     } finally {
       setActionLoading(null);
     }
@@ -3405,10 +3440,53 @@ export default function ListerBookingsPage() {
                             Flagged: vehicle not returned
                           </p>
                           <p className="mt-1">
-                            SafeDrive support is handling this case. Any refund
-                            stays on hold. You can take this car offline from My
-                            Vehicles while the case is open.
+                            SafeDrive support is on this case. Your rental earnings
+                            for the days the renter had the car are released
+                            separately and do not wait for it to close. You can take
+                            this car offline from My Vehicles at any time.
                           </p>
+                          {closingCaseId === b.id ? (
+                            <div className="mt-2 space-y-2">
+                              <Input
+                                value={closingCaseNote}
+                                onChange={(event) => setClosingCaseNote(event.target.value)}
+                                placeholder="e.g. the car was recovered on 12 Sept and is back with me"
+                                className="h-8 text-[11px]"
+                              />
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setClosingCaseId(null);
+                                    setClosingCaseNote("");
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  disabled={actionLoading === b.id}
+                                  onClick={() => handleResolveNonReturn(b.id)}
+                                >
+                                  Close case and finish trip
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-2 text-right">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setClosingCaseId(b.id);
+                                  setClosingCaseNote("");
+                                }}
+                              >
+                                This is settled - close the case
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       ) : canReportNonReturnNow ? (
                         <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">

@@ -1,7 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { sendUserNotificationEmail } from "../server/email.js";
 import { blockedIpResponse } from "../server/ipBlock.js";
-import { fetchNoShowGraceMinutes } from "../server/bookingCompletion.js";
+import {
+  fetchNoShowGraceMinutes,
+  runBookingCompletionSideEffects,
+} from "../server/bookingCompletion.js";
 
 export const config = {
   runtime: "edge",
@@ -11,7 +14,8 @@ type IncidentAction =
   | "renter_no_car"
   | "renter_no_show"
   | "report_non_return"
-  | "lister_no_show_return";
+  | "lister_no_show_return"
+  | "resolve_non_return";
 
 // Structured reason for report_non_return (CHAPTER 37) - kept in sync with
 // NON_RETURN_REASON_OPTIONS in src/lib/incidents.ts and the check constraint
@@ -54,6 +58,8 @@ type BookingRow = {
   owner_id: string;
   status: string;
   dispute_status: string;
+  dispute_reason: string | null;
+  commission: number;
   start_date: string;
   end_date: string;
   pickup_time: string | null;
@@ -302,7 +308,7 @@ export default async function handler(req: Request) {
       .from("bookings")
       .select(
         `
-        id, car_id, renter_id, owner_id, status, dispute_status,
+        id, car_id, renter_id, owner_id, status, dispute_status, dispute_reason, commission,
         start_date, end_date, pickup_time, dropoff_time,
         renter_arrived_at, lister_arrived_at,
         renter_arrival_latitude, renter_arrival_longitude,
@@ -818,6 +824,151 @@ export default async function handler(req: Request) {
       });
 
       return jsonResponse({ success: true, state: "flagged" });
+    }
+
+    // -------------------------------------------------- resolve_non_return
+    //
+    // The way out of a non-return case. Until this existed, dispute_status
+    // could only ever move 'none' -> 'open': three of its values were reachable
+    // and one was not, so every case a lister opened outlived the booking it
+    // described.
+    //
+    // The lister goes first because they are the one who knows how it ended -
+    // the car was recovered, written off, settled privately. But once their
+    // payout has already been released they have no reason left to come back
+    // and tidy up, and the case is the last thing keeping the booking open, so
+    // support can close it too. That is the whole reason for the second
+    // route: it must not be possible for one person's inattention to leave
+    // another person's booking open forever - the same failure this endpoint
+    // and the return sweeps were built to remove.
+    //
+    // No return photo report is required, unlike an ordinary completion. There
+    // is frequently no car to photograph, and demanding evidence that cannot
+    // exist would put the exit back out of reach.
+    if (payload.action === "resolve_non_return") {
+      const closingNote = payload.note?.trim() || "";
+      let closedByAdmin = false;
+      if (!isOwner) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+        const isAdminRole = Boolean(profile && ["admin", "super_admin"].includes(profile.role));
+        const { data: canHandle } = isAdminRole
+          ? await supabase.rpc("admin_can_for", { p_uid: user.id, p_key: "support.handle" })
+          : { data: false };
+        if (!isAdminRole || canHandle !== true) {
+          return jsonResponse(
+            { error: "Only the lister or SafeDrive support can close this case" },
+            403,
+          );
+        }
+        closedByAdmin = true;
+      }
+      if (b.dispute_status !== "open") {
+        return jsonResponse({ error: "There is no open case on this booking." }, 409);
+      }
+      if (b.dispute_reason === "lister_no_show_at_return") {
+        return jsonResponse(
+          {
+            error:
+              "This case closes itself once the return is completed. Confirm the car was received instead.",
+          },
+          409,
+        );
+      }
+      if (b.status !== "active") {
+        return jsonResponse({ error: "This booking is no longer running." }, 409);
+      }
+      if (closingNote.length < 10) {
+        return jsonResponse(
+          { error: "Say in a sentence how this ended, so the record explains itself." },
+          400,
+        );
+      }
+
+      const { data: closed, error: closeError } = await supabase
+        .from("bookings")
+        .update({
+          dispute_status: "resolved",
+          owner_completed: true,
+          owner_completed_at: new Date().toISOString(),
+          status: "completed",
+        })
+        .eq("id", b.id)
+        .eq("status", "active")
+        .eq("dispute_status", "open")
+        .select("id")
+        .maybeSingle();
+      if (closeError) throw closeError;
+      if (!closed) {
+        return jsonResponse(
+          { error: "This case changed while you were closing it. Refresh and try again." },
+          409,
+        );
+      }
+
+      await supabase.from("audit_log").insert({
+        user_id: user.id,
+        action: closedByAdmin ? "admin_resolved_non_return_case" : "lister_resolved_non_return_case",
+        entity_type: "booking",
+        entity_id: b.id,
+        details: { note: closingNote, previous_reason: b.dispute_reason },
+      });
+
+      const closeTitle = "Case closed";
+      const closeRenterMessage = `The case for ${label(b)} has been closed and the booking is complete. Reason given: ${closingNote}`;
+      await supabase.from("notifications").insert({
+        user_id: b.renter_id,
+        title: closeTitle,
+        message: closeRenterMessage,
+        type: "info",
+        link: "/my-bookings",
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: b.renter_id,
+        title: closeTitle,
+        message: closeRenterMessage,
+        link: "/my-bookings",
+        baseOrigin,
+        eventKey: `non-return-closed-renter:${b.id}`,
+      });
+      if (closedByAdmin) {
+        const ownerMessage = `SafeDrive support closed the case for ${label(b)} and the booking is now complete. Reason given: ${closingNote}`;
+        await supabase.from("notifications").insert({
+          user_id: b.owner_id,
+          title: closeTitle,
+          message: ownerMessage,
+          type: "info",
+          link: "/lister-bookings",
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: b.owner_id,
+          title: closeTitle,
+          message: ownerMessage,
+          link: "/lister-bookings",
+          baseOrigin,
+          eventKey: `non-return-closed-owner:${b.id}`,
+        });
+      }
+
+      // Idempotent: on most of these the rental was already released by the
+      // deadline sweep, and processAutomaticPayoutForBooking skips a booking
+      // that already has a completed payout. This is for a case closed early,
+      // before that sweep ever ran.
+      await runBookingCompletionSideEffects(
+        supabase,
+        {
+          id: b.id,
+          owner_id: b.owner_id,
+          renter_id: b.renter_id,
+          commission: b.commission,
+        },
+        { initiatedByUserId: user.id, baseOrigin },
+      );
+
+      return jsonResponse({ success: true, state: "resolved" });
     }
 
     return jsonResponse({ error: "Unknown action" }, 400);

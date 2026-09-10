@@ -42,6 +42,7 @@ import {
 } from "@/lib/richText";
 import { Profile, SupportTicket, TicketMessage } from "@/types/database";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import AdminSectionTabs from "@/components/AdminSectionTabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -52,6 +53,9 @@ type AdminTicket = SupportTicket & {
 
 type BookingArrivalEvidence = {
   id: string;
+  status: string;
+  dispute_status: string | null;
+  dispute_reason: string | null;
   start_date: string;
   pickup_time: string | null;
   // The meetup point as agreed, not as the listing reads today - a dispute
@@ -329,6 +333,9 @@ export default function AdminSupportTicketsPage() {
       start_date,
       pickup_time,
       pickup_location_snapshot,
+      status,
+      dispute_status,
+      dispute_reason,
       renter_arrived_at,
       lister_arrived_at,
       renter_arrival_photo_url,
@@ -716,6 +723,50 @@ export default function AdminSupportTicketsPage() {
     setIsCreatingTicket(false);
   };
 
+  // Support closing a non-return case. The lister has the same button and
+  // normally uses it, but their payout is released without waiting for the
+  // case, so once they have been paid there is nothing left pulling them back
+  // to tidy up - and the case is the last thing holding the booking open. This
+  // is the backstop for that, not the usual route.
+  const [caseNote, setCaseNote] = useState("");
+  const [closingCase, setClosingCase] = useState(false);
+
+  const handleAdminResolveCase = async (bookingId: string) => {
+    if (caseNote.trim().length < 10) {
+      toast.error("Say how this ended", {
+        description: "A sentence is enough. Both parties see it, and it becomes the record.",
+      });
+      return;
+    }
+    setClosingCase(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const res = await fetch("/api/booking-incident-action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionData.session?.access_token ?? ""}`,
+        },
+        body: JSON.stringify({
+          bookingId,
+          action: "resolve_non_return",
+          note: caseNote.trim(),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error || "Could not close the case");
+      toast.success("Case closed", {
+        description: "The booking is complete and both parties have been told.",
+      });
+      setCaseNote("");
+      await fetchBookingEvidence(bookingId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not close the case");
+    } finally {
+      setClosingCase(false);
+    }
+  };
+
   const displayedBookingEvidence =
     activeTicket?.booking_id && activeBookingEvidence?.id === activeTicket.booking_id
       ? activeBookingEvidence
@@ -1030,6 +1081,36 @@ export default function AdminSupportTicketsPage() {
                           displayedBookingEvidence.lister_arrival_location_captured_at,
                         )}
                       </div>
+                      {displayedBookingEvidence.dispute_status === "open" &&
+                      displayedBookingEvidence.status === "active" &&
+                      displayedBookingEvidence.dispute_reason !== "lister_no_show_at_return" ? (
+                        <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
+                          <p className="text-sm font-semibold">Close this case</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Completes the booking and marks the case resolved. The
+                            lister can do this themselves; use this when they have
+                            stopped responding. Their rental earnings are released
+                            separately and do not depend on this.
+                          </p>
+                          <Input
+                            value={caseNote}
+                            onChange={(event) => setCaseNote(event.target.value)}
+                            placeholder="How did this end? Both parties see this."
+                            className="mt-2"
+                          />
+                          <div className="mt-2 flex justify-end">
+                            <Button
+                              size="sm"
+                              disabled={closingCase}
+                              onClick={() =>
+                                handleAdminResolveCase(displayedBookingEvidence.id)
+                              }
+                            >
+                              {closingCase ? "Closing…" : "Close case and complete booking"}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="flex items-start gap-2 text-sm text-muted-foreground">

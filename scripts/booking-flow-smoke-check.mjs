@@ -413,6 +413,38 @@ const checks = [
     absentMarkers: ["onlyOneArrived"],
   },
   {
+    file: "api/booking-incident-action.ts",
+    markers: [
+      "resolve_non_return",
+      "dispute_status: \"resolved\"",
+      // The lister goes first; support is the backstop for a lister who has
+      // already been paid and has no reason left to come back.
+      "Only the lister or SafeDrive support can close this case",
+      "support.handle",
+      // No return photo report is demanded here: there is frequently no car
+      // left to photograph, and requiring impossible evidence would put the
+      // exit back out of reach.
+      "runBookingCompletionSideEffects",
+    ],
+    absentMarkers: [
+      // The renter marking the car returned is a claim, not proof, and must
+      // never close the lister's route to reporting a car that never came back.
+      "b.renter_completed || b.owner_completed",
+    ],
+  },
+  {
+    file: "src/pages/admin/AdminSupportTicketsPage.tsx",
+    markers: ["resolve_non_return", "Close case and complete booking"],
+  },
+  {
+    file: "src/pages/MyBookingsPage.tsx",
+    markers: [
+      // The renter was the only party who could not see the case naming them.
+      "There is an open case on this booking",
+      "Your account is not restricted by this",
+    ],
+  },
+  {
     file: "api/expire-platform-setting-changes.ts",
     markers: [
       "_resolve_platform_setting_change",

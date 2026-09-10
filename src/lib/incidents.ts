@@ -7,7 +7,10 @@ export type IncidentAction =
   | "renter_no_car"
   | "renter_no_show"
   | "report_non_return"
-  | "lister_no_show_return";
+  | "lister_no_show_return"
+  // Closing a non-return case: the lister normally, SafeDrive support when the
+  // lister has been paid and has no reason left to come back and tidy up.
+  | "resolve_non_return";
 
 // Structured reason for report_non_return (CHAPTER 37), kept in sync with
 // NON_RETURN_REASONS in api/booking-incident-action.ts and the check

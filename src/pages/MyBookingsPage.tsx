@@ -78,6 +78,7 @@ interface BookingRow {
   balance_amount: number;
   status: string;
   dispute_status?: string | null;
+  dispute_reason?: string | null;
   renter_completed: boolean;
   owner_completed: boolean;
   payment_deadline: string | null;
@@ -2227,6 +2228,21 @@ export default function MyBookingsPage() {
                           </span>
                         </div>
                       </div>
+
+                      {(booking.dispute_status ?? "none") === "open" ? (
+                        <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-900 dark:text-amber-200">
+                          <p className="font-semibold">There is an open case on this booking</p>
+                          <p className="mt-1">
+                            {booking.dispute_reason === "lister_no_show_at_return"
+                              ? "You reported that the lister did not arrive to receive the car. SafeDrive support is following it up, and the trip closes on its own if they stay unresponsive."
+                              : "The lister reported that this vehicle was not returned. If you have already returned it, or you are still arranging to, message them from this booking - and reply to SafeDrive support so it can be closed."}
+                          </p>
+                          <p className="mt-1 opacity-80">
+                            Your account is not restricted by this. You can book and pay
+                            as normal while it is being sorted out.
+                          </p>
+                        </div>
+                      ) : null}
 
                       {nextStep ? (
                         <div
