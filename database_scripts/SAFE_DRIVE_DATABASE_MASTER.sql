@@ -12690,4 +12690,307 @@ commit;
 -- select count(*) from public.cars;
 --   (unchanged - discontinuing never touches a listing)
 
+-- ============================================================================
+-- CHAPTER 85 - An account can be suspended: the rung between a block and a delete
+-- Apply this chapter only, staging first. Three columns, one index and one
+-- function are added, and the two profile guards are replaced with the same
+-- rules plus one clause each. No account changes state: everything starts
+-- unsuspended.
+-- ============================================================================
+begin;
+
+-- Reported: a renter behaves badly on one trip and books again; a lister has
+-- bookings in flight and needs to be stopped. The only levers were a temporary
+-- sign-in block and outright deletion, and neither fits:
+--
+--   login_blocked_until  stops SIGN-IN, but nothing else. api/create-booking.ts
+--                        never read it, and blocking does not revoke a session
+--                        already issued - so a blocked renter holding a live
+--                        token could still book.
+--   verified_status      'inactive' is checked by AuthContext, but no admin
+--                        screen ever sets it. A lever nothing pulls.
+--   anonymize_user()     permanent, super-admin only, and it refuses outright
+--                        while any booking is in progress - which is exactly
+--                        when you most want to stop someone.
+--
+-- What was missing is the rung between them: serious, immediate, and
+-- reversible. That is what suspension is everywhere else - it stops NEW
+-- activity while trips already under way are honoured, because cancelling a
+-- live rental punishes the innocent counterparty, not the person being
+-- moderated.
+--
+-- Deliberately NOT stored: any per-car flag. A suspended owner's listings
+-- disappear because the account is suspended, not because someone remembered
+-- to switch each car off. One state, derived everywhere, so the two can never
+-- disagree.
+alter table public.profiles
+  add column if not exists suspended_at timestamptz,
+  add column if not exists suspension_reason text,
+  add column if not exists suspended_by uuid references public.profiles(id) on delete set null;
+
+create index if not exists profiles_suspended_at_idx
+  on public.profiles (suspended_at)
+  where suspended_at is not null;
+
+-- The one way to suspend or lift. Doing it through a function rather than a
+-- bare UPDATE means the reason, the notification and the audit row cannot be
+-- forgotten by a caller, and they all land in one transaction.
+create or replace function public.set_account_suspended(
+  p_user_id uuid,
+  p_suspended boolean,
+  p_reason text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $set_account_suspended$
+declare
+  v_target public.profiles%rowtype;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if not public.admin_can('users.moderate') then
+    raise exception 'Suspending an account requires the users.moderate permission';
+  end if;
+
+  select * into v_target from public.profiles where profiles.id = p_user_id;
+  if not found then
+    raise exception 'User not found';
+  end if;
+
+  -- Staff are disabled through admin management (admin_disabled_at), which is
+  -- a different power with a different owner. Suspension is for members.
+  if v_target.role in ('admin', 'super_admin') then
+    raise exception 'Staff accounts are disabled through admin management, not suspension';
+  end if;
+
+  if p_suspended then
+    -- The person has to be told why, so there has to be a why. Same floor the
+    -- sign-in block already uses.
+    if v_reason is null or length(v_reason) < 10 then
+      raise exception 'Give a reason of at least 10 characters when suspending an account';
+    end if;
+
+    update public.profiles set
+      suspended_at = coalesce(suspended_at, now()),
+      suspension_reason = v_reason,
+      suspended_by = auth.uid(),
+      updated_at = now()
+    where profiles.id = p_user_id;
+
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      p_user_id,
+      'Your account is suspended',
+      'SafeDrive suspended your account. Reason: ' || v_reason ||
+      ' You cannot start or accept new bookings, and any vehicles you list are hidden from Browse. A trip already under way continues as normal. Open a support case if you believe this is a mistake.',
+      'error',
+      '/support'
+    );
+  else
+    update public.profiles set
+      suspended_at = null,
+      suspension_reason = null,
+      suspended_by = null,
+      updated_at = now()
+    where profiles.id = p_user_id;
+
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      p_user_id,
+      'Your account is active again',
+      'SafeDrive lifted the suspension on your account. You can book again, and any vehicles you list are visible on Browse once more.',
+      'success',
+      '/browse'
+    );
+  end if;
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (
+    auth.uid(),
+    case when p_suspended then 'admin_suspended_account' else 'admin_lifted_account_suspension' end,
+    'profile',
+    p_user_id::text,
+    jsonb_build_object('reason', v_reason, 'suspended', p_suspended)
+  );
+end;
+$set_account_suspended$;
+
+revoke all on function public.set_account_suspended(uuid, boolean, text) from public;
+grant execute on function public.set_account_suspended(uuid, boolean, text) to authenticated;
+
+-- 85.1  User-facing guard: CHAPTER 64's rules, plus one.
+-- A member may update their own profile row, so without this clause a
+-- suspended user could clear suspended_at themselves and carry on.
+create or replace function public.protect_profile_sensitive_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $protect_profile$
+declare
+  privileged boolean;
+begin
+  privileged := public.is_admin() or public.is_trusted_server_context();
+
+  if privileged then
+    return new;
+  end if;
+
+  if auth.uid() is null or auth.uid() <> old.id then
+    raise exception 'Only the owning user or an admin can update this profile';
+  end if;
+
+  if new.role is distinct from old.role then
+    raise exception 'Users cannot change their own role';
+  end if;
+
+  if new.rejection_reason is distinct from old.rejection_reason then
+    raise exception 'Users cannot change verification rejection reasons';
+  end if;
+
+  if new.login_blocked_until is distinct from old.login_blocked_until
+     or new.login_block_reason is distinct from old.login_block_reason then
+    raise exception 'Users cannot change login block settings';
+  end if;
+
+  if new.suspended_at is distinct from old.suspended_at
+     or new.suspension_reason is distinct from old.suspension_reason
+     or new.suspended_by is distinct from old.suspended_by then
+    raise exception 'Users cannot lift their own suspension';
+  end if;
+
+  if new.verified_status is distinct from old.verified_status then
+    if not (
+      old.verified_status in ('unverified', 'rejected')
+      and new.verified_status = 'pending'
+    ) then
+      raise exception 'Users cannot self-approve or directly change verification status';
+    end if;
+  end if;
+
+  if old.verified_status = 'verified' and (
+    new.first_name is distinct from old.first_name
+    or new.middle_name is distinct from old.middle_name
+    or new.last_name is distinct from old.last_name
+    or new.full_name is distinct from old.full_name
+    or new.birthday is distinct from old.birthday
+    or new.driver_license is distinct from old.driver_license
+    or new.national_id is distinct from old.national_id
+    or new.secondary_id_type is distinct from old.secondary_id_type
+  ) then
+    raise exception 'Verified identity fields require admin review to change';
+  end if;
+
+  if new.license_expiry is distinct from old.license_expiry
+     or new.license_transmission is distinct from old.license_transmission
+     or new.license_expiry_notified_at is distinct from old.license_expiry_notified_at then
+    raise exception 'Driver''s licence validity is set by an admin during review';
+  end if;
+
+  if new.license_update_pending is distinct from old.license_update_pending
+     and not (old.license_update_pending = false and new.license_update_pending = true) then
+    raise exception 'Only an admin can clear a pending licence update';
+  end if;
+
+  if new.is_lister is distinct from old.is_lister
+     and old.verified_status <> 'verified' then
+    raise exception 'Only verified users can change lister mode';
+  end if;
+
+  if old.deleted_at is not null
+     and new.deleted_at is distinct from old.deleted_at then
+    raise exception 'Deleted profiles cannot be reactivated by the user';
+  end if;
+
+  return new;
+end;
+$protect_profile$;
+
+drop trigger if exists protect_profile_sensitive_fields on public.profiles;
+create trigger protect_profile_sensitive_fields
+  before update on public.profiles
+  for each row execute function public.protect_profile_sensitive_fields();
+
+-- 85.2  Admin-facing guard: CHAPTER 64's rules, plus one.
+-- Suspension is moderation, so it belongs to users.moderate - the same
+-- permission a sign-in block already needs.
+create or replace function public.enforce_admin_profile_permission()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $admin_profile_guard$
+begin
+  if public.is_trusted_server_context() then
+    return new;
+  end if;
+
+  -- Applies to EVERYONE reaching the database through PostgREST - a plain
+  -- user, an admin, a super admin. Roles change only through
+  -- api/admin-create.ts and api/admin-delete.ts, which use the service-role
+  -- key and are exempted above.
+  if new.role is distinct from old.role then
+    raise exception 'Roles are changed only through the admin management endpoints';
+  end if;
+
+  if not public.is_admin() or public.is_super_admin() then
+    return new;
+  end if;
+
+  -- Everything below constrains a PLAIN admin.
+
+  if new.deleted_at is distinct from old.deleted_at
+     or new.admin_disabled_at is distinct from old.admin_disabled_at then
+    raise exception 'Only a super admin can disable or delete an account';
+  end if;
+
+  if (new.payout_method is distinct from old.payout_method
+      or new.payout_account_name is distinct from old.payout_account_name
+      or new.payout_account_number is distinct from old.payout_account_number)
+     and auth.uid() is distinct from old.id then
+    raise exception 'An admin cannot change another account''s payout details';
+  end if;
+
+  if (new.verified_status  is distinct from old.verified_status
+      or new.rejection_reason is distinct from old.rejection_reason)
+     and not public.admin_can('users.verify') then
+    raise exception 'Changing verification status requires the users.verify permission';
+  end if;
+
+  if (new.login_blocked_until is distinct from old.login_blocked_until
+      or new.login_block_reason is distinct from old.login_block_reason)
+     and not public.admin_can('users.moderate') then
+    raise exception 'Changing a login block requires the users.moderate permission';
+  end if;
+
+  if (new.suspended_at is distinct from old.suspended_at
+      or new.suspension_reason is distinct from old.suspension_reason
+      or new.suspended_by is distinct from old.suspended_by)
+     and not public.admin_can('users.moderate') then
+    raise exception 'Changing a suspension requires the users.moderate permission';
+  end if;
+
+  return new;
+end;
+$admin_profile_guard$;
+
+drop trigger if exists enforce_admin_profile_permission on public.profiles;
+create trigger enforce_admin_profile_permission
+  before update on public.profiles
+  for each row execute function public.enforce_admin_profile_permission();
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select column_name from information_schema.columns
+--   where table_schema='public' and table_name='profiles'
+--     and column_name in ('suspended_at','suspension_reason','suspended_by')
+--   order by column_name;
+--   (expect three rows)
+-- select count(*) from public.profiles where suspended_at is not null;
+--   (expect 0 - this chapter suspends nobody)
+-- select proname from pg_proc where proname = 'set_account_suspended';
+--   (expect one row)
+
 -- End of SafeDrive chaptered database master.

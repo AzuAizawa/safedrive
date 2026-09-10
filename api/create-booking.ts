@@ -321,7 +321,9 @@ export default async function handler(req: Request) {
 
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
-      .select("id, email, full_name, role, verified_status")
+      .select(
+        "id, email, full_name, role, verified_status, deleted_at, login_blocked_until, suspended_at, suspension_reason",
+      )
       .eq("id", user.id)
       .single();
 
@@ -340,6 +342,51 @@ export default async function handler(req: Request) {
     if (profile.role === "lister" || profile.role === "admin" || profile.role === "super_admin") {
       return jsonResponse(
         { error: "This account type cannot create renter bookings" },
+        403,
+      );
+    }
+
+    // Moderation belongs here because this endpoint is the ONLY way a booking
+    // can be created: public.bookings has no renter INSERT policy, only
+    // "Admins can create bookings". Blocking sign-in never stopped a booking -
+    // it does not revoke a token already issued, so a blocked renter could keep
+    // booking until that token expired. Suspension (CHAPTER 85) is checked in
+    // the same place for the same reason.
+    const renterState = profileData as unknown as {
+      deleted_at: string | null;
+      login_blocked_until: string | null;
+      suspended_at: string | null;
+      suspension_reason: string | null;
+    };
+
+    if (renterState.deleted_at) {
+      return jsonResponse(
+        { error: "This account is closed and cannot make a booking." },
+        403,
+      );
+    }
+
+    if (renterState.suspended_at) {
+      return jsonResponse(
+        {
+          error: renterState.suspension_reason
+            ? "Your account is suspended, so you cannot start a new booking. Reason: " +
+              renterState.suspension_reason
+            : "Your account is suspended, so you cannot start a new booking.",
+        },
+        403,
+      );
+    }
+
+    if (
+      renterState.login_blocked_until &&
+      new Date(renterState.login_blocked_until).getTime() > Date.now()
+    ) {
+      return jsonResponse(
+        {
+          error:
+            "Sign-in to this account is blocked right now, so it cannot start a booking.",
+        },
         403,
       );
     }
@@ -405,6 +452,31 @@ export default async function handler(req: Request) {
     const car = carData as unknown as CarRecord;
     if (!["approved", "active"].includes(car.status ?? "")) {
       return jsonResponse({ error: "This car is not available for booking" }, 409);
+    }
+
+    // The owner's suspension travels with their listings (CHAPTER 85). Browse
+    // already hides them, but a bookmarked car page or a tab left open would
+    // otherwise still reach this far. The reason is deliberately NOT echoed to
+    // the renter - it is about someone else's account.
+    const { data: ownerState } = await supabase
+      .from("profiles")
+      .select("suspended_at, deleted_at")
+      .eq("id", car.owner_id)
+      .maybeSingle();
+
+    const owner = (ownerState ?? null) as {
+      suspended_at: string | null;
+      deleted_at: string | null;
+    } | null;
+
+    if (owner?.suspended_at || owner?.deleted_at) {
+      return jsonResponse(
+        {
+          error:
+            "This car is not accepting bookings at the moment. Please choose another one.",
+        },
+        409,
+      );
     }
 
     const documentCoverage = await getVehicleCompliance(supabase, carId,

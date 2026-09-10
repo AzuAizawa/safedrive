@@ -105,6 +105,8 @@ export default function AdminUsersPage() {
   const [showBlockInput, setShowBlockInput] = useState(false);
   const [blockReason, setBlockReason] = useState("");
   const [blockDurationHours, setBlockDurationHours] = useState("24");
+  const [showSuspendInput, setShowSuspendInput] = useState(false);
+  const [suspendReason, setSuspendReason] = useState("");
   const [showPasswordResetInput, setShowPasswordResetInput] = useState(false);
   // Two-step delete. The first dialog explains what is destroyed; the second
   // will not enable its button until the admin types the account's own email.
@@ -290,6 +292,9 @@ export default function AdminUsersPage() {
 
   const getImageUrl = (path: string, _cacheKey?: string | null) =>
     verificationImageUrls[path] ?? "";
+
+  const isSuspended = (userRecord: UserWithImages | null) =>
+    Boolean(userRecord?.suspended_at);
 
   const isLoginBlocked = (userRecord: UserWithImages | null) =>
     Boolean(
@@ -842,6 +847,60 @@ export default function AdminUsersPage() {
     setActionLoading(false);
   };
 
+  const handleSuspendAccount = async () => {
+    if (!selectedUser || suspendReason.trim().length < minimumBlockReasonLength) {
+      toast.error(
+        `Please give at least ${minimumBlockReasonLength} characters saying why this account is being suspended`,
+      );
+      return;
+    }
+
+    setActionLoading(true);
+    const { error } = await supabase.rpc("set_account_suspended", {
+      p_user_id: selectedUser.id,
+      p_suspended: true,
+      p_reason: suspendReason.trim(),
+    });
+    setActionLoading(false);
+
+    if (error) {
+      toast.error("Account was not suspended", { description: error.message });
+      return;
+    }
+    toast.success("Account suspended", {
+      description:
+        "They cannot start or accept new bookings, and their listings are hidden. Trips already under way continue.",
+    });
+    setSelectedUser(null);
+    setSuspendReason("");
+    setShowSuspendInput(false);
+    fetchUsers();
+  };
+
+  const handleLiftSuspension = async () => {
+    if (!selectedUser) return;
+
+    setActionLoading(true);
+    const { error } = await supabase.rpc("set_account_suspended", {
+      p_user_id: selectedUser.id,
+      p_suspended: false,
+      p_reason: null,
+    });
+    setActionLoading(false);
+
+    if (error) {
+      toast.error("Suspension was not lifted", { description: error.message });
+      return;
+    }
+    toast.success("Suspension lifted", {
+      description: "Their listings are visible again and they can book as usual.",
+    });
+    setSelectedUser(null);
+    setSuspendReason("");
+    setShowSuspendInput(false);
+    fetchUsers();
+  };
+
   const handleUnblockLogin = async () => {
     if (!selectedUser || !adminUser) return;
     setActionLoading(true);
@@ -1290,6 +1349,17 @@ export default function AdminUsersPage() {
                     {isLoginBlocked(selectedUser) && selectedUser.login_block_reason && (
                       <p className="mt-1 text-xs text-red-600 dark:text-red-400">
                         Reason: {selectedUser.login_block_reason}
+                      </p>
+                    )}
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="text-muted-foreground">Account:</span>
+                    <p className="font-medium">
+                      {isSuspended(selectedUser) ? "Suspended" : "Active"}
+                    </p>
+                    {isSuspended(selectedUser) && selectedUser.suspension_reason && (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        Reason: {selectedUser.suspension_reason}
                       </p>
                     )}
                   </div>
@@ -1793,6 +1863,81 @@ export default function AdminUsersPage() {
                     ) : null}
                   </div>
                 </div>
+
+                {canModerate ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3 dark:border-red-900/50 dark:bg-red-950/20">
+                    <div>
+                      <p className="text-sm font-semibold">Account Suspension</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Stops this account starting or accepting new bookings, and hides any
+                        vehicle it lists from Browse. A trip already under way continues, so the
+                        other party is not punished for this. Reversible at any time.
+                      </p>
+                    </div>
+                    {isSuspended(selectedUser) ? (
+                      <Button
+                        variant="outline"
+                        onClick={handleLiftSuspension}
+                        disabled={actionLoading}
+                        className="gap-2 border-green-300 text-green-700 hover:bg-green-50 dark:border-green-800 dark:text-green-300 dark:hover:bg-green-950/30"
+                      >
+                        {actionLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : null}
+                        Lift Suspension
+                      </Button>
+                    ) : showSuspendInput ? (
+                      <div className="space-y-3">
+                        <div className="space-y-2">
+                          <Label>Why is this account being suspended? *</Label>
+                          <Input
+                            value={suspendReason}
+                            onChange={(event) => setSuspendReason(event.target.value)}
+                            placeholder="The person is told this word for word"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            At least {minimumBlockReasonLength} characters. They receive it in a
+                            notification, so write it for them to read.
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-3 sm:flex-row">
+                          <Button
+                            variant="destructive"
+                            onClick={handleSuspendAccount}
+                            disabled={
+                              actionLoading ||
+                              suspendReason.trim().length < minimumBlockReasonLength
+                            }
+                            className="gap-2"
+                          >
+                            {actionLoading ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : null}
+                            Confirm Suspension
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setShowSuspendInput(false);
+                              setSuspendReason("");
+                            }}
+                            disabled={actionLoading}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowSuspendInput(true)}
+                        className="gap-2 border-red-300 text-red-700 hover:bg-red-100 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/30"
+                      >
+                        Suspend Account
+                      </Button>
+                    )}
+                  </div>
+                ) : null}
 
                 {isSuperAdmin ? (
                   <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-3 dark:border-blue-900/50 dark:bg-blue-950/20">

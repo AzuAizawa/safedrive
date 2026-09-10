@@ -174,11 +174,15 @@ export default function BrowseCarsPage() {
             car_brands!inner (*)
           ),
           car_images (*),
-          profiles!cars_owner_id_fkey!inner (full_name, phone, email, deleted_at)
+          profiles!cars_owner_id_fkey!inner (full_name, phone, email, deleted_at, suspended_at)
         `,
         )
         .in("status", ["approved", "active"])
-        .is("profiles.deleted_at", null);
+        .is("profiles.deleted_at", null)
+        // A suspended owner takes their listings with them (CHAPTER 85). The
+        // car rows are untouched - nothing is switched off per vehicle - so
+        // lifting the suspension brings every listing straight back.
+        .is("profiles.suspended_at", null);
       if (error) throw error;
       if (data) setCars(data as unknown as CarWithDetails[]);
     } catch (err) {

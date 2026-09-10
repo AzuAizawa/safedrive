@@ -3,6 +3,72 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-10 - An account can be suspended: the rung between a block and a delete
+
+Asked by a tester: a renter misbehaves on one trip and books again; a lister has
+bookings in flight and needs stopping. What do you do to the account, when all
+you have is block-sign-in and delete?
+
+Neither fits, and one of them was not even doing what it looked like it did.
+
+- **`login_blocked_until`** stops *sign-in* and nothing else.
+  `api/create-booking.ts` never read it, and blocking does not revoke a token
+  already issued — so a blocked renter holding a live session **could keep
+  booking**. That was a real hole, not a theoretical one.
+- **`verified_status = 'inactive'`** is checked by `AuthContext`, but no admin
+  screen anywhere sets it. A lever nothing pulls.
+- **`anonymize_user()`** is permanent, super-admin only, and refuses outright
+  while any booking is in progress — exactly when you most want to act.
+
+The tester also feared that deleting a lister would wipe their bookings and
+leave renters wondering. It would not: `anonymize_user()` refuses while a
+booking is in progress and never deletes a booking row.
+
+**CHAPTER 85** adds the missing rung. `profiles.suspended_at`,
+`suspension_reason` and `suspended_by`, plus `public.set_account_suspended()` —
+one function so the reason, the notification and the audit row land together and
+cannot be forgotten. It requires a reason of at least 10 characters, because the
+person is told it word for word.
+
+Suspension stops **new** activity and honours what is already running: a trip
+under way continues, because cancelling it would punish the counterparty, not
+the person being moderated. That is what suspension means on other marketplaces
+too, and it is why this is not just an early delete.
+
+Both guards were replaced with their existing rules plus one clause each: a
+member **cannot lift their own suspension** (they may update their own profile
+row, so without it they simply could), and a plain admin needs `users.moderate`
+— the same permission a sign-in block already needs.
+
+**Vehicles follow the account, and are not a second switch.** A suspended
+owner's cars vanish from Browse because the *account* is suspended; no per-car
+flag is written, so lifting the suspension brings every listing straight back,
+untouched. One state, derived everywhere, so the two can never disagree.
+
+`api/create-booking.ts` is where the enforcement lands, because it is the only
+way a booking can be created — `public.bookings` has no renter INSERT policy,
+only "Admins can create bookings". It now refuses a renter who is suspended,
+closed, or currently blocked, and refuses a booking on a suspended owner's car
+without echoing that owner's reason to the renter.
+
+In **Admin → Users**, a new Account Suspension card sits between Sign-in Access
+Control and the super-admin powers, so the panel escalates as you read down it:
+temporary, serious-but-reversible, permanent. The detail grid gains an
+"Account: Active / Suspended" line with the reason.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 85),
+`api/create-booking.ts`, `src/pages/admin/AdminUsersPage.tsx`,
+`src/pages/BrowseCarsPage.tsx`, `src/types/database.ts`,
+`scripts/account-suspension.test.mjs`, `package.json`.
+
+Migration: apply CHAPTER 85, staging first. It suspends nobody — every account
+starts active. Proved against real PostgreSQL before shipping:
+`npm run check:account-suspension`, covering the reason floor, the notification
+and audit trail, lifting, a suspended member being unable to free themselves,
+the permission gate holding against a bare UPDATE, and staff being out of scope.
+
+---
+
 ## 2026-09-10 - A catalog entry is discontinued, not deleted
 
 Requested: block an admin from deleting a car brand or model while there is an

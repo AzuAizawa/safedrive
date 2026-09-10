@@ -30,6 +30,9 @@ export interface Database {
           verified_status: string;
           role: string;
           is_lister: boolean;
+          suspended_at: string | null;
+          suspension_reason: string | null;
+          suspended_by: string | null;
           rejection_reason: string | null;
           avatar_url: string | null;
           gender: string | null;
@@ -69,6 +72,9 @@ export interface Database {
           verified_status?: string;
           role?: string;
           is_lister?: boolean;
+          suspended_at?: string | null;
+          suspension_reason?: string | null;
+          suspended_by?: string | null;
           rejection_reason?: string | null;
           avatar_url?: string | null;
           gender?: string | null;
@@ -108,6 +114,9 @@ export interface Database {
           verified_status?: string;
           role?: string;
           is_lister?: boolean;
+          suspended_at?: string | null;
+          suspension_reason?: string | null;
+          suspended_by?: string | null;
           rejection_reason?: string | null;
           avatar_url?: string | null;
           gender?: string | null;
@@ -1774,6 +1783,10 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      set_account_suspended: {
+        Args: { p_user_id: string; p_suspended: boolean; p_reason?: string | null };
+        Returns: undefined;
+      };
       set_brand_discontinued: {
         Args: { p_brand_id: string; p_discontinued: boolean };
         Returns: undefined;
