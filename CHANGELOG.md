@@ -3,6 +3,55 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-10 - Deleting a car says why it cannot happen, before you try
+
+Reported by a tester: Delete failed with *"Failed to delete vehicle — Check if
+the vehicle has bookings or try again."* They checked, believed they had no
+bookings, and could not work out what the system meant. They asked for the
+message to add *"and you cannot delete your car if you have an incoming payout"*.
+
+Three things were wrong, and only one of them was the payout.
+
+**The real reason was never shown.** A Supabase error is a plain object, not an
+`Error`, so `error instanceof Error` in `handleDeleteVehicle` was never true and
+the fallback guess was printed **every single time**. The database said exactly
+what was wrong; the code threw it away.
+
+**The blocker is bookings, not payouts.** `bookings.car_id` references
+`cars(id)` with no `ON DELETE` clause, so PostgreSQL refuses to remove a car any
+booking row still points at — of *any* status, including long-finished and
+cancelled ones. Every other table referencing a car cascades or nulls out;
+bookings is the one that holds. A car that has ever been booked can therefore
+never be deleted, by its owner or by an admin. So the requested wording would
+have been untrue in the more common case: with no payout at all, the delete
+still fails.
+
+**The trip was not actually over.** `payoutReleaseState` releases a payout only
+once `status = 'completed'` **and** `owner_completed`. An early return by the
+renter does not end a trip — the lister confirming receipt does. The tester's
+car still had an `active` booking, which is also what their own notification had
+told them: *"Finish the return to release your payout."*
+
+So the button no longer offers a door that cannot open. Before it is drawn, the
+list loads one booking query and one payout query and reports the first case
+that applies, in the order of what the lister can do about it:
+
+- **a booking that is not finished** — names when it ends, and that a trip ends
+  when they confirm they have the car back, not when the renter drops it off;
+- **a payout still on its way** — the case the tester asked for;
+- **past bookings only** — the record is kept, so the car can no longer be
+  deleted; use **Disable** to take it off the listings.
+
+Delete is disabled with that sentence beneath it and in its tooltip. If a delete
+still fails for any other reason, the database's own message now reaches the
+lister, with the foreign-key case translated into words rather than shown raw.
+
+No migration: presentation only, nothing about what is allowed has changed.
+
+Files: `src/pages/MyVehiclesPage.tsx`.
+
+---
+
 ## 2026-09-10 - A deleted notification waits 30 days, then is gone
 
 Requested: let people clear their notification list, the way a phone does —

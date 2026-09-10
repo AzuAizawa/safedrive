@@ -184,6 +184,38 @@ interface VehicleRow {
   car_models: { name: string; body_type: string; car_brands: { name: string } };
 }
 
+/**
+ * Why a car cannot be deleted.
+ *
+ * bookings.car_id references cars(id) with no ON DELETE clause, so PostgreSQL
+ * refuses to remove a car that any booking row still points at - whatever that
+ * booking's status is. Every other table that references a car cascades or
+ * nulls out; bookings is the one that holds. So a car that has ever been booked
+ * can never be deleted, by its owner or by an admin, and the button that offers
+ * to do it is offering something that cannot happen.
+ *
+ * These three cases are ordered by what the lister should do next, not by
+ * severity: finish the trip, wait for the money, or stop trying and take the
+ * car offline instead.
+ */
+type DeleteBlockKind = "in_progress" | "payout_due" | "history";
+
+interface DeleteBlock {
+  kind: DeleteBlockKind;
+  reason: string;
+}
+
+// A booking in any of these states is not over yet. Same list openDisableFlow
+// uses, deliberately - the two screens must agree on what "in progress" means.
+const UNFINISHED_BOOKING_STATUSES = [
+  "pending",
+  "confirmed",
+  "awaiting_payment",
+  "downpayment_paid",
+  "fully_paid",
+  "active",
+];
+
 const statusBadge: Record<string, { label: string; color: string }> = {
   pending: {
     label: "Pending",
@@ -443,6 +475,9 @@ export default function MyVehiclesPage() {
   const [editing, setEditing] = useState(false);
   const [vehicleActionId, setVehicleActionId] = useState<string | null>(null);
   const [deleteTargetVehicle, setDeleteTargetVehicle] = useState<VehicleRow | null>(null);
+  // Filled alongside the vehicle list: why each car cannot be deleted, or absent
+  // when it can be. Read before the button is drawn, not after it fails.
+  const [deleteBlocks, setDeleteBlocks] = useState<Record<string, DeleteBlock>>({});
   const [disableTarget, setDisableTarget] = useState<VehicleRow | null>(null);
   const [disableReason, setDisableReason] = useState<
     "stolen" | "damaged" | "other"
@@ -557,6 +592,93 @@ export default function MyVehiclesPage() {
       ]
     : [];
 
+  /**
+   * One booking query and one payout query for the whole list. A car is
+   * reported by the first case that applies, so the lister is told the thing
+   * they can act on rather than the whole tangle at once.
+   */
+  const loadDeleteBlocks = async (carIds: string[]) => {
+    if (carIds.length === 0) return {};
+
+    const { data: bookingRows, error: bookingError } = await supabase
+      .from("bookings")
+      .select("id, car_id, status, start_date, end_date")
+      .in("car_id", carIds);
+    if (bookingError) {
+      console.error("Could not check bookings before delete:", bookingError);
+      return {};
+    }
+
+    const bookings = (bookingRows ?? []) as {
+      id: string;
+      car_id: string;
+      status: string;
+      start_date: string;
+      end_date: string;
+    }[];
+
+    // A payout is money SafeDrive still owes the lister for this car. It is
+    // recorded as a payments row of type 'payout'; anything not completed is
+    // still on its way, and a failed one is still owed, not written off.
+    const bookingIds = bookings.map((booking) => booking.id);
+    let owedPayoutBookingIds = new Set<string>();
+    if (bookingIds.length > 0) {
+      const { data: payoutRows, error: payoutError } = await supabase
+        .from("payments")
+        .select("booking_id, status")
+        .eq("payment_type", "payout")
+        .in("status", ["pending", "failed"])
+        .in("booking_id", bookingIds);
+      if (payoutError) {
+        console.error("Could not check payouts before delete:", payoutError);
+      } else {
+        owedPayoutBookingIds = new Set(
+          (payoutRows ?? []).map((row) => (row as { booking_id: string }).booking_id),
+        );
+      }
+    }
+
+    const blocks: Record<string, DeleteBlock> = {};
+    for (const carId of carIds) {
+      const forCar = bookings.filter((booking) => booking.car_id === carId);
+      if (forCar.length === 0) continue;
+
+      const unfinished = forCar.filter((booking) =>
+        UNFINISHED_BOOKING_STATUSES.includes(booking.status),
+      );
+      if (unfinished.length > 0) {
+        const soonest = unfinished
+          .map((booking) => booking.end_date)
+          .sort()[0];
+        blocks[carId] = {
+          kind: "in_progress",
+          reason:
+            unfinished.length === 1
+              ? `This car has a booking that is not finished yet (ends ${soonest}). A trip ends when you confirm you have the car back - an early return does not end it on its own.`
+              : `This car has ${unfinished.length} bookings that are not finished yet (earliest ends ${soonest}). A trip ends when you confirm you have the car back.`,
+        };
+        continue;
+      }
+
+      if (forCar.some((booking) => owedPayoutBookingIds.has(booking.id))) {
+        blocks[carId] = {
+          kind: "payout_due",
+          reason:
+            "A payout for this car is still on its way to you. It has to reach you before the car can leave SafeDrive.",
+        };
+        continue;
+      }
+
+      blocks[carId] = {
+        kind: "history",
+        reason:
+          `This car has ${forCar.length} past booking${forCar.length === 1 ? "" : "s"}. SafeDrive keeps that record, so the car can no longer be deleted - use Disable to take it off the listings instead.`,
+      };
+    }
+
+    return blocks;
+  };
+
   const fetchVehicles = useCallback(async () => {
     setLoading(true);
     try {
@@ -568,7 +690,9 @@ export default function MyVehiclesPage() {
       if (error) {
         console.error("Fetch vehicles error:", error);
       } else if (data) {
-        setVehicles(data as unknown as VehicleRow[]);
+        const rows = data as unknown as VehicleRow[];
+        setVehicles(rows);
+        setDeleteBlocks(await loadDeleteBlocks(rows.map((row) => row.id)));
       }
     } catch (err) {
       console.error("Unexpected error fetching vehicles:", err);
@@ -1307,12 +1431,29 @@ export default function MyVehiclesPage() {
       toast.success("Vehicle deleted.", { id: toastId });
       fetchVehicles();
     } catch (error) {
+      // A Supabase error is a plain object, not an Error - so the old
+      // `error instanceof Error` test was never true, and the real reason was
+      // thrown away every single time in favour of a guess. Read the message
+      // off whatever shape arrives, and translate the one code this can
+      // realistically be into words the lister can act on.
+      const raw =
+        typeof error === "object" && error !== null && "message" in error
+          ? String((error as { message?: unknown }).message ?? "")
+          : error instanceof Error
+            ? error.message
+            : "";
+      const isForeignKeyViolation =
+        (typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          String((error as { code?: unknown }).code) === "23503") ||
+        raw.includes("violates foreign key constraint");
+
       toast.error("Failed to delete vehicle", {
         id: toastId,
-        description:
-          error instanceof Error
-            ? error.message
-            : "Check if the vehicle has bookings or try again.",
+        description: isForeignKeyViolation
+          ? "This car has bookings on record, so it cannot be deleted. Use Disable to take it off the listings instead."
+          : raw || "Please try again.",
       });
     } finally {
       setVehicleActionId(null);
@@ -2236,7 +2377,8 @@ export default function MyVehiclesPage() {
                       variant="destructive"
                       size="sm"
                       onClick={() => setDeleteTargetVehicle(v)}
-                      disabled={vehicleActionId === v.id}
+                      disabled={vehicleActionId === v.id || Boolean(deleteBlocks[v.id])}
+                      title={deleteBlocks[v.id]?.reason}
                       className="gap-2"
                     >
                       {vehicleActionId === v.id ? (
@@ -2247,6 +2389,14 @@ export default function MyVehiclesPage() {
                       Delete
                     </Button>
                   </div>
+                  {deleteBlocks[v.id] && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground">
+                        Cannot be deleted:
+                      </span>{" "}
+                      {deleteBlocks[v.id].reason}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             );
