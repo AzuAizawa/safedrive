@@ -10,6 +10,7 @@ import {
   getPayoutAccountNumberError as getServerPayoutAccountNumberError,
   PAYOUT_METHOD_RULES as SERVER_PAYOUT_METHOD_RULES,
 } from "../server/payoutAccount.ts";
+import { payoutReleaseState } from "../server/payoutAutomation.ts";
 
 import { isMissingTopicsColumn } from "../api/create-guest-inquiry.ts";
 import { isMissingResolvedAtColumn } from "../api/reply-guest-inquiry.ts";
@@ -308,5 +309,70 @@ test("typing into the account number field strips non-digits and caps at the des
   assert.equal(
     sanitizeClientPayoutAccountNumber("12345678901234567890", "BPI"),
     "1234567890123456",
+  );
+});
+
+test("a rental fee is not held hostage by a case about the car", () => {
+  const booking = (over = {}) => ({
+    status: "active",
+    dispute_status: "none",
+    dispute_reason: null,
+    owner_completed: false,
+    ...over,
+  });
+
+  // The ordinary trip: the lister confirmed receipt.
+  assert.equal(
+    payoutReleaseState(booking({ status: "completed", owner_completed: true })),
+    "release",
+  );
+
+  // The trip is simply still running.
+  assert.equal(payoutReleaseState(booking()), "not_ready");
+  assert.equal(
+    payoutReleaseState(booking({ status: "completed", owner_completed: false })),
+    "not_ready",
+  );
+
+  // The car never came back. The renter still had it for the days they paid
+  // for, and no outcome of the case refunds those days - so the fee is earned
+  // and the lister, who is usually paying for a police report or a tow out of
+  // pocket, gets it. Every reason a lister can file behaves the same way.
+  for (const reason of [
+    "renter_unreachable",
+    "stolen_or_missing",
+    "accident_or_breakdown",
+    "other",
+    null, // the overstay path files a case with no reason at all
+  ]) {
+    assert.equal(
+      payoutReleaseState(booking({ dispute_status: "open", dispute_reason: reason })),
+      "release",
+      `an open case (${reason ?? "no reason"}) must not hold the earned rental`,
+    );
+  }
+
+  // The renter reporting that the lister never came to take the car back is
+  // not a reason to hold either: the renter had the car for every day they
+  // paid for, so nothing is owed back to them. The incident ticket already
+  // tells admins the trip "will auto-complete with payout if the lister
+  // remains unresponsive" - holding the money contradicted that promise.
+  assert.equal(
+    payoutReleaseState(
+      booking({ dispute_status: "open", dispute_reason: "lister_no_show_at_return" }),
+    ),
+    "release",
+  );
+
+  // The situations that CAN owe the renter money - no car at pickup, renter
+  // no-show at pickup - cancel the booking rather than leaving it running, so
+  // they are held by status alone and never depend on the case flag.
+  assert.equal(
+    payoutReleaseState(booking({ status: "cancelled", dispute_status: "open" })),
+    "not_ready",
+  );
+  assert.equal(
+    payoutReleaseState(booking({ status: "fully_paid", dispute_status: "open" })),
+    "not_ready",
   );
 });

@@ -1117,24 +1117,6 @@ export default function MyVehiclesPage() {
       return;
     }
 
-    // A car with an unresolved non-return / incident case stays locked until
-    // SafeDrive support closes it. Separate query so a pre-CHAPTER-31 deploy
-    // degrades to "no lock".
-    const { data: openCase } = await supabase
-      .from("bookings")
-      .select("id")
-      .eq("car_id", vehicle.id)
-      .eq("dispute_status", "open")
-      .limit(1)
-      .maybeSingle();
-    if (openCase) {
-      toast.error("This listing is locked", {
-        description:
-          "An open incident case is still being reviewed by SafeDrive support. You can re-enable the listing once it is resolved.",
-      });
-      return;
-    }
-
     setVehicleActionId(vehicle.id);
     const toastId = toast.loading("Enabling vehicle listing...");
     try {

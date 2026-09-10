@@ -54,7 +54,11 @@ export const canReportNonReturn = (
   now = new Date(),
 ) => {
   if (booking.status !== "active") return false;
-  if (booking.renter_completed || booking.owner_completed) return false;
+  // Deliberately not booking.renter_completed: the renter marking the car
+  // returned is their claim, not proof, and it must not close the only route
+  // the lister has for saying the car never came back. Mirrors the server
+  // guard in api/booking-incident-action.ts.
+  if (booking.owner_completed) return false;
   if ((booking.dispute_status ?? "none") !== "none") return false;
   const deadline = getOperativeReturnDeadline(
     booking,

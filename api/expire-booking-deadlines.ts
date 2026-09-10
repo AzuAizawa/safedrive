@@ -10,6 +10,7 @@ import {
   type RefundableBooking,
 } from "../server/cancellationRefundPlan.js";
 import { sendUserNotificationEmail } from "../server/email.js";
+import { processAutomaticPayoutForBooking } from "../server/payoutAutomation.js";
 import { vehicleGuardMessage } from "../server/vehicleCompliance.js";
 
 
@@ -794,19 +795,16 @@ export default async function handler(req: Request) {
     const { data: returnNoShowCandidates, error: returnNoShowError } = await supabase
       .from("bookings")
       .select(
-        "id, renter_id, owner_id, end_date, dropoff_time, renter_return_arrived_at, lister_return_arrived_at, cars(plate_number, car_models(name, car_brands(name)))",
+        "id, renter_id, owner_id, end_date, dropoff_time, renter_return_arrived_at, lister_return_arrived_at, renter_completed, cars(plate_number, car_models(name, car_brands(name)))",
       )
       .eq("status", "active")
       .is("return_no_show_reminder_sent_at", null)
-      .or("renter_return_arrived_at.not.is.null,lister_return_arrived_at.not.is.null")
+      .or("dispute_status.neq.open,dispute_reason.eq.lister_no_show_at_return")
       .limit(200);
     if (returnNoShowError) throw returnNoShowError;
 
-    // This sweep only ever reaches a booking where exactly one side has
-    // arrived (below), so a fallback to the original instant can never
-    // apply here (the fallback only triggers when NEITHER side has arrived)
-    // - only "prefer the approved early instant over the original" matters,
-    // batch-fetched once for the whole candidate set rather than per-row.
+    // Prefer an approved early-return instant over the original, batch-fetched
+    // once for the whole candidate set rather than per-row.
     const returnNoShowCandidateIds = (returnNoShowCandidates ?? []).map((b) => b.id);
     const { data: approvedEarlyReturnRows } = returnNoShowCandidateIds.length
       ? await supabase
@@ -838,11 +836,13 @@ export default async function handler(req: Request) {
       dropoff_time: string | null;
       renter_return_arrived_at: string | null;
       lister_return_arrived_at: string | null;
+      renter_completed: boolean;
       cars: { plate_number: string; car_models: { name: string; car_brands: { name: string } } } | null;
     }>) {
-      const onlyOneArrived =
-        Boolean(booking.renter_return_arrived_at) !== Boolean(booking.lister_return_arrived_at);
-      if (!onlyOneArrived) continue;
+      // A renter who has already said "I returned it" has armed the
+      // lister-completion timeout; that clock will finish this trip on its
+      // own, so a second nudge here would only be noise.
+      if (booking.renter_completed) continue;
 
       const approvedEarly = approvedEarlyReturnByBooking.get(booking.id);
       const dropoffMs = approvedEarly
@@ -862,36 +862,381 @@ export default async function handler(req: Request) {
       if (!claimed) continue;
 
       const vehicleLabel = getVehicleLabel(booking as unknown as RefundableBooking);
-      const arrivedIsRenter = Boolean(booking.renter_return_arrived_at);
-      const returnNoShowUserId = arrivedIsRenter ? booking.renter_id : booking.owner_id;
-      const returnNoShowTitle = "The other party hasn't shown up";
-      const returnNoShowMessage = arrivedIsRenter
-        ? `You arrived to return ${vehicleLabel}, but the lister hasn't shown up yet. If they don't arrive, you can report a no-show from the booking.`
-        : `You arrived to receive ${vehicleLabel}, but the renter hasn't shown up yet. If they don't arrive, you can report this from the booking.`;
-      const returnNoShowLink = arrivedIsRenter ? "/my-bookings" : "/lister-bookings";
-      await supabase.from("notifications").insert({
-        user_id: returnNoShowUserId,
-        title: returnNoShowTitle,
-        message: returnNoShowMessage,
-        type: "warning",
-        link: returnNoShowLink,
-      });
-      await sendUserNotificationEmail(supabase, {
-        userId: returnNoShowUserId,
-        title: returnNoShowTitle,
-        message: returnNoShowMessage,
-        link: returnNoShowLink,
-        baseOrigin,
-        eventKey: `return-no-show-${arrivedIsRenter ? "renter" : "owner"}:${booking.id}`,
-      });
+      const renterArrived = Boolean(booking.renter_return_arrived_at);
+      const listerArrived = Boolean(booking.lister_return_arrived_at);
+
+      // Who still has a tap to make decides who hears about it. The lister is
+      // named whenever the trip cannot close without them, because confirming
+      // receipt is what releases their own payout.
+      const recipients: Array<{ userId: string; title: string; message: string; link: string; key: string }> = [];
+      if (renterArrived && !listerArrived) {
+        recipients.push({
+          userId: booking.renter_id,
+          title: "The lister hasn't shown up",
+          message: `You arrived to return ${vehicleLabel}, but the lister hasn't checked in yet. You can still tap "Car Returned" to record your side. If they never arrive, report a no-show from the booking.`,
+          link: "/my-bookings",
+          key: "renter",
+        });
+      } else if (listerArrived && !renterArrived) {
+        recipients.push({
+          userId: booking.owner_id,
+          title: "Finish the return to release your payout",
+          message: `You checked in to receive ${vehicleLabel}, but the trip is still open. Submit your return report and tap "Confirm - Car Received" - you do not need the renter to check in. If the car was never returned, report that instead.`,
+          link: "/lister-bookings",
+          key: "owner",
+        });
+      } else if (renterArrived && listerArrived) {
+        recipients.push({
+          userId: booking.owner_id,
+          title: "Finish the return to release your payout",
+          message: `You and the renter both checked in for ${vehicleLabel}, but the trip is still open. Submit your return report and tap "Confirm - Car Received" to close it and release your payout.`,
+          link: "/lister-bookings",
+          key: "owner",
+        });
+      } else {
+        // Neither tapped. Previously this sweep skipped exactly this case, so
+        // the one situation where nobody was going to act on their own was
+        // also the only one nobody was told about. The car is usually already
+        // back and both simply forgot; the trip cannot close, and the lister's
+        // payout waits behind it.
+        recipients.push({
+          userId: booking.owner_id,
+          title: "Finish the return to release your payout",
+          message: `The return time for ${vehicleLabel} has passed and neither of you confirmed it. If you have the car back, tap "I Have Arrived", submit your return report, then "Confirm - Car Received" to close the trip and release your payout. If the car was never returned, report that instead.`,
+          link: "/lister-bookings",
+          key: "owner",
+        });
+        recipients.push({
+          userId: booking.renter_id,
+          title: "Your trip is still open",
+          message: `The return time for ${vehicleLabel} has passed and the trip was never closed. If you already returned the car, tap "I Have Arrived" and then "Car Returned" so it is on record.`,
+          link: "/my-bookings",
+          key: "renter",
+        });
+      }
+
+      for (const recipient of recipients) {
+        await supabase.from("notifications").insert({
+          user_id: recipient.userId,
+          title: recipient.title,
+          message: recipient.message,
+          type: "warning",
+          link: recipient.link,
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: recipient.userId,
+          title: recipient.title,
+          message: recipient.message,
+          link: recipient.link,
+          baseOrigin,
+          eventKey: `return-no-show-${recipient.key}:${booking.id}`,
+        });
+      }
       await supabase.from("audit_log").insert({
         user_id: null,
         action: "return_no_show_reminder_sent",
         entity_type: "booking",
         entity_id: booking.id,
-        details: { automated: true, arrived_side: arrivedIsRenter ? "renter" : "lister" },
+        details: {
+          automated: true,
+          renter_arrived: renterArrived,
+          lister_arrived: listerArrived,
+          notified: recipients.map((r) => r.key),
+        },
       });
       returnNoShowReminderSent += 1;
+    }
+
+    // --- Return auto-completion: the last resort for a trip nobody closed.
+    //
+    // A renter who has already driven away has nothing left to gain from
+    // opening the app, and until this existed the lister's payout sat behind
+    // that renter's tap indefinitely. Relaxing the completion gates fixed the
+    // common case - a lister who is paying attention can now finish alone -
+    // but it cannot help a lister who is also not looking. This is that case.
+    //
+    // What makes it safe to pay without anyone confirming: reaching 'active'
+    // at all required the full pickup handshake, so the car demonstrably left
+    // with the renter, and the only open question is whether it came back.
+    // Exactly one person knows the answer, and they have a button for saying
+    // it did not - report_non_return, open to them from the return deadline,
+    // which sets dispute_status to open. Silence from the one party who would
+    // object, after being told, is taken as agreement.
+    //
+    // Deliberately unreachable unless the reminder above has been sent: no
+    // trip is closed on a timer its owner was never warned about.
+    const RETURN_AUTO_COMPLETE_HOURS = 24;
+    const { data: returnAutoCandidates, error: returnAutoError } = await supabase
+      .from("bookings")
+      .select(
+        "id, renter_id, owner_id, commission, end_date, dropoff_time, return_no_show_reminder_sent_at, cars(plate_number, car_models(name, car_brands(name)))",
+      )
+      .eq("status", "active")
+      .eq("owner_completed", false)
+      .or("dispute_status.neq.open,dispute_reason.eq.lister_no_show_at_return")
+      .not("return_no_show_reminder_sent_at", "is", null)
+      .limit(100);
+    if (returnAutoError) throw returnAutoError;
+
+    const returnAutoIds = (returnAutoCandidates ?? []).map((b) => b.id);
+    // An unresolved extension moves the very end date this sweep measures
+    // from, and api/booking-action.ts refuses completion while one is open.
+    // Refuse it here too, rather than letting a timer do what a person is
+    // forbidden to do.
+    const { data: openExtensionRows } = returnAutoIds.length
+      ? await supabase
+          .from("booking_extensions")
+          .select("booking_id")
+          .in("booking_id", returnAutoIds)
+          .in("status", ["pending", "approved"])
+      : { data: [] as { booking_id: string }[] };
+    const blockedByExtension = new Set((openExtensionRows ?? []).map((row) => row.booking_id));
+
+    const { data: autoEarlyReturnRows } = returnAutoIds.length
+      ? await supabase
+          .from("booking_early_returns")
+          .select("booking_id, requested_end_date, requested_end_time, approved_at")
+          .eq("status", "approved")
+          .in("booking_id", returnAutoIds)
+          .order("approved_at", { ascending: false })
+      : { data: [] as { booking_id: string; requested_end_date: string; requested_end_time: string }[] };
+    const autoEarlyReturnByBooking = new Map<string, { requested_end_date: string; requested_end_time: string }>();
+    for (const early of autoEarlyReturnRows ?? []) {
+      if (!autoEarlyReturnByBooking.has(early.booking_id)) {
+        autoEarlyReturnByBooking.set(early.booking_id, early);
+      }
+    }
+
+    let returnAutoCompleted = 0;
+    for (const booking of (returnAutoCandidates ?? []) as unknown as Array<{
+      id: string;
+      renter_id: string;
+      owner_id: string;
+      commission: number;
+      end_date: string;
+      dropoff_time: string | null;
+      return_no_show_reminder_sent_at: string;
+      cars: { plate_number: string; car_models: { name: string; car_brands: { name: string } } } | null;
+    }>) {
+      if (blockedByExtension.has(booking.id)) continue;
+
+      const approvedEarly = autoEarlyReturnByBooking.get(booking.id);
+      const autoDropoffMs = approvedEarly
+        ? getInstantMs(approvedEarly.requested_end_date, approvedEarly.requested_end_time)
+        : getInstantMs(booking.end_date, booking.dropoff_time);
+      if (autoDropoffMs === null) continue;
+
+      // Measured from the deadline AND from the reminder, whichever lands
+      // later, so a reminder that went out late cannot shorten the window.
+      const deadlineDue =
+        autoDropoffMs + returnNoShowGraceMinutes * 60_000 + RETURN_AUTO_COMPLETE_HOURS * 3_600_000;
+      const reminderDue =
+        new Date(booking.return_no_show_reminder_sent_at).getTime() +
+        RETURN_AUTO_COMPLETE_HOURS * 3_600_000;
+      if (Date.now() < Math.max(deadlineDue, reminderDue)) continue;
+
+      const { data: autoCompleted, error: autoCompleteError } = await supabase
+        .from("bookings")
+        .update({
+          owner_completed: true,
+          owner_completed_at: new Date().toISOString(),
+          status: "completed",
+          // A lister-no-show case is about the handover, and completing the
+          // trip is the handover being settled. Nothing else in SafeDrive
+          // writes 'resolved', so without this the case would outlive the
+          // booking it describes.
+          dispute_status: "resolved",
+        })
+        .eq("id", booking.id)
+        .eq("status", "active")
+        .eq("owner_completed", false)
+        // Re-checked at claim time: the lister may have filed
+        // report_non_return between the select above and this update, and
+        // that has to win.
+        .neq("dispute_status", "open")
+        .select("id")
+        .maybeSingle();
+      if (autoCompleteError) throw autoCompleteError;
+      if (!autoCompleted) continue;
+
+      const autoVehicleLabel = getVehicleLabel(booking as unknown as RefundableBooking);
+      await supabase.from("audit_log").insert({
+        user_id: null,
+        action: "return_auto_completed_after_deadline",
+        entity_type: "booking",
+        entity_id: booking.id,
+        details: {
+          automated: true,
+          hours_after_deadline: RETURN_AUTO_COMPLETE_HOURS,
+          grace_minutes: returnNoShowGraceMinutes,
+        },
+      });
+
+      const autoOwnerTitle = "Trip closed and payout released";
+      const autoOwnerMessage = `No one confirmed the return of ${autoVehicleLabel}, so the trip was closed ${RETURN_AUTO_COMPLETE_HOURS} hours after the return deadline and your payout was released. No return report was filed, so there is no record of the condition of the car at handback - file one at the return next time if you may need to claim damage.`;
+      const autoRenterTitle = "Trip closed";
+      const autoRenterMessage = `Your trip with ${autoVehicleLabel} was closed automatically because neither side confirmed the return. If you have not actually returned the car, contact support now.`;
+      await supabase.from("notifications").insert([
+        {
+          user_id: booking.owner_id,
+          title: autoOwnerTitle,
+          message: autoOwnerMessage,
+          type: "warning",
+          link: "/lister-bookings",
+        },
+        {
+          user_id: booking.renter_id,
+          title: autoRenterTitle,
+          message: autoRenterMessage,
+          type: "info",
+          link: "/my-bookings",
+        },
+      ]);
+      await sendUserNotificationEmail(supabase, {
+        userId: booking.owner_id,
+        title: autoOwnerTitle,
+        message: autoOwnerMessage,
+        link: "/lister-bookings",
+        baseOrigin,
+        eventKey: `return-auto-complete-owner:${booking.id}`,
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: booking.renter_id,
+        title: autoRenterTitle,
+        message: autoRenterMessage,
+        link: "/my-bookings",
+        baseOrigin,
+        eventKey: `return-auto-complete-renter:${booking.id}`,
+      });
+      await runBookingCompletionSideEffects(
+        supabase,
+        {
+          id: booking.id,
+          owner_id: booking.owner_id,
+          renter_id: booking.renter_id,
+          commission: booking.commission,
+        },
+        { initiatedByUserId: null, baseOrigin: new URL(req.url).origin },
+      );
+      returnAutoCompleted += 1;
+    }
+
+    // --- Earned rental on a vehicle that was never brought back.
+    //
+    // The trip does NOT complete here and the case stays open - the car is
+    // still missing and that is not settled by a timer. Only the money moves.
+    //
+    // Why it moves at all: the renter had the car for the days they paid for,
+    // and no outcome of a non-return case refunds those days to them. The fee
+    // is not the contested thing; the vehicle is, and SafeDrive is not holding
+    // the vehicle. Meanwhile the lister is usually paying for a police report,
+    // an insurance claim or a tow out of pocket, and this is the one sum they
+    // were counting on. Holding it protected nobody.
+    //
+    // Not tied to the case being closed, deliberately: a lister cannot close a
+    // case about a car that is genuinely still gone, so that condition would
+    // have starved them in exactly the situation this exists for.
+    const { data: unreturnedPayoutCandidates, error: unreturnedPayoutError } = await supabase
+      .from("bookings")
+      .select(
+        "id, renter_id, owner_id, end_date, dropoff_time, dispute_reason, cars(plate_number, car_models(name, car_brands(name))), payments(payment_type, status)",
+      )
+      .eq("status", "active")
+      .eq("dispute_status", "open")
+      .limit(50);
+    if (unreturnedPayoutError) throw unreturnedPayoutError;
+
+    const unreturnedIds = (unreturnedPayoutCandidates ?? []).map((b) => b.id);
+    const { data: unreturnedEarlyRows } = unreturnedIds.length
+      ? await supabase
+          .from("booking_early_returns")
+          .select("booking_id, requested_end_date, requested_end_time, approved_at")
+          .eq("status", "approved")
+          .in("booking_id", unreturnedIds)
+          .order("approved_at", { ascending: false })
+      : { data: [] as { booking_id: string; requested_end_date: string; requested_end_time: string }[] };
+    const unreturnedEarlyByBooking = new Map<string, { requested_end_date: string; requested_end_time: string }>();
+    for (const early of unreturnedEarlyRows ?? []) {
+      if (!unreturnedEarlyByBooking.has(early.booking_id)) {
+        unreturnedEarlyByBooking.set(early.booking_id, early);
+      }
+    }
+
+    let unreturnedPayoutReleased = 0;
+    for (const booking of (unreturnedPayoutCandidates ?? []) as unknown as Array<{
+      id: string;
+      renter_id: string;
+      owner_id: string;
+      end_date: string;
+      dropoff_time: string | null;
+      dispute_reason: string | null;
+      cars: { plate_number: string; car_models: { name: string; car_brands: { name: string } } } | null;
+      payments: { payment_type: string; status: string }[] | null;
+    }>) {
+      // A case the renter raised - the lister never came to take the car back -
+      // can end with money owed to the renter, and a disbursement cannot be
+      // recalled. That one waits for a human.
+      if (booking.dispute_reason === "lister_no_show_at_return") continue;
+
+      // Filtered here rather than re-read per booking: the payout call is
+      // idempotent, but without this a permanently open case would be polled
+      // on every run forever.
+      const alreadyPaid = (booking.payments ?? []).some(
+        (payment) => payment.payment_type === "payout" && payment.status === "completed",
+      );
+      if (alreadyPaid) continue;
+
+      const approvedEarly = unreturnedEarlyByBooking.get(booking.id);
+      const unreturnedDropoffMs = approvedEarly
+        ? getInstantMs(approvedEarly.requested_end_date, approvedEarly.requested_end_time)
+        : getInstantMs(booking.end_date, booking.dropoff_time);
+      if (unreturnedDropoffMs === null) continue;
+      if (
+        Date.now() <
+        unreturnedDropoffMs + returnNoShowGraceMinutes * 60_000 + RETURN_AUTO_COMPLETE_HOURS * 3_600_000
+      ) {
+        continue;
+      }
+
+      const payoutOutcome = await processAutomaticPayoutForBooking({
+        supabase,
+        bookingId: booking.id,
+        initiatedByUserId: null,
+        baseOrigin: new URL(req.url).origin,
+      });
+      if (payoutOutcome.state === "skipped") continue;
+
+      const unreturnedLabel = getVehicleLabel(booking as unknown as RefundableBooking);
+      const unreturnedTitle = "Your rental earnings have been released";
+      const unreturnedMessage = `The case for ${unreturnedLabel} is still open, but the rental itself was already earned - the renter paid for the days they had the car. That amount, net of commission, is on its way to your payout method. The case stays open and SafeDrive support is still working it; releasing this does not settle anything about the vehicle.`;
+      await supabase.from("notifications").insert({
+        user_id: booking.owner_id,
+        title: unreturnedTitle,
+        message: unreturnedMessage,
+        type: "info",
+        link: "/lister-bookings",
+      });
+      await sendUserNotificationEmail(supabase, {
+        userId: booking.owner_id,
+        title: unreturnedTitle,
+        message: unreturnedMessage,
+        link: "/lister-bookings",
+        baseOrigin,
+        eventKey: `unreturned-payout:${booking.id}`,
+      });
+      await supabase.from("audit_log").insert({
+        user_id: null,
+        action: "unreturned_vehicle_payout_released",
+        entity_type: "booking",
+        entity_id: booking.id,
+        details: {
+          automated: true,
+          dispute_reason: booking.dispute_reason,
+          hours_after_deadline: RETURN_AUTO_COMPLETE_HOURS,
+          note: "Booking deliberately left active with the case open; only the earned rental was released.",
+        },
+      });
+      unreturnedPayoutReleased += 1;
     }
 
     // --- Extension response deadline: the lister never approved or rejected
@@ -1066,6 +1411,8 @@ export default async function handler(req: Request) {
       handoverAutoActivated,
       handoverStallFlagged,
       returnNoShowReminderSent,
+      returnAutoCompleted,
+      unreturnedPayoutReleased,
       extensionRequestExpired,
       extensionPaymentExpired,
     });

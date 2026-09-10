@@ -1531,15 +1531,15 @@ export default function MyBookingsPage() {
         if (!booking.lister_return_arrived_at) {
           return {
             tone,
-            title: "Wait for the lister to arrive at the return",
-            body: "Your check-in is recorded. If they do not arrive after the grace window, report a no-show.",
+            title: "Mark the car returned",
+            body: 'Your check-in is recorded. You can tap "Car Returned" now - the lister does not have to check in first. If they never arrive, report a no-show after the grace window.',
           };
         }
         if (!booking.owner_completed) {
           return {
             tone,
-            title: "Waiting for the lister to confirm receipt",
-            body: "You're both at the return point. The lister needs to submit their return photos and confirm receipt before you can finish.",
+            title: "Mark the car returned",
+            body: 'You\'re both at the return point. Tap "Car Returned" to record your side - you do not have to wait for the lister to confirm receipt.',
           };
         }
         return {
@@ -2913,16 +2913,18 @@ export default function MyBookingsPage() {
                                     I Have Arrived
                                   </Button>
                                 ) : !booking.renter_return_arrived_at ||
-                                  !booking.lister_return_arrived_at ||
                                   booking.renter_completed ? null : (
                                   // The renter's half of the return handshake.
                                   // It used to wait for booking.owner_completed,
                                   // which made it unreachable: the lister's
                                   // confirmation completed the booking outright,
                                   // and a completed booking rejects this call.
-                                  // Now it opens as soon as both sides have
-                                  // checked in at the return, so the renter can
-                                  // go first - which is also what arms the
+                                  // It then waited for the lister's return
+                                  // check-in, which stalled a renter standing
+                                  // in front of a lister who had not tapped.
+                                  // Their own check-in is the only thing they
+                                  // control, so it is the only thing asked of
+                                  // them - and going first is what arms the
                                   // lister-unresponsive safety net.
                                   <Button
                                     size="sm"

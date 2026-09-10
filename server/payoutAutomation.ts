@@ -18,6 +18,8 @@ type PaymentRecord = {
 type BookingForPayout = {
   id: string;
   status: string;
+  dispute_status: string | null;
+  dispute_reason: string | null;
   owner_completed: boolean;
   renter_completed: boolean;
   base_price: number;
@@ -91,6 +93,44 @@ const PAYOUT_CALLBACK_PATH = "/api/webhooks/paymongo-payouts";
 const jsonHeaders = {
   Accept: "application/json",
   "Content-Type": "application/json",
+};
+
+
+/**
+ * Whether a booking's rental fee may be paid out to the lister.
+ *
+ * - "release"   pay it
+ * - "hold"      an open case that could end with money owed to the renter
+ * - "not_ready" the trip simply is not finished
+ */
+export type PayoutReleaseState = "release" | "not_ready";
+export const payoutReleaseState = (booking: {
+  status: string;
+  dispute_status?: string | null;
+  dispute_reason?: string | null;
+  owner_completed: boolean;
+}): PayoutReleaseState => {
+  const caseOpen = (booking.dispute_status ?? "none") === "open";
+
+  // The ordinary path: the lister confirmed receipt, which completes the trip.
+  if (booking.status === "completed" && booking.owner_completed) return "release";
+
+  // An open case on a running trip. The rental fee is still earned - the
+  // renter had the car for the days they paid for, and no outcome of any such
+  // case refunds those days to them. The contested thing is the vehicle, which
+  // SafeDrive is not holding. Withholding the fee protects nobody and starves
+  // the lister exactly when a stolen or wrecked car is costing them money
+  // elsewhere.
+  //
+  // Deliberately not conditioned on the case being closed: a lister cannot
+  // close a case about a car that is genuinely still missing.
+  //
+  // The cases that CAN end in a refund - no car at pickup, renter no-show at
+  // pickup - cancel the booking instead, so they never reach this line and are
+  // held by the fall-through below.
+  if (booking.status === "active" && caseOpen) return "release";
+
+  return "not_ready";
 };
 
 const getVehicleLabel = (booking: BookingForPayout) =>
@@ -585,6 +625,8 @@ export const processAutomaticPayoutForBooking = async ({
       `
       id,
       status,
+      dispute_status,
+      dispute_reason,
       owner_completed,
       renter_completed,
       base_price,
@@ -623,8 +665,13 @@ export const processAutomaticPayoutForBooking = async ({
   // rejected because it only accepts fully_paid/active - so the flag could
   // never be set afterwards. The lister was emailed "your payout is being
   // processed" and then nothing moved, on every trip.
-  if (payoutBooking.status !== "completed" || !payoutBooking.owner_completed) {
-    return { state: "skipped", bookingId, reason: "Booking is not fully completed yet." };
+  const releaseState = payoutReleaseState(payoutBooking);
+  if (releaseState !== "release") {
+    return {
+      state: "skipped",
+      bookingId,
+      reason: "Booking is not fully completed yet.",
+    };
   }
 
 

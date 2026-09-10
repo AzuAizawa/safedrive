@@ -1571,7 +1571,7 @@ export default async function handler(req: Request) {
         : "Lister Arrived for Return";
       const returnArrivalMessage = renter
         ? `The renter arrived to return ${getVehicleLabel(bookingRecord)}. Confirm your own arrival, then inspect the vehicle and submit your return photos.`
-        : `The lister arrived to receive ${getVehicleLabel(bookingRecord)}. Confirm your own arrival so the return can proceed.`;
+        : `The lister arrived to receive ${getVehicleLabel(bookingRecord)}. Confirm your own arrival so it is on record that you were there.`;
       await supabase.from("notifications").insert({
         user_id: returnCounterpartyId,
         title: returnArrivalTitle,
@@ -1688,14 +1688,22 @@ export default async function handler(req: Request) {
       // blocker. The renter can complete any time after arrival with no
       // report requirement at all.
       if (owner) {
+        // Only the lister's own check-in, deliberately - NOT the renter's.
+        // At pickup a two-sided handshake is the only proof the car changed
+        // hands, so that one stays. At the return it proves nothing the
+        // lister has not already asserted: they are holding the car and
+        // filing photos of it. Requiring the renter's tap here handed a
+        // renter who had already driven off, and had nothing left to gain,
+        // a veto over the lister's payout - which is released by this very
+        // confirmation. A renter who never taps again cannot be made to.
         if (
           bookingRecord.status === "active" &&
-          (!bookingRecord.renter_return_arrived_at || !bookingRecord.lister_return_arrived_at)
+          !bookingRecord.lister_return_arrived_at
         ) {
           return jsonResponse(
             {
               error:
-                "Both you and the renter must confirm arrival at the return before you can confirm receipt.",
+                "Confirm your own arrival at the return before you can confirm receipt.",
             },
             409,
           );
@@ -1733,18 +1741,18 @@ export default async function handler(req: Request) {
             409,
           );
         }
-        // Their half of the return handshake, so it needs the return to have
-        // actually happened - both sides checked in - not just the pickup
-        // arrival. Mirrors the lister guard above.
+        // Their own check-in only, mirroring the lister guard above. A
+        // renter waiting on a lister who has not tapped yet can still record
+        // that they handed the car back; the lister's silence is then the
+        // lister-completion timeout's problem, not a wall for the renter.
         if (
           bookingRecord.status === "active" &&
-          (!bookingRecord.renter_return_arrived_at ||
-            !bookingRecord.lister_return_arrived_at)
+          !bookingRecord.renter_return_arrived_at
         ) {
           return jsonResponse(
             {
               error:
-                "Both you and the lister must confirm arrival at the return before you can mark the car returned.",
+                "Confirm your arrival at the return before you can mark the car returned.",
             },
             409,
           );

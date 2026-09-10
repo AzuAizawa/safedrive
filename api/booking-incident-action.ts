@@ -664,7 +664,7 @@ export default async function handler(req: Request) {
           409,
         );
       }
-      if (b.renter_completed || b.owner_completed) {
+      if (b.owner_completed) {
         return jsonResponse(
           { error: "This trip is already being completed." },
           409,

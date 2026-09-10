@@ -1333,17 +1333,12 @@ export default function ListerBookingsPage() {
             body: 'Tap "I Have Arrived" once you\'re at the agreed return location.',
           };
         }
-        if (!booking.renter_return_arrived_at) {
-          return {
-            tone,
-            title: "Wait for the renter to arrive at the return",
-            body: "Your check-in is recorded. You'll be notified once the renter arrives.",
-          };
-        }
         return {
           tone,
           title: "Confirm the car was received",
-          body: 'You\'re both at the return point. Submit your return report with live photos, then tap "Confirm - Car Received".',
+          body: booking.renter_return_arrived_at
+            ? 'You\'re both at the return point. Submit your return report with live photos, then tap "Confirm - Car Received".'
+            : 'Submit your return report with live photos, then tap "Confirm - Car Received". You do not need to wait for the renter to check in.',
         };
       }
 
@@ -3534,22 +3529,6 @@ export default function ListerBookingsPage() {
                               <p className="text-[10px] text-muted-foreground text-right leading-tight">
                                 Tap "I Have Arrived" once you're at the agreed return location.
                               </p>
-                            </div>
-                          ) : apparentState === "active" && !b.renter_return_arrived_at ? (
-                            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-left text-[11px] leading-relaxed text-muted-foreground">
-                              <p>Waiting for the renter to arrive at the return point. You can still submit your return report while you wait.</p>
-                              <div className="mt-1.5 text-right">
-                                <Button
-                                  size="sm"
-                                  variant={ownReportsByBooking[b.id]?.return ? "ghost" : "outline"}
-                                  className={ownReportsByBooking[b.id]?.return ? "gap-1 text-green-600" : undefined}
-                                  onClick={() => navigate(`/trip-report/${b.id}/return`)}
-                                  disabled={Boolean(ownReportsByBooking[b.id]?.return)}
-                                >
-                                  {ownReportsByBooking[b.id]?.return && <CheckCircle2 className="w-3.5 h-3.5" />}
-                                  {ownReportsByBooking[b.id]?.return ? "Return report (submitted)" : "Submit return report"}
-                                </Button>
-                              </div>
                             </div>
                           ) : apparentState !== "active" ? (
                             // Every branch above is gated on "active", so a

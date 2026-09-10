@@ -245,8 +245,18 @@ const checks = [
       "renter_return_arrived_at",
       "lister_return_arrived_at",
       "bothArrivedForReturn",
+      // The return leg asks each side only for their own check-in: a renter
+      // who has driven off must never be able to withhold the lister's payout.
+      "Confirm your own arrival at the return before you can confirm receipt.",
+      // The pickup handshake is deliberately NOT relaxed - it is the only
+      // proof the car changed hands.
+      "Both you and the renter must confirm arrival before handing over the car",
     ],
-    absentMarkers: ["confirmOnBehalfOfRenter"],
+    absentMarkers: [
+      "confirmOnBehalfOfRenter",
+      "Both you and the renter must confirm arrival at the return",
+      "Both you and the lister must confirm arrival at the return",
+    ],
   },
   {
     // "I've Returned the Car" was renamed to "I Have Arrived" - the return
@@ -386,7 +396,21 @@ const checks = [
       "balance payment deadline missed",
       "booking_early_return_expired",
       "earlyReturnExpired",
+      // The return reminder must reach a booking where NEITHER side checked
+      // in - the case the old onlyOneArrived filter silently skipped, and the
+      // only one where nobody was ever going to act unprompted.
+      "return_no_show_reminder_sent",
+      "Finish the return to release your payout",
+      // Last resort once the reminder has been sent and still nothing moved.
+      "RETURN_AUTO_COMPLETE_HOURS",
+      "return_auto_completed_after_deadline",
+      // Releases the earned rental WITHOUT completing the trip or closing the
+      // case - the vehicle is still missing and a timer does not settle that.
+      "unreturned_vehicle_payout_released",
+      "processAutomaticPayoutForBooking",
+      "Booking deliberately left active with the case open",
     ],
+    absentMarkers: ["onlyOneArrived"],
   },
   {
     file: "api/expire-platform-setting-changes.ts",
@@ -431,6 +455,14 @@ const checks = [
       "Fuel / charge reimbursements from paid trip extensions",
       "sendAdminAlertEmail",
       "payout-failed:${paymentRecord.id}",
+      // The rental fee is earned by the days the renter had the car, so a case
+      // about the CAR must not hold it. The single exception is a case the
+      // renter raised, which can end with money owed back to them.
+      // The decision lives in a pure function so scripts/process-logic.test.mjs
+      // can assert the answer, not just the presence of the words - a marker
+      // check cannot tell a working rule from a broken one.
+      "export const payoutReleaseState",
+      "The contested thing is the vehicle",
     ],
   },
   {
