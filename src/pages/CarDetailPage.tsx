@@ -1053,42 +1053,6 @@ export default function CarDetailPage() {
                     <p className="mt-1 text-xs opacity-90">{licenceGateReason}</p>
                   </div>
                 )}
-                <div className="rounded-lg border border-border/60 bg-muted/30 p-3 space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1">
-                    <Calendar className="w-3 h-3" /> Availability guide
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-2 text-xs">
-                    <div className="flex items-start gap-2">
-                      <span className="mt-0.5 h-3 w-3 rounded-sm bg-red-500/20 ring-1 ring-red-500/30" />
-                      <div>
-                        <p className="font-medium text-red-500">Red dates</p>
-                        <p className="text-muted-foreground">Already booked or conflicting with another reservation.</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="mt-0.5 h-3 w-3 rounded-sm bg-amber-500/20 ring-1 ring-amber-500/30" />
-                      <div>
-                        <p className="font-medium text-amber-600 dark:text-amber-400">Amber dates</p>
-                        <p className="text-muted-foreground">Owner marked the car unavailable (maintenance or personal use).</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="mt-0.5 h-3 w-3 rounded-sm bg-muted ring-1 ring-border" />
-                      <div>
-                        <p className="font-medium text-foreground">Gray dates</p>
-                        <p className="text-muted-foreground">Outside the allowed booking window.</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="mt-0.5 h-3 w-3 rounded-sm bg-primary/20 ring-1 ring-primary/30" />
-                      <div>
-                        <p className="font-medium text-primary">Selectable dates</p>
-                        <p className="text-muted-foreground">Trips can start as early as tomorrow and up to {MAX_ADVANCE_BOOKING_DAYS} days out. A single trip can run up to {MAX_TOTAL_RENTAL_DAYS} days.</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
               <div
                 className={`booking-calendar flex min-h-[300px] justify-center overflow-x-auto overflow-y-hidden rounded-xl border border-border/60 bg-card/70 p-3 shadow-sm sm:min-h-[350px] ${licenceGateReason ? "opacity-50 grayscale" : ""}`}
               >
@@ -1098,23 +1062,9 @@ export default function CarDetailPage() {
                   onSelect={setDateRange}
                   disabled={licenceGateReason ? true : disabledDays}
                   min={1}
-                  modifiers={{
-                    booked: bookedDayRanges,
-                    blackout: blackoutDayRanges,
-                    unavailableWindow: availabilityWindow,
-                  }}
+                  modifiers={{ unavailable: disabledDays }}
                   modifiersStyles={{
-                    booked: {
-                      backgroundColor: "rgb(239 68 68 / 0.15)",
-                      color: "rgb(239 68 68)",
-                      textDecoration: "line-through",
-                    },
-                    blackout: {
-                      backgroundColor: "rgb(245 158 11 / 0.15)",
-                      color: "rgb(217 119 6)",
-                      textDecoration: "line-through",
-                    },
-                    unavailableWindow: {
+                    unavailable: {
                       backgroundColor: "rgb(100 116 139 / 0.12)",
                       color: "rgb(100 116 139)",
                     },
