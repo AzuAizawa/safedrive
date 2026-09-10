@@ -461,6 +461,11 @@ export default function AdminVehicleApprovalPage() {
         .from("car_documents")
         .update({
           review_flag: "approved_after_review",
+          // An approved document has nothing left to correct, so it must not
+          // keep a review note. Older rejections wrote one onto every
+          // document of the car, and approving never cleared it - which is
+          // how an approved CR ended up showing the note meant for the OR.
+          review_reason: null,
         })
         .eq("car_id", selected.id)
         .eq("compliance_status", "approved");
@@ -529,7 +534,13 @@ export default function AdminVehicleApprovalPage() {
         .from("car_documents")
         .update({
           review_flag: "rejected_after_review",
-          review_reason: rejectionReason.trim(),
+          // Deliberately no review_reason. This is one decision about the
+          // vehicle, not a verdict on each file: writing it into every
+          // document put the same sentence under documents that were fine,
+          // including approved ones. The lister already reads the vehicle
+          // reason from cars.rejection_reason (MyVehiclesPage,
+          // ListerBookingsPage), and a note about one document is written by
+          // the per-document review in VehicleCompliancePanel.
           reviewed_by: adminUser.id,
           reviewed_at: new Date().toISOString(),
         })

@@ -3,6 +3,109 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-10 - A deleted notification waits 30 days, then is gone
+
+Requested: let people clear their notification list, the way a phone does —
+deleted items move to a "Recently deleted" shelf, and after 30 days they are
+gone for good.
+
+There was no delete at all before this: the page offered "Mark all read" and
+nothing else, and `notifications` had no DELETE policy, so a browser session
+could not remove a row even in principle.
+
+Deleting is now two acts, and only the first belongs to the browser.
+**CHAPTER 83** adds `notifications.deleted_at`, which the recipient writes
+(an UPDATE on their own row, already permitted); clearing the row for good is
+done by `public.purge_deleted_notifications()`, executable by the service role
+only. What is deliberately *not* added is a DELETE policy — there is still no
+way for any browser session, the recipient's or anyone else's, to destroy a
+notification row.
+
+The 30 days is declared, not hard-coded. `retention_policy_rules` (CHAPTER 14)
+is where this codebase already states how long each kind of record is kept, and
+it had no row for notifications; it does now, and the purge function reads its
+own window from it, falling back to 30 days only if the rule is removed or
+switched off — so a missing rule can never quietly mean "keep forever".
+
+Gone means gone, on purpose. A notification is a copy of something that already
+happened; the record of the event lives in `audit_log`, `security_logs`,
+`bookings` and `support_tickets`, which is where an investigation looks. Keeping
+deleted copies indefinitely would hold personal data answering no question the
+other tables cannot.
+
+The daily job joins the five already in `.github/workflows/scheduled-workers.yml`
+(GitHub Actions calling the endpoint with `CRON_SECRET`, because Vercel Hobby
+allows only one cron a day).
+
+The page now has two views — the list, with a delete button per notification,
+and "Recently deleted", where each item shows what is left of its 30 days and
+can be restored. Every other place that shows notifications to a person now
+skips deleted ones: the renter/lister bell badge, the admin bell and its
+mark-all-read, the admin notifications page, and the lister dashboard feed.
+
+**One place deliberately left unfiltered:** `src/lib/bookingLifecycle.ts` reads
+notifications as a record of *"was this already sent?"*. Filtering deleted rows
+there would re-send a notification the recipient had just thrown away.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 83),
+`api/purge-deleted-notifications.ts`, `.github/workflows/scheduled-workers.yml`,
+`src/pages/NotificationsPage.tsx`, `src/components/DashboardLayout.tsx`,
+`src/components/AdminLayout.tsx`, `src/pages/admin/AdminNotificationsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`, `src/types/database.ts`,
+`scripts/notification-retention.test.mjs`, `package.json`.
+
+Migration: apply CHAPTER 83, staging first. It deletes nothing — it adds a
+column, an index, a retention rule and a function. Proved against real
+PostgreSQL before shipping: `npm run check:notification-retention`, covering the
+boundary day, restore, a tuned window, a missing rule, and a signed-in session
+being refused the purge.
+
+---
+
+## 2026-09-10 - A review note belongs to the document it is about
+
+Reported: a lister could not tell which document needed correcting. The ask was
+to colour the admin review note red so the reason stands out.
+
+Colouring it red alone would have made the screen worse. The same note was
+printed under every document of the car: the reported vehicle showed "Review
+note: Send ka ulit ng expiry for or" under its **Approved** Certificate of
+Registration — word for word the note belonging to the OR. Live data confirmed
+it: seven documents on one car carried one identical sentence, across
+`approved`, `rejected` and `pending`. Red would have reported four healthy
+documents as broken alongside the one that actually was.
+
+Cause: `AdminVehicleApprovalPage.handleReject` wrote the vehicle-level rejection
+reason into `car_documents.review_reason` for every document of the car, with no
+status filter, and `handleApprove` never cleared it — so one sentence about the
+OR sat under the CR, the BIR and the CTPL, and survived their approval. The
+vehicle reason was never missing from the lister's view either: it is read from
+`cars.rejection_reason` on MyVehiclesPage and ListerBookingsPage. Copying it onto
+the documents added nothing and cost clarity — `VehicleCompliancePanel` already
+carried a comment admitting the column held "the blanket note the approval page
+stamps on every document".
+
+So the note is now red **where it means something** — `rejected` and `revoked`,
+matching the "Needs correction" badge — and stays muted on a pending document,
+whose note is often the automated provenance warning, or on an approved one,
+which has nothing to correct. Rejecting a vehicle no longer stamps a reason onto
+its documents (`review_flag` still is: that is a per-document provenance marker,
+a different thing), and approving one clears any note left behind.
+
+**CHAPTER 82** clears the rows already written: `review_reason` on approved
+documents only. Pending and rejected rows are deliberately untouched — a pending
+note is usually the provenance warning, and a rejected note is the whole point.
+
+Files: `src/components/VehicleCompliancePanel.tsx`,
+`src/pages/admin/AdminVehicleApprovalPage.tsx`,
+`database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 82).
+
+Migration: apply CHAPTER 82, staging first. Data only — no table, function,
+trigger or policy changes, and nothing is removed beyond notes that were never
+about the document holding them.
+
+---
+
 ## 2026-09-10 - A booking conversation has a closing time
 
 Requested: once the trip is over, the renter and the lister should stop being

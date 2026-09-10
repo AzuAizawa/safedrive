@@ -14,6 +14,7 @@ on:
     - cron: "41 3 * * *" # notify renters whose driver's licence is expiring, daily
     - cron: "50 3 * * *" # expire stale platform-setting change proposals, daily
     - cron: "58 3 * * *" # flag dormant accounts for retention review, daily
+    - cron: "12 4 * * *" # delete notifications past their retention window, daily
   workflow_dispatch: {}
 
 env:
@@ -92,6 +93,21 @@ jobs:
           echo "HTTP $code"; cat /tmp/out; echo
           if [ "$code" != "200" ]; then
             echo "::error::expire-platform-setting-changes returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
+            exit 1
+          fi
+
+  purge-deleted-notifications:
+    if: github.event.schedule == '12 4 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call purge-deleted-notifications
+        run: |
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${SITE_URL}/api/purge-deleted-notifications")
+          echo "HTTP $code"; cat /tmp/out; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::purge-deleted-notifications returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
             exit 1
           fi
 

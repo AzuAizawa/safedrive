@@ -27,7 +27,7 @@ export default function AdminNotificationsPage() {
 
     try {
       const [notificationResult, nextQueue] = await Promise.all([
-        supabase.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(100),
+        supabase.from("notifications").select("*").eq("user_id", user.id).is("deleted_at", null).order("created_at", { ascending: false }).limit(100),
         loadAdminAttentionItems(isSuperAdmin),
       ]);
       if (notificationResult.error) throw notificationResult.error;
@@ -63,7 +63,7 @@ export default function AdminNotificationsPage() {
 
   const markAllRead = async () => {
     if (!user?.id) return;
-    const { error } = await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
+    const { error } = await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).is("deleted_at", null).eq("read", false);
     if (error) toast.error("Notifications were not updated", { description: error.message });
     else await load();
   };

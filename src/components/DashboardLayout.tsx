@@ -158,6 +158,7 @@ export default function DashboardLayout() {
       .from("notifications")
       .select("id", { count: "exact", head: true })
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .eq("read", false);
 
     if (error) {

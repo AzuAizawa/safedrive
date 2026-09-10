@@ -115,6 +115,7 @@ export default function AdminLayout() {
           .from("notifications")
           .select("*")
           .eq("user_id", user.id)
+          .is("deleted_at", null)
           .order("created_at", { ascending: false })
           .limit(20),
       ]);
@@ -177,6 +178,7 @@ export default function AdminLayout() {
       .from("notifications")
       .update({ read: true })
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .eq("read", false);
     if (error) toast.error("Notifications were not updated", { description: error.message });
     else await loadNotifications();

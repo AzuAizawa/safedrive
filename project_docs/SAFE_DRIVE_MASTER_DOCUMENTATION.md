@@ -1371,6 +1371,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/open-booking-conversation.ts` | POST; a participant (renter or owner) of the booking | Open (or reuse) the one `support_tickets` conversation thread tied to a paid/active/completed booking - "Message Lister" / "Message Renter" |
 | `api/process-payout.ts` | POST; super-admin | Run payout eligibility and PayMongo/simulator automation |
 | `api/process-refund.ts` | POST; super-admin | Retry one or a controlled batch of refund automation |
+| `api/purge-deleted-notifications.ts` | GET/POST; cron secret | Daily: permanently remove notifications the recipient deleted more than the retention window ago (via `purge_deleted_notifications()`, which reads its window from `retention_policy_rules` category `deleted_notification`, default 30 days). Until then a deleted notification only carries `notifications.deleted_at` and can be restored; there is no DELETE policy on the table, so no browser session can destroy a row |
 | `api/record-security-event.ts` | POST; authenticated or allow-listed login event | Sanitize and record security-relevant activity without secrets |
 | `api/reply-guest-inquiry.ts` | POST; admin/super-admin | `action: reply` adds a thread message + emails (Resend, Gmail fallback), sets `in_progress`, notifies a linked account; `action: resolve` closes the inquiry |
 | `api/reset-my-authenticator.ts` | POST; authenticated | Clear the caller's own enrolled authenticator (self-service after an email-code sign-in) so the login flow can offer a fresh QR |

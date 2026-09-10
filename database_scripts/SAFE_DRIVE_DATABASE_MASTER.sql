@@ -12443,4 +12443,149 @@ commit;
 --   where participant_user_id is null and conversation_closes_at is not null;
 --   (expect 0 - a SafeDrive support ticket never closes on a timer)
 
+-- ============================================================================
+-- CHAPTER 82 - A review note belongs to the document it is about
+-- Apply this chapter only, staging first. Data only: no table, function,
+-- trigger or policy changes. It clears review notes that were never about the
+-- document they are attached to. No file, approval or rejection is undone.
+-- ============================================================================
+begin;
+
+-- Reported: a lister's compliance panel showed "Review note: Send ka ulit ng
+-- expiry for or" under the Certificate of Registration - which was Approved -
+-- word for word the same note shown under the OR that actually needed
+-- correction. The note was true of one document and printed under all of them.
+--
+-- Cause, now fixed in the app: rejecting a vehicle
+-- (AdminVehicleApprovalPage.handleReject) wrote the vehicle's rejection reason
+-- into car_documents.review_reason for every document of that car, with no
+-- status filter, and approving never cleared it. One sentence about the OR
+-- therefore sat under the CR, the BIR, the CTPL and the rest, and survived
+-- their approval.
+--
+-- The vehicle-level reason was never missing from the lister's view - it is
+-- read from cars.rejection_reason on MyVehiclesPage and ListerBookingsPage.
+-- Copying it onto the documents added nothing and cost clarity.
+--
+-- This chapter deals with the rows already written. An approved document has
+-- nothing left for its owner to correct, so a review note on one can only be
+-- the blanket copy: the note that belonged to it, if any, was consumed by the
+-- approval. Pending and rejected rows are deliberately untouched - a pending
+-- row's note is often the automated provenance warning ("No C2PA / Content
+-- Credentials marker found."), and a rejected row's note is the whole point.
+update public.car_documents
+   set review_reason = null
+ where compliance_status = 'approved'
+   and review_reason is not null;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select count(*) from public.car_documents
+--   where compliance_status = 'approved' and review_reason is not null;
+--   (expect 0 - an approved document carries no correction note)
+-- select document_type, compliance_status, review_reason from public.car_documents
+--   where review_reason is not null order by car_id, document_type;
+--   (expect only pending/rejected rows, each with a note about itself)
+
+-- ============================================================================
+-- CHAPTER 83 - A deleted notification waits 30 days, then is gone
+-- Apply this chapter only, staging first. One column, one index, one retention
+-- rule and one function are added. No existing notification is touched, and no
+-- policy is changed: browsers still cannot delete a row at all.
+-- ============================================================================
+begin;
+
+-- Requested: let people clear their notification list, the way a phone does -
+-- deleted items move to a "Recently Deleted" shelf, and after 30 days they are
+-- gone for good.
+--
+-- Deleting is therefore a two-step act, and only the first step belongs to the
+-- browser. `deleted_at` is written by the recipient (an UPDATE, which the
+-- existing "Users update own notifications" policy already allows on their own
+-- rows); clearing the row for good is done here, by a job running as the
+-- service role. Note what is deliberately NOT added: a DELETE policy. There is
+-- none today, so no browser session - the recipient's or anyone else's - can
+-- destroy a notification row. That stays true.
+--
+-- Gone means gone. A notification is a copy of something that already happened;
+-- the record of the event itself lives in audit_log, security_logs, bookings
+-- and support_tickets, which is where an investigation looks. Keeping deleted
+-- copies indefinitely would hold personal data that answers no question the
+-- other tables cannot already answer.
+alter table public.notifications
+  add column if not exists deleted_at timestamptz;
+
+-- The purge scans by deleted_at and nothing else, and the overwhelming majority
+-- of rows are never deleted - so the index only carries the ones that are.
+create index if not exists notifications_deleted_at_idx
+  on public.notifications (deleted_at)
+  where deleted_at is not null;
+
+-- How long anything is kept is declared in one table (CHAPTER 14), not spread
+-- through code. This adds the missing category rather than hard-coding 30 in
+-- the job. 'on conflict do nothing' on purpose: if an admin has tuned the
+-- window, re-applying this chapter must not silently reset their decision.
+insert into public.retention_policy_rules (record_category, retention_days, rationale)
+values (
+  'deleted_notification',
+  30,
+  'A notification its recipient deleted. Kept briefly so it can be restored, then removed - the underlying event stays in audit_log and the booking or ticket it came from.'
+)
+on conflict (record_category) do nothing;
+
+-- Called once a day by api/purge-deleted-notifications.ts. Reads its own window
+-- from the rules table so the retention decision and the job cannot drift
+-- apart; falls back to 30 days only if the rule has been removed or switched
+-- off, so a missing rule can never mean "keep forever" by accident.
+create or replace function public.purge_deleted_notifications()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $purge_notifications$
+declare
+  window_days integer;
+  removed integer;
+begin
+  select r.retention_days
+    into window_days
+    from public.retention_policy_rules r
+   where r.record_category = 'deleted_notification'
+     and r.active
+     and r.retention_days is not null;
+
+  window_days := coalesce(window_days, 30);
+
+  delete from public.notifications
+   where deleted_at is not null
+     and deleted_at < now() - make_interval(days => window_days);
+
+  get diagnostics removed = row_count;
+  return removed;
+end;
+$purge_notifications$;
+
+-- Only the scheduled job may run it. It is not something a signed-in browser
+-- session should ever be able to trigger.
+revoke all on function public.purge_deleted_notifications() from public;
+revoke all on function public.purge_deleted_notifications() from authenticated;
+grant execute on function public.purge_deleted_notifications() to service_role;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select column_name from information_schema.columns
+--   where table_schema='public' and table_name='notifications'
+--     and column_name='deleted_at';
+--   (expect one row)
+-- select record_category, retention_days, active from public.retention_policy_rules
+--   where record_category = 'deleted_notification';
+--   (expect 30 days, active)
+-- select count(*) from pg_policies
+--   where schemaname='public' and tablename='notifications' and cmd='DELETE';
+--   (expect 0 - no browser session can destroy a notification)
+-- select count(*) from public.notifications where deleted_at is not null;
+--   (expect 0 on a fresh apply - nothing is deleted by this chapter)
+
 -- End of SafeDrive chaptered database master.

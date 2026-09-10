@@ -1734,6 +1734,7 @@ export interface Database {
           read: boolean | null;
           link: string | null;
           created_at: string | null;
+          deleted_at: string | null;
         };
         Insert: {
           id?: string;
@@ -1744,6 +1745,7 @@ export interface Database {
           read?: boolean | null;
           link?: string | null;
           created_at?: string | null;
+          deleted_at?: string | null;
         };
         Update: {
           id?: string;
@@ -1754,6 +1756,7 @@ export interface Database {
           read?: boolean | null;
           link?: string | null;
           created_at?: string | null;
+          deleted_at?: string | null;
         };
         Relationships: [
           {

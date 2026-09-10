@@ -403,7 +403,20 @@ export default function VehicleCompliancePanel({
                       </Button>
                     </div>
                     {d.review_reason && (
-                      <p className="mt-2 text-xs text-muted-foreground">Review note: {d.review_reason}</p>
+                      // Red is reserved for a note the lister has to act on. A pending
+                      // document carries automated warnings here too (the provenance
+                      // scan writes one), and an approved one has nothing to correct -
+                      // colouring those red would report four healthy documents as
+                      // broken alongside the one that actually is.
+                      <p
+                        className={`mt-2 text-xs ${
+                          d.compliance_status === "rejected" || d.compliance_status === "revoked"
+                            ? "font-medium text-red-700 dark:text-red-400"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        Review note: {d.review_reason}
+                      </p>
                     )}
                     {d.superseded_at && (
                       <p className="mt-2 text-xs text-muted-foreground">
