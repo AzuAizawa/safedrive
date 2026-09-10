@@ -276,9 +276,9 @@ export interface Database {
         ];
       };
       car_brands: {
-        Row: { id: string; name: string; created_at: string };
-        Insert: { id?: string; name: string; created_at?: string };
-        Update: { id?: string; name?: string; created_at?: string };
+        Row: { id: string; name: string; created_at: string; discontinued_at: string | null };
+        Insert: { id?: string; name: string; created_at?: string; discontinued_at?: string | null };
+        Update: { id?: string; name?: string; created_at?: string; discontinued_at?: string | null };
         Relationships: [];
       };
       car_models: {
@@ -290,6 +290,7 @@ export interface Database {
           seats: number;
           fuel_type: string;
           created_at: string;
+          discontinued_at: string | null;
         };
         Insert: {
           id?: string;
@@ -299,6 +300,7 @@ export interface Database {
           seats?: number;
           fuel_type: string;
           created_at?: string;
+          discontinued_at?: string | null;
         };
         Update: {
           id?: string;
@@ -308,6 +310,7 @@ export interface Database {
           seats?: number;
           fuel_type?: string;
           created_at?: string;
+          discontinued_at?: string | null;
         };
         Relationships: [
           {
@@ -1771,6 +1774,10 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      set_brand_discontinued: {
+        Args: { p_brand_id: string; p_discontinued: boolean };
+        Returns: undefined;
+      };
       vehicle_compliance_summary: {
         Args: { p_car_id: string; p_start?: string; p_end?: string };
         Returns: Json;

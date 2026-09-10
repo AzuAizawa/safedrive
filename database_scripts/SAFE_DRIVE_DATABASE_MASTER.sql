@@ -12588,4 +12588,106 @@ commit;
 -- select count(*) from public.notifications where deleted_at is not null;
 --   (expect 0 on a fresh apply - nothing is deleted by this chapter)
 
+-- ============================================================================
+-- CHAPTER 84 - A catalog entry is discontinued, not deleted
+-- Apply this chapter only, staging first. Two columns, two indexes and one
+-- function are added. Nothing is deleted, and no existing brand or model
+-- changes state: everything starts out active.
+-- ============================================================================
+begin;
+
+-- Reported: an admin asked to be blocked from deleting a brand or model while
+-- transactions are in flight, and to give the affected user a reason when a
+-- delete does go through.
+--
+-- Both halves of that turned out to be answers to a question the system does
+-- not have. Deleting is already refused far earlier and far more broadly than
+-- "a transaction is in flight": cars.model_id references car_models(id) with no
+-- ON DELETE clause, so PostgreSQL refuses to remove a model any car points at -
+-- of any status, booked or not, and AdminCarCatalogPage counts those cars
+-- before it even tries. So a delete only ever succeeds on an entry that no car
+-- uses, which means no booking, no payout, and nobody to send a reason to.
+--
+-- What was actually missing is the state between "offered" and "erased".
+-- Reference data is not supposed to be deleted once it has been used - the
+-- standard practice for a catalog is to deactivate or discontinue the entry so
+-- existing records keep resolving while nothing new can be created against it.
+-- SafeDrive had no way to express that: a model was either on offer or gone.
+--
+-- So: discontinuing is the ordinary act, and deleting stays available only for
+-- an entry nobody ever used - the typo added five minutes ago. A discontinued
+-- entry keeps every listing and every booking that already points at it; it
+-- simply stops appearing when a lister picks a brand and model for a new car.
+alter table public.car_brands
+  add column if not exists discontinued_at timestamptz;
+
+alter table public.car_models
+  add column if not exists discontinued_at timestamptz;
+
+-- The pickers ask for active rows, which is almost all of them, so the index
+-- carries only the discontinued minority.
+create index if not exists car_brands_discontinued_at_idx
+  on public.car_brands (discontinued_at)
+  where discontinued_at is not null;
+
+create index if not exists car_models_discontinued_at_idx
+  on public.car_models (discontinued_at)
+  where discontinued_at is not null;
+
+-- Discontinuing a brand has to take its models with it: a lister picks a brand
+-- first and a model second, so a brand that is still offered while its models
+-- are gone is a dead end, and a model still offered under a withdrawn brand is
+-- unreachable. One statement, one transaction, so the two can never disagree.
+--
+-- A model on its own is a plain UPDATE from the admin page - the existing
+-- "Catalog write access models" policy already allows exactly the people who
+-- may do this - so there is deliberately no second function here.
+create or replace function public.set_brand_discontinued(
+  p_brand_id uuid,
+  p_discontinued boolean
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $set_brand_discontinued$
+declare
+  stamp timestamptz;
+begin
+  if not public.admin_can('catalog.manage') then
+    raise exception 'Catalog management permission required';
+  end if;
+
+  stamp := case when p_discontinued then now() else null end;
+
+  update public.car_brands
+     set discontinued_at = stamp
+   where id = p_brand_id;
+
+  if not found then
+    raise exception 'Brand not found';
+  end if;
+
+  update public.car_models
+     set discontinued_at = stamp
+   where brand_id = p_brand_id;
+end;
+$set_brand_discontinued$;
+
+revoke all on function public.set_brand_discontinued(uuid, boolean) from public;
+grant execute on function public.set_brand_discontinued(uuid, boolean) to authenticated;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select table_name, column_name from information_schema.columns
+--   where table_schema='public' and column_name='discontinued_at'
+--   order by table_name;
+--   (expect car_brands and car_models)
+-- select count(*) from public.car_brands where discontinued_at is not null;
+-- select count(*) from public.car_models where discontinued_at is not null;
+--   (expect 0 and 0 - this chapter withdraws nothing)
+-- select count(*) from public.cars;
+--   (unchanged - discontinuing never touches a listing)
+
 -- End of SafeDrive chaptered database master.

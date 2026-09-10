@@ -3,6 +3,61 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-10 - A catalog entry is discontinued, not deleted
+
+Requested: block an admin from deleting a car brand or model while there is an
+ongoing booking, payout or other transaction, and give the affected user a
+reason when a delete does go through.
+
+Both halves turned out to answer a question the system does not have, so this
+does something different — and says why.
+
+**The block asked for is weaker than the one already standing.** `cars.model_id`
+references `car_models(id)` with no `ON DELETE` clause, so PostgreSQL refuses to
+remove a model any car points at — of *any* status, booked or not — and
+`AdminCarCatalogPage` counts those cars before it even tries. A single
+registered car is already enough. Gating on "a transaction is in flight" would
+have *loosened* it.
+
+**The reason asked for has nobody to send it to.** A delete only ever succeeds
+on an entry no car uses. No car means no lister, no booking, no payout, and no
+recipient. Bookings point at cars, cars point at models, and nothing else
+references the catalog — so a deletable entry has no history at all.
+
+What was actually missing is the state between *offered* and *erased*.
+Reference data is not meant to be deleted once used; the standard for a catalog
+is to deactivate or discontinue the entry so existing records keep resolving
+while nothing new can be created against it. SafeDrive had no way to say that: a
+model was either on offer or gone.
+
+**CHAPTER 84** adds `discontinued_at` to `car_brands` and `car_models`, plus
+`public.set_brand_discontinued()`, which stamps a brand and its models in one
+transaction — a brand still offered with no models under it is a dead end, and a
+model under a withdrawn brand is unreachable, so the two can never disagree. It
+is gated on `catalog.manage`, the same permission the table policies use.
+
+Discontinuing keeps every listing and booking pointing at the entry and only
+removes it from the brand/model pickers in the add-a-car form. Editing an
+existing listing never reopens those pickers, so a car already on a withdrawn
+model keeps it.
+
+Delete stays for the entry nobody ever used — the typo added five minutes ago.
+When it is refused, the page now says so in words and points at Discontinue
+instead of surfacing a raw foreign-key error, and the model delete gets a real
+confirmation dialog instead of the browser's `confirm()`.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 84),
+`src/pages/admin/AdminCarCatalogPage.tsx`, `src/pages/MyVehiclesPage.tsx`,
+`src/types/database.ts`, `scripts/catalog-discontinue.test.mjs`, `package.json`.
+
+Migration: apply CHAPTER 84, staging first. It withdraws nothing — every brand
+and model starts active. Proved against real PostgreSQL before shipping:
+`npm run check:catalog-discontinue`, covering the brand/model cascade, restore,
+listings staying intact, the permission gate, and that a model in use still
+cannot be deleted while a never-used one still can.
+
+---
+
 ## 2026-09-10 - Deleting a car says why it cannot happen, before you try
 
 Reported by a tester: Delete failed with *"Failed to delete vehicle — Check if

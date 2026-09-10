@@ -21,9 +21,35 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Trash2, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Archive,
+  RotateCcw,
+} from "lucide-react";
 import { toast } from "sonner";
 import type { CarBrand, CarModel } from "@/types/database";
+
+/**
+ * Deleting versus discontinuing.
+ *
+ * cars.model_id references car_models(id) with no ON DELETE clause, so a model
+ * any car points at cannot be removed - booked or not. A delete therefore only
+ * ever succeeds on an entry no listing uses, which is the entry added by
+ * mistake five minutes ago. That is the only thing Delete is for.
+ *
+ * Everything else is discontinued (CHAPTER 84): the row stays, every listing
+ * and booking that points at it keeps resolving, and it stops being offered
+ * when a lister picks a brand and model for a new car. This is the ordinary
+ * way a catalog entry leaves - the standard for reference data, and the only
+ * one that does not destroy history.
+ */
+type CatalogEntry = { discontinued_at?: string | null };
+
+const isDiscontinued = (entry: CatalogEntry) => Boolean(entry.discontinued_at);
 
 const bodyTypes = [
   "sedan",
@@ -75,6 +101,13 @@ export default function AdminCarCatalogPage() {
     (CarBrand & { models: CarModel[] }) | null
   >(null);
   const [deleteBrandLoading, setDeleteBrandLoading] = useState(false);
+  // How many registered cars use each model. Loaded with the catalog so the
+  // page can say what will happen before a button is pressed, rather than
+  // after the database refuses.
+  const [modelUsage, setModelUsage] = useState<Record<string, number>>({});
+  const [modelDeleteTarget, setModelDeleteTarget] = useState<CarModel | null>(null);
+  const [modelDeleteLoading, setModelDeleteLoading] = useState(false);
+  const [discontinuingId, setDiscontinuingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchBrands();
@@ -101,6 +134,20 @@ export default function AdminCarCatalogPage() {
             models: modelsData.filter((m) => m.brand_id === b.id),
           })),
         );
+
+        const { data: carRows, error: carErr } = await supabase
+          .from("cars")
+          .select("model_id");
+        if (carErr) {
+          console.error("Could not count catalog usage:", carErr);
+          setModelUsage({});
+        } else {
+          const counts: Record<string, number> = {};
+          for (const row of (carRows ?? []) as { model_id: string }[]) {
+            counts[row.model_id] = (counts[row.model_id] ?? 0) + 1;
+          }
+          setModelUsage(counts);
+        }
       }
     } catch (err) {
       console.error("Failed to load brands:", err);
@@ -168,17 +215,85 @@ export default function AdminCarCatalogPage() {
     setAddingModel(false);
   };
 
-  const handleDeleteModel = async (modelId: string, modelName: string) => {
-    if (!confirm(`Delete model "${modelName}"?`)) return;
+  /** Read a message off a Supabase error, which is a plain object, not an Error. */
+  /** True when any listing depends on a model under this brand. */
+  const brandIsInUse = (brand: CarBrand & { models: CarModel[] }) =>
+    brand.models.some((model) => (modelUsage[model.id] ?? 0) > 0);
+
+  const errorMessage = (error: unknown) =>
+    typeof error === "object" && error !== null && "message" in error
+      ? String((error as { message?: unknown }).message ?? "")
+      : error instanceof Error
+        ? error.message
+        : "";
+
+  const toggleBrandDiscontinued = async (
+    brand: CarBrand & { models: CarModel[] },
+  ) => {
+    setDiscontinuingId(brand.id);
+    // One call, one transaction: a brand and its models must never disagree,
+    // or a lister picks a brand and finds nothing under it.
+    const { error } = await supabase.rpc("set_brand_discontinued", {
+      p_brand_id: brand.id,
+      p_discontinued: !isDiscontinued(brand),
+    });
+    setDiscontinuingId(null);
+    if (error) {
+      toast.error("Could not update this brand", { description: error.message });
+      return;
+    }
+    toast.success(
+      isDiscontinued(brand)
+        ? `"${brand.name}" is offered again.`
+        : `"${brand.name}" and its models are no longer offered. Existing listings keep working.`,
+    );
+    fetchBrands();
+  };
+
+  const toggleModelDiscontinued = async (model: CarModel) => {
+    setDiscontinuingId(model.id);
+    const { error } = await supabase
+      .from("car_models")
+      .update({
+        discontinued_at: isDiscontinued(model) ? null : new Date().toISOString(),
+      })
+      .eq("id", model.id);
+    setDiscontinuingId(null);
+    if (error) {
+      toast.error("Could not update this model", { description: error.message });
+      return;
+    }
+    toast.success(
+      isDiscontinued(model)
+        ? `"${model.name}" is offered again.`
+        : `"${model.name}" is no longer offered. Existing listings keep working.`,
+    );
+    fetchBrands();
+  };
+
+  const handleDeleteModel = async () => {
+    if (!modelDeleteTarget) return;
+    setModelDeleteLoading(true);
     const { error } = await supabase
       .from("car_models")
       .delete()
-      .eq("id", modelId);
-    if (error) toast.error("Failed to delete", { description: error.message });
-    else {
-      toast.success("Model deleted");
-      fetchBrands();
+      .eq("id", modelDeleteTarget.id);
+    setModelDeleteLoading(false);
+    setModelDeleteTarget(null);
+    if (error) {
+      const raw = errorMessage(error);
+      const inUse =
+        String((error as { code?: unknown }).code) === "23503" ||
+        raw.includes("violates foreign key constraint");
+      toast.error("Model was not deleted", {
+        description: inUse
+          ? "A registered car uses this model, so it cannot be deleted. Discontinue it instead - existing listings keep working and it stops being offered."
+          : raw || "Please try again.",
+      });
+      return;
     }
+    toast.success("Model deleted");
+    fetchBrands();
   };
 
   const handleDeleteBrand = async () => {
@@ -204,7 +319,7 @@ export default function AdminCarCatalogPage() {
       if ((count ?? 0) > 0) {
         toast.error("Brand cannot be deleted", {
           description:
-            "At least one registered car uses a model under this brand. Move or remove those cars first.",
+            "A registered car uses a model under this brand, and deleting it would take that model with it. Discontinue the brand instead - every existing listing keeps working, and it stops being offered to new ones.",
         });
         setDeleteBrandLoading(false);
         setBrandDeleteTarget(null);
@@ -307,6 +422,11 @@ export default function AdminCarCatalogPage() {
                   <span className="text-xs text-muted-foreground">
                     ({brand.models.length} models)
                   </span>
+                  {isDiscontinued(brand) && (
+                    <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                      Discontinued
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
@@ -323,14 +443,42 @@ export default function AdminCarCatalogPage() {
                     <Plus className="w-3.5 h-3.5 mr-1" /> Add Model
                   </Button>
                   <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={discontinuingId === brand.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void toggleBrandDiscontinued(brand);
+                    }}
+                    title={
+                      isDiscontinued(brand)
+                        ? "Offer this brand again"
+                        : "Stop offering this brand for new cars. Existing listings keep working."
+                    }
+                  >
+                    {discontinuingId === brand.id ? (
+                      <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                    ) : isDiscontinued(brand) ? (
+                      <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                    ) : (
+                      <Archive className="w-3.5 h-3.5 mr-1" />
+                    )}
+                    {isDiscontinued(brand) ? "Restore" : "Discontinue"}
+                  </Button>
+                  <Button
                     size="icon"
                     variant="ghost"
                     className="h-8 w-8 text-destructive"
+                    disabled={brandIsInUse(brand)}
                     onClick={(e) => {
                       e.stopPropagation();
                       setBrandDeleteTarget(brand);
                     }}
-                    title="Delete brand"
+                    title={
+                      brandIsInUse(brand)
+                        ? "Registered cars use this brand, so it cannot be deleted. Discontinue it instead."
+                        : "Delete brand"
+                    }
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -455,14 +603,27 @@ export default function AdminCarCatalogPage() {
                           <TableHead>Body Type</TableHead>
                           <TableHead>Seats</TableHead>
                           <TableHead>Fuel</TableHead>
-                          <TableHead className="w-10"></TableHead>
+                          <TableHead className="w-56 text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {brand.models.map((m) => (
                           <TableRow key={m.id}>
                             <TableCell className="font-medium">
-                              {m.name}
+                              <span className="flex flex-wrap items-center gap-2">
+                                {m.name}
+                                {isDiscontinued(m) && (
+                                  <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                                    Discontinued
+                                  </span>
+                                )}
+                                {(modelUsage[m.id] ?? 0) > 0 && (
+                                  <span className="text-[10px] font-normal text-muted-foreground">
+                                    {modelUsage[m.id]} listing
+                                    {modelUsage[m.id] === 1 ? "" : "s"}
+                                  </span>
+                                )}
+                              </span>
                             </TableCell>
                             <TableCell className="capitalize">
                               {m.body_type}
@@ -471,15 +632,43 @@ export default function AdminCarCatalogPage() {
                             <TableCell className="capitalize">
                               {m.fuel_type}
                             </TableCell>
-                            <TableCell>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-destructive"
-                                onClick={() => handleDeleteModel(m.id, m.name)}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </Button>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={discontinuingId === m.id}
+                                  onClick={() => void toggleModelDiscontinued(m)}
+                                  title={
+                                    isDiscontinued(m)
+                                      ? "Offer this model again"
+                                      : "Stop offering this model for new cars. Existing listings keep working."
+                                  }
+                                >
+                                  {discontinuingId === m.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                  ) : isDiscontinued(m) ? (
+                                    <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                                  ) : (
+                                    <Archive className="w-3.5 h-3.5 mr-1" />
+                                  )}
+                                  {isDiscontinued(m) ? "Restore" : "Discontinue"}
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-destructive"
+                                  disabled={(modelUsage[m.id] ?? 0) > 0}
+                                  onClick={() => setModelDeleteTarget(m)}
+                                  title={
+                                    (modelUsage[m.id] ?? 0) > 0
+                                      ? "Registered cars use this model, so it cannot be deleted. Discontinue it instead."
+                                      : "Delete model"
+                                  }
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -493,13 +682,27 @@ export default function AdminCarCatalogPage() {
         </div>
       )}
       <ConfirmDialog
+        open={Boolean(modelDeleteTarget)}
+        title="Delete this model?"
+        description={
+          modelDeleteTarget
+            ? `"${modelDeleteTarget.name}" has never been used by a listing, so deleting it removes a catalog entry and nothing else. If you only want to stop offering it, use Discontinue instead.`
+            : ""
+        }
+        confirmText="Delete Model"
+        destructive
+        isLoading={modelDeleteLoading}
+        onConfirm={handleDeleteModel}
+        onCancel={() => setModelDeleteTarget(null)}
+      />
+      <ConfirmDialog
         open={Boolean(brandDeleteTarget)}
         title="Delete car brand?"
         description={
           brandDeleteTarget
             ? brandDeleteTarget.models.length > 0
-              ? `This will delete "${brandDeleteTarget.name}" and ${brandDeleteTarget.models.length} unused model record(s). If any car is already registered under those models, SafeDrive will block the delete.`
-              : `This will permanently delete "${brandDeleteTarget.name}".`
+              ? `This deletes "${brandDeleteTarget.name}" and its ${brandDeleteTarget.models.length} model record(s) outright - no listing uses any of them, so nothing else is affected. To stop offering the brand while keeping its records, use Discontinue instead.`
+              : `This permanently deletes "${brandDeleteTarget.name}". No models exist under it.`
             : ""
         }
         confirmText="Delete Brand"

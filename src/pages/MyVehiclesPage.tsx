@@ -701,10 +701,15 @@ export default function MyVehiclesPage() {
     }
   }, [user]);
 
+  // A discontinued brand or model (CHAPTER 84) is not offered for a NEW car.
+  // This is the only picker that feeds the add-a-car form, and editing an
+  // existing listing never reopens it - so a car already on a withdrawn model
+  // keeps that model, exactly as intended.
   const fetchBrands = useCallback(async () => {
     const { data } = await supabase
       .from("car_brands")
       .select("*")
+      .is("discontinued_at", null)
       .order("name");
     if (data) setBrands(data);
   }, []);
@@ -728,6 +733,7 @@ export default function MyVehiclesPage() {
       .from("car_models")
       .select("*")
       .eq("brand_id", brandId)
+      .is("discontinued_at", null)
       .order("name");
     if (data) setModels(data);
   };
