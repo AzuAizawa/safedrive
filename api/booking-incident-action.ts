@@ -712,13 +712,13 @@ export default async function handler(req: Request) {
         `Vehicle not returned: ${label(b)}`,
         `The lister reports that ${label(b)} was not returned by its scheduled return (${b.end_date}${
           b.dropoff_time ? ` ${b.dropoff_time}` : ""
-        }) and the ${graceMinutes}-minute grace window has passed. The booking is flagged (dispute_status=open) so the car can be taken offline; any refund stays on hold pending admin review. Reported reason: ${NON_RETURN_REASON_LABELS[nonReturnReason]}. ${note ?? ""}`.trim(),
+        }) and the ${graceMinutes}-minute grace window has passed. The booking stays active with the case open; the lister can take the car offline from My Vehicles at any time. Note on money: nothing is being withheld from the renter - they paid for days they had the car and no outcome here refunds those - and the lister's earned rental is released automatically 24 hours after the return deadline, so this case is not holding it. Closing the case completes the booking: the lister can do it from their booking, or support can from this ticket. Reported reason: ${NON_RETURN_REASON_LABELS[nonReturnReason]}. ${note ?? ""}`.trim(),
       );
 
       await supabase.from("notifications").insert({
         user_id: b.renter_id,
         title: "Vehicle overdue — return it now",
-        message: `${label(b)} is past its return time. Return it immediately and file your return report, or SafeDrive support will escalate. Any refund is on hold.`,
+        message: `${label(b)} is past its return time. The lister has reported it as not returned. Return it and tap "I Have Arrived", or reply to SafeDrive support so this can be sorted out.`,
         type: "error",
         link: "/my-bookings",
       });
