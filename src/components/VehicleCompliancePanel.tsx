@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import {
   COMPLIANCE_DOCUMENTS,
   documentLabel,
+  matchesDocumentType,
   requiresExpiry,
   expiryDateToIso,
   isoToManilaInput,
@@ -81,14 +82,6 @@ const STATUS_BADGES: Record<string, { label: string; className: string }> = {
 };
 
 const isImagePath = (path: string) => /\.(jpe?g|png|webp|gif)$/i.test(path.split("?")[0]);
-
-// A legacy combined OR/CR row satisfies both the OR and the CR requirement -
-// vehicle_compliance_summary treats it that way, and the panel has to agree or
-// the CR card reads "No document uploaded" for every vehicle listed before the
-// two were split.
-const matchesType = (documentType: string, required: string) =>
-  documentType === required ||
-  (documentType === "orcr" && (required === "or" || required === "cr"));
 
 function DocumentReview({
   document,
@@ -358,7 +351,7 @@ export default function VehicleCompliancePanel({
             replacements do not extend approved coverage.
           </p>
           {COMPLIANCE_DOCUMENTS.map((type) => {
-            const matching = documents.filter((d) => matchesType(d.document_type, type.type));
+            const matching = documents.filter((d) => matchesDocumentType(d.document_type, type.type));
             const pending = matching.some((d) => d.compliance_status === "pending" && d.renewal_id);
             const needs = summary?.reasons.includes(`${type.type}_coverage_required`);
             return (

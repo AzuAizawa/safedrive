@@ -71,6 +71,19 @@ const MAX_LISTING_PRICE = 100000;
 // again now, but stays required and range-checked so that cannot come back.
 const MIN_EARLY_RETURN_RESPONSE_HOURS = 1;
 const MAX_EARLY_RETURN_RESPONSE_HOURS = 24;
+
+// Keeps the field inside 1-24 while it is being typed. Digits only; an entry
+// past the ceiling is held at the ceiling rather than accepted and rejected
+// later. Empty stays empty so the field can be cleared and retyped.
+const clampResponseHours = (value: string) => {
+  // Cut a decimal before stripping: "3.5" is three-and-a-half hours, not 35.
+  const digits = value.split(".")[0].replace(/[^0-9]/g, "").slice(0, 2);
+  if (!digits) return "";
+  const hours = Number(digits);
+  if (hours > MAX_EARLY_RETURN_RESPONSE_HOURS) return String(MAX_EARLY_RETURN_RESPONSE_HOURS);
+  if (hours < MIN_EARLY_RETURN_RESPONSE_HOURS) return String(MIN_EARLY_RETURN_RESPONSE_HOURS);
+  return String(hours);
+};
 const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const ALLOWED_PDF_TYPES = ["application/pdf"];
@@ -201,31 +214,6 @@ const VEHICLE_TAB_STATUSES: Record<VehicleTab, string[]> = {
   in_review: ["pending", "renewal_required"],
   listed: ["approved", "active"],
   inactive: ["inactive", "rejected"],
-};
-
-// Green if the document is valid with comfortable runway, amber if it expires
-// within 30 days, red if missing or already expired.
-const documentChipTone = (expiry: string | null) => {
-  if (!expiry) return "border-red-500/30 bg-red-500/5 text-red-600";
-  const days = Math.floor(
-    (new Date(`${expiry}T00:00:00`).getTime() - Date.now()) / 86_400_000,
-  );
-  if (Number.isNaN(days) || days < 0)
-    return "border-red-500/30 bg-red-500/5 text-red-600";
-  if (days <= 30)
-    return "border-amber-500/30 bg-amber-500/5 text-amber-600";
-  return "border-emerald-500/30 bg-emerald-500/5 text-emerald-600";
-};
-
-const documentChipLabel = (expiry: string | null) => {
-  if (!expiry) return "Missing";
-  const days = Math.floor(
-    (new Date(`${expiry}T00:00:00`).getTime() - Date.now()) / 86_400_000,
-  );
-  if (Number.isNaN(days)) return expiry;
-  if (days < 0) return `Expired ${expiry}`;
-  if (days <= 30) return `Expires ${expiry}`;
-  return `Valid to ${expiry}`;
 };
 
 const formatModelLabel = (model: CarModel) =>
@@ -1718,7 +1706,10 @@ export default function MyVehiclesPage() {
                     placeholder={`${MIN_EARLY_RETURN_RESPONSE_HOURS}-${MAX_EARLY_RETURN_RESPONSE_HOURS}`}
                     value={form.early_return_response_window_hours}
                     onChange={(e) =>
-                      setForm({ ...form, early_return_response_window_hours: e.target.value })
+                      setForm({
+                        ...form,
+                        early_return_response_window_hours: clampResponseHours(e.target.value),
+                      })
                     }
                   />
                   <p className="text-xs text-muted-foreground">
@@ -2157,30 +2148,6 @@ export default function MyVehiclesPage() {
                               : "Not specified"}
                         </span>
                       </p>
-                      <div className="mt-2">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                          Documents
-                        </p>
-                        <div className="mt-1 flex flex-wrap gap-1.5">
-                          {[
-                            { label: "Registration", expiry: v.registration_expiry },
-                            { label: "CTPL", expiry: v.ctpl_expiry },
-                            {
-                              label: "Comprehensive",
-                              expiry: v.comprehensive_insurance_expiry,
-                            },
-                          ].map((doc) => (
-                            <span
-                              key={doc.label}
-                              className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${documentChipTone(
-                                doc.expiry,
-                              )}`}
-                            >
-                              {doc.label}: {documentChipLabel(doc.expiry)}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
                       <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1.5">
                         {v.location && <span className="flex items-center gap-1">📍 {v.location}</span>}
                         {v.contact_number && <span className="flex items-center gap-1">📞 {v.contact_number}</span>}
@@ -2385,7 +2352,9 @@ export default function MyVehiclesPage() {
                       required
                       placeholder={`${MIN_EARLY_RETURN_RESPONSE_HOURS}-${MAX_EARLY_RETURN_RESPONSE_HOURS}`}
                       value={editEarlyReturnResponseWindowHours}
-                      onChange={(e) => setEditEarlyReturnResponseWindowHours(e.target.value)}
+                      onChange={(e) =>
+                        setEditEarlyReturnResponseWindowHours(clampResponseHours(e.target.value))
+                      }
                     />
                     <p className="text-xs text-muted-foreground">
                       How long you have to answer an early-return request, from{" "}
