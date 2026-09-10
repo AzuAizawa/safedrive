@@ -1625,6 +1625,7 @@ export interface Database {
           booking_id: string | null;
           status: string;
           created_at: string;
+          conversation_closes_at: string | null;
         };
         Insert: {
           id?: string;
@@ -1635,6 +1636,7 @@ export interface Database {
           booking_id?: string | null;
           status?: string;
           created_at?: string;
+          conversation_closes_at?: string | null;
         };
         Update: {
           id?: string;
@@ -1645,6 +1647,7 @@ export interface Database {
           booking_id?: string | null;
           status?: string;
           created_at?: string;
+          conversation_closes_at?: string | null;
         };
         Relationships: [
           {

@@ -94,6 +94,42 @@ export const isConversationTicket = (ticket: {
   participant_user_id?: string | null;
 }) => Boolean(ticket.participant_user_id);
 
+/**
+ * A booking conversation stops belonging to its two members a day after the
+ * trip ends - CHAPTER 81 stamps `support_tickets.conversation_closes_at` from
+ * a trigger on `bookings.status`, and the row-level policies refuse a read or
+ * a reply past it. The database is the enforcement; these three exist so the
+ * screen can count down to the same moment and drop the thread on time instead
+ * of waiting for the next refetch to notice it is gone.
+ *
+ * A SafeDrive support ticket never carries a closing time, so it always reads
+ * as open here.
+ */
+export const conversationClosesInMs = (
+  ticket: { conversation_closes_at?: string | null },
+  now: number = Date.now(),
+) => {
+  if (!ticket.conversation_closes_at) return null;
+  return new Date(ticket.conversation_closes_at).getTime() - now;
+};
+
+export const isConversationClosed = (
+  ticket: { conversation_closes_at?: string | null },
+  now: number = Date.now(),
+) => {
+  const remaining = conversationClosesInMs(ticket, now);
+  return remaining !== null && remaining <= 0;
+};
+
+/** "23h 40m", "45m", "under a minute" - short enough to sit on a list card. */
+export const formatConversationCountdown = (remainingMs: number) => {
+  const totalMinutes = Math.floor(remainingMs / 60_000);
+  if (totalMinutes < 1) return "under a minute";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+};
+
 export type TicketSenderKind =
   | "you"
   | "support"

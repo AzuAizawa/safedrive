@@ -16,6 +16,7 @@
     "check:reconciliation-logic": "tsx --test scripts/reconciliation-logic.test.mjs",
     "check:process-logic": "tsx --test scripts/process-logic.test.mjs",
     "check:kyc-ocr": "tsx --test scripts/kyc-ocr-logic.test.mjs",
+    "check:conversation-closure": "tsx --test scripts/booking-conversation-closure.test.mjs",
     "check:api-boundaries": "node scripts/api-boundary-smoke-check.mjs",
     "check:local-env": "node scripts/check-local-env.mjs",
     "check:live-supabase": "node scripts/verify-live-supabase.mjs",
@@ -28,7 +29,7 @@
     "check:targeted-ui": "tsx scripts/targeted-authenticated-ui-check.mjs",
     "check:api": "tsc -p tsconfig.api.json",
     "check:alignment": "node scripts/repository-alignment-check.mjs",
-    "check:all": "npm run lint && npm run check:api && npm run check:booking-flow && npm run check:vehicle-compliance && npm run check:agreement-storage && npm run check:financial-logic && npm run check:reconciliation-logic && npm run check:process-logic && npm run check:kyc-ocr && npm run check:api-boundaries && npm run check:alignment && npm run check:browser && npm run check:local-env",
+    "check:all": "npm run lint && npm run check:api && npm run check:booking-flow && npm run check:vehicle-compliance && npm run check:agreement-storage && npm run check:financial-logic && npm run check:reconciliation-logic && npm run check:process-logic && npm run check:kyc-ocr && npm run check:conversation-closure && npm run check:api-boundaries && npm run check:alignment && npm run check:browser && npm run check:local-env",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"api/**/*.ts\" \"server/**/*.ts\" \"*.{js,ts}\"",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort"
   },

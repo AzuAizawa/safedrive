@@ -23,8 +23,11 @@ import { helpArticles, helpCategories, type HelpCategory } from "@/lib/helpCente
 import { supabase } from "@/lib/supabase";
 import { uploadFile } from "@/lib/uploadUtils";
 import {
+  conversationClosesInMs,
+  formatConversationCountdown,
   getTicketAttachmentUrl,
   getTicketTagLabels,
+  isConversationClosed,
   isConversationTicket,
   isTicketAttachmentImage,
   resolveTicketSender,
@@ -55,11 +58,33 @@ const escapeHtml = (value: string) =>
 const plainTextToEditorHtml = (value: string) =>
   escapeHtml(value).replace(/\n/g, "<br />");
 
+function ConversationCountdown({
+  ticket,
+  now,
+  className,
+}: {
+  ticket: { conversation_closes_at?: string | null };
+  now: number;
+  className: string;
+}) {
+  const remaining = conversationClosesInMs(ticket, now);
+  if (remaining === null || remaining <= 0) return null;
+
+  return (
+    <span className={className}>
+      <Clock className="h-3 w-3" /> Closes in {formatConversationCountdown(remaining)}
+    </span>
+  );
+}
+
 export default function SupportTicketsPage() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
-  const [bookingStatuses, setBookingStatuses] = useState<Record<string, string>>({});
+  // A booking conversation closes on a timestamp the database stamps and
+  // enforces (CHAPTER 81). This clock exists only so the countdown ticks and
+  // the thread leaves the screen the moment it expires, without a refetch.
+  const [now, setNow] = useState(() => Date.now());
   const [loading, setLoading] = useState(true);
   const [activeTicket, setActiveTicket] = useState<SupportTicket | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
@@ -176,32 +201,13 @@ export default function SupportTicketsPage() {
       .select("*")
       .order("created_at", { ascending: false });
 
+    // No second query to work out which conversations are over. A closed one
+    // is already absent from this response - the row-level policies refuse it
+    // to both members past support_tickets.conversation_closes_at (CHAPTER 81,
+    // a soft close: the row and its messages stay whole for support). The
+    // filter below only has to catch the moment passing while the page is open.
     if (!error && data) {
       setTickets(data);
-
-      // A booking conversation disappears from this list the moment its
-      // booking is completed or cancelled (soft-archive, not a delete - the
-      // row and its messages stay in the database for admin/dispute lookup).
-      // A legacy conversation ticket with no booking_id (from the retired
-      // pre-booking car inquiry) has nothing to check and stays visible.
-      const bookingIds = [
-        ...new Set(
-          data
-            .filter((ticket) => isConversationTicket(ticket) && ticket.booking_id)
-            .map((ticket) => ticket.booking_id as string),
-        ),
-      ];
-      if (bookingIds.length > 0) {
-        const { data: bookings } = await supabase
-          .from("bookings")
-          .select("id, status")
-          .in("id", bookingIds);
-        setBookingStatuses(
-          Object.fromEntries((bookings ?? []).map((b) => [b.id, b.status as string])),
-        );
-      } else {
-        setBookingStatuses({});
-      }
     }
     setLoading(false);
   }, [user]);
@@ -209,6 +215,22 @@ export default function SupportTicketsPage() {
   useEffect(() => {
     void fetchTickets();
   }, [fetchTickets]);
+
+  useEffect(() => {
+    const tick = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
+    if (!activeTicket || !isConversationClosed(activeTicket, now)) return;
+    setActiveTicket(null);
+    setMessages([]);
+    setAttachmentUrls({});
+    toast.info("This booking conversation has closed", {
+      description:
+        "The trip is over. SafeDrive Support still holds the full thread if you need it later.",
+    });
+  }, [activeTicket, now]);
 
   const fetchMessages = async (ticketId: string) => {
     setMessagesLoading(true);
@@ -287,6 +309,9 @@ export default function SupportTicketsPage() {
     if (!ticketId || loading) return;
     const ticket = tickets.find((item) => item.id === ticketId);
     if (!ticket) return;
+    // A stale notification or bookmark into a conversation that has since
+    // closed lands on the list, not on a thread the database would refuse.
+    if (isConversationClosed(ticket)) return;
     setTicketView(isConversationTicket(ticket) ? "messages" : "support");
     handleOpenTicket(ticket);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -541,6 +566,9 @@ export default function SupportTicketsPage() {
     [newTags],
   );
   const isActiveTicketClosed = activeTicket ? activeTicket.status !== "open" : false;
+  const activeConversationClosesIn = activeTicket
+    ? conversationClosesInMs(activeTicket, now)
+    : null;
 
   const supportTickets = useMemo(
     () => tickets.filter((ticket) => !isConversationTicket(ticket)),
@@ -548,13 +576,10 @@ export default function SupportTicketsPage() {
   );
   const conversationTickets = useMemo(
     () =>
-      tickets.filter((ticket) => {
-        if (!isConversationTicket(ticket)) return false;
-        if (!ticket.booking_id) return true; // legacy pre-booking conversation, never archived
-        const bookingStatus = bookingStatuses[ticket.booking_id];
-        return !["completed", "cancelled"].includes(bookingStatus ?? "");
-      }),
-    [tickets, bookingStatuses],
+      tickets.filter(
+        (ticket) => isConversationTicket(ticket) && !isConversationClosed(ticket, now),
+      ),
+    [tickets, now],
   );
   const visibleTickets =
     ticketView === "messages" ? conversationTickets : supportTickets;
@@ -730,6 +755,11 @@ export default function SupportTicketsPage() {
                       </span>
                     ))}
                   </div>
+                  <ConversationCountdown
+                    ticket={ticket}
+                    now={now}
+                    className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-amber-500"
+                  />
                   <div className="flex items-center justify-between mt-2">
                     <span
                       className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${
@@ -775,6 +805,13 @@ export default function SupportTicketsPage() {
                     )}
                   </div>
                 </div>
+                {activeConversationClosesIn !== null && activeConversationClosesIn > 0 && (
+                  <ConversationCountdown
+                    ticket={activeTicket}
+                    now={now}
+                    className="flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-500"
+                  />
+                )}
                 {isActiveTicketClosed && (
                   <div className="flex items-center gap-1.5 text-sm font-semibold text-green-500 bg-green-500/10 px-3 py-1 rounded-full">
                     <CheckCircle2 className="w-4 h-4" /> Resolved

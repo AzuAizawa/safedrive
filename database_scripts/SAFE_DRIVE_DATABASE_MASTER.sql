@@ -12258,4 +12258,189 @@ commit;
 --                  and a.id<>d.id and a.compliance_status='approved');
 --   (expect zero rows)
 
+-- ============================================================================
+-- CHAPTER 81 - A booking conversation has a closing time
+-- Apply this chapter only, staging first. One column is added, two triggers are
+-- created and three policies are replaced. Nothing is deleted: every closed
+-- conversation stays whole in the database and stays readable to support staff.
+-- ============================================================================
+begin;
+
+-- Reported requirement: once a trip is over, the renter and the lister should
+-- not be able to keep messaging each other - the thread is about that booking,
+-- and the booking is finished. It should not linger the way a messaging app
+-- does, and booking again with the same person must start a fresh thread
+-- rather than reopen the old one (it already does - a conversation is keyed on
+-- booking_id in api/open-booking-conversation.ts).
+--
+-- SupportTicketsPage already hid such a thread from the member's list the
+-- moment its booking reached 'completed' or 'cancelled'. That was a filter in
+-- the browser and nothing more: the ticket stayed open, a notification link or
+-- a /support?ticketId=... address still opened it with a working composer, and
+-- the database accepted every message sent that way.
+--
+-- The closing time is written down rather than re-derived. One timestamp on the
+-- ticket is what the screen counts down to, what the policies below enforce,
+-- and what an admin can read to see exactly when a thread stopped accepting
+-- messages. A day is deliberate: long enough to notice a problem with the trip
+-- that just ended and say so, short enough that the thread does not become a
+-- standing chat channel between two strangers.
+alter table public.support_tickets
+  add column if not exists conversation_closes_at timestamptz;
+
+create index if not exists support_tickets_conversation_closes_at_idx
+  on public.support_tickets (conversation_closes_at)
+  where conversation_closes_at is not null;
+
+-- The grace window lives in exactly one place. Both triggers below read it, so
+-- changing the period later is a one-line change that cannot drift.
+create or replace function public.booking_conversation_grace()
+returns interval
+language sql
+immutable
+as $conversation_grace$ select interval '1 day' $conversation_grace$;
+
+-- Every route that ends a booking - a member confirming completion, the
+-- incident handler, the deadline cron, an admin - ends it by writing
+-- bookings.status. Hanging the stamp on that column means no caller has to
+-- remember to do it, and a route added later is covered for free.
+create or replace function public.close_booking_conversation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $close_conversation$
+begin
+  if new.status is not distinct from old.status then
+    return new;
+  end if;
+  if new.status not in ('completed', 'cancelled') then
+    return new;
+  end if;
+
+  -- 'is null' keeps the first ending authoritative: a later status change
+  -- cannot hand the two members another day.
+  update public.support_tickets t
+     set conversation_closes_at = now() + public.booking_conversation_grace()
+   where t.booking_id = new.id
+     and t.participant_user_id is not null
+     and t.conversation_closes_at is null;
+
+  return new;
+end;
+$close_conversation$;
+
+drop trigger if exists close_booking_conversation on public.bookings;
+create trigger close_booking_conversation
+  after update of status on public.bookings
+  for each row execute function public.close_booking_conversation();
+
+-- A conversation can also be created after its booking has already ended:
+-- api/submit-trip-condition-report.ts opens the thread on demand to post the
+-- report into it. Without this, such a thread would carry no closing time at
+-- all and would stay open forever - the one case the trigger above cannot see.
+create or replace function public.stamp_booking_conversation_closure()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $stamp_conversation$
+begin
+  if new.participant_user_id is null
+     or new.booking_id is null
+     or new.conversation_closes_at is not null then
+    return new;
+  end if;
+
+  select now() + public.booking_conversation_grace()
+    into new.conversation_closes_at
+    from public.bookings b
+   where b.id = new.booking_id
+     and b.status in ('completed', 'cancelled');
+
+  return new;
+end;
+$stamp_conversation$;
+
+drop trigger if exists stamp_booking_conversation_closure on public.support_tickets;
+create trigger stamp_booking_conversation_closure
+  before insert on public.support_tickets
+  for each row execute function public.stamp_booking_conversation_closure();
+
+-- The three policies below are the enforcement. Each one keeps its previous
+-- rule exactly and adds the same clause: a member reaches a conversation only
+-- while it is still open. A support ticket (participant_user_id null) never
+-- gets a closing time, so nothing about SafeDrive support changes here.
+--
+-- Support staff are deliberately outside the window. A dispute raised after the
+-- thread closes is answered from the admin console, where the whole
+-- conversation - messages, photos, timestamps - is still there.
+drop policy if exists "Users and admins can read tickets" on public.support_tickets;
+create policy "Users and admins can read tickets" on public.support_tickets
+  for select using (
+    public.admin_can('support.handle')
+    or (
+      (auth.uid() = user_id or auth.uid() = participant_user_id)
+      and (conversation_closes_at is null or conversation_closes_at > now())
+    )
+  );
+
+drop policy if exists "Users and admins can read ticket messages" on public.ticket_messages;
+create policy "Users and admins can read ticket messages" on public.ticket_messages
+  for select using (
+    exists (
+      select 1 from public.support_tickets t
+      where t.id = ticket_messages.ticket_id
+        and (
+          public.admin_can('support.handle')
+          or (
+            (t.user_id = auth.uid() or t.participant_user_id = auth.uid())
+            and (t.conversation_closes_at is null or t.conversation_closes_at > now())
+          )
+        )
+    )
+  );
+
+drop policy if exists "Users and admins can create ticket messages" on public.ticket_messages;
+create policy "Users and admins can create ticket messages" on public.ticket_messages
+  for insert with check (
+    auth.uid() = sender_id
+    and exists (
+      select 1 from public.support_tickets t
+      where t.id = ticket_messages.ticket_id
+        and (
+          public.admin_can('support.handle')
+          or (
+            (t.user_id = auth.uid() or t.participant_user_id = auth.uid())
+            and (t.conversation_closes_at is null or t.conversation_closes_at > now())
+          )
+        )
+    )
+  );
+
+-- Conversations whose booking ended before this chapter existed. They are
+-- already invisible to both members (the browser-side filter did that), so
+-- closing them as of now changes nothing anyone can see, and it stops them
+-- being the one set of threads that never closes.
+update public.support_tickets t
+   set conversation_closes_at = now()
+  from public.bookings b
+ where b.id = t.booking_id
+   and t.participant_user_id is not null
+   and t.conversation_closes_at is null
+   and b.status in ('completed', 'cancelled');
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select t.id, b.status, t.conversation_closes_at
+--   from public.support_tickets t join public.bookings b on b.id = t.booking_id
+--   where t.participant_user_id is not null
+--     and b.status in ('completed','cancelled')
+--     and t.conversation_closes_at is null;
+--   (expect zero rows - every ended booking's conversation has a closing time)
+-- select count(*) from public.support_tickets
+--   where participant_user_id is null and conversation_closes_at is not null;
+--   (expect 0 - a SafeDrive support ticket never closes on a timer)
+
 -- End of SafeDrive chaptered database master.

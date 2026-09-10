@@ -3,6 +3,59 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-10 - A booking conversation has a closing time
+
+Requested: once the trip is over, the renter and the lister should stop being
+able to message each other. The thread is about that booking, and the booking is
+finished — it should not linger the way a messaging app does.
+
+It already vanished from the member's list when the booking reached `completed`
+or `cancelled`, but that was a filter in the browser and nothing more. The
+ticket stayed open, a notification link or a `/support?ticketId=...` address
+still opened it with a working composer, and the database accepted every message
+sent that way.
+
+**CHAPTER 81** writes the closing time down instead of re-deriving it.
+`support_tickets.conversation_closes_at` is stamped **one day** after the booking
+ends, by a trigger on `bookings.status` — so every route that ends a booking (a
+member confirming completion, the incident handler, the deadline cron, an admin)
+is covered without any caller having to remember. A second trigger stamps a
+conversation opened *after* its booking already ended, which is what
+`api/submit-trip-condition-report.ts` does when it posts a report into a thread
+that did not exist yet.
+
+Three row-level policies enforce it: past that timestamp neither member can read
+the ticket, read its messages, or send one. **Support staff are outside the
+window on purpose** — the whole thread, photos and timestamps included, stays
+readable from the admin console, which is where a dispute raised later is
+answered. Nothing is deleted.
+
+The day is the point: long enough to notice a problem with the trip that just
+ended and say so, short enough that the thread does not become a standing chat
+channel between two strangers. The screen counts down to the same timestamp
+("Closes in 23h 40m") on the list card and in the thread header, and lets go of
+a thread that expires while it is open.
+
+Booking the same lister again already started a fresh thread — a conversation is
+keyed on `booking_id` (`api/open-booking-conversation.ts:117`) — so nothing was
+needed there, and an old thread is never reopened.
+
+One consequence worth stating: the pickup/return photos posted into a
+conversation are visible only there (`TripConditionReportPage` never shows a
+submitted report back), so both members now have one day to look at them.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 81),
+`src/lib/supportTickets.ts`, `src/pages/SupportTicketsPage.tsx`,
+`src/types/database.ts`, `scripts/booking-conversation-closure.test.mjs`,
+`package.json`.
+
+Migration: apply CHAPTER 81, staging first. Its backfill closes conversations
+whose booking had already ended — they were already invisible to both members,
+so nothing on screen changes. Proved against real PostgreSQL before shipping:
+`npm run check:conversation-closure`.
+
+---
+
 ## 2026-09-10 - "Switch to Renter" no longer gets undone on the way out
 
 Reported: switching to renter landed on Browse Cars - the renter page, showing

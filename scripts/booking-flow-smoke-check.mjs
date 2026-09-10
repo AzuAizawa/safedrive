@@ -718,7 +718,11 @@ const checks = [
       "ticket_messages",
       "serializeTicketTags",
       "Booking Conversations",
-      "bookingStatuses",
+      // CHAPTER 81: the closing time is what decides whether a conversation is
+      // still the members. Reading it is the whole archive rule.
+      "isConversationClosed",
+      "ConversationCountdown",
+      "conversationClosesInMs",
     ],
     absentMarkers: [
       "SupportDb",
@@ -727,6 +731,10 @@ const checks = [
       // Retired copy - conversations no longer start from a car page.
       "Lister Messages",
       "Ask the lister",
+      // The archive rule used to be a second query for every conversation
+      // booking status, decided in the browser. CHAPTER 81 replaced it with a
+      // stamped timestamp the database itself enforces.
+      "bookingStatuses",
     ],
   },
   {
