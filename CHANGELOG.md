@@ -3,6 +3,55 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-11 - Early return finally reads the clock
+
+Reported by a tester with a booking running Sep 10, 12:00 AM to Sep 11, 12:00 AM.
+At 9 PM on Sep 11 — twenty-one hours past the agreed return — the trip still
+offered **Request early return**, and the dialog proposed **7:00 PM**: a time
+both later than the return being brought forward and already gone.
+
+**Nothing invalid was ever stored.** `api/booking-early-return-action.ts` already
+refuses a request that is not earlier than the current return, and refuses one in
+the past. The server was right and is untouched. What broke was trust: the screen
+walked the renter into building a request that was guaranteed to be refused, and
+offered it at a moment when no valid request existed at all.
+
+Three causes, one root — **the page has had a live clock all along and the early
+return never asked it.** `clockNow` ticks every minute and already drives the
+no-show and extension logic.
+
+- `canRequestEarlyReturn` checked the booking state and the handoff flags, and
+  nothing about time. Past the agreed return instant, every possible answer is in
+  the past, so the offer is now withdrawn instead of left standing to fail.
+- `TIME_OPTIONS` is a fixed list of all 48 half-hours. It knew nothing of today,
+  of now, or of the return being shortened. It is now filtered to times **later
+  than now and earlier than the current return** — the same two conditions the
+  server enforces.
+- The date floor was `new Date().toISOString()`, which is **UTC**: still
+  yesterday in Manila between midnight and 8am, long enough to offer a date that
+  had already gone. It now uses the Manila date.
+
+Nothing new was invented. `getOperativeReturnDeadline` already gives the return
+that is actually in force, honouring an approved early return;
+`getBookingReturnDeadline` builds its instant through `manilaInstant`, so the
+comparison is in Philippine time by construction. Both simply were not imported
+here. Changing the date now also clears the chosen time, so a value picked under
+the old date cannot survive into a new one where it sits in the past.
+
+**Placement.** The line the whole form is measured against — *Current return:
+Sep 11, 2026 at 12:00 AM* — was buried under the time field, wrapping to three
+lines and crowding the Reason box, even though it governs both inputs. It is now
+a single strip above both. The paragraph beneath the time picker is one short
+line that says what is true at that moment, including the case the filtering
+makes possible: a date where every half-hour has either gone or falls after the
+current return now says so plainly instead of showing an empty picker.
+
+No migration — client only, and the server was already correct.
+
+Files: `src/pages/MyBookingsPage.tsx`.
+
+---
+
 ## 2026-09-11 - A lister can delete a car; the record it explains stays
 
 Reported by a tester, two things at once: the "Cannot be deleted" note was

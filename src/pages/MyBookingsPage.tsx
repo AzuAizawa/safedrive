@@ -7,7 +7,9 @@ import { supabase } from "@/lib/supabase";
 import { createPrivateStorageUrlMap } from "@/lib/privateStorage";
 import {
   ensureReturnReminderNotifications,
+  getBookingReturnDeadline,
   getNoShowWindowState,
+  getOperativeReturnDeadline,
   getReturnNoShowWindowState,
   getReturnReminderState,
   getReturnCheckinEligibleDeadline,
@@ -318,6 +320,44 @@ export default function MyBookingsPage() {
 
     return () => window.clearInterval(intervalId);
   }, []);
+
+  // Today as the Philippines sees it. new Date().toISOString() is UTC, which is
+  // still yesterday here between midnight and 8am - long enough to offer a
+  // renter a return date that has already gone.
+  const manilaToday = new Date(clockNow).toLocaleDateString("en-CA", {
+    timeZone: "Asia/Manila",
+  });
+
+  // The picker used to list all 48 half-hours whatever the clock said, so a
+  // renter could choose a time that had already passed, or one later than the
+  // return they were trying to bring forward. api/booking-early-return-action.ts
+  // refuses both; the picker simply never knew what time it was. It does now -
+  // the same live clock the rest of this page runs on.
+  const earlyReturnTimeOptions = useMemo(() => {
+    if (!earlyReturnModalBooking || !earlyReturnDraft.requestedEndDate) {
+      return TIME_OPTIONS;
+    }
+    const currentReturn = getOperativeReturnDeadline(
+      earlyReturnModalBooking,
+      latestApprovedEarlyReturn(earlyReturnsByBooking[earlyReturnModalBooking.id]),
+      graceMinutes,
+      new Date(clockNow),
+    ).deadline.getTime();
+
+    return TIME_OPTIONS.filter((option) => {
+      const candidate = getBookingReturnDeadline(
+        earlyReturnDraft.requestedEndDate,
+        option.value,
+      ).getTime();
+      return candidate > clockNow && candidate < currentReturn;
+    });
+  }, [
+    earlyReturnModalBooking,
+    earlyReturnDraft.requestedEndDate,
+    earlyReturnsByBooking,
+    graceMinutes,
+    clockNow,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -1958,7 +1998,17 @@ export default function MyBookingsPage() {
               !booking.renter_completed &&
               !booking.owner_completed &&
               !extensionBlocksCompletion &&
-              (!latestEarly || !["pending", "approved"].includes(latestEarly.status));
+              (!latestEarly || !["pending", "approved"].includes(latestEarly.status)) &&
+              // This page has had a live clock all along (clockNow, ticking
+              // every minute) and this was the one decision that never asked it.
+              // Past the agreed return instant every possible answer is in the
+              // past, so there is nothing valid left to offer.
+              getOperativeReturnDeadline(
+                booking,
+                latestApprovedEarly,
+                graceMinutes,
+                new Date(clockNow),
+              ).deadline.getTime() > clockNow;
             const noShowState = getNoShowWindowState(
               booking,
               "renter",
@@ -3214,17 +3264,30 @@ export default function MyBookingsPage() {
                 )}
               </div>
               <div className="max-h-[calc(100vh-16rem)] space-y-3 overflow-y-auto px-5 py-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    Current return
+                  </span>
+                  <span className="text-sm font-semibold">
+                    {format(new Date(earlyReturnModalBooking.end_date), "MMM d, yyyy")}
+                    {" at "}
+                    {formatTimeLabel(earlyReturnModalBooking.dropoff_time)}
+                  </span>
+                </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">New return date</label>
                   <input
                     type="date"
                     value={earlyReturnDraft.requestedEndDate}
-                    min={new Date().toISOString().slice(0, 10)}
+                    min={manilaToday}
                     max={earlyReturnModalBooking.end_date}
                     onChange={(e) =>
                       setEarlyReturnDraft((d) => ({
                         ...d,
                         requestedEndDate: e.target.value,
+                        // A time picked under the previous date may be in the
+                        // past under this one. Start that choice again.
+                        requestedEndTime: "",
                       }))
                     }
                     className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -3245,18 +3308,25 @@ export default function MyBookingsPage() {
                     <option value="" disabled>
                       Select return time
                     </option>
-                    {TIME_OPTIONS.map((option) => (
+                    {earlyReturnTimeOptions.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
                   </select>
-                  <p className="text-[11px] text-muted-foreground">
-                    Current return: {format(new Date(earlyReturnModalBooking.end_date), "MMM d, yyyy")}
-                    {" at "}
-                    {formatTimeLabel(earlyReturnModalBooking.dropoff_time)}. Same-day requests are fine, as
-                    long as the new date and time are earlier than this.
-                  </p>
+                  {!earlyReturnDraft.requestedEndDate ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Pick the date first.
+                    </p>
+                  ) : earlyReturnTimeOptions.length === 0 ? (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                      No time left on this date — choose an earlier one.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Later than now, earlier than the current return.
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">Reason (optional)</label>
