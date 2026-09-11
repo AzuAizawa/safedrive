@@ -185,20 +185,22 @@ interface VehicleRow {
 }
 
 /**
- * Why a car cannot be deleted.
+ * Why a car cannot be deleted yet.
  *
- * bookings.car_id references cars(id) with no ON DELETE clause, so PostgreSQL
- * refuses to remove a car that any booking row still points at - whatever that
- * booking's status is. Every other table that references a car cascades or
- * nulls out; bookings is the one that holds. So a car that has ever been booked
- * can never be deleted, by its owner or by an admin, and the button that offers
- * to do it is offering something that cannot happen.
+ * Deleting a car does not remove its row (CHAPTER 86). A booking is DISPLAYED
+ * by joining cars - nine API handlers and three pages read
+ * booking.cars.car_models.car_brands.name to say what was rented - so removing
+ * the row would leave every past booking of that car unable to name the
+ * vehicle. Deleting marks cars.deleted_at instead: gone from this list, gone
+ * from Browse, the listing slot freed, and the bookings it explains still
+ * resolving.
  *
- * These three cases are ordered by what the lister should do next, not by
- * severity: finish the trip, wait for the money, or stop trying and take the
- * car offline instead.
+ * Past bookings therefore do NOT block a delete. Only what is still in the air
+ * does, and these two are ordered by what the lister should do next: finish the
+ * trip, or wait for the money. The same two conditions are enforced by a
+ * trigger on cars, so a stale page or a direct call cannot get around them.
  */
-type DeleteBlockKind = "in_progress" | "payout_due" | "history";
+type DeleteBlockKind = "in_progress" | "payout_due";
 
 interface DeleteBlock {
   kind: DeleteBlockKind;
@@ -664,16 +666,13 @@ export default function MyVehiclesPage() {
         blocks[carId] = {
           kind: "payout_due",
           reason:
-            "A payout for this car is still on its way to you. It has to reach you before the car can leave SafeDrive.",
+            "A payout for this car is still on its way to you. It has to reach you before the car can be removed.",
         };
-        continue;
       }
 
-      blocks[carId] = {
-        kind: "history",
-        reason:
-          `This car has ${forCar.length} past booking${forCar.length === 1 ? "" : "s"}. SafeDrive keeps that record, so the car can no longer be deleted - use Disable to take it off the listings instead.`,
-      };
+      // Past bookings deliberately do NOT block. A trip that ended is no reason
+      // to keep a vehicle on someone's account - the record of it survives the
+      // delete because the car row is kept to keep explaining it (CHAPTER 86).
     }
 
     return blocks;
@@ -686,6 +685,7 @@ export default function MyVehiclesPage() {
         .from("cars")
         .select("*, car_models(name, body_type, car_brands(name))")
         .eq("owner_id", user!.id)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (error) {
         console.error("Fetch vehicles error:", error);
@@ -1426,15 +1426,24 @@ export default function MyVehiclesPage() {
     const toastId = toast.loading("Deleting vehicle...");
 
     try {
+      // Not a row removal: nine API handlers and three pages render a booking
+      // by joining cars, so deleting the row would leave every past booking of
+      // this car unable to say what was rented. The car is marked instead - it
+      // leaves this list, leaves Browse, and frees the listing slot, while the
+      // bookings it explains keep resolving (CHAPTER 86).
       const { error } = await supabase
         .from("cars")
-        .delete()
+        .update({ deleted_at: new Date().toISOString() })
         .eq("id", vehicle.id)
         .eq("owner_id", user.id);
 
       if (error) throw error;
 
-      toast.success("Vehicle deleted.", { id: toastId });
+      toast.success("Vehicle deleted.", {
+        id: toastId,
+        description:
+          "It is off your listings and your slot is free. Past bookings keep their record.",
+      });
       fetchVehicles();
     } catch (error) {
       // A Supabase error is a plain object, not an Error - so the old
@@ -2320,6 +2329,7 @@ export default function MyVehiclesPage() {
                       )}
                     </div>
                   </div>
+                  <div className="flex flex-col gap-2 sm:items-end">
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <span
                       className={`px-2.5 py-1 rounded-full text-xs font-medium ${badge.color}`}
@@ -2395,14 +2405,15 @@ export default function MyVehiclesPage() {
                       Delete
                     </Button>
                   </div>
-                  {deleteBlocks[v.id] && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      <span className="font-semibold text-foreground">
-                        Cannot be deleted:
-                      </span>{" "}
-                      {deleteBlocks[v.id].reason}
-                    </p>
-                  )}
+                    {deleteBlocks[v.id] && (
+                      <p className="max-w-xs text-xs text-muted-foreground sm:text-right">
+                        <span className="font-semibold text-foreground">
+                          Cannot be deleted:
+                        </span>{" "}
+                        {deleteBlocks[v.id].reason}
+                      </p>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             );
@@ -2793,7 +2804,7 @@ export default function MyVehiclesPage() {
         title="Delete vehicle listing?"
         description={
           deleteTargetVehicle
-            ? `Delete ${deleteTargetVehicle.car_models.car_brands.name} ${deleteTargetVehicle.car_models.name} (${deleteTargetVehicle.plate_number})? This cannot be undone.`
+            ? `Delete ${deleteTargetVehicle.car_models.car_brands.name} ${deleteTargetVehicle.car_models.name} (${deleteTargetVehicle.plate_number})? It comes off your listings and frees a slot. Bookings that already happened keep their record, and only SafeDrive support can bring the car back.`
             : ""
         }
         confirmText="Delete Vehicle"

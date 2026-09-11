@@ -178,6 +178,9 @@ export default function BrowseCarsPage() {
         `,
         )
         .in("status", ["approved", "active"])
+        // A car its owner deleted is gone from the listings; the row stays only
+        // to keep explaining the bookings it already had (CHAPTER 86).
+        .is("deleted_at", null)
         .is("profiles.deleted_at", null)
         // A suspended owner takes their listings with them (CHAPTER 85). The
         // car rows are untouched - nothing is switched off per vehicle - so

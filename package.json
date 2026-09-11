@@ -20,6 +20,7 @@
     "check:notification-retention": "tsx --test scripts/notification-retention.test.mjs",
     "check:catalog-discontinue": "tsx --test scripts/catalog-discontinue.test.mjs",
     "check:account-suspension": "tsx --test scripts/account-suspension.test.mjs",
+    "check:car-deletion": "tsx --test scripts/car-deletion.test.mjs",
     "check:api-boundaries": "node scripts/api-boundary-smoke-check.mjs",
     "check:local-env": "node scripts/check-local-env.mjs",
     "check:live-supabase": "node scripts/verify-live-supabase.mjs",
@@ -32,7 +33,7 @@
     "check:targeted-ui": "tsx scripts/targeted-authenticated-ui-check.mjs",
     "check:api": "tsc -p tsconfig.api.json",
     "check:alignment": "node scripts/repository-alignment-check.mjs",
-    "check:all": "npm run lint && npm run check:api && npm run check:booking-flow && npm run check:vehicle-compliance && npm run check:agreement-storage && npm run check:financial-logic && npm run check:reconciliation-logic && npm run check:process-logic && npm run check:kyc-ocr && npm run check:conversation-closure && npm run check:notification-retention && npm run check:catalog-discontinue && npm run check:account-suspension && npm run check:api-boundaries && npm run check:alignment && npm run check:browser && npm run check:local-env",
+    "check:all": "npm run lint && npm run check:api && npm run check:booking-flow && npm run check:vehicle-compliance && npm run check:agreement-storage && npm run check:financial-logic && npm run check:reconciliation-logic && npm run check:process-logic && npm run check:kyc-ocr && npm run check:conversation-closure && npm run check:notification-retention && npm run check:catalog-discontinue && npm run check:account-suspension && npm run check:car-deletion && npm run check:api-boundaries && npm run check:alignment && npm run check:browser && npm run check:local-env",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"api/**/*.ts\" \"server/**/*.ts\" \"*.{js,ts}\"",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort"
   },

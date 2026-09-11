@@ -275,7 +275,10 @@ export default function AdminVehicleApprovalPage() {
         .from("cars")
         .select(
           "*, car_models(name, body_type, seats, fuel_type, car_brands(name)), car_images(*), car_documents(*), profiles!cars_owner_id_fkey(id, full_name, email, phone, first_name, last_name, driver_license, national_id, address)",
-        );
+        )
+        // A car its owner deleted must leave the review queue with it -
+        // otherwise an admin is asked to approve a listing that is gone.
+        .is("deleted_at", null);
       // A resubmission does not change the car's status - it files a pending
       // car_documents row while the listing stays where it is. The separate
       // renewals page used to be the only place those surfaced; now they

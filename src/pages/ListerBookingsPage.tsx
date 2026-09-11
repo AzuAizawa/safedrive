@@ -605,6 +605,7 @@ export default function ListerBookingsPage() {
             "id, plate_number, status, rejection_reason, car_models(name, car_brands(name))",
           )
           .eq("owner_id", user.id)
+          .is("deleted_at", null)
           .in("status", ["pending", "rejected"])
           .order("updated_at", { ascending: false })
           .limit(5),

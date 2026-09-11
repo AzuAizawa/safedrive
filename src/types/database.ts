@@ -358,6 +358,7 @@ export interface Database {
           comprehensive_insurance_expiry: string | null;
           insurer_rental_use_confirmed: boolean;
           insurance_verification_status: string;
+          deleted_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -387,6 +388,7 @@ export interface Database {
           comprehensive_insurance_expiry?: string | null;
           insurer_rental_use_confirmed?: boolean;
           insurance_verification_status?: string;
+          deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -416,6 +418,7 @@ export interface Database {
           comprehensive_insurance_expiry?: string | null;
           insurer_rental_use_confirmed?: boolean;
           insurance_verification_status?: string;
+          deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

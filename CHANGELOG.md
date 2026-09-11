@@ -3,6 +3,75 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-11 - A lister can delete a car; the record it explains stays
+
+Reported by a tester, two things at once: the "Cannot be deleted" note was
+sitting *beside* the Approved/Edit/Disable/Delete buttons instead of under them,
+and the rule behind it was wrong — a car should be deletable, blocked only by an
+ongoing or accepted booking or an incoming payout, not by a trip that ended
+months ago.
+
+They were right on both, and asked the question that decided how to build it:
+*where does the past booking go, does the admin keep it, and can the lister ask
+for it?*
+
+**Removing the row is not available, and not because of the foreign key alone.**
+A booking is *displayed* by joining `cars` — nine API handlers and three pages
+read `booking.cars.car_models.car_brands.name` to say what was rented. Delete
+the car and every past booking of it stops rendering, for the renter and the
+admin as much as for the lister: "somebody paid ₱2,000 for nothing".
+
+So **CHAPTER 86** adds `cars.deleted_at`. To the lister the car is gone — off
+their list, off Browse, and **the listing slot is theirs again**. The row stays
+only to keep explaining bookings that already happened, for as long as those are
+kept: `retention_policy_rules` already sets that at `financial_source_record`,
+1825 days. The personal parts of a car (`contact_number`, `additional_info`) are
+already cleared by `anonymize_user()`, so what remains describes a vehicle, not a
+person. A car nobody ever booked is still removed outright — nothing points at
+it, so there is nothing to keep.
+
+The lister can already ask for that record: `/privacy-request` → **Access my
+data** files a `data_retention_requests` row for a super admin to action. No new
+mechanism was needed.
+
+**What blocks a delete is now only what is still in the air:** a booking that has
+not finished, or a payout that has not reached the owner. Past bookings do not
+block. A database trigger enforces the same two conditions, so a stale page, a
+second tab, or a direct PostgREST call cannot retire a car out from under a live
+trip or unpaid money.
+
+**Statistics are untouched, and this was checked rather than assumed.** Revenue
+comes from `ledger_entries`/`ledger_journals`/`bookings`; the lister's earnings
+and completion rate from `bookings`; car ratings from `booking_reviews` joined to
+`bookings`; the lister's rating and trip count from `bookings` by `owner_id`.
+None of them join `cars`, so nothing is lost by deleting one.
+
+Two counts *did* read `cars` and would have gone wrong, neither of them reported:
+`AdminEarningsPage` counts listed cars per region, and `AdminVehicleApprovalPage`
+would have kept asking an admin to review a listing its owner had deleted. Both
+now skip deleted cars — along with Browse, the lister's own list, and the lister
+dashboard.
+
+**Layout:** the card is a flex row on wide screens, and the note was a *third*
+child of that row, so it sat beside the buttons. The buttons and the note are now
+wrapped in one column — buttons, then the note beneath, right-aligned and width-
+capped. Nothing was removed.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 86),
+`src/pages/MyVehiclesPage.tsx`, `src/pages/BrowseCarsPage.tsx`,
+`src/pages/ListerBookingsPage.tsx`, `src/pages/admin/AdminEarningsPage.tsx`,
+`src/pages/admin/AdminVehicleApprovalPage.tsx`, `src/types/database.ts`,
+`scripts/car-deletion.test.mjs`, `package.json`.
+
+Migration: apply CHAPTER 86, staging first. It deletes nothing — every car
+starts undeleted. Proved against real PostgreSQL before shipping:
+`npm run check:car-deletion`, covering each unfinished booking status blocking,
+an owed payout blocking, past bookings not blocking, the booking still resolving
+to its car afterwards, restore never being blocked, and a never-booked car still
+being removed outright.
+
+---
+
 ## 2026-09-10 - An account can be suspended: the rung between a block and a delete
 
 Asked by a tester: a renter misbehaves on one trip and books again; a lister has

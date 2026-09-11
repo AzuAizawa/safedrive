@@ -88,6 +88,7 @@ export default function AdminEarningsPage() {
           .from("cars")
           .select("location, status")
           .in("status", ["approved", "active"])
+          .is("deleted_at", null)
           .limit(ROW_LIMIT),
         supabase
           .from("subscriptions")

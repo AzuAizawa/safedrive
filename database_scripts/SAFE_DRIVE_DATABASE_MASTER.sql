@@ -12993,4 +12993,109 @@ commit;
 -- select proname from pg_proc where proname = 'set_account_suspended';
 --   (expect one row)
 
+-- ============================================================================
+-- CHAPTER 86 - A lister can delete a car; the record it explains stays
+-- Apply this chapter only, staging first. One column, one index and one trigger
+-- are added. No car changes state: everything starts undeleted.
+-- ============================================================================
+begin;
+
+-- Reported: a lister could not delete a car that had only finished bookings.
+-- The panel said so plainly (CHAPTER 83's sibling change), but the rule itself
+-- was too strict - a trip that ended months ago is no reason to keep a vehicle
+-- on someone's account forever. What should block a delete is money or a trip
+-- still in the air: a booking that has not finished, or a payout that has not
+-- reached the owner.
+--
+-- Removing the row outright is not available, and not because of the foreign
+-- key alone. A booking is DISPLAYED by joining cars - nine API handlers and
+-- three pages read booking.cars.car_models.car_brands.name to say what was
+-- rented. Delete the car row and every past booking of that car stops
+-- rendering, for the renter and the admin as much as for the lister. The
+-- booking would become "somebody paid P2,000 for nothing".
+--
+-- So deleting marks the car instead. To the lister it is gone: off their list,
+-- off Browse, and the listing slot is theirs again. The row stays only to keep
+-- explaining bookings that already happened, for as long as those records are
+-- kept - retention_policy_rules already sets that at financial_source_record,
+-- 1825 days. The personal parts of a car (contact_number, additional_info) are
+-- already cleared by anonymize_user(), so what remains is a description of a
+-- vehicle, not data about a person.
+--
+-- A car nobody ever booked is still deleted outright: nothing points at it and
+-- there is no record to explain. That path is unchanged.
+alter table public.cars
+  add column if not exists deleted_at timestamptz;
+
+create index if not exists cars_deleted_at_idx
+  on public.cars (deleted_at)
+  where deleted_at is not null;
+
+-- The browser checks the same two conditions before it enables the button, so
+-- this is the backstop, not the only guard: a stale page, a second tab, or a
+-- direct PostgREST call must not be able to retire a car out from under a live
+-- trip or an unpaid payout.
+create or replace function public.guard_car_soft_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $guard_car_soft_delete$
+declare
+  unfinished integer;
+  owed integer;
+begin
+  -- Only the moment of deletion is guarded. Restoring, or any other edit to a
+  -- car that is already deleted, is left alone.
+  if new.deleted_at is null or old.deleted_at is not null then
+    return new;
+  end if;
+
+  select count(*) into unfinished
+  from public.bookings b
+  where b.car_id = new.id
+    and b.status in (
+      'pending', 'confirmed', 'awaiting_payment',
+      'downpayment_paid', 'fully_paid', 'active'
+    );
+
+  if unfinished > 0 then
+    raise exception 'This car still has % booking(s) that have not finished. Finish or cancel them first.', unfinished;
+  end if;
+
+  -- A payout is recorded as a payments row of type 'payout'; anything pending
+  -- or failed is still owed, not written off.
+  select count(*) into owed
+  from public.payments p
+  join public.bookings b on b.id = p.booking_id
+  where b.car_id = new.id
+    and p.payment_type = 'payout'
+    and p.status in ('pending', 'failed');
+
+  if owed > 0 then
+    raise exception 'A payout for this car has not reached its owner yet. It has to be settled first.';
+  end if;
+
+  return new;
+end;
+$guard_car_soft_delete$;
+
+drop trigger if exists guard_car_soft_delete on public.cars;
+create trigger guard_car_soft_delete
+  before update of deleted_at on public.cars
+  for each row execute function public.guard_car_soft_delete();
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select column_name from information_schema.columns
+--   where table_schema='public' and table_name='cars' and column_name='deleted_at';
+--   (expect one row)
+-- select count(*) from public.cars where deleted_at is not null;
+--   (expect 0 - this chapter deletes nothing)
+-- select c.plate_number, count(b.id) as bookings
+--   from public.cars c left join public.bookings b on b.car_id = c.id
+--   where c.deleted_at is not null group by c.plate_number;
+--   (after a lister deletes one: the row is still there, still explaining its bookings)
+
 -- End of SafeDrive chaptered database master.
