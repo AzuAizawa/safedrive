@@ -18,6 +18,8 @@ import {
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import AdminSectionTabs from "@/components/AdminSectionTabs";
+import BookingPagination from "@/components/BookingPagination";
+import { usePagedItems } from "@/lib/usePagedItems";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -390,6 +392,8 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
     () => bookings.filter((booking) => getLatestPayout(booking)?.status === "completed"),
     [bookings],
   );
+  const queuePages = usePagedItems(queue, "queue");
+  const completedPages = usePagedItems(completed, "completed");
   const payoutStats = useMemo(() => {
     // The lister's payout is base_price net of SafeDrive's commission (see
     // server/payoutAutomation.ts) - commission is no longer additional cash
@@ -587,7 +591,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
           </div>
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
-            {queue.map((booking) => {
+            {queuePages.items.map((booking) => {
               const support = getAutomationSupport(booking);
               const latestPayout = getLatestPayout(booking);
               const supportCaseCount = supportCaseCounts[booking.id] ?? 0;
@@ -746,6 +750,11 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
             })}
           </div>
         )}
+        {queuePages.pageCount > 1 ? (
+          <div className="mt-4">
+            <BookingPagination {...queuePages.paginationProps} noun="payouts" />
+          </div>
+        ) : null}
       </div>
       ) : null}
 
@@ -796,7 +805,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {completed.map((booking) => {
+                    {completedPages.items.map((booking) => {
                       const payout = getLatestPayout(booking);
                       return (
                         <TableRow key={booking.id}>
@@ -831,6 +840,11 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                   </TableBody>
                 </Table>
               </Card>
+              {completedPages.pageCount > 1 ? (
+                <div className="mt-4">
+                  <BookingPagination {...completedPages.paginationProps} noun="payouts" />
+                </div>
+              ) : null}
             </>
           ) : (
             <Card>

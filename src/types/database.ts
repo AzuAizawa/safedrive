@@ -1848,6 +1848,33 @@ export interface Database {
         Args: { p_start: string; p_end?: string | null };
         Returns: { car_id: string }[];
       };
+      // CHAPTER 89 - the audit trail, paged and filtered in the database.
+      admin_audit_log_actions: {
+        Args: Record<string, never>;
+        Returns: { action: string; entries: number; routine_entries: number }[];
+      };
+      admin_audit_log_page: {
+        Args: {
+          p_search?: string | null;
+          p_actions?: string[] | null;
+          p_search_actions?: string[] | null;
+          p_include_routine?: boolean;
+          p_limit?: number;
+          p_offset?: number;
+        };
+        Returns: {
+          id: string;
+          user_id: string | null;
+          action: string;
+          entity_type: string | null;
+          entity_id: string | null;
+          details: Json | null;
+          created_at: string;
+          actor_full_name: string | null;
+          actor_email: string | null;
+          total_count: number;
+        }[];
+      };
       propose_platform_setting_change: {
         Args: {
           p_changes: Json;

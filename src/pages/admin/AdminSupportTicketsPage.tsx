@@ -46,6 +46,8 @@ import { Input } from "@/components/ui/input";
 import AdminSectionTabs from "@/components/AdminSectionTabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import BookingPagination from "@/components/BookingPagination";
+import { usePagedItems } from "@/lib/usePagedItems";
 
 type AdminTicket = SupportTicket & {
   profiles?: Pick<Profile, "full_name" | "email">;
@@ -258,6 +260,7 @@ export default function AdminSupportTicketsPage() {
       }),
     [tickets, filter, tagFilter, kindFilter],
   );
+  const ticketPages = usePagedItems(filteredTickets, `${filter}|${tagFilter}|${kindFilter}`);
 
   const conversationCount = useMemo(
     () =>
@@ -887,7 +890,7 @@ export default function AdminSupportTicketsPage() {
                 <p className="text-sm">No tickets found</p>
               </div>
             ) : (
-              filteredTickets.map((ticket) => (
+              ticketPages.items.map((ticket) => (
                 <div
                   key={ticket.id}
                   onClick={() => handleOpenTicket(ticket)}
@@ -933,6 +936,11 @@ export default function AdminSupportTicketsPage() {
               ))
             )}
           </div>
+          {ticketPages.pageCount > 1 ? (
+            <div className="border-t border-border/30 p-2">
+              <BookingPagination {...ticketPages.paginationProps} noun="tickets" />
+            </div>
+          ) : null}
         </div>
 
         <div className="md:col-span-2 border border-border/50 rounded-xl bg-card flex flex-col overflow-hidden shadow-sm">

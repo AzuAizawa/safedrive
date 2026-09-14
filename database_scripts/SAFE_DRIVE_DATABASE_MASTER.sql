@@ -13527,4 +13527,149 @@ commit;
 -- select count(*) from public.approved_extension_holds();
 --   (expect the number of approved, unpaid extensions still inside their payment window)
 
+-- ============================================================================
+-- CHAPTER 89 - The audit trail pages through every entry
+-- Apply this chapter only, staging first. Four read-only functions are added.
+-- No table, row or policy changes.
+-- ============================================================================
+begin;
+
+-- Reported: the audit trail was one long scroll. Checking it found worse:
+-- AdminAuditTrailPage loaded the newest 200 entries and stopped, so every older
+-- entry was unreachable, and search and the filters only ever looked inside
+-- those 200. Paging in the browser cannot fix that - the database has to page,
+-- filter and search. The category and label text the page shows are defined
+-- in the page, which resolves them to action names and passes those in; the
+-- "routine system job" rule lives here so it can be counted and filtered.
+--
+-- Both admin functions answer only to someone who may read the audit log: the
+-- same admin_can('audit.view') the "Admin read audit log" policy checks.
+
+-- A number stored in an entry's details, or null when it is not one.
+create or replace function public.audit_detail_number(p_details jsonb, p_key text)
+returns numeric
+language sql
+immutable
+set search_path = public
+as $audit_detail_number$
+  select case
+    when jsonb_typeof(p_details) = 'object'
+     and (p_details ->> p_key) ~ '^-?[0-9]+(\.[0-9]+)?$'
+    then (p_details ->> p_key)::numeric
+  end;
+$audit_detail_number$;
+
+-- A return-reminder sweep that found and sent nothing - hidden by default,
+-- exactly as isRoutineAutomationEntry in AdminAuditTrailPage.tsx decides.
+create or replace function public.is_routine_audit_entry(p_action text, p_details jsonb)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $is_routine_audit_entry$
+  select p_action = 'return_reminder_sweep'
+    and coalesce(public.audit_detail_number(p_details, 'checked'),
+                 public.audit_detail_number(p_details, 'bookings_checked'), 0) = 0
+    and coalesce(public.audit_detail_number(p_details, 'email_reminders'),
+                 public.audit_detail_number(p_details, 'gmail_reminders'), 0) = 0
+    and coalesce(public.audit_detail_number(p_details, 'notifications_created'), 0) = 0;
+$is_routine_audit_entry$;
+
+-- Every action ever recorded, with how many entries it has and how many of
+-- those are routine: the filter list and the category counts.
+create or replace function public.admin_audit_log_actions()
+returns table(action text, entries bigint, routine_entries bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $admin_audit_log_actions$
+  select a.action,
+         count(*),
+         count(*) filter (where public.is_routine_audit_entry(a.action, a.details))
+  from public.audit_log a
+  where public.admin_can('audit.view')
+  group by a.action
+  order by a.action;
+$admin_audit_log_actions$;
+
+-- One page of the trail, newest first, with the total it was cut from.
+--   p_actions        only these actions (null = all; empty = none)
+--   p_search         matched against the actor's name and email and the action
+--   p_search_actions actions whose on-screen label matched p_search
+create or replace function public.admin_audit_log_page(
+  p_search text default null,
+  p_actions text[] default null,
+  p_search_actions text[] default null,
+  p_include_routine boolean default false,
+  p_limit integer default 20,
+  p_offset integer default 0
+)
+returns table(
+  id uuid,
+  user_id uuid,
+  action text,
+  entity_type text,
+  entity_id text,
+  details jsonb,
+  created_at timestamptz,
+  actor_full_name text,
+  actor_email text,
+  total_count bigint
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $admin_audit_log_page$
+declare
+  term text := nullif(btrim(coalesce(p_search, '')), '');
+  pattern text;
+begin
+  if not public.admin_can('audit.view') then
+    raise exception 'The audit.view permission is required to read the audit trail.'
+      using errcode = '42501';
+  end if;
+
+  -- What is typed is text to find, never a LIKE wildcard.
+  if term is not null then
+    pattern := '%' || replace(replace(replace(term, '\', '\\'), '%', '\%'), '_', '\_') || '%';
+  end if;
+
+  return query
+  select a.id, a.user_id, a.action, a.entity_type, a.entity_id, a.details, a.created_at,
+         p.full_name, p.email,
+         count(*) over ()
+  from public.audit_log a
+  left join public.profiles p on p.id = a.user_id
+  where (p_actions is null or a.action = any(p_actions))
+    and (p_include_routine or not public.is_routine_audit_entry(a.action, a.details))
+    and (
+      pattern is null
+      or p.full_name ilike pattern
+      or p.email ilike pattern
+      or a.action ilike pattern
+      or replace(a.action, '_', ' ') ilike pattern
+      or a.action = any(coalesce(p_search_actions, '{}'::text[]))
+    )
+  order by a.created_at desc, a.id desc
+  limit least(greatest(coalesce(p_limit, 20), 1), 100)
+  offset greatest(coalesce(p_offset, 0), 0);
+end;
+$admin_audit_log_page$;
+
+revoke all on function public.admin_audit_log_actions() from public, anon;
+grant execute on function public.admin_audit_log_actions() to authenticated, service_role;
+revoke all on function public.admin_audit_log_page(text, text[], text[], boolean, integer, integer) from public, anon;
+grant execute on function public.admin_audit_log_page(text, text[], text[], boolean, integer, integer) to authenticated, service_role;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select proname from pg_proc where proname in
+--   ('audit_detail_number', 'is_routine_audit_entry', 'admin_audit_log_actions', 'admin_audit_log_page');
+--   (expect four rows)
+-- select sum(entries) from public.admin_audit_log_actions();
+--   (as an admin: expect the number of rows in audit_log; as anyone else: null)
+
 -- End of SafeDrive chaptered database master.

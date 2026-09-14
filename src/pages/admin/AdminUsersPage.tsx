@@ -61,6 +61,8 @@ import {
   Trash2,
 } from "lucide-react";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import BookingPagination from "@/components/BookingPagination";
+import { usePagedItems } from "@/lib/usePagedItems";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import type { Profile, VerificationImage } from "@/types/database";
@@ -289,6 +291,7 @@ export default function AdminUsersPage() {
       u.email.toLowerCase().includes(search.toLowerCase());
     return matchesFilter && matchesSearch;
   });
+  const userPages = usePagedItems(filteredUsers, `${filter}|${search}`);
 
   const getImageUrl = (path: string, _cacheKey?: string | null) =>
     verificationImageUrls[path] ?? "";
@@ -1125,6 +1128,7 @@ export default function AdminUsersPage() {
           ))}
         </div>
       ) : (
+        <>
         <Card>
           <Table>
             <TableHeader>
@@ -1148,7 +1152,7 @@ export default function AdminUsersPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredUsers.map((u) => (
+                userPages.items.map((u) => (
                   <TableRow
                     key={u.id}
                     className="cursor-pointer hover:bg-muted/50"
@@ -1241,6 +1245,8 @@ export default function AdminUsersPage() {
             </TableBody>
           </Table>
         </Card>
+        <BookingPagination {...userPages.paginationProps} noun="users" />
+        </>
       )}
 
       {/* User Detail Modal */}

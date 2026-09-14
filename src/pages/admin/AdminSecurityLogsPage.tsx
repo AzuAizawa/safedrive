@@ -42,6 +42,8 @@ type SecurityLog = SecurityLogRow & {
 };
 
 const LOGS_PER_PAGE = 25;
+// Rows per request while loading a date range; PostgREST returns at most 1000.
+const LOG_BATCH_SIZE = 1000;
 
 const eventLabels: Record<string, string> = {
   login_success: "Sign in",
@@ -281,33 +283,45 @@ export default function AdminSecurityLogsPage() {
     }
   };
 
+  // Every event in the chosen date range is loaded, in batches. It used to be
+  // the newest 500 whatever the range, so older events could not be reached at
+  // all. Search, the role filter and paging then run over what the range holds.
   useEffect(() => {
+    let cancelled = false;
     const fetchLogs = async () => {
       setLoading(true);
       try {
-        const { data: rawLogs, error } = await supabase
-          .from("security_logs")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(500);
+        const fromMs = fromDateTime ? new Date(fromDateTime).getTime() : Number.NaN;
+        const toMs = toDateTime ? new Date(toDateTime).getTime() : Number.NaN;
+        const rawLogs: SecurityLogRow[] = [];
 
-        if (error) throw error;
+        for (let offset = 0; ; offset += LOG_BATCH_SIZE) {
+          let query = supabase.from("security_logs").select("*");
+          if (!Number.isNaN(fromMs)) query = query.gte("created_at", new Date(fromMs).toISOString());
+          if (!Number.isNaN(toMs)) query = query.lte("created_at", new Date(toMs).toISOString());
+          const { data, error } = await query
+            .order("created_at", { ascending: false })
+            .range(offset, offset + LOG_BATCH_SIZE - 1);
+          if (error) throw error;
+          rawLogs.push(...(data ?? []));
+          if (cancelled) return;
+          if (!data || data.length < LOG_BATCH_SIZE) break;
+        }
 
         const userIds = [
           ...new Set(
-            (rawLogs ?? [])
-              .map((log) => log.user_id)
-              .filter((id): id is string => Boolean(id)),
+            rawLogs.map((log) => log.user_id).filter((id): id is string => Boolean(id)),
           ),
         ];
 
         const profileMap: Record<string, { full_name: string | null; email: string }> = {};
 
-        if (userIds.length > 0) {
+        // In chunks, so a busy range cannot build an over-long request URL.
+        for (let index = 0; index < userIds.length; index += 150) {
           const { data: profiles } = await supabase
             .from("profiles")
             .select("id, full_name, email")
-            .in("id", userIds);
+            .in("id", userIds.slice(index, index + 150));
 
           profiles?.forEach((profile) => {
             profileMap[profile.id] = {
@@ -316,24 +330,29 @@ export default function AdminSecurityLogsPage() {
             };
           });
         }
+        if (cancelled) return;
 
         setLogs(
-          (rawLogs ?? []).map((log) => ({
+          rawLogs.map((log) => ({
             ...log,
             profiles: log.user_id ? profileMap[log.user_id] ?? null : null,
           })),
         );
       } catch (error) {
+        if (cancelled) return;
         toast.error("Failed to load security logs", {
           description: error instanceof Error ? error.message : "Please try again.",
         });
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    fetchLogs();
-  }, []);
+    void fetchLogs();
+    return () => {
+      cancelled = true;
+    };
+  }, [fromDateTime, toDateTime]);
 
   const filteredLogs = useMemo(() => {
     const search = searchTerm.trim().toLowerCase();
@@ -460,8 +479,8 @@ export default function AdminSecurityLogsPage() {
               <div>
                 <CardTitle>Authentication Activity</CardTitle>
                 <CardDescription>
-                  Latest 500 security events. Filter by role, date, or search
-                  event / user / IP / device / reason.
+                  Every security event in the chosen date range. Filter by role,
+                  or search event / user / IP / device / reason.
                 </CardDescription>
               </div>
               <div className="relative w-full lg:w-[320px]">

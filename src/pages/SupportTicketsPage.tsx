@@ -46,6 +46,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import BookingPagination from "@/components/BookingPagination";
+import { LIST_PAGE_SIZE } from "@/lib/pagination";
+import { usePagedItems } from "@/lib/usePagedItems";
 
 const escapeHtml = (value: string) =>
   value
@@ -583,6 +586,20 @@ export default function SupportTicketsPage() {
   );
   const visibleTickets =
     ticketView === "messages" ? conversationTickets : supportTickets;
+  const ticketPages = usePagedItems(visibleTickets, ticketView);
+  const setTicketPage = ticketPages.setPage;
+
+  // A ticket opened from a link (?ticketId=) is also shown on the page of the
+  // list that holds it - once, so paging away afterwards is not undone.
+  const jumpedToTicketRef = useRef<string | null>(null);
+  useEffect(() => {
+    const ticketId = searchParams.get("ticketId");
+    if (!ticketId || jumpedToTicketRef.current === ticketId) return;
+    const index = visibleTickets.findIndex((item) => item.id === ticketId);
+    if (index === -1) return;
+    jumpedToTicketRef.current = ticketId;
+    setTicketPage(Math.floor(index / LIST_PAGE_SIZE) + 1);
+  }, [searchParams, visibleTickets, setTicketPage]);
 
   return (
     <div className="max-w-5xl mx-auto flex flex-col gap-6 animate-fade-in">
@@ -734,7 +751,7 @@ export default function SupportTicketsPage() {
                 ) : null}
               </div>
             ) : (
-              visibleTickets.map((ticket) => (
+              ticketPages.items.map((ticket) => (
                 <div
                   key={ticket.id}
                   onClick={() => handleOpenTicket(ticket)}
@@ -778,6 +795,14 @@ export default function SupportTicketsPage() {
               ))
             )}
           </div>
+          {ticketPages.pageCount > 1 ? (
+            <div className="border-t border-border/30 p-2">
+              <BookingPagination
+                {...ticketPages.paginationProps}
+                noun={ticketView === "messages" ? "conversations" : "tickets"}
+              />
+            </div>
+          ) : null}
         </div>
 
         <div className="md:col-span-2 border border-border/50 rounded-xl bg-card flex flex-col overflow-hidden">

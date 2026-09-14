@@ -13,6 +13,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import AdminSectionTabs from "@/components/AdminSectionTabs";
+import BookingPagination from "@/components/BookingPagination";
+import { usePagedItems } from "@/lib/usePagedItems";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -240,6 +242,8 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
     () => refunds.filter((refund) => refund.status === "completed"),
     [refunds],
   );
+  const pendingPages = usePagedItems(pendingRefunds, "pending");
+  const releasedPages = usePagedItems(releasedRefunds, "released");
   const stats = useMemo(
     () => ({
       pendingAmount: pendingRefunds.reduce(
@@ -615,13 +619,19 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
         ]}
       />
 
-      {pageTab === "pending"
-        ? renderRefundCards(pendingRefunds, "No refunds need admin review right now.")
-        : null}
+      {pageTab === "pending" ? (
+        <>
+          {renderRefundCards(pendingPages.items, "No refunds need admin review right now.")}
+          <BookingPagination {...pendingPages.paginationProps} noun="refunds" />
+        </>
+      ) : null}
 
-      {pageTab === "released"
-        ? renderRefundCards(releasedRefunds, "No released refunds are recorded yet.")
-        : null}
+      {pageTab === "released" ? (
+        <>
+          {renderRefundCards(releasedPages.items, "No released refunds are recorded yet.")}
+          <BookingPagination {...releasedPages.paginationProps} noun="refunds" />
+        </>
+      ) : null}
 
       {pageTab === "statistics" ? (
         <div className="grid gap-4 md:grid-cols-3">

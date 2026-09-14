@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Bell, CheckCheck, Clock3, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 
+import BookingPagination from "@/components/BookingPagination";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { loadAdminAttentionItems, type AdminAttentionItem } from "@/lib/adminAttention";
+import { pageRange, serverPageInfo } from "@/lib/pagination";
 import { getQueueTiming, queueSeverityClasses } from "@/lib/queueAge";
 import { supabase } from "@/lib/supabase";
 import type { Notification } from "@/types/database";
@@ -16,6 +18,11 @@ export default function AdminNotificationsPage() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  // One page of notifications at a time, with the total and the unread count
+  // across all of them. It used to be the newest 100.
+  const [notificationPage, setNotificationPage] = useState(1);
+  const [notificationTotal, setNotificationTotal] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
@@ -26,12 +33,22 @@ export default function AdminNotificationsPage() {
     setLoading(true);
 
     try {
-      const [notificationResult, nextQueue] = await Promise.all([
-        supabase.from("notifications").select("*").eq("user_id", user.id).is("deleted_at", null).order("created_at", { ascending: false }).limit(100),
+      const { from, to } = pageRange(notificationPage);
+      const [notificationResult, unreadResult, nextQueue] = await Promise.all([
+        supabase.from("notifications").select("*", { count: "exact" }).eq("user_id", user.id).is("deleted_at", null).order("created_at", { ascending: false }).range(from, to),
+        supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", user.id).is("deleted_at", null).eq("read", false),
         loadAdminAttentionItems(isSuperAdmin),
       ]);
+      // The last page emptied: PostgREST refuses a range past the end.
+      if (notificationResult.error?.code === "PGRST103" && notificationPage > 1) {
+        setNotificationPage(1);
+        return;
+      }
       if (notificationResult.error) throw notificationResult.error;
+      if (unreadResult.error) throw unreadResult.error;
       setNotifications((notificationResult.data ?? []) as Notification[]);
+      setNotificationTotal(notificationResult.count ?? 0);
+      setUnreadCount(unreadResult.count ?? 0);
       setQueueItems(nextQueue);
     } catch (error) {
       toast.error("Admin work center could not be refreshed", {
@@ -40,7 +57,7 @@ export default function AdminNotificationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [isSuperAdmin, user?.id]);
+  }, [isSuperAdmin, notificationPage, user?.id]);
 
   useEffect(() => {
     void load();
@@ -58,8 +75,6 @@ export default function AdminNotificationsPage() {
       void supabase.removeChannel(channel);
     };
   }, [load, user?.id]);
-
-  const unreadCount = useMemo(() => notifications.filter((item) => !item.read).length, [notifications]);
 
   const markAllRead = async () => {
     if (!user?.id) return;
@@ -147,6 +162,11 @@ export default function AdminNotificationsPage() {
             ))}
           </div>
         )}
+        <BookingPagination
+          {...serverPageInfo(notificationPage, notificationTotal)}
+          noun="notifications"
+          onPageChange={setNotificationPage}
+        />
       </section>
     </div>
   );

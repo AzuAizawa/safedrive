@@ -9,8 +9,11 @@ type BookingPaginationProps = {
   endIndex: number;
   total: number;
   onPageChange: (page: number) => void;
+  /** What the list holds, for "Showing 1–20 of 45 entries". */
+  noun?: string;
 };
 
+// Used by every paged list, not only bookings - the name predates that.
 export default function BookingPagination({
   page,
   pageCount,
@@ -18,16 +21,17 @@ export default function BookingPagination({
   endIndex,
   total,
   onPageChange,
+  noun = "bookings",
 }: BookingPaginationProps) {
   if (total === 0 || pageCount <= 1) return null;
 
   return (
     <nav
-      aria-label="Bookings pagination"
+      aria-label={`${noun} pagination`}
       className="flex flex-col items-center justify-between gap-3 rounded-xl border border-border/60 bg-card px-4 py-3 sm:flex-row"
     >
       <p className="text-sm text-muted-foreground">
-        Showing {startIndex + 1}–{endIndex} of {total} bookings
+        Showing {startIndex + 1}–{endIndex} of {total} {noun}
       </p>
       <div className="flex items-center gap-2">
         <Button

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookOpenCheck, Loader2, RefreshCw, RotateCcw, Scale } from "lucide-react";
 import { toast } from "sonner";
 
+import BookingPagination from "@/components/BookingPagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { pageRange, serverPageInfo } from "@/lib/pagination";
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/types/database";
 
@@ -18,8 +20,6 @@ type CorrectionLine = {
   party_user_id: string | null;
   memo: string;
 };
-
-const JOURNAL_LIMIT = 250;
 
 const money = (centavos: number) =>
   new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(centavos / 100);
@@ -43,6 +43,10 @@ export default function AdminFinancialLedgerPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
+  // One page of records at a time, with the total. It used to be the newest
+  // 250, so older records could not be reached.
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [correctingJournalId, setCorrectingJournalId] = useState<string | null>(null);
   const [correctionReason, setCorrectionReason] = useState("");
@@ -51,15 +55,22 @@ export default function AdminFinancialLedgerPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const { from, to } = pageRange(page);
     const [journalResult, accountResult] = await Promise.all([
       supabase
         .from("ledger_journals")
-        .select("*")
+        .select("*", { count: "exact" })
         .order("effective_at", { ascending: false })
-        .limit(JOURNAL_LIMIT),
+        .range(from, to),
       supabase.from("financial_accounts").select("*").order("code"),
     ]);
 
+    // The last page emptied (a correction, or fewer records): PostgREST
+    // refuses a range past the end, so start over from the first page.
+    if (journalResult.error?.code === "PGRST103" && page > 1) {
+      setPage(1);
+      return;
+    }
     if (journalResult.error || accountResult.error) {
       toast.error("Money records could not be loaded", {
         description: (journalResult.error || accountResult.error)?.message,
@@ -95,10 +106,11 @@ export default function AdminFinancialLedgerPage() {
     }
 
     setJournals(journalRows);
+    setTotal(journalResult.count ?? 0);
     setEntries(entryResult.data ?? []);
     setAccounts(accountResult.data ?? []);
     setLoading(false);
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     void load();
@@ -429,6 +441,11 @@ export default function AdminFinancialLedgerPage() {
               </article>
             );
           })}
+          <BookingPagination
+            {...serverPageInfo(page, total)}
+            noun="records"
+            onPageChange={setPage}
+          />
         </div>
       )}
     </div>

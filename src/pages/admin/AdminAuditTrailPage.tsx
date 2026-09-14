@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,14 @@ import { Search, ClipboardList, ChevronDown } from "lucide-react";
 import { format, parseISO, isValid } from "date-fns";
 import { toast } from "sonner";
 import type { AuditLog, Json } from "@/types/database";
+import BookingPagination from "@/components/BookingPagination";
+import { LIST_PAGE_SIZE, serverPageInfo } from "@/lib/pagination";
 
 interface AuditEntry extends AuditLog {
   profiles: { full_name: string | null; email: string } | null;
 }
+
+type AuditActionStat = { action: string; entries: number; routine_entries: number };
 
 const actionLabels: Record<string, string> = {
   verification_submitted: "Submitted verification",
@@ -279,105 +283,138 @@ const isRoutineAutomationEntry = (entry: AuditEntry) => {
 
 export default function AdminAuditTrailPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [actionStats, setActionStats] = useState<AuditActionStat[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [actionFilter, setActionFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [showRoutineAutomation, setShowRoutineAutomation] = useState(false);
 
+  // The trail is paged, filtered and searched in the database (CHAPTER 89), so
+  // every entry can be reached. It used to load the newest 200 and stop, and
+  // search only looked inside those. Typing waits a moment before asking.
   useEffect(() => {
-    void fetchEntries();
-  }, []);
+    const timer = window.setTimeout(() => {
+      setSearchTerm(search.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
-  const fetchEntries = async () => {
-    setLoading(true);
-    try {
-      const { data: rawEntries, error } = await supabase
-        .from("audit_log")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(200);
-
-      if (error) throw error;
-      if (!rawEntries || rawEntries.length === 0) {
-        setEntries([]);
+  useEffect(() => {
+    const fetchActionStats = async () => {
+      const { data, error } = await supabase.rpc("admin_audit_log_actions");
+      if (error) {
+        toast.error("Failed to load audit trail filters", { description: error.message });
         return;
       }
-
-      const auditRows = rawEntries as AuditLog[];
-      const userIds = [...new Set(auditRows.map((entry) => entry.user_id).filter(Boolean))] as string[];
-
-      let profileMap: Record<string, { full_name: string | null; email: string }> = {};
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, full_name, email")
-          .in("id", userIds);
-
-        if (profiles) {
-          profileMap = profiles.reduce<Record<string, { full_name: string | null; email: string }>>(
-            (accumulator, profile) => {
-              accumulator[profile.id] = {
-                full_name: profile.full_name,
-                email: profile.email,
-              };
-              return accumulator;
-            },
-            {},
-          );
-        }
-      }
-
-      setEntries(
-        auditRows.map((entry) => ({
-          ...entry,
-          profiles: entry.user_id ? profileMap[entry.user_id] ?? null : null,
+      setActionStats(
+        (data ?? []).map((stat) => ({
+          action: stat.action,
+          entries: Number(stat.entries),
+          routine_entries: Number(stat.routine_entries),
         })),
       );
-    } catch (err: unknown) {
-      console.error(err);
-      const message = err instanceof Error ? err.message : "Unknown error";
-      toast.error("Failed to load audit trail", { description: message });
-    } finally {
-      setLoading(false);
+    };
+    void fetchActionStats();
+  }, []);
+
+  const uniqueActions = useMemo(() => actionStats.map((stat) => stat.action), [actionStats]);
+
+  // Categories and labels belong to this page, so they are turned into action
+  // names here and the database is asked for those.
+  const filterActions = useMemo(() => {
+    if (actionFilter !== "all") {
+      return categoryFilter === "all" || getActionCategory(actionFilter) === categoryFilter
+        ? [actionFilter]
+        : [];
     }
-  };
+    if (categoryFilter !== "all") {
+      return uniqueActions.filter((action) => getActionCategory(action) === categoryFilter);
+    }
+    return null;
+  }, [actionFilter, categoryFilter, uniqueActions]);
 
-  const uniqueActions = [...new Set(entries.map((entry) => entry.action))];
+  const searchActions = useMemo(() => {
+    if (!searchTerm) return null;
+    const needle = searchTerm.toLowerCase();
+    return uniqueActions.filter((action) => humanizeAction(action).toLowerCase().includes(needle));
+  }, [searchTerm, uniqueActions]);
 
-  const usefulEntries = entries.filter((entry) => !isRoutineAutomationEntry(entry));
-  const routineAutomationCount = entries.length - usefulEntries.length;
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPage = async () => {
+      setLoading(true);
+      const { data, error } = await supabase.rpc("admin_audit_log_page", {
+        p_search: searchTerm || null,
+        p_actions: filterActions,
+        p_search_actions: searchActions,
+        p_include_routine: showRoutineAutomation,
+        p_limit: LIST_PAGE_SIZE,
+        p_offset: (page - 1) * LIST_PAGE_SIZE,
+      });
+      if (cancelled) return;
+      if (error) {
+        console.error(error);
+        toast.error("Failed to load audit trail", { description: error.message });
+        setEntries([]);
+        setTotal(0);
+      } else {
+        const rows = data ?? [];
+        // The list shrank under a later page (a filter, or fewer entries):
+        // an empty page says nothing about the total, so start over.
+        if (rows.length === 0 && page > 1) {
+          setPage(1);
+          return;
+        }
+        setEntries(
+          rows.map((row) => ({
+            id: row.id,
+            user_id: row.user_id,
+            action: row.action,
+            entity_type: row.entity_type,
+            entity_id: row.entity_id,
+            details: row.details,
+            created_at: row.created_at,
+            profiles: row.actor_email
+              ? { full_name: row.actor_full_name, email: row.actor_email }
+              : null,
+          })),
+        );
+        setTotal(rows.length > 0 ? Number(rows[0].total_count) : 0);
+      }
+      setLoading(false);
+    };
+    void fetchPage();
+    return () => {
+      cancelled = true;
+    };
+  }, [page, searchTerm, filterActions, searchActions, showRoutineAutomation]);
+
+  const routineAutomationCount = actionStats.reduce(
+    (sum, stat) => sum + stat.routine_entries,
+    0,
+  );
 
   const categoryOptions = Object.entries(actionCategoryLabels)
     .map(([value, label]) => ({
       value,
       label,
-      count:
-        value === "all"
-          ? usefulEntries.length
-          : usefulEntries.filter((entry) => getActionCategory(entry.action) === value).length,
+      count: actionStats
+        .filter((stat) => value === "all" || getActionCategory(stat.action) === value)
+        .reduce((sum, stat) => sum + stat.entries - stat.routine_entries, 0),
     }))
     .filter((option) => option.value === "all" || option.count > 0);
-
-  const filtered = entries.filter((entry) => {
-    const matchesAction = actionFilter === "all" || entry.action === actionFilter;
-    const matchesCategory =
-      categoryFilter === "all" || getActionCategory(entry.action) === categoryFilter;
-    const matchesRoutineVisibility = showRoutineAutomation || !isRoutineAutomationEntry(entry);
-    const matchesSearch =
-      search === "" ||
-      (entry.profiles?.full_name || "").toLowerCase().includes(search.toLowerCase()) ||
-      (entry.profiles?.email || "").toLowerCase().includes(search.toLowerCase()) ||
-      humanizeAction(entry.action).toLowerCase().includes(search.toLowerCase());
-    return matchesAction && matchesCategory && matchesSearch && matchesRoutineVisibility;
-  });
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Audit Trail</h1>
         <p className="mt-1 text-muted-foreground">
-          Important staff, booking, payment, verification, and vehicle changes. Repetitive no-result system jobs are hidden by default.
+          Important staff, booking, payment, verification, and vehicle changes, newest first. Repetitive no-result system jobs are hidden by default.
         </p>
       </div>
 
@@ -391,7 +428,14 @@ export default function AdminAuditTrailPage() {
             className="h-10 pl-9"
           />
         </div>
-        <Select value={actionFilter} onValueChange={(value) => value && setActionFilter(value)}>
+        <Select
+          value={actionFilter}
+          onValueChange={(value) => {
+            if (!value) return;
+            setActionFilter(value);
+            setPage(1);
+          }}
+        >
           <SelectTrigger className="h-10 w-full sm:w-56">
             <SelectValue placeholder="Filter by action" />
           </SelectTrigger>
@@ -413,7 +457,10 @@ export default function AdminAuditTrailPage() {
             size="sm"
             variant={categoryFilter === option.value ? "default" : "outline"}
             className="rounded-full"
-            onClick={() => setCategoryFilter(option.value)}
+            onClick={() => {
+              setCategoryFilter(option.value);
+              setPage(1);
+            }}
           >
             {option.label}
             <span className="ml-1 text-[11px] opacity-80">{option.count}</span>
@@ -425,7 +472,10 @@ export default function AdminAuditTrailPage() {
             size="sm"
             variant="ghost"
             className="rounded-full text-muted-foreground"
-            onClick={() => setShowRoutineAutomation((visible) => !visible)}
+            onClick={() => {
+              setShowRoutineAutomation((visible) => !visible);
+              setPage(1);
+            }}
           >
             {showRoutineAutomation ? "Hide" : "Show"} {routineAutomationCount} routine system job{routineAutomationCount === 1 ? "" : "s"}
           </Button>
@@ -438,14 +488,14 @@ export default function AdminAuditTrailPage() {
             <Skeleton key={index} className="h-10 w-full" />
           ))}
         </div>
-      ) : filtered.length === 0 ? (
+      ) : entries.length === 0 ? (
         <div className="py-20 text-center">
           <ClipboardList className="mx-auto mb-4 h-16 w-16 text-muted-foreground/30" />
           <h3 className="text-lg font-semibold">No audit entries</h3>
         </div>
       ) : (
         <Card className="divide-y divide-border/60 overflow-hidden">
-          {filtered.map((entry) => {
+          {entries.map((entry) => {
             const detailEntries = formatDetailEntries(entry.action, entry.details);
             const actionCategory = getActionCategory(entry.action);
             // A null actor is either genuine automation or a staff member who
@@ -498,6 +548,12 @@ export default function AdminAuditTrailPage() {
           })}
         </Card>
       )}
+
+      <BookingPagination
+        {...serverPageInfo(page, total)}
+        noun="entries"
+        onPageChange={setPage}
+      />
     </div>
   );
 }

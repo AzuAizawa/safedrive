@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format } from "date-fns";
 import { CheckCircle2, Loader2, Mail, MessageSquare, RefreshCw, Send, UserCheck } from "lucide-react";
 import { useSearchParams } from "react-router";
@@ -6,8 +6,11 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import AdminSectionTabs from "@/components/AdminSectionTabs";
+import BookingPagination from "@/components/BookingPagination";
 import { useAuth } from "@/contexts/AuthContext";
+import { LIST_PAGE_SIZE } from "@/lib/pagination";
 import { formatElapsed, getQueueTiming, queueSeverityClasses } from "@/lib/queueAge";
+import { usePagedItems } from "@/lib/usePagedItems";
 import { supabase } from "@/lib/supabase";
 import type { GuestInquiry, GuestInquiryMessage } from "@/types/database";
 
@@ -101,6 +104,22 @@ export default function AdminGuestInquiriesPage() {
     if (filter === "resolved") return inquiries.filter((item) => CLOSED.includes(item.status));
     return inquiries;
   }, [filter, inquiries]);
+  const inquiryPages = usePagedItems(visible, filter);
+  const setInquiryPage = inquiryPages.setPage;
+
+  // A link to one inquiry (?inquiry=) opens the page that holds it, once.
+  const jumpedToInquiryRef = useRef<string | null>(null);
+  useEffect(() => {
+    const requestedId = searchParams.get("inquiry");
+    if (!requestedId || jumpedToInquiryRef.current === requestedId) return;
+    const index = visible.findIndex((item) => item.id === requestedId);
+    if (index === -1) return;
+    jumpedToInquiryRef.current = requestedId;
+    setInquiryPage(Math.floor(index / LIST_PAGE_SIZE) + 1);
+    window.setTimeout(() => {
+      document.getElementById(`guest-inquiry-${requestedId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
+  }, [searchParams, visible, setInquiryPage]);
 
   // Opening the reply box silently claims the inquiry so the queue shows
   // someone is on it. There is no separate "Start review" step.
@@ -200,7 +219,7 @@ export default function AdminGuestInquiriesPage() {
         <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">No inquiries in this view.</div>
       ) : (
         <div className="grid gap-4">
-          {visible.map((inquiry) => {
+          {inquiryPages.items.map((inquiry) => {
             const timing = getQueueTiming(inquiry.created_at, "guest", now);
             const isExpanded = expandedId === inquiry.id;
             const hasAccount = Boolean(inquiry.submitted_by_user_id);
@@ -309,6 +328,7 @@ export default function AdminGuestInquiriesPage() {
               </article>
             );
           })}
+          <BookingPagination {...inquiryPages.paginationProps} noun="inquiries" />
         </div>
       )}
 

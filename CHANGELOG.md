@@ -3,6 +3,46 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - Long lists page, and every older record can be reached
+
+Tester request: the audit trail was one endless scroll; it should have
+Previous / Next pages, and other lists should be checked too.
+
+Checking found a worse problem under the scroll. Several lists loaded only the
+newest rows and silently stopped, so older records **could not be seen at all**,
+and search and filters only looked inside what was loaded:
+
+| List | Before | Now |
+|---|---|---|
+| Audit Trail | newest 200, one list | paged in the database, 20 per page; search, action, category and routine-job filters cover **every** entry |
+| Security Logs | newest 500 whatever the date range | **every** event in the chosen date range (loaded in batches), paged |
+| Reconciliation | newest 500, one list | paged in the database |
+| Money Records (ledger) | newest 250, one list | paged in the database |
+| Admin Work Center notifications | newest 100 | paged in the database; unread count covers all |
+| Users, Support Tickets (admin and user), User Inquiries, Vehicle Approval, Lister payouts, Renter refunds, Privacy Requests | one list | Previous / Next, 20 per page |
+
+Tabs, filters and search go back to page 1. A link to one inquiry or one support
+ticket opens the page that holds it. A page that empties under you (a resolved
+issue, a filter) returns to page 1 instead of showing nothing.
+
+**CHAPTER 89** (paste by hand, **before** deploying this) adds read-only
+`admin_audit_log_actions()` and `admin_audit_log_page(...)`, answering only to
+`admin_can('audit.view')` - the same rule as the audit log's read policy - plus
+the helpers `audit_detail_number` and `is_routine_audit_entry` (the routine
+sweep rule the page already used). Category and label text stay in the page,
+which resolves them to action names before asking. Search text is literal, not a
+LIKE wildcard. Proved on PGlite by `scripts/audit-trail-paging.test.mjs`
+(`check:audit-trail-paging`, in `check:all`).
+
+Shared pieces: `src/lib/usePagedItems.ts` (client-side paging that resets on a
+filter change), `LIST_PAGE_SIZE`, `serverPageInfo` and `pageRange` in
+`src/lib/pagination.ts`, and `BookingPagination` now takes a `noun`.
+
+Lists that stay small (car catalog, admins, platform settings, announcements, a
+lister's own vehicles) were left as they are. Pages that load a whole list and
+page it in the browser still load at most PostgREST's 1,000 rows per request;
+none of those lists is near that today.
+
 ## 2026-09-14 - An approved extension holds its dates until it is paid
 
 Asked while reviewing extensions: *if the lister already approved it and it is

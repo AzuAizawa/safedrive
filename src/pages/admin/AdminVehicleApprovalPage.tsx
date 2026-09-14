@@ -21,6 +21,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import BookingPagination from "@/components/BookingPagination";
+import { usePagedItems } from "@/lib/usePagedItems";
 import {
   Table,
   TableBody,
@@ -259,6 +261,8 @@ export default function AdminVehicleApprovalPage() {
       isMounted = false;
     };
   }, [selected]);
+
+  const carPages = usePagedItems(cars, activeTab);
 
   const displayPii = (rawValue: string | null, decryptedValue: string | null) => {
     if (piiLoading) return "Decrypting...";
@@ -707,6 +711,7 @@ export default function AdminVehicleApprovalPage() {
           </p>
         </div>
       ) : (
+        <>
         <Card>
           <Table>
             <TableHeader>
@@ -720,7 +725,7 @@ export default function AdminVehicleApprovalPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {cars.map((car) => (
+              {carPages.items.map((car) => (
                 <TableRow
                   key={car.id}
                   className="cursor-pointer hover:bg-muted/50"
@@ -758,6 +763,8 @@ export default function AdminVehicleApprovalPage() {
             </TableBody>
           </Table>
         </Card>
+        <BookingPagination {...carPages.paginationProps} noun="vehicles" />
+        </>
       )}
 
       {/* Vehicle Detail Modal */}
