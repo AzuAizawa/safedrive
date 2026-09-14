@@ -863,11 +863,11 @@ export default function AdminSupportTicketsPage() {
         <div className="rounded-xl border border-border/60 bg-card p-4">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">
             <MessageSquare className="h-4 w-4 text-primary" />
-            Car inquiries
+            Lister questions
           </div>
           <p className="mt-2 text-2xl font-bold">{queueStats.inquiries}</p>
           <p className="text-xs text-muted-foreground">
-            Open renter and lister inquiry threads still waiting on a response.
+            Open questions between renters and listers still waiting on a response.
           </p>
         </div>
       </div>

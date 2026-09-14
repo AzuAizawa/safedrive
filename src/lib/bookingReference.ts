@@ -10,3 +10,12 @@
 // behind the scenes - this is a display convenience, not a lookup key.
 export const getBookingReference = (bookingId: string): string =>
   `SD-BK-${bookingId.slice(0, 8).toUpperCase()}`;
+
+// The same short reference for the other things a person asks SafeDrive, so
+// they can be quoted and told apart: an inquiry and a support ticket.
+// server/email.ts carries its own copy of the inquiry one for emails.
+export const getInquiryReference = (inquiryId: string): string =>
+  `SD-IN-${inquiryId.slice(0, 8).toUpperCase()}`;
+
+export const getTicketReference = (ticketId: string): string =>
+  `SD-TK-${ticketId.slice(0, 8).toUpperCase()}`;

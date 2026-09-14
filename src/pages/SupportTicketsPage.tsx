@@ -41,7 +41,7 @@ import {
   normalizeRichTextInput,
   richTextHasVisibleContent,
 } from "@/lib/richText";
-import type { SupportTicket, TicketMessage } from "@/types/database";
+import type { GuestInquiry, SupportTicket, TicketMessage } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +49,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import BookingPagination from "@/components/BookingPagination";
 import { LIST_PAGE_SIZE } from "@/lib/pagination";
 import { usePagedItems } from "@/lib/usePagedItems";
+import InquiryThread from "@/components/InquiryThread";
+import { getInquiryReference, getTicketReference } from "@/lib/bookingReference";
+import {
+  getInquiryStatusClasses,
+  getInquiryStatusLabel,
+  isInquiryClosed,
+} from "@/lib/inquiries";
+
+// SafeDrive Support lists everything a person asked SafeDrive - tickets and
+// inquiries - in one list, each labelled and numbered, as a help desk's
+// "my requests" does. Booking conversations stay apart: they are between the
+// renter and the lister, not requests to SafeDrive.
+type SupportListItem =
+  | { kind: "ticket"; id: string; createdAt: string; ticket: SupportTicket }
+  | { kind: "inquiry"; id: string; createdAt: string; inquiry: GuestInquiry };
 
 const escapeHtml = (value: string) =>
   value
@@ -90,6 +105,8 @@ export default function SupportTicketsPage() {
   const [now, setNow] = useState(() => Date.now());
   const [loading, setLoading] = useState(true);
   const [activeTicket, setActiveTicket] = useState<SupportTicket | null>(null);
+  const [inquiries, setInquiries] = useState<GuestInquiry[]>([]);
+  const [activeInquiry, setActiveInquiry] = useState<GuestInquiry | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [senderProfiles, setSenderProfiles] = useState<
     Record<string, { full_name: string | null; role: string }>
@@ -219,6 +236,27 @@ export default function SupportTicketsPage() {
     void fetchTickets();
   }, [fetchTickets]);
 
+  // The inquiries this account sent from the Inquiry button or the contact
+  // page. A guest's inquiry has no account and stays an email exchange.
+  const fetchInquiries = useCallback(async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("guest_inquiries")
+      .select("*")
+      .eq("submitted_by_user_id", user.id)
+      .order("created_at", { ascending: false });
+    if (error) return;
+    const list = (data ?? []) as GuestInquiry[];
+    setInquiries(list);
+    setActiveInquiry((current) =>
+      current ? list.find((item) => item.id === current.id) ?? current : null,
+    );
+  }, [user]);
+
+  useEffect(() => {
+    void fetchInquiries();
+  }, [fetchInquiries]);
+
   useEffect(() => {
     const tick = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(tick);
@@ -294,6 +332,7 @@ export default function SupportTicketsPage() {
   };
 
   const handleOpenTicket = (ticket: SupportTicket) => {
+    setActiveInquiry(null);
     setActiveTicket(ticket);
     setNewMessage("");
     clearReplyAttachment();
@@ -584,22 +623,71 @@ export default function SupportTicketsPage() {
       ),
     [tickets, now],
   );
-  const visibleTickets =
-    ticketView === "messages" ? conversationTickets : supportTickets;
-  const ticketPages = usePagedItems(visibleTickets, ticketView);
+  const supportItems = useMemo<SupportListItem[]>(
+    () =>
+      [
+        ...supportTickets.map((ticket) => ({
+          kind: "ticket" as const,
+          id: ticket.id,
+          createdAt: ticket.created_at,
+          ticket,
+        })),
+        ...inquiries.map((inquiry) => ({
+          kind: "inquiry" as const,
+          id: inquiry.id,
+          createdAt: inquiry.created_at,
+          inquiry,
+        })),
+      ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
+    [supportTickets, inquiries],
+  );
+  const conversationItems = useMemo<SupportListItem[]>(
+    () =>
+      conversationTickets.map((ticket) => ({
+        kind: "ticket" as const,
+        id: ticket.id,
+        createdAt: ticket.created_at,
+        ticket,
+      })),
+    [conversationTickets],
+  );
+  const visibleItems = ticketView === "messages" ? conversationItems : supportItems;
+  const ticketPages = usePagedItems(visibleItems, ticketView);
   const setTicketPage = ticketPages.setPage;
 
-  // A ticket opened from a link (?ticketId=) is also shown on the page of the
-  // list that holds it - once, so paging away afterwards is not undone.
-  const jumpedToTicketRef = useRef<string | null>(null);
+  const handleOpenInquiry = (inquiry: GuestInquiry) => {
+    setActiveTicket(null);
+    setMessages([]);
+    setAttachmentUrls({});
+    setActiveInquiry(inquiry);
+  };
+
+  // A ticket or inquiry opened from a link (?ticketId= / ?inquiryId=) is also
+  // shown on the page of the list that holds it - once, so paging away
+  // afterwards is not undone.
+  const jumpedToItemRef = useRef<string | null>(null);
   useEffect(() => {
-    const ticketId = searchParams.get("ticketId");
-    if (!ticketId || jumpedToTicketRef.current === ticketId) return;
-    const index = visibleTickets.findIndex((item) => item.id === ticketId);
+    const itemId = searchParams.get("ticketId") ?? searchParams.get("inquiryId");
+    if (!itemId || jumpedToItemRef.current === itemId) return;
+    const index = visibleItems.findIndex((item) => item.id === itemId);
     if (index === -1) return;
-    jumpedToTicketRef.current = ticketId;
+    jumpedToItemRef.current = itemId;
     setTicketPage(Math.floor(index / LIST_PAGE_SIZE) + 1);
-  }, [searchParams, visibleTickets, setTicketPage]);
+  }, [searchParams, visibleItems, setTicketPage]);
+
+  // An inquiry link - from a reply notification or the acknowledgement email -
+  // opens that inquiry, once.
+  const openedInquiryRef = useRef<string | null>(null);
+  useEffect(() => {
+    const inquiryId = searchParams.get("inquiryId");
+    if (!inquiryId || openedInquiryRef.current === inquiryId) return;
+    const inquiry = inquiries.find((item) => item.id === inquiryId);
+    if (!inquiry) return;
+    openedInquiryRef.current = inquiryId;
+    setTicketView("support");
+    setActiveTicket(null);
+    setActiveInquiry(inquiry);
+  }, [searchParams, inquiries]);
 
   return (
     <div className="max-w-5xl mx-auto flex flex-col gap-6 animate-fade-in">
@@ -713,7 +801,7 @@ export default function SupportTicketsPage() {
                 }`}
               >
                 SafeDrive Support
-                {supportTickets.length > 0 ? ` (${supportTickets.length})` : ""}
+                {supportItems.length > 0 ? ` (${supportItems.length})` : ""}
               </button>
               <button
                 type="button"
@@ -736,13 +824,13 @@ export default function SupportTicketsPage() {
               Array.from({ length: 4 }).map((_, index) => (
                 <Skeleton key={index} className="h-16 w-full rounded-lg" />
               ))
-            ) : visibleTickets.length === 0 ? (
+            ) : visibleItems.length === 0 ? (
               <div className="text-center py-10 opacity-60">
                 <Ticket className="w-8 h-8 mx-auto mb-2" />
                 <p className="text-sm">
                   {ticketView === "messages"
                     ? "No booking conversations yet"
-                    : "No support tickets yet"}
+                    : "No support tickets or inquiries yet"}
                 </p>
                 {ticketView === "messages" ? (
                   <p className="mt-1 text-xs">
@@ -751,7 +839,45 @@ export default function SupportTicketsPage() {
                 ) : null}
               </div>
             ) : (
-              ticketPages.items.map((ticket) => (
+              ticketPages.items.map((item) => {
+                if (item.kind === "inquiry") {
+                  const inquiry = item.inquiry;
+                  return (
+                    <div
+                      key={inquiry.id}
+                      onClick={() => handleOpenInquiry(inquiry)}
+                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                        activeInquiry?.id === inquiry.id
+                          ? "border-primary bg-primary/5"
+                          : "border-transparent hover:bg-muted"
+                      }`}
+                    >
+                      <p className="font-medium text-sm line-clamp-1">
+                        {inquiry.subject || inquiry.topics?.[0] || "Inquiry"}
+                      </p>
+                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                        {getInquiryReference(inquiry.id)}
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <span className="rounded bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+                          Inquiry
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-2">
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${getInquiryStatusClasses(inquiry.status)}`}
+                        >
+                          {getInquiryStatusLabel(inquiry.status)}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {format(new Date(inquiry.created_at), "MMM d")}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+                const ticket = item.ticket;
+                return (
                 <div
                   key={ticket.id}
                   onClick={() => handleOpenTicket(ticket)}
@@ -762,6 +888,9 @@ export default function SupportTicketsPage() {
                   }`}
                 >
                   <p className="font-medium text-sm line-clamp-1">{ticket.subject}</p>
+                  <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                    {getTicketReference(ticket.id)}
+                  </p>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {getTicketTagLabels(ticket.tag).map((label) => (
                       <span
@@ -792,7 +921,8 @@ export default function SupportTicketsPage() {
                     </span>
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
           {ticketPages.pageCount > 1 ? (
@@ -806,13 +936,44 @@ export default function SupportTicketsPage() {
         </div>
 
         <div className="md:col-span-2 border border-border/50 rounded-xl bg-card flex flex-col overflow-hidden">
-          {activeTicket ? (
+          {activeInquiry ? (
+            <>
+              <div className="p-4 border-b border-border/30 bg-muted/20 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="font-bold text-lg">
+                    {activeInquiry.subject || activeInquiry.topics?.[0] || "Inquiry"}
+                  </h2>
+                  <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                    Inquiry {getInquiryReference(activeInquiry.id)}
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-2 text-[10px]">
+                    <span className="rounded bg-blue-500/10 px-2 py-0.5 font-semibold text-blue-600 dark:text-blue-400">
+                      Inquiry
+                    </span>
+                    <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">
+                      Replies also go to {activeInquiry.email}
+                    </span>
+                  </div>
+                </div>
+                {isInquiryClosed(activeInquiry) && (
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-green-500 bg-green-500/10 px-3 py-1 rounded-full">
+                    <CheckCircle2 className="w-4 h-4" /> Resolved
+                  </div>
+                )}
+              </div>
+              <InquiryThread
+                inquiry={activeInquiry}
+                onFollowUpSent={fetchInquiries}
+                className="min-h-0 flex-1 p-4"
+              />
+            </>
+          ) : activeTicket ? (
             <>
               <div className="p-4 border-b border-border/30 bg-muted/20 flex items-center justify-between">
                 <div>
                   <h2 className="font-bold text-lg">{activeTicket.subject}</h2>
                   <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                    Ticket ID: {activeTicket.id.split("-")[0]}
+                    Ticket {getTicketReference(activeTicket.id)}
                   </p>
                   <div className="mt-1 flex flex-wrap gap-2 text-[10px]">
                     {getTicketTagLabels(activeTicket.tag).map((label) => (
@@ -1000,7 +1161,7 @@ export default function SupportTicketsPage() {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground opacity-60">
               <MessageSquare className="w-12 h-12 mb-3 opacity-50" />
-              <p>Select a ticket from the left to view the thread</p>
+              <p>Select a ticket or inquiry from the left to view the thread</p>
             </div>
           )}
         </div>

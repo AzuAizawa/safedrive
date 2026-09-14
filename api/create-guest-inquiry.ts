@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { getClientIp } from "../server/ipBlock.js";
+import { sendInquiryReceivedEmail } from "../server/email.js";
 
 export const config = {
   runtime: "edge",
@@ -234,6 +235,23 @@ export default async function handler(req: Request) {
             console.warn("Inquiry seed message failed", msgError.code);
           }
         });
+    }
+
+    // Acknowledge with the reference number. Best-effort: the inquiry is saved,
+    // so a mail hiccup must not turn a received question into an error. The
+    // rate limits above also bound how often this can email one address.
+    if (inserted?.id) {
+      const receipt = await sendInquiryReceivedEmail({
+        to: email,
+        name,
+        subject,
+        inquiryId: inserted.id,
+        linked: Boolean(submittedByUserId),
+        baseOrigin: new URL(req.url).origin,
+      });
+      if (receipt.state !== "sent" && receipt.state !== "not_configured") {
+        console.warn("Inquiry acknowledgement email was not delivered", receipt.state);
+      }
     }
 
     return jsonResponse({ success: true, id: inserted?.id ?? null, linked: Boolean(submittedByUserId) }, 201);

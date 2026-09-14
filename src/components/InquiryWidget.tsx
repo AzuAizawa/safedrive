@@ -18,7 +18,10 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { GUEST_INQUIRY_TOPICS } from "@/lib/guestInquiryTopics";
-import type { GuestInquiry, GuestInquiryMessage } from "@/types/database";
+import type { GuestInquiry } from "@/types/database";
+import InquiryThread from "@/components/InquiryThread";
+import { getInquiryReference } from "@/lib/bookingReference";
+import { getInquiryStatusClasses, getInquiryStatusLabel } from "@/lib/inquiries";
 
 const emptyForm = {
   name: "",
@@ -28,8 +31,6 @@ const emptyForm = {
   message: "",
   company: "",
 };
-
-const CLOSED_STATUSES = ["resolved", "closed"];
 
 type WidgetView = "list" | "thread" | "form";
 
@@ -57,10 +58,7 @@ export default function InquiryWidget() {
   const [inquiries, setInquiries] = useState<GuestInquiry[]>([]);
   const [inquiriesLoading, setInquiriesLoading] = useState(false);
   const [openInquiryId, setOpenInquiryId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<GuestInquiryMessage[]>([]);
-  const [messagesLoading, setMessagesLoading] = useState(false);
-  const [followUpDraft, setFollowUpDraft] = useState("");
-  const [sendingFollowUp, setSendingFollowUp] = useState(false);
+  const [submittedReference, setSubmittedReference] = useState<string | null>(null);
 
   const hidden = pathname.startsWith("/admin") || pathname === "/contact";
 
@@ -131,41 +129,6 @@ export default function InquiryWidget() {
     setOpen(false);
   }, [pathname]);
 
-  const fetchMessages = useCallback(async (inquiryId: string) => {
-    setMessagesLoading(true);
-    const { data, error } = await supabase
-      .from("guest_inquiry_messages")
-      .select("*")
-      .eq("inquiry_id", inquiryId)
-      .order("created_at", { ascending: true });
-    if (!error) setMessages((data ?? []) as GuestInquiryMessage[]);
-    setMessagesLoading(false);
-  }, []);
-
-  useEffect(() => {
-    if (view !== "thread" || !openInquiryId) {
-      setMessages([]);
-      return;
-    }
-    void fetchMessages(openInquiryId);
-    const channel = supabase
-      .channel(`inquiry-widget-thread-${openInquiryId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "guest_inquiry_messages",
-          filter: `inquiry_id=eq.${openInquiryId}`,
-        },
-        () => void fetchMessages(openInquiryId),
-      )
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [view, openInquiryId, fetchMessages]);
-
   if (hidden) return null;
 
   const update = (field: keyof typeof form, value: string) =>
@@ -178,7 +141,6 @@ export default function InquiryWidget() {
 
   const openThread = (inquiryId: string) => {
     setOpenInquiryId(inquiryId);
-    setFollowUpDraft("");
     setView("thread");
   };
 
@@ -188,7 +150,6 @@ export default function InquiryWidget() {
   };
 
   const openInquiry = inquiries.find((item) => item.id === openInquiryId) ?? null;
-  const isThreadClosed = openInquiry ? CLOSED_STATUSES.includes(openInquiry.status) : false;
   const pendingReplyCount = inquiries.filter((item) => item.status === "in_progress").length;
 
   const submit = async (event: React.FormEvent) => {
@@ -198,7 +159,13 @@ export default function InquiryWidget() {
     try {
       const response = await fetch("/api/create-guest-inquiry", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // Signed in, the inquiry belongs to the account: a thread here and in
+        // Support & Chats. Without this header every inquiry sent from this
+        // button was treated as a guest's - email only, never linked.
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
         body: JSON.stringify({
           name: form.name,
           email: form.email,
@@ -215,13 +182,17 @@ export default function InquiryWidget() {
       };
       if (!response.ok) throw new Error(payload.error || "Unable to submit inquiry");
       setForm((current) => ({ ...emptyForm, name: current.name, email: current.email, phone: current.phone }));
-      toast.success("Inquiry submitted", {
-        description: "SafeDrive received your inquiry and will reply through email.",
+      const reference = payload.id ? getInquiryReference(payload.id) : null;
+      toast.success(reference ? `Inquiry ${reference} submitted` : "Inquiry submitted", {
+        description: payload.linked
+          ? "SafeDrive replies here, in Support & Chats, and by email."
+          : "SafeDrive will reply to your email. Keep this number if you contact us about it.",
       });
       if (payload.linked && payload.id) {
         await fetchInquiries();
         openThread(payload.id);
       } else {
+        setSubmittedReference(reference);
         setSubmitted(true);
       }
     } catch (error) {
@@ -230,32 +201,6 @@ export default function InquiryWidget() {
       });
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const sendFollowUp = async () => {
-    if (!openInquiryId || !followUpDraft.trim() || !session?.access_token || sendingFollowUp) return;
-    setSendingFollowUp(true);
-    try {
-      const res = await fetch("/api/inquiry-followup", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ inquiryId: openInquiryId, message: followUpDraft.trim() }),
-      });
-      const payload = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(payload.error || "Follow-up was not sent");
-      setFollowUpDraft("");
-      await fetchMessages(openInquiryId);
-      await fetchInquiries();
-    } catch (error) {
-      toast.error("Follow-up failed", {
-        description: error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setSendingFollowUp(false);
     }
   };
 
@@ -294,8 +239,10 @@ export default function InquiryWidget() {
                   {view === "list"
                     ? "Questions you asked SafeDrive and the replies."
                     : view === "thread"
-                      ? "Follow up here - SafeDrive replies to this same thread."
-                      : "This goes to the admin inquiry queue - separate from support tickets and booking conversations."}
+                      ? `${openInquiry ? `${getInquiryReference(openInquiry.id)} · ` : ""}Follow up here or in Support & Chats - SafeDrive replies to this thread and by email.`
+                      : user
+                        ? "Your question gets a reference number and shows in Support & Chats with your tickets. Replies also come by email."
+                        : "Your question gets a reference number, and SafeDrive replies to your email."}
                 </p>
               </div>
               <Button type="button" size="icon" variant="ghost" aria-label="Close inquiry form" onClick={close}>
@@ -323,23 +270,14 @@ export default function InquiryWidget() {
                             {inquiry.subject || inquiry.topics?.[0] || "Inquiry"}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Asked {format(new Date(inquiry.created_at), "MMM d, yyyy")}
+                            <span className="font-mono">{getInquiryReference(inquiry.id)}</span> · Asked{" "}
+                            {format(new Date(inquiry.created_at), "MMM d, yyyy")}
                           </p>
                         </div>
                         <span
-                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                            CLOSED_STATUSES.includes(inquiry.status)
-                              ? "bg-green-500/10 text-green-700 dark:text-green-300"
-                              : inquiry.status === "in_progress"
-                                ? "bg-blue-500/10 text-blue-700 dark:text-blue-300"
-                                : "bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                          }`}
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${getInquiryStatusClasses(inquiry.status)}`}
                         >
-                          {CLOSED_STATUSES.includes(inquiry.status)
-                            ? "Resolved"
-                            : inquiry.status === "in_progress"
-                              ? "Replied"
-                              : "Waiting"}
+                          {getInquiryStatusLabel(inquiry.status)}
                         </span>
                       </button>
                     ))}
@@ -355,71 +293,22 @@ export default function InquiryWidget() {
                   </div>
                 )
               ) : view === "thread" ? (
-                <div className="flex h-full flex-col">
-                  {messagesLoading ? (
-                    <div className="flex flex-1 items-center justify-center py-8">
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    </div>
-                  ) : (
-                    <div className="flex-1 space-y-3">
-                      {messages.map((message) => {
-                        const mine = message.sender_role === "inquirer";
-                        return (
-                          <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                            <div
-                              className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
-                                mine ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
-                              }`}
-                            >
-                              <p className="whitespace-pre-wrap">{message.message}</p>
-                              <p
-                                className={`mt-1 text-[10px] ${
-                                  mine ? "text-primary-foreground/70" : "text-muted-foreground"
-                                }`}
-                              >
-                                {mine ? "You" : "SafeDrive"} · {format(new Date(message.created_at), "MMM d, h:mm a")}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {messages.length === 0 && (
-                        <p className="py-4 text-center text-sm text-muted-foreground">
-                          No messages in this thread yet.
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {isThreadClosed ? (
-                    <p className="mt-4 flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                      <CheckCircle2 className="h-4 w-4" /> This inquiry is resolved. Ask a new question to start again.
-                    </p>
-                  ) : (
-                    <div className="mt-4 flex items-end gap-2">
-                      <textarea
-                        className="min-h-11 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                        rows={2}
-                        maxLength={3000}
-                        value={followUpDraft}
-                        onChange={(event) => setFollowUpDraft(event.target.value)}
-                        placeholder="Add a follow-up..."
-                      />
-                      <Button
-                        className="gap-1"
-                        onClick={() => void sendFollowUp()}
-                        disabled={sendingFollowUp || !followUpDraft.trim()}
-                      >
-                        {sendingFollowUp ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                        Send
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                openInquiry ? (
+                  <InquiryThread
+                    inquiry={openInquiry}
+                    onFollowUpSent={async () => {
+                      await fetchInquiries();
+                    }}
+                    className="h-full"
+                  />
+                ) : null
               ) : submitted ? (
                 <div className="py-8 text-center">
                   <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-500" />
                   <p className="mt-3 font-semibold">Inquiry received</p>
+                  {submittedReference ? (
+                    <p className="mt-1 font-mono text-sm font-semibold">{submittedReference}</p>
+                  ) : null}
                   <p className="mt-1 text-sm text-muted-foreground">We will reply through the email you provided.</p>
                   <Button type="button" variant="outline" className="mt-5" onClick={() => setSubmitted(false)}>
                     Send another inquiry

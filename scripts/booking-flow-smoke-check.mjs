@@ -208,11 +208,22 @@ const checks = [
     // behind a removed nav item.
     file: "src/components/InquiryWidget.tsx",
     markers: [
-      "/api/inquiry-followup",
-      "guest_inquiry_messages",
       "submitted_by_user_id",
       "My inquiries",
+      "InquiryThread",
+      // Without the session every inquiry from this button was a guest's.
+      "Authorization: `Bearer ${session.access_token}`",
     ],
+  },
+  {
+    // The thread itself, shared with Support & Chats.
+    file: "src/components/InquiryThread.tsx",
+    markers: ["/api/inquiry-followup", "guest_inquiry_messages"],
+  },
+  {
+    // Tickets and inquiries in one list, each labelled and numbered.
+    file: "src/pages/SupportTicketsPage.tsx",
+    markers: ["guest_inquiries", "InquiryThread", "getInquiryReference", "getTicketReference"],
   },
   {
     file: "server/bookingCompletion.ts",

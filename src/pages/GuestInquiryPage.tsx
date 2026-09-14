@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getInquiryReference } from "@/lib/bookingReference";
 import { GUEST_INQUIRY_TOPICS } from "@/lib/guestInquiryTopics";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -28,6 +29,7 @@ export default function GuestInquiryPage() {
   }));
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submittedReference, setSubmittedReference] = useState<string | null>(null);
 
   const setField = (field: Exclude<keyof typeof form, "topics">, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -60,15 +62,20 @@ export default function GuestInquiryPage() {
       });
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
+        id?: string | null;
         linked?: boolean;
       };
       if (!response.ok) throw new Error(payload.error || "Unable to submit inquiry");
+      const reference = payload.id ? getInquiryReference(payload.id) : null;
 
-      if (payload.linked) {
-        toast.success("Inquiry sent - continue the conversation from the Inquiry button");
-        navigate("/");
+      if (payload.linked && payload.id) {
+        toast.success(`Inquiry ${reference} sent`, {
+          description: "Follow it in Support & Chats - replies also come by email.",
+        });
+        navigate(`/support?inquiryId=${payload.id}`);
         return;
       }
+      setSubmittedReference(reference);
       setSubmitted(true);
       setForm(initialForm);
     } catch (error) {
@@ -96,7 +103,7 @@ export default function GuestInquiryPage() {
               <h1 className="text-2xl font-bold">Ask SafeDrive a question</h1>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 {user
-                  ? "You're signed in - SafeDrive replies in My Inquiries so you can read it in your account and follow up."
+                  ? "You're signed in - your inquiry shows in Support & Chats with your tickets, so you can read replies and follow up there. Replies also come by email."
                   : "You do not need an account to ask about SafeDrive; the reply comes to your email."}{" "}
                 Do not include passwords, one-time codes, government ID numbers, or payment credentials.
               </p>
@@ -107,6 +114,9 @@ export default function GuestInquiryPage() {
             <div className="mt-8 rounded-xl border border-green-500/30 bg-green-500/10 p-6 text-center">
               <CheckCircle2 className="mx-auto h-10 w-10 text-green-500" />
               <h2 className="mt-3 text-lg font-semibold">Your inquiry was received</h2>
+              {submittedReference ? (
+                <p className="mt-1 font-mono text-sm font-semibold">{submittedReference}</p>
+              ) : null}
               <p className="mt-2 text-sm text-muted-foreground">
                 SafeDrive support will review it and respond using the email address you supplied.
               </p>

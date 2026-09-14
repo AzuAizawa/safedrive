@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { LIST_PAGE_SIZE } from "@/lib/pagination";
 import { formatElapsed, getQueueTiming, queueSeverityClasses } from "@/lib/queueAge";
 import { usePagedItems } from "@/lib/usePagedItems";
+import { getInquiryReference } from "@/lib/bookingReference";
 import { supabase } from "@/lib/supabase";
 import type { GuestInquiry, GuestInquiryMessage } from "@/types/database";
 
@@ -234,6 +235,7 @@ export default function AdminGuestInquiriesPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="font-semibold">{inquiry.topics?.[0] || inquiry.subject}</h2>
+                      <span className="font-mono text-xs text-muted-foreground">{getInquiryReference(inquiry.id)}</span>
                       <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">{inquiry.status.replace("_", " ")}</span>
                       <span
                         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -338,7 +340,12 @@ export default function AdminGuestInquiriesPage() {
             <div className="flex items-start gap-3">
               <MessageSquare className="mt-1 h-5 w-5 text-primary" />
               <div>
-                <h2 className="text-lg font-semibold">Reply to {selected.name}</h2>
+                <h2 className="text-lg font-semibold">
+                  Reply to {selected.name}{" "}
+                  <span className="font-mono text-sm font-normal text-muted-foreground">
+                    {getInquiryReference(selected.id)}
+                  </span>
+                </h2>
                 <p className="text-sm text-muted-foreground">
                   Emailed to {selected.email}
                   {selected.submitted_by_user_id ? " and added to their in-app inquiry thread" : ""}. This does not

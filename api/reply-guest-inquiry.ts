@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { sendGuestInquiryReplyEmail } from "../server/email.js";
+import { inquiryReference, sendGuestInquiryReplyEmail } from "../server/email.js";
 
 export const config = {
   runtime: "edge",
@@ -149,7 +149,8 @@ export default async function handler(req: Request) {
           title: "Inquiry Resolved",
           message: `Your inquiry about ${inquiry.subject || "SafeDrive"} was marked resolved. Reopen it by asking a new question.`,
           type: "success",
-          link: "/inquiries",
+          // /inquiries no longer exists; the thread lives in Support & Chats.
+          link: `/support?inquiryId=${inquiry.id}`,
         });
       }
       await supabase.from("audit_log").insert({
@@ -184,6 +185,7 @@ export default async function handler(req: Request) {
       inquiryId: inquiry.id,
       messageId: threadMessage?.id,
       baseOrigin: new URL(req.url).origin,
+      linked: Boolean(inquiry.submitted_by_user_id),
     });
     let deliveryProvider = "resend";
 
@@ -206,8 +208,8 @@ export default async function handler(req: Request) {
         body: JSON.stringify({
           secret: emailWebhookSecret,
           to: inquiry.email,
-          subject: `SafeDrive response: ${inquiry.subject}`,
-          body: `Hello ${inquiry.name},\n\n${reply}\n\nSafeDrive Support`,
+          subject: `SafeDrive response ${inquiryReference(inquiry.id)}: ${inquiry.subject}`,
+          body: `Hello ${inquiry.name},\n\nReference: ${inquiryReference(inquiry.id)}\n\n${reply}\n\nSafeDrive Support`,
           idempotencyKey: `guest-inquiry-reply:${inquiry.id}`,
         }),
       });
@@ -275,7 +277,8 @@ export default async function handler(req: Request) {
         title: "SafeDrive Replied to Your Inquiry",
         message: `SafeDrive support replied about ${inquiry.subject || "your question"}. Open the thread to read it or follow up.`,
         type: "info",
-        link: "/inquiries",
+        // /inquiries no longer exists; the thread lives in Support & Chats.
+        link: `/support?inquiryId=${inquiry.id}`,
       });
     }
 

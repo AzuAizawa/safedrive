@@ -3,6 +3,48 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - An inquiry is a numbered request, not an email that disappears
+
+Tester report: an inquiry seemed to be email only - it never showed in the app,
+had no number, and had no label, while support tickets had both.
+
+**The cause was a bug.** The floating Inquiry button posted to
+`/api/create-guest-inquiry` without the signed-in session, and that API links an
+inquiry to an account only when a session comes with it. Every inquiry sent from
+the button was stored as a guest's: on live, **8 of 8 were unlinked**, while the
+admin had replied in their threads (12 messages) that nobody could open. Reply
+notifications also pointed to `/inquiries`, a page that no longer exists.
+
+**Now, as a help desk treats a request:**
+
+- The button sends the session, so a signed-in person's inquiry belongs to
+  their account.
+- **SafeDrive Support** in Support & Chats lists **tickets and inquiries
+  together**, newest first, each labelled (tag labels / **Inquiry**) and
+  numbered: tickets `SD-TK-…`, inquiries `SD-IN-…`. An inquiry opens its thread
+  there with a follow-up box; Booking Conversations stay separate (they are
+  between renter and lister, not requests to SafeDrive).
+- The same thread shows in the Inquiry widget - both use
+  `src/components/InquiryThread.tsx`.
+- Sending an inquiry shows its reference, and an **acknowledgement email**
+  carries it. Replies are still emailed, now with the reference, and point a
+  signed-in person to the thread (`/support?inquiryId=`); notifications link
+  there too.
+- A guest (not signed in) stays an email exchange, with a reference number.
+- The admin User Inquiries page shows each reference.
+- The ticket tag "Car Inquiry" (a renter's question to a lister) is now
+  **"Lister Question"**, so it is not confused with an Inquiry; its stored value
+  is unchanged.
+
+**CHAPTER 90** (paste by hand) links the inquiries already sent to the account
+whose **verified** email sent them - the help-desk rule, and every reply already
+went to that address. Unverified or deleted accounts are left alone, and an
+inquiry already linked is never moved. Proved on PGlite by
+`scripts/inquiry-linking.test.mjs` (`check:inquiry-linking`, in `check:all`).
+
+The acknowledgement email is bounded by the inquiry API's existing rate limits
+(3 per 15 minutes per sender, 5 per hour per address).
+
 ## 2026-09-14 - Long lists page, and every older record can be reached
 
 Tester request: the audit trail was one endless scroll; it should have

@@ -3,7 +3,10 @@ import { createPrivateStorageUrl } from "@/lib/privateStorage";
 
 export const ticketTags = [
   { value: "general", label: "General Help" },
-  { value: "inquiry", label: "Car Inquiry" },
+  // A renter's question to a lister about a car. Named apart from an Inquiry
+  // (a question to SafeDrive, with an SD-IN reference) so the two are not
+  // mistaken for each other; the stored value stays "inquiry".
+  { value: "inquiry", label: "Lister Question" },
   { value: "verification", label: "Verification" },
   { value: "booking", label: "Booking Help" },
   { value: "booking_report", label: "Report Booking" },

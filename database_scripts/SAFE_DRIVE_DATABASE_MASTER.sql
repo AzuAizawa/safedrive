@@ -13672,4 +13672,41 @@ commit;
 -- select sum(entries) from public.admin_audit_log_actions();
 --   (as an admin: expect the number of rows in audit_log; as anyone else: null)
 
+-- ============================================================================
+-- CHAPTER 90 - An inquiry sent while signed in belongs to the account
+-- Apply this chapter only, staging first. No schema change: one UPDATE links
+-- past inquiries to the account whose verified email sent them.
+-- ============================================================================
+begin;
+
+-- Reported: an inquiry looked like "email only" - never in the app, no number.
+-- The cause was the floating Inquiry button: it posted to
+-- /api/create-guest-inquiry without the signed-in session, and that API links
+-- an inquiry to an account only when a session comes with it. So every inquiry
+-- sent from the button was stored as a guest's (live on this date: 8 of 8
+-- unlinked), and the thread SafeDrive replied in could not be seen by anyone.
+-- The button now sends the session.
+--
+-- For the ones already sent, a help desk's rule applies: a request belongs to
+-- the account whose email it came from, provided that account proved it owns
+-- the email. Every reply already went to that address, so linking shows the
+-- owner nothing they have not already been sent. An unverified or deleted
+-- account is left alone, and an inquiry already linked is never moved.
+update public.guest_inquiries gi
+set submitted_by_user_id = u.id
+from auth.users u
+join public.profiles p on p.id = u.id
+where gi.submitted_by_user_id is null
+  and u.email_confirmed_at is not null
+  and p.deleted_at is null
+  and lower(btrim(u.email)) = lower(btrim(gi.email));
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select count(*) filter (where submitted_by_user_id is not null) as linked,
+--        count(*) filter (where submitted_by_user_id is null) as guest
+--   from public.guest_inquiries;
+--   (expect linked to be the inquiries whose email matches a verified account)
+
 -- End of SafeDrive chaptered database master.

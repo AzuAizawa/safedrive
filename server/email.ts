@@ -583,7 +583,48 @@ export const sendVerificationDecisionEmail = async (input: {
   });
 };
 
-/** Sends an administrator's response to a public (non-account) inquiry. */
+/** "SD-IN-1A2B3C4D" - mirrors getInquiryReference in src/lib/bookingReference.ts. */
+export const inquiryReference = (inquiryId: string) =>
+  `SD-IN-${inquiryId.slice(0, 8).toUpperCase()}`;
+
+/**
+ * Confirms an inquiry arrived and gives its reference number, as a help desk
+ * acknowledges a request. A signed-in person is pointed to the thread in
+ * Support & Chats; a guest is told the reply comes to this address.
+ */
+export const sendInquiryReceivedEmail = async (input: {
+  to: string;
+  name: string | null;
+  subject: string | null;
+  inquiryId: string;
+  linked: boolean;
+  baseOrigin: string;
+}) => {
+  const reference = inquiryReference(input.inquiryId);
+  const topic = input.subject?.trim() || "your question";
+  const actionUrl = getAppLink(
+    input.baseOrigin,
+    input.linked ? `/support?inquiryId=${input.inquiryId}` : "/contact",
+  );
+  const next = input.linked
+    ? "You can read replies and follow up in Support & Chats. Replies are also emailed to you."
+    : "SafeDrive support will reply to this email address.";
+  return sendTransactionalEmail({
+    to: input.to,
+    subject: `SafeDrive received your inquiry ${reference}`,
+    text: `Hello ${input.name?.trim() || "there"},\n\nWe received your inquiry about ${topic}.\nReference: ${reference}\n\n${next}\n${actionUrl}\n\nSafeDrive Support`,
+    html: messagePage(
+      "Inquiry received",
+      `We received your inquiry about ${topic}. Keep this reference number if you contact SafeDrive about it.`,
+      `Reference: ${reference}\n\n${next}`,
+      input.linked ? "Open in Support & Chats" : "Contact SafeDrive",
+      actionUrl,
+    ),
+    idempotencyKey: `guest-inquiry-received:${input.inquiryId}`,
+  });
+};
+
+/** Sends an administrator's response to an inquiry, by email. */
 export const sendGuestInquiryReplyEmail = async (input: {
   to: string;
   name: string | null;
@@ -592,19 +633,25 @@ export const sendGuestInquiryReplyEmail = async (input: {
   inquiryId: string;
   baseOrigin: string;
   messageId?: string;
+  /** The inquiry belongs to an account, so the thread is in Support & Chats. */
+  linked?: boolean;
 }) => {
-  const actionUrl = getAppLink(input.baseOrigin, "/contact");
+  const reference = inquiryReference(input.inquiryId);
+  const actionUrl = getAppLink(
+    input.baseOrigin,
+    input.linked ? `/support?inquiryId=${input.inquiryId}` : "/contact",
+  );
   const subject = input.subject?.trim() || "your inquiry";
-  const intro = `A SafeDrive support agent replied to your inquiry about ${subject}.`;
+  const intro = `A SafeDrive support agent replied to your inquiry ${reference} about ${subject}.`;
   return sendTransactionalEmail({
     to: input.to,
-    subject: `SafeDrive response: ${subject}`,
-    text: `Hello ${input.name?.trim() || "there"},\n\n${input.reply}\n\nNeed more help? Contact SafeDrive: ${actionUrl}\n\nSafeDrive Support`,
+    subject: `SafeDrive response ${reference}: ${subject}`,
+    text: `Hello ${input.name?.trim() || "there"},\n\nReference: ${reference}\n\n${input.reply}\n\n${input.linked ? "Follow up in Support & Chats" : "Need more help? Contact SafeDrive"}: ${actionUrl}\n\nSafeDrive Support`,
     html: messagePage(
       "SafeDrive support response",
       intro,
       input.reply,
-      "Contact SafeDrive",
+      input.linked ? "Follow up in Support & Chats" : "Contact SafeDrive",
       actionUrl,
     ),
     // Key on the reply message so each admin reply in a thread emails once.
