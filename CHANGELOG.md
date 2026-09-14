@@ -3,6 +3,33 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - "I Do Not Agree" finally means no
+
+Tester report on the car page's rental agreement modal: the disabled *Yes, I Agree
+and Continue* gave no reason, and after *I Do Not Agree* the page said *Review
+again* and the renter could not agree on reopening.
+
+Three defects in `src/pages/CarDetailPage.tsx`:
+
+- **Declining withdrew nothing.** `handleAgreementDecline` only closed the modal,
+  so a renter who had agreed and then declined still read *Rental agreement
+  accepted* — and a booking would go through as agreed. It now clears the
+  acceptance; booking is blocked until they agree again. The PDF they already
+  opened still counts, so agreeing again is one click.
+- **The reason was invisible.** The explanation was a native `title` on a
+  `disabled` button, which browsers do not show (and phones never do), and the
+  amber hint sat above the policy links, away from the button. The button now
+  only *looks* disabled while the PDF is unopened, so a hover shows the tooltip
+  and a tap raises the existing "Open the rental agreement PDF first" toast; the
+  hint moved directly under the buttons.
+- **The PDF link died after five minutes.** The signed URL
+  (`api/get-approved-rental-agreement.ts`, 5-minute lifetime) was fetched once on
+  page load, yet *View PDF* marked the PDF as viewed even when it opened an
+  expired link. A stale link is now re-signed on click; if the lister's approved
+  version changed meanwhile, an earlier acceptance is cleared.
+
+No API, SQL or policy change.
+
 ## 2026-09-14 - A cancelled renter's share goes back; the lister's share is finally paid
 
 Asked while reviewing a pending PHP 7,996 refund: *the car was used, so shouldn't

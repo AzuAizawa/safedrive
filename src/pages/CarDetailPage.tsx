@@ -1,6 +1,6 @@
 import { complianceReason, type ComplianceSummary } from "@/lib/vehicleCompliance";
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { supabase } from "@/lib/supabase";
 import {
@@ -153,6 +153,9 @@ export default function CarDetailPage() {
   const [agreementLoading, setAgreementLoading] = useState(false);
   const [agreementError, setAgreementError] = useState<string | null>(null);
   const [agreementReloadNonce, setAgreementReloadNonce] = useState(0);
+  // When the signed PDF link was issued. It expires after expiresInSeconds, so
+  // "View PDF" asks for a fresh one instead of opening a dead link.
+  const agreementFetchedAtRef = useRef(0);
   const [agreementIntent, setAgreementIntent] = useState<"review" | "booking">(
     "review",
   );
@@ -271,6 +274,30 @@ export default function CarDetailPage() {
     })();
   }, []);
 
+  const requestAgreementAccess = async (carId: string): Promise<AgreementAccess> => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error("Please sign in again to review the rental agreement.");
+    }
+
+    const response = await fetch(
+      `/api/get-approved-rental-agreement?carId=${encodeURIComponent(carId)}`,
+      {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      },
+    );
+    const result = (await response.json().catch(() => null)) as
+      | (Partial<AgreementAccess> & { error?: string })
+      | null;
+    if (!response.ok || !result?.agreementVersionId || !result.url) {
+      throw new Error(result?.error || "The approved rental agreement is unavailable.");
+    }
+    return result as AgreementAccess;
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -284,28 +311,11 @@ export default function CarDetailPage() {
 
       setAgreementLoading(true);
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (!session?.access_token) {
-          throw new Error("Please sign in again to review the rental agreement.");
+        const access = await requestAgreementAccess(id);
+        if (!cancelled) {
+          agreementFetchedAtRef.current = Date.now();
+          setAgreementAccess(access);
         }
-
-        const response = await fetch(
-          `/api/get-approved-rental-agreement?carId=${encodeURIComponent(id)}`,
-          {
-            headers: { Authorization: `Bearer ${session.access_token}` },
-            cache: "no-store",
-          },
-        );
-        const result = (await response.json().catch(() => null)) as
-          | (Partial<AgreementAccess> & { error?: string })
-          | null;
-        if (!response.ok || !result?.agreementVersionId || !result.url) {
-          throw new Error(result?.error || "The approved rental agreement is unavailable.");
-        }
-
-        if (!cancelled) setAgreementAccess(result as AgreementAccess);
       } catch (error) {
         if (!cancelled) {
           setAgreementError(
@@ -526,7 +536,49 @@ export default function CarDetailPage() {
     }
   };
 
+  const handleViewAgreementPdf = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!agreementAccess || !id) return;
+
+    const ageMs = Date.now() - agreementFetchedAtRef.current;
+    const usableForMs = Math.max(0, agreementAccess.expiresInSeconds - 30) * 1000;
+    if (ageMs < usableForMs) {
+      setPdfViewed(true);
+      return;
+    }
+
+    // The signed link has expired. Open the tab now (so the browser does not
+    // treat it as a popup), then point it at a freshly signed link.
+    event.preventDefault();
+    const pdfWindow = window.open("", "_blank");
+    try {
+      const fresh = await requestAgreementAccess(id);
+      agreementFetchedAtRef.current = Date.now();
+      if (fresh.agreementVersionId !== agreementAccess.agreementVersionId) {
+        // The lister's approved document changed; an earlier acceptance was of
+        // a different version and no longer counts.
+        setAcceptedAgreement(false);
+      }
+      setAgreementAccess(fresh);
+      if (pdfWindow) {
+        pdfWindow.opener = null;
+        pdfWindow.location.href = fresh.url;
+      } else {
+        window.open(fresh.url, "_blank", "noopener,noreferrer");
+      }
+      setPdfViewed(true);
+    } catch (error) {
+      pdfWindow?.close();
+      toast.error("Could not open the rental agreement PDF", {
+        description:
+          error instanceof Error ? error.message : "Please try again in a moment.",
+      });
+    }
+  };
+
   const handleAgreementDecline = () => {
+    // Declining withdraws any earlier acceptance, so booking is blocked until
+    // the renter agrees again. The PDF they already opened still counts.
+    setAcceptedAgreement(false);
     setShowAgreement(false);
     toast.error("Agreement required", {
       description:
@@ -1417,7 +1469,7 @@ export default function CarDetailPage() {
                   href={agreementUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={() => setPdfViewed(true)}
+                  onClick={(event) => void handleViewAgreementPdf(event)}
                 >
                   <Button size="sm" variant="outline" className="gap-2 border-border/70 bg-background/60 hover:bg-muted">
                     <Eye className="w-4 h-4" /> View PDF
@@ -1425,13 +1477,6 @@ export default function CarDetailPage() {
                 </a>
               </div>
             )}
-            {agreementUrl && !pdfViewed && (
-              <p className="mb-4 -mt-2 text-xs font-medium text-amber-600 dark:text-amber-400">
-                Open and review the lister's PDF above - it sets this vehicle's
-                specific conditions and differs from the summary below.
-              </p>
-            )}
-
             {!agreementUrl && (
               <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-700 dark:text-red-300">
                 {agreementLoading
@@ -1482,15 +1527,31 @@ export default function CarDetailPage() {
               >
                 I Do Not Agree
               </Button>
+              {/* Not `disabled` while waiting on the PDF: a disabled button
+                  swallows hover and taps, so the reason never showed. It looks
+                  disabled, and a hover or tap explains why. */}
               <Button
-                className="h-11 shadow-lg shadow-primary/20"
+                className={`h-11 shadow-lg shadow-primary/20 ${
+                  agreementAccess && !pdfViewed ? "cursor-not-allowed opacity-50" : ""
+                }`}
                 onClick={handleAgreementAccept}
-                disabled={!agreementAccess || agreementLoading || !pdfViewed}
-                title={!pdfViewed ? "Open the lister's PDF first" : undefined}
+                disabled={!agreementAccess || agreementLoading}
+                aria-disabled={!pdfViewed}
+                title={
+                  agreementAccess && !pdfViewed
+                    ? "Open the lister's PDF first (View PDF above) to continue"
+                    : undefined
+                }
               >
                 Yes, I Agree and Continue
               </Button>
             </div>
+            {agreementUrl && !pdfViewed && (
+              <p className="mt-3 text-center text-xs font-medium text-amber-600 dark:text-amber-400 sm:text-right">
+                To continue, open the lister's PDF above first - it sets this
+                vehicle's specific conditions.
+              </p>
+            )}
           </div>
         </div>,
         document.body,
