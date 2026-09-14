@@ -21,7 +21,14 @@ import { GUEST_INQUIRY_TOPICS } from "@/lib/guestInquiryTopics";
 import type { GuestInquiry } from "@/types/database";
 import InquiryThread from "@/components/InquiryThread";
 import { getInquiryReference } from "@/lib/bookingReference";
-import { getInquiryStatusClasses, getInquiryStatusLabel } from "@/lib/inquiries";
+import {
+  getInquiryStatusClasses,
+  getInquiryStatusLabel,
+  validateInquiryForm,
+  type InquiryField,
+} from "@/lib/inquiries";
+import FieldError from "@/components/FieldError";
+import { focusField, INVALID_CONTROL_CLASSES } from "@/lib/formErrors";
 
 const emptyForm = {
   name: "",
@@ -59,6 +66,8 @@ export default function InquiryWidget() {
   const [inquiriesLoading, setInquiriesLoading] = useState(false);
   const [openInquiryId, setOpenInquiryId] = useState<string | null>(null);
   const [submittedReference, setSubmittedReference] = useState<string | null>(null);
+  // Missing fields show in red from the first submit on, and clear as they are filled.
+  const [inquiryAttempted, setInquiryAttempted] = useState(false);
 
   const hidden = pathname.startsWith("/admin") || pathname === "/contact";
 
@@ -137,7 +146,17 @@ export default function InquiryWidget() {
   const close = () => {
     setOpen(false);
     setSubmitted(false);
+    setInquiryAttempted(false);
   };
+
+  const inquiryErrors = validateInquiryForm({
+    name: form.name,
+    email: form.email,
+    topics: [form.topic],
+    message: form.message,
+  });
+  const inquiryError = (field: InquiryField) =>
+    inquiryAttempted ? inquiryErrors.find((error) => error.field === field)?.message ?? null : null;
 
   const openThread = (inquiryId: string) => {
     setOpenInquiryId(inquiryId);
@@ -155,6 +174,13 @@ export default function InquiryWidget() {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (submitting) return;
+    // Submit stays clickable and says what is missing, in red on each field -
+    // it used to stay disabled without a reason.
+    if (inquiryErrors.length > 0) {
+      setInquiryAttempted(true);
+      focusField(`inquiry-${inquiryErrors[0].field}`);
+      return;
+    }
     setSubmitting(true);
     try {
       const response = await fetch("/api/create-guest-inquiry", {
@@ -182,6 +208,7 @@ export default function InquiryWidget() {
       };
       if (!response.ok) throw new Error(payload.error || "Unable to submit inquiry");
       setForm((current) => ({ ...emptyForm, name: current.name, email: current.email, phone: current.phone }));
+      setInquiryAttempted(false);
       const reference = payload.id ? getInquiryReference(payload.id) : null;
       toast.success(reference ? `Inquiry ${reference} submitted` : "Inquiry submitted", {
         description: payload.linked
@@ -315,7 +342,7 @@ export default function InquiryWidget() {
                   </Button>
                 </div>
               ) : (
-                <form className="space-y-4" onSubmit={submit}>
+                <form className="space-y-4" onSubmit={submit} noValidate>
                   {inquiries.length > 0 && (
                     <button
                       type="button"
@@ -327,8 +354,9 @@ export default function InquiryWidget() {
                   )}
                   <div className="grid grid-cols-2 gap-3">
                     <label className="space-y-1.5">
-                      <Label htmlFor="inquiry-name">Name</Label>
-                      <Input id="inquiry-name" maxLength={120} required value={form.name} onChange={(event) => update("name", event.target.value)} />
+                      <Label htmlFor="inquiry-name">Name *</Label>
+                      <Input id="inquiry-name" maxLength={120} required aria-invalid={Boolean(inquiryError("name"))} value={form.name} onChange={(event) => update("name", event.target.value)} />
+                      <FieldError message={inquiryError("name")} />
                     </label>
                     <label className="space-y-1.5">
                       <Label htmlFor="inquiry-phone">Phone <span className="text-muted-foreground">(optional)</span></Label>
@@ -336,40 +364,45 @@ export default function InquiryWidget() {
                     </label>
                   </div>
                   <label className="block space-y-1.5">
-                    <Label htmlFor="inquiry-email">Email</Label>
-                    <Input id="inquiry-email" type="email" maxLength={320} required value={form.email} onChange={(event) => update("email", event.target.value)} />
+                    <Label htmlFor="inquiry-email">Email *</Label>
+                    <Input id="inquiry-email" type="email" maxLength={320} required aria-invalid={Boolean(inquiryError("email"))} value={form.email} onChange={(event) => update("email", event.target.value)} />
+                    <FieldError message={inquiryError("email")} />
                   </label>
                   <label className="block space-y-1.5">
-                    <Label htmlFor="inquiry-topic">Inquiry topic</Label>
+                    <Label htmlFor="inquiry-topic">Inquiry topic *</Label>
                     <select
                       id="inquiry-topic"
-                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      className={`h-10 w-full rounded-md border border-input bg-background px-3 text-sm ${INVALID_CONTROL_CLASSES}`}
                       required
+                      aria-invalid={Boolean(inquiryError("topic"))}
                       value={form.topic}
                       onChange={(event) => update("topic", event.target.value)}
                     >
                       <option value="">Choose a topic</option>
                       {GUEST_INQUIRY_TOPICS.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
                     </select>
+                    <FieldError message={inquiryError("topic")} />
                   </label>
                   <label className="hidden" aria-hidden="true">
                     Company
                     <input tabIndex={-1} autoComplete="off" value={form.company} onChange={(event) => update("company", event.target.value)} />
                   </label>
                   <label className="block space-y-1.5">
-                    <Label htmlFor="inquiry-message">Question or concern</Label>
+                    <Label htmlFor="inquiry-message">Question or concern *</Label>
                     <textarea
                       id="inquiry-message"
-                      className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className={`min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring ${INVALID_CONTROL_CLASSES}`}
                       minLength={10}
                       maxLength={3000}
                       required
+                      aria-invalid={Boolean(inquiryError("message"))}
                       value={form.message}
                       onChange={(event) => update("message", event.target.value)}
                       placeholder="How can SafeDrive help?"
                     />
+                    <FieldError message={inquiryError("message")} />
                   </label>
-                  <Button type="submit" className="w-full gap-2" disabled={submitting || !form.topic || form.message.trim().length < 10}>
+                  <Button type="submit" className="w-full gap-2" disabled={submitting}>
                     {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     Submit inquiry
                   </Button>

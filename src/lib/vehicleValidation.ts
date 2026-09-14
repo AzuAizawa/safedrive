@@ -48,3 +48,195 @@ export const validateListingPrice = (value: string | number): string | null => {
   }
   return null;
 };
+
+export const EARLY_RETURN_RESPONSE_HOURS_MIN = 1;
+export const EARLY_RETURN_RESPONSE_HOURS_MAX = 24;
+
+/**
+ * The listing form's checked fields, in the order they appear on the form, so
+ * every problem is reported at once and top to bottom. The form used to stop
+ * at the first: the browser's bubble named one field per click, the handler
+ * then raised one toast per click, and Brand and Model - custom dropdowns the
+ * browser does not check - were skipped with no message at all.
+ */
+export const LISTING_FIELD_LABELS = {
+  brand: "Brand",
+  model: "Model",
+  transmission: "Transmission",
+  plate_number: "Plate number",
+  mileage: "Mileage",
+  price_per_day: "Price per day",
+  early_return_response_window_hours: "Early-return response limit",
+  location: "Pickup/Dropoff region",
+  city: "City/Municipality",
+  specific_location: "Pick-up location/landmark",
+  car_images: "Car images",
+  or_file: "Official Receipt (OR)",
+  registration_expiry: "Registration expiry",
+  cr_file: "Certificate of Registration (CR)",
+  ctpl_file: "CTPL insurance",
+  ctpl_expiry: "CTPL expiry",
+  comprehensive_insurance_file: "Comprehensive insurance",
+  comprehensive_insurance_expiry: "Comprehensive insurance expiry",
+  insurer_rental_use_confirmed: "Rental-use disclosure",
+  dti_file: "DTI registration",
+  dti_expiry: "DTI expiry",
+  mayors_permit_file: "Business/Mayor's Permit",
+  mayors_permit_expiry: "Permit expiry",
+  bir_file: "BIR certificate",
+  rental_agreement: "Rental agreement",
+} as const;
+
+export type ListingField = keyof typeof LISTING_FIELD_LABELS;
+export type ListingFieldError = { field: ListingField; message: string };
+
+const responseHoursError = (value: string) => {
+  const hours = Number(value);
+  return value.trim() === "" ||
+    !Number.isInteger(hours) ||
+    hours < EARLY_RETURN_RESPONSE_HOURS_MIN ||
+    hours > EARLY_RETURN_RESPONSE_HOURS_MAX
+    ? `Enter a whole number of hours from ${EARLY_RETURN_RESPONSE_HOURS_MIN} to ${EARLY_RETURN_RESPONSE_HOURS_MAX}.`
+    : null;
+};
+
+// Dates are yyyy-MM-dd, so they compare as strings.
+const expiryError = (value: string, today: string, document: string) =>
+  !value
+    ? `Enter the expiry date shown on the ${document}.`
+    : value < today
+      ? `That date has passed - the ${document} must still be valid.`
+      : null;
+
+export type NewListingInput = {
+  brandId: string | null;
+  modelId: string | null;
+  transmission: string;
+  plateNumber: string;
+  plateTaken: boolean;
+  mileage: string;
+  pricePerDay: string;
+  earlyReturnResponseHours: string;
+  region: string;
+  city: string;
+  specificLocation: string;
+  carImageCount: number;
+  hasOr: boolean;
+  registrationExpiry: string;
+  hasCr: boolean;
+  hasCtpl: boolean;
+  ctplExpiry: string;
+  hasComprehensive: boolean;
+  comprehensiveExpiry: string;
+  rentalUseConfirmed: boolean;
+  hasDti: boolean;
+  dtiExpiry: string;
+  hasMayorsPermit: boolean;
+  mayorsPermitExpiry: string;
+  hasBir: boolean;
+  hasRentalAgreement: boolean;
+  /** yyyy-MM-dd */
+  today: string;
+};
+
+/** Every problem with a new listing, in form order. Empty means it can be submitted. */
+export const validateNewListing = (input: NewListingInput): ListingFieldError[] => {
+  const errors: ListingFieldError[] = [];
+  const check = (field: ListingField, message: string | null) => {
+    if (message) errors.push({ field, message });
+  };
+
+  check("brand", input.brandId ? null : "Select the brand.");
+  check(
+    "model",
+    input.modelId ? null : input.brandId ? "Select the model." : "Select a brand first, then the model.",
+  );
+  check(
+    "transmission",
+    ["automatic", "manual"].includes(input.transmission) ? null : "Select Automatic or Manual.",
+  );
+  check(
+    "plate_number",
+    validatePlateNumber(input.plateNumber) ??
+      (input.plateTaken ? "This plate number is already registered in SafeDrive." : null),
+  );
+  check(
+    "mileage",
+    input.mileage.trim() !== "" && !(Number(input.mileage) >= 0)
+      ? "Enter a mileage of 0 or more, or leave it blank."
+      : null,
+  );
+  check("price_per_day", validateListingPrice(input.pricePerDay));
+  check("early_return_response_window_hours", responseHoursError(input.earlyReturnResponseHours));
+  check("location", input.region ? null : "Select the pickup/dropoff region.");
+  check(
+    "city",
+    input.city.trim()
+      ? null
+      : input.region
+        ? "Select the city or municipality, or type it under Other."
+        : "Select a region first, then the city.",
+  );
+  check("specific_location", input.specificLocation.trim() ? null : "Enter where the renter picks the car up.");
+  check(
+    "car_images",
+    input.carImageCount < 1
+      ? "Add at least 1 photo of the car."
+      : input.carImageCount > 5
+        ? "Add no more than 5 photos."
+        : null,
+  );
+  check("or_file", input.hasOr ? null : "Upload the Official Receipt (OR).");
+  check("registration_expiry", expiryError(input.registrationExpiry, input.today, "OR"));
+  check("cr_file", input.hasCr ? null : "Upload the Certificate of Registration (CR).");
+  check("ctpl_file", input.hasCtpl ? null : "Upload the CTPL insurance.");
+  check("ctpl_expiry", expiryError(input.ctplExpiry, input.today, "CTPL"));
+  // Optional cover, but half of it cannot be reviewed: a policy with no expiry,
+  // or an expiry with no policy.
+  if (input.hasComprehensive && !input.comprehensiveExpiry) {
+    check("comprehensive_insurance_expiry", "Enter the policy's expiry date, or remove the policy.");
+  } else if (!input.hasComprehensive && input.comprehensiveExpiry) {
+    check("comprehensive_insurance_file", "Upload the policy, or clear its expiry date.");
+  } else if (input.comprehensiveExpiry && input.comprehensiveExpiry < input.today) {
+    check("comprehensive_insurance_expiry", "That date has passed - the policy must still be valid.");
+  }
+  check(
+    "insurer_rental_use_confirmed",
+    input.rentalUseConfirmed ? null : "Confirm you disclosed rental use to your insurer.",
+  );
+  check("dti_file", input.hasDti ? null : "Upload the DTI business name registration.");
+  check("dti_expiry", expiryError(input.dtiExpiry, input.today, "DTI registration"));
+  check("mayors_permit_file", input.hasMayorsPermit ? null : "Upload the Business/Mayor's Permit.");
+  check("mayors_permit_expiry", expiryError(input.mayorsPermitExpiry, input.today, "permit"));
+  check("bir_file", input.hasBir ? null : "Upload the BIR Certificate of Registration.");
+  check("rental_agreement", input.hasRentalAgreement ? null : "Upload the rental agreement (PDF).");
+  return errors;
+};
+
+/** Every problem with a listing edit, in form order. Empty means it can be saved. */
+export const validateListingEdit = (input: {
+  pricePerDay: string;
+  earlyReturnResponseHours: string;
+  rentalUseConfirmed: boolean;
+  transmission: string;
+  /** Only while the listing is under review or was sent back. */
+  transmissionEditable: boolean;
+}): ListingFieldError[] => {
+  const errors: ListingFieldError[] = [];
+  const check = (field: ListingField, message: string | null) => {
+    if (message) errors.push({ field, message });
+  };
+  check("price_per_day", validateListingPrice(input.pricePerDay));
+  check("early_return_response_window_hours", responseHoursError(input.earlyReturnResponseHours));
+  check(
+    "insurer_rental_use_confirmed",
+    input.rentalUseConfirmed ? null : "Confirm the rental use was disclosed to your insurer before saving.",
+  );
+  if (input.transmissionEditable) {
+    check(
+      "transmission",
+      ["automatic", "manual"].includes(input.transmission) ? null : "Select Automatic or Manual.",
+    );
+  }
+  return errors;
+};

@@ -3,6 +3,42 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - A form says everything that is missing, at once, in red
+
+Tester report: listing a car told you what was missing one field at a time -
+fix it, submit, next message - and skipped Brand and Model although both are
+required. The inquiry form kept **Submit inquiry** disabled without saying why,
+and its topic had no asterisk.
+
+**What was wrong.** The listing form leaned on the browser's `required`
+bubbles, which name one field per click, and then on one toast per check in
+`handleSubmit`. Brand and Model are custom dropdowns the browser never checks,
+and the handler ended with `if (!form.model_id) return;` - a submit that did
+nothing and said nothing. The Edit listing save had the same silent stop for an
+empty price.
+
+**Now, as forms are expected to work:** Submit stays clickable; the first
+submit shows **every** problem together - in red on each field with a short
+message, and in a summary at the top whose entries jump to their field - and
+each clears as it is fixed.
+
+- **List a New Vehicle** (`noValidate`): brand, model, transmission, plate
+  (format or already registered), mileage, price, early-return hours, region,
+  city, landmark, photos, OR/CR/CTPL and their expiry dates, the optional
+  comprehensive policy (both halves or neither, still valid), the rental-use
+  confirmation, DTI/permit/BIR and their dates, and the rental agreement.
+- **Edit listing:** price, early-return hours, rental-use confirmation, and
+  transmission while the listing is under review or was sent back.
+- **Inquiry widget and `/contact`:** asterisks on every required field; name,
+  email, topic and question are marked red with a message ("Select an inquiry
+  topic first.").
+
+The rules live in one place each - `validateNewListing` / `validateListingEdit`
+in `src/lib/vehicleValidation.ts`, `validateInquiryForm` in `src/lib/inquiries.ts` -
+pinned by `scripts/form-validation.test.mjs` (`check:form-validation`, in
+`check:all`). Shared pieces: `src/components/FieldError.tsx` and
+`src/lib/formErrors.ts`. Nothing the server or database accepts changed.
+
 ## 2026-09-14 - An inquiry is a numbered request, not an email that disappears
 
 Tester report: an inquiry seemed to be email only - it never showed in the app,

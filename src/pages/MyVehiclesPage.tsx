@@ -56,11 +56,20 @@ import {
 } from "@/lib/platformSettings";
 import type { CarBrand, CarModel } from "@/types/database";
 import {
+  EARLY_RETURN_RESPONSE_HOURS_MAX,
+  EARLY_RETURN_RESPONSE_HOURS_MIN,
+  LISTING_FIELD_LABELS,
   PLATE_NUMBER_PATTERN,
   PLATE_NUMBER_HINT,
+  validateListingEdit,
+  validateNewListing,
   validatePlateNumber,
   validateListingPrice,
+  type ListingField,
+  type ListingFieldError,
 } from "@/lib/vehicleValidation";
+import FieldError from "@/components/FieldError";
+import { focusField, INVALID_CONTROL_CLASSES } from "@/lib/formErrors";
 
 const MAX_LISTING_PRICE = 100000;
 // How long the lister has to answer an early-return request before it rejects
@@ -69,8 +78,8 @@ const MAX_LISTING_PRICE = 100000;
 // api/booking-early-return-action.ts. It was a picklist because the free-text
 // box it replaced (CHAPTER 40) was left blank or misunderstood; it is typed
 // again now, but stays required and range-checked so that cannot come back.
-const MIN_EARLY_RETURN_RESPONSE_HOURS = 1;
-const MAX_EARLY_RETURN_RESPONSE_HOURS = 24;
+const MIN_EARLY_RETURN_RESPONSE_HOURS = EARLY_RETURN_RESPONSE_HOURS_MIN;
+const MAX_EARLY_RETURN_RESPONSE_HOURS = EARLY_RETURN_RESPONSE_HOURS_MAX;
 
 // Keeps the field inside 1-24 while it is being typed. Digits only; an entry
 // past the ceiling is held at the ceiling rather than accepted and rejected
@@ -353,6 +362,11 @@ type DocumentFieldProps = {
   onExpiry?: (value: string) => void;
   expiryRequired?: boolean;
   note?: string;
+  /** Where the error summary scrolls to for the file, and for its expiry date. */
+  fieldId?: string;
+  expiryFieldId?: string;
+  fileError?: string | null;
+  expiryError?: string | null;
 };
 
 const DocumentField = ({
@@ -368,17 +382,21 @@ const DocumentField = ({
   onExpiry,
   expiryRequired,
   note,
+  fieldId,
+  expiryFieldId,
+  fileError,
+  expiryError,
 }: DocumentFieldProps) => {
   // Remounts the native input after a removal, so choosing the same file
   // again still fires onChange.
   const [inputKey, setInputKey] = useState(0);
   return (
-  <div className="space-y-2">
+  <div id={fieldId} className="space-y-2">
     <Label>{label}</Label>
     {/* The chosen file is named inside the box rather than in a chip beneath it.
         A chip added height to whichever column had a file, which pushed its date
         picker out of line with the one beside it. */}
-    <label className="relative flex h-24 w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-2 text-center transition-colors hover:border-primary/50 aria-[current=true]:border-green-500/50 aria-[current=true]:bg-green-500/5" aria-current={Boolean(file)}>
+    <label className={`relative flex h-24 w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-2 text-center transition-colors hover:border-primary/50 aria-[current=true]:border-green-500/50 aria-[current=true]:bg-green-500/5 ${fileError ? "border-destructive bg-destructive/5" : ""}`} aria-current={Boolean(file)}>
       {file && (
         <button
           type="button"
@@ -424,8 +442,9 @@ const DocumentField = ({
         }}
       />
     </label>
+    <FieldError message={fileError} />
     {expiryLabel && onExpiry && (
-      <div className="space-y-1">
+      <div id={expiryFieldId} className="space-y-1">
         <Label className="text-xs">{expiryLabel}</Label>
         <Input
           type="date"
@@ -433,13 +452,58 @@ const DocumentField = ({
           value={expiryValue ?? ""}
           onChange={(event) => onExpiry(event.target.value)}
           required={expiryRequired}
+          aria-invalid={Boolean(expiryError)}
         />
+        <FieldError message={expiryError} />
       </div>
     )}
     {note && <p className="text-xs text-muted-foreground">{note}</p>}
   </div>
   );
 };
+
+/**
+ * Every problem at the top of a form after a submit, each one a link to its
+ * field. The fields themselves are marked in red too; this is the list.
+ */
+const ListingErrorSummary = ({
+  id,
+  errors,
+  fieldIdPrefix,
+}: {
+  id: string;
+  errors: ListingFieldError[];
+  fieldIdPrefix: string;
+}) =>
+  errors.length === 0 ? null : (
+    <div
+      id={id}
+      role="alert"
+      tabIndex={-1}
+      className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 outline-none"
+    >
+      <p className="text-sm font-semibold text-destructive">
+        {errors.length === 1 ? "1 field needs attention" : `${errors.length} fields need attention`}
+      </p>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        Each one is marked in red below. Fill them in, then submit again.
+      </p>
+      <ul className="mt-2 grid gap-1 sm:grid-cols-2">
+        {errors.map((error) => (
+          <li key={error.field}>
+            <button
+              type="button"
+              onClick={() => focusField(`${fieldIdPrefix}${error.field}`)}
+              className="text-left text-xs text-destructive underline-offset-2 hover:underline"
+            >
+              <span className="font-semibold">{LISTING_FIELD_LABELS[error.field]}:</span>{" "}
+              {error.message}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 
 export default function MyVehiclesPage() {
   const { user, profile, session } = useAuth();
@@ -529,6 +593,9 @@ export default function MyVehiclesPage() {
     status: "idle" | "checking" | "available" | "taken";
     message: string;
   }>({ status: "idle", message: "" });
+  // Problems show from the first submit on, and clear as each field is fixed.
+  const [listingSubmitAttempted, setListingSubmitAttempted] = useState(false);
+  const [editSubmitAttempted, setEditSubmitAttempted] = useState(false);
   // Drives the live "you'll earn approximately..." note next to the price
   // field, so a lister sees their real take-home the moment they set a
   // price - SafeDrive's commission is deducted from their payout, not added
@@ -593,6 +660,61 @@ export default function MyVehiclesPage() {
         ],
       ]
     : [];
+
+  // Every required field is checked together, and every problem is shown at
+  // once: in red on its field and listed at the top of the form. The browser's
+  // own bubbles named one field per click and never covered brand, model, the
+  // uploads or the dates.
+  const listingErrors = validateNewListing({
+    brandId: form.brand_id,
+    modelId: form.model_id,
+    transmission: form.transmission,
+    plateNumber: form.plate_number,
+    plateTaken: plateCheck.status === "taken",
+    mileage: form.mileage,
+    pricePerDay: form.price_per_day,
+    earlyReturnResponseHours: form.early_return_response_window_hours,
+    region: form.location,
+    city: form.city,
+    specificLocation: form.specific_location,
+    carImageCount: carImages.length,
+    hasOr: Boolean(orFile),
+    registrationExpiry: form.registration_expiry,
+    hasCr: Boolean(crFile),
+    hasCtpl: Boolean(ctplFile),
+    ctplExpiry: form.ctpl_expiry,
+    hasComprehensive: Boolean(comprehensiveInsuranceFile),
+    comprehensiveExpiry: form.comprehensive_insurance_expiry,
+    rentalUseConfirmed: form.insurer_rental_use_confirmed,
+    hasDti: Boolean(dtiFile),
+    dtiExpiry: form.dti_expiry,
+    hasMayorsPermit: Boolean(mayorsPermitFile),
+    mayorsPermitExpiry: form.mayors_permit_expiry,
+    hasBir: Boolean(birFile),
+    hasRentalAgreement: Boolean(rentalAgreementFile),
+    today: new Date().toISOString().slice(0, 10),
+  });
+  const shownListingErrors = listingSubmitAttempted ? listingErrors : [];
+  const listingError = (field: ListingField) =>
+    shownListingErrors.find((error) => error.field === field)?.message ?? null;
+
+  const editListingErrors = editVehicle
+    ? validateListingEdit({
+        pricePerDay: editPrice,
+        earlyReturnResponseHours: editEarlyReturnResponseWindowHours,
+        rentalUseConfirmed: editRentalUseConfirmed,
+        transmission: editTransmission,
+        transmissionEditable: ["pending", "rejected"].includes(editVehicle.status),
+      })
+    : [];
+  const shownEditErrors = editSubmitAttempted ? editListingErrors : [];
+  const editListingError = (field: ListingField) =>
+    shownEditErrors.find((error) => error.field === field)?.message ?? null;
+
+  // A closed form starts clean the next time it is opened.
+  useEffect(() => {
+    if (!showForm) setListingSubmitAttempted(false);
+  }, [showForm]);
 
   /**
    * One booking query and one payout query for the whole list. A car is
@@ -835,13 +957,7 @@ export default function MyVehiclesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !form.model_id) return;
-    if (plateCheck.status === "taken") {
-      toast.error("Duplicate Plate Number", {
-        description: "This plate number is already registered in our system.",
-      });
-      return;
-    }
+    if (!user) return;
 
     if (!isVerifiedLister) {
       toast.error("Vehicle listing unavailable", {
@@ -851,94 +967,26 @@ export default function MyVehiclesPage() {
       return;
     }
 
-    const plateError = validatePlateNumber(form.plate_number);
-    if (plateError) {
-      toast.error("Invalid plate number", { description: plateError });
-      return;
-    }
-
-    const priceError = validateListingPrice(form.price_per_day);
-    if (priceError) {
-      toast.error("Invalid listing price", { description: priceError });
-      return;
-    }
-    const pricePerDay = Number(form.price_per_day);
-
-    let earlyReturnResponseWindowHours: number | null = null;
-    {
-      const parsed = Number(form.early_return_response_window_hours);
-      if (
-        form.early_return_response_window_hours.trim() === "" ||
-        !Number.isInteger(parsed) ||
-        parsed < MIN_EARLY_RETURN_RESPONSE_HOURS ||
-        parsed > MAX_EARLY_RETURN_RESPONSE_HOURS
-      ) {
-        toast.error("Set your early-return response limit", {
-          description: `Enter a whole number of hours from ${MIN_EARLY_RETURN_RESPONSE_HOURS} to ${MAX_EARLY_RETURN_RESPONSE_HOURS}.`,
-        });
-        return;
-      }
-      earlyReturnResponseWindowHours = parsed;
-    }
-
-    if (carImages.length < 1 || carImages.length > 5) {
-      toast.error("Please provide between 1 and 5 car images.");
-      return;
-    }
-
-    if (!orFile || !crFile) {
-      toast.error("OR and CR photos are required.");
-      return;
-    }
-
-    if (!ctplFile) {
-      toast.error("CTPL document photo is required.");
-      return;
-    }
-
-    // Optional cover, but half of it is worse than none: a policy with no
-    // stated expiry cannot be reviewed, and a date with no document cannot be
-    // checked against anything.
-    if (Boolean(comprehensiveInsuranceFile) !== Boolean(form.comprehensive_insurance_expiry)) {
-      toast.error("Comprehensive insurance is optional", {
-        description: "Give both the document and its expiry date, or leave both blank.",
-      });
-      return;
-    }
-    if (!dtiFile || !mayorsPermitFile || !birFile) {
-      toast.error("DTI registration, Business/Mayor's Permit and BIR certificate are required.");
-      return;
-    }
-    if (!form.dti_expiry || !form.mayors_permit_expiry) {
-      toast.error("Enter the expiry dates", {
-        description: "The DTI registration and the Business/Mayor's Permit both show an expiry date.",
-      });
-      return;
-    }
-
-    if (!rentalAgreementFile) {
-      toast.error("Rental Agreement PDF is required.");
-      return;
-    }
-
-    if (!["automatic", "manual"].includes(form.transmission)) {
-      toast.error("Select the vehicle transmission (Automatic or Manual).");
-      return;
-    }
-
-    const todayIso = new Date().toISOString().slice(0, 10);
-    if (
-      !form.registration_expiry ||
-      form.registration_expiry < todayIso ||
-      !form.ctpl_expiry ||
-      form.ctpl_expiry < todayIso ||
-      !form.insurer_rental_use_confirmed
-    ) {
+    // One check for the whole form (validateNewListing), so every missing or
+    // invalid field is shown together instead of one toast per submit. It
+    // includes Brand and Model, which used to stop the submit with no message.
+    if (listingErrors.length > 0) {
+      setListingSubmitAttempted(true);
       toast.error(
-        "Registration and CTPL must be current, and rental-use disclosure must be confirmed with the insurer.",
+        listingErrors.length === 1
+          ? "1 field needs attention"
+          : `${listingErrors.length} fields need attention`,
+        { description: "Each one is marked in red on the form." },
       );
+      window.requestAnimationFrame(() => focusField("listing-error-summary"));
       return;
     }
+    // validateNewListing has already reported a missing model in red; this
+    // only narrows the type for the insert below.
+    const modelId = form.model_id;
+    if (!modelId) return;
+    const pricePerDay = Number(form.price_per_day);
+    const earlyReturnResponseWindowHours = Number(form.early_return_response_window_hours);
 
     setSubmitting(true);
     const toastId = toast.loading("Saving vehicle details...");
@@ -947,7 +995,7 @@ export default function MyVehiclesPage() {
         .from("cars")
         .insert({
           owner_id: user.id,
-          model_id: form.model_id,
+          model_id: modelId,
           plate_number: form.plate_number,
           mileage: form.mileage ? parseInt(form.mileage) : null,
           price_per_day: pricePerDay,
@@ -1099,42 +1147,22 @@ export default function MyVehiclesPage() {
   };
 
   const handleUpdateVehicle = async () => {
-    if (!editVehicle || !editPrice) return;
-    const editPriceError = validateListingPrice(editPrice);
-    if (editPriceError) {
-      toast.error("Invalid listing price", { description: editPriceError });
+    if (!editVehicle) return;
+    // Same idea as a new listing: every problem at once, in red. An empty
+    // price used to end the save here without a word.
+    if (editListingErrors.length > 0) {
+      setEditSubmitAttempted(true);
+      toast.error(
+        editListingErrors.length === 1
+          ? "1 field needs attention"
+          : `${editListingErrors.length} fields need attention`,
+        { description: "Each one is marked in red on the form." },
+      );
+      window.requestAnimationFrame(() => focusField("edit-listing-error-summary"));
       return;
     }
     const nextPrice = Number(editPrice);
-
-    let nextEarlyReturnResponseWindowHours: number | null = null;
-    {
-      const parsed = Number(editEarlyReturnResponseWindowHours);
-      if (
-        editEarlyReturnResponseWindowHours.trim() === "" ||
-        !Number.isInteger(parsed) ||
-        parsed < MIN_EARLY_RETURN_RESPONSE_HOURS ||
-        parsed > MAX_EARLY_RETURN_RESPONSE_HOURS
-      ) {
-        toast.error("Set your early-return response limit", {
-          description: `Enter a whole number of hours from ${MIN_EARLY_RETURN_RESPONSE_HOURS} to ${MAX_EARLY_RETURN_RESPONSE_HOURS}.`,
-        });
-        return;
-      }
-      nextEarlyReturnResponseWindowHours = parsed;
-    }
-
-    if (["pending", "rejected"].includes(editVehicle.status) && !["automatic", "manual"].includes(editTransmission)) {
-      toast.error("Select the vehicle transmission (Automatic or Manual).");
-      return;
-    }
-
-    if (!editRentalUseConfirmed) {
-      toast.error("Rental-use confirmation is required", {
-        description: "Confirm that the intended rental use was disclosed to the insurer before resubmitting.",
-      });
-      return;
-    }
+    const nextEarlyReturnResponseWindowHours = Number(editEarlyReturnResponseWindowHours);
 
     setEditing(true);
     const toastId = toast.loading("Saving changes...");
@@ -1595,10 +1623,17 @@ export default function MyVehiclesPage() {
               {vehicleVerificationEta}
             </CardDescription>
           </CardHeader>
-          <form onSubmit={handleSubmit}>
+          {/* noValidate: validateNewListing reports every field at once; the
+              browser's bubbles would stop at the first. */}
+          <form onSubmit={handleSubmit} noValidate>
             <CardContent className="space-y-4">
+              <ListingErrorSummary
+                id="listing-error-summary"
+                errors={shownListingErrors}
+                fieldIdPrefix="listing-"
+              />
               <div className="grid sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
+                <div id="listing-brand" className="space-y-2">
                   <Label>Brand *</Label>
                   <Select
                     value={form.brand_id || ""}
@@ -1609,7 +1644,7 @@ export default function MyVehiclesPage() {
                       }
                     }}
                   >
-                    <SelectTrigger className="h-10">
+                    <SelectTrigger className="h-10" aria-invalid={Boolean(listingError("brand"))}>
                       <SelectValue placeholder="Select brand">
                         {form.brand_id
                           ? brands.find((b) => b.id === form.brand_id)?.name
@@ -1624,14 +1659,15 @@ export default function MyVehiclesPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <FieldError message={listingError("brand")} />
                 </div>
-                <div className="space-y-2">
+                <div id="listing-model" className="space-y-2">
                   <Label>Model *</Label>
                   <Select
                     value={form.model_id || ""}
                     onValueChange={(val) => setForm({ ...form, model_id: val })}
                   >
-                    <SelectTrigger className="h-10 w-full">
+                    <SelectTrigger className="h-10 w-full" aria-invalid={Boolean(listingError("model"))}>
                       <SelectValue placeholder="Select model">
                         {selectedModel
                           ? `${selectedModel.name} (${selectedModel.body_type})`
@@ -1646,6 +1682,7 @@ export default function MyVehiclesPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <FieldError message={listingError("model")} />
                   {selectedModel ? (
                     <p className="text-xs text-muted-foreground break-words">
                       Selected: {formatModelLabel(selectedModel)}
@@ -1710,14 +1747,15 @@ export default function MyVehiclesPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
+                <div id="listing-transmission" className="space-y-2">
                   <Label>Transmission *</Label>
                   <select
                     value={form.transmission}
                     onChange={(e) =>
                       setForm({ ...form, transmission: e.target.value })
                     }
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    aria-invalid={Boolean(listingError("transmission"))}
+                    className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${INVALID_CONTROL_CLASSES}`}
                   >
                     <option value="">Select transmission</option>
                     <option value="automatic">Automatic</option>
@@ -1727,8 +1765,9 @@ export default function MyVehiclesPage() {
                     A renter with an automatic-only licence can book automatic
                     vehicles only.
                   </p>
+                  <FieldError message={listingError("transmission")} />
                 </div>
-                <div className="space-y-2">
+                <div id="listing-plate_number" className="space-y-2">
                   <Label>Plate Number *</Label>
                   <Input
                     maxLength={8}
@@ -1745,8 +1784,11 @@ export default function MyVehiclesPage() {
                     title={PLATE_NUMBER_HINT}
                     pattern={PLATE_NUMBER_PATTERN}
                     required
+                    aria-invalid={Boolean(listingError("plate_number"))}
                   />
                   {(() => {
+                    const submitError = listingError("plate_number");
+                    if (submitError) return <FieldError message={submitError} />;
                     const formatError = form.plate_number
                       ? validatePlateNumber(form.plate_number)
                       : null;
@@ -1775,19 +1817,21 @@ export default function MyVehiclesPage() {
                     return null;
                   })()}
                 </div>
-                <div className="space-y-2">
+                <div id="listing-mileage" className="space-y-2">
                   <Label>Mileage (km) <span className="text-xs font-normal text-muted-foreground">(optional)</span></Label>
                   <Input
                     type="number"
                     min="0"
+                    aria-invalid={Boolean(listingError("mileage"))}
                     value={form.mileage}
                     onChange={(e) =>
                       setForm({ ...form, mileage: e.target.value })
                     }
                     className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
+                  <FieldError message={listingError("mileage")} />
                 </div>
-                <div className="space-y-2">
+                <div id="listing-price_per_day" className="space-y-2">
                   <Label>Price per Day (PHP) *</Label>
                   <div className="relative">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
@@ -1811,15 +1855,16 @@ export default function MyVehiclesPage() {
                       });
                     }}
                     required
+                    aria-invalid={Boolean(listingError("price_per_day"))}
                     className="pl-12 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                   </div>
-                  {form.price_per_day !== "" &&
-                    validateListingPrice(form.price_per_day) && (
-                      <p className="text-xs font-medium text-red-500">
-                        {validateListingPrice(form.price_per_day)}
-                      </p>
-                    )}
+                  <FieldError
+                    message={
+                      listingError("price_per_day") ??
+                      (form.price_per_day !== "" ? validateListingPrice(form.price_per_day) : null)
+                    }
+                  />
                   {form.price_per_day !== "" && !validateListingPrice(form.price_per_day) && (
                     <p className="text-xs text-muted-foreground">
                       Renters pay ₱{Number(form.price_per_day).toLocaleString()}/day. You'll earn
@@ -1832,9 +1877,10 @@ export default function MyVehiclesPage() {
                     </p>
                   )}
                 </div>
-                <div className="space-y-2">
+                <div id="listing-early_return_response_window_hours" className="space-y-2">
                   <Label>Early-return response limit (hours) *</Label>
                   <Input
+                    aria-invalid={Boolean(listingError("early_return_response_window_hours"))}
                     type="number"
                     inputMode="numeric"
                     min={MIN_EARLY_RETURN_RESPONSE_HOURS}
@@ -1855,24 +1901,27 @@ export default function MyVehiclesPage() {
                     {MIN_EARLY_RETURN_RESPONSE_HOURS} to {MAX_EARLY_RETURN_RESPONSE_HOURS} hours. Past
                     this it rejects itself and the original return date stands.
                   </p>
+                  <FieldError message={listingError("early_return_response_window_hours")} />
                 </div>
 
                 <div className="space-y-4 sm:col-span-2">
-                  <div className="space-y-2">
+                  <div id="listing-location" className="space-y-2">
                     <Label>Pickup/Dropoff Region *</Label>
                     <select
                       value={form.location}
                       onChange={(e) => setForm({ ...form, location: e.target.value, city: "" })}
                       required
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      aria-invalid={Boolean(listingError("location"))}
+                      className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${INVALID_CONTROL_CLASSES}`}
                     >
                       <option value="" disabled>Select a region</option>
                       {VEHICLE_REGION_OPTIONS.map((region) => (
                         <option key={region} value={region}>{region}</option>
                       ))}
                     </select>
+                    <FieldError message={listingError("location")} />
                   </div>
-                  <div className="space-y-2">
+                  <div id="listing-city" className="space-y-2">
                     <Label>City/Municipality *</Label>
                     {(() => {
                       const cityChoices = VEHICLE_CITY_OPTIONS[form.location as (typeof VEHICLE_REGION_OPTIONS)[number]] ?? [];
@@ -1889,7 +1938,8 @@ export default function MyVehiclesPage() {
                             }
                             disabled={!form.location}
                             required
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-invalid={Boolean(listingError("city"))}
+                            className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${INVALID_CONTROL_CLASSES}`}
                           >
                             <option value="" disabled>
                               {form.location ? "Select a city/municipality" : "Select a region first"}
@@ -1905,21 +1955,25 @@ export default function MyVehiclesPage() {
                               onChange={(e) => setForm({ ...form, city: e.target.value })}
                               placeholder="Type the city or municipality"
                               required
+                              aria-invalid={Boolean(listingError("city"))}
                               className="mt-2"
                             />
                           )}
+                          <FieldError message={listingError("city")} />
                         </>
                       );
                     })()}
                   </div>
-                  <div className="space-y-2">
+                  <div id="listing-specific_location" className="space-y-2">
                     <Label>Specific Pick-up Location/Landmark *</Label>
                     <Input
                       value={form.specific_location}
                       onChange={(e) => setForm({ ...form, specific_location: e.target.value })}
                       placeholder="e.g. SM Megamall Building A entrance"
                       required
+                      aria-invalid={Boolean(listingError("specific_location"))}
                     />
+                    <FieldError message={listingError("specific_location")} />
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -1968,10 +2022,14 @@ export default function MyVehiclesPage() {
               </div>
 
               {/* Image uploads */}
-              <div className="space-y-2">
+              <div id="listing-car_images" className="space-y-2">
                 <Label>Car Images (minimum 1, up to 5) *</Label>
                 <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
-                  <label className="flex flex-col items-center justify-center h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors relative">
+                  <label
+                    className={`flex flex-col items-center justify-center h-24 rounded-lg border-2 border-dashed hover:border-primary/50 cursor-pointer transition-colors relative ${
+                      listingError("car_images") ? "border-destructive bg-destructive/5" : "border-border"
+                    }`}
+                  >
                     <ImageIcon className="w-5 h-5 text-muted-foreground mb-1" />
                     <span className="text-xs text-muted-foreground text-center px-1">
                       {carImages.length > 0
@@ -2013,6 +2071,7 @@ export default function MyVehiclesPage() {
                     </div>
                   ))}
                 </div>
+                <FieldError message={listingError("car_images")} />
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -2022,6 +2081,10 @@ export default function MyVehiclesPage() {
                 </div>
                 <DocumentField
                   label="Official Receipt (OR) *"
+                  fieldId="listing-or_file"
+                  expiryFieldId="listing-registration_expiry"
+                  fileError={listingError("or_file")}
+                  expiryError={listingError("registration_expiry")}
                   action="OR"
                   file={orFile}
                   onFile={setOrFile}
@@ -2035,6 +2098,8 @@ export default function MyVehiclesPage() {
                 />
                 <DocumentField
                   label="Certificate of Registration (CR) *"
+                  fieldId="listing-cr_file"
+                  fileError={listingError("cr_file")}
                   action="CR"
                   file={crFile}
                   onFile={setCrFile}
@@ -2045,6 +2110,10 @@ export default function MyVehiclesPage() {
                 />
                 <DocumentField
                   label="CTPL insurance *"
+                  fieldId="listing-ctpl_file"
+                  expiryFieldId="listing-ctpl_expiry"
+                  fileError={listingError("ctpl_file")}
+                  expiryError={listingError("ctpl_expiry")}
                   action="CTPL"
                   file={ctplFile}
                   onFile={setCtplFile}
@@ -2058,6 +2127,10 @@ export default function MyVehiclesPage() {
                 />
                 <DocumentField
                   label="Comprehensive insurance (optional)"
+                  fieldId="listing-comprehensive_insurance_file"
+                  expiryFieldId="listing-comprehensive_insurance_expiry"
+                  fileError={listingError("comprehensive_insurance_file")}
+                  expiryError={listingError("comprehensive_insurance_expiry")}
                   action="policy"
                   file={comprehensiveInsuranceFile}
                   onFile={setComprehensiveInsuranceFile}
@@ -2069,16 +2142,29 @@ export default function MyVehiclesPage() {
                   onExpiry={(value) => setForm({ ...form, comprehensive_insurance_expiry: value })}
                   note="Optional, but a missing or expired policy creates an admin warning."
                 />
-                <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm sm:col-span-2">
-                  <input type="checkbox" className="mt-1" checked={form.insurer_rental_use_confirmed} onChange={(event) => setForm({ ...form, insurer_rental_use_confirmed: event.target.checked })} required />
-                  <span><strong>Rental-use disclosure confirmed.</strong><span className="mt-1 block text-xs text-muted-foreground">I disclosed intended vehicle rental use to the insurer and understand SafeDrive does not guarantee that any policy covers peer-to-peer rental.</span></span>
-                </label>
+                <div id="listing-insurer_rental_use_confirmed" className="space-y-1 sm:col-span-2">
+                  <label
+                    className={`flex items-start gap-3 rounded-lg border p-3 text-sm ${
+                      listingError("insurer_rental_use_confirmed")
+                        ? "border-destructive bg-destructive/5"
+                        : "border-amber-500/30 bg-amber-500/5"
+                    }`}
+                  >
+                    <input type="checkbox" className="mt-1" checked={form.insurer_rental_use_confirmed} onChange={(event) => setForm({ ...form, insurer_rental_use_confirmed: event.target.checked })} required aria-invalid={Boolean(listingError("insurer_rental_use_confirmed"))} />
+                    <span><strong>Rental-use disclosure confirmed.</strong><span className="mt-1 block text-xs text-muted-foreground">I disclosed intended vehicle rental use to the insurer and understand SafeDrive does not guarantee that any policy covers peer-to-peer rental.</span></span>
+                  </label>
+                  <FieldError message={listingError("insurer_rental_use_confirmed")} />
+                </div>
                 <div className="sm:col-span-2">
                   <h3 className="text-sm font-semibold text-foreground">Business documents</h3>
                   <p className="text-xs text-muted-foreground">Required for every listed vehicle, even if you list more than one.</p>
                 </div>
                 <DocumentField
                   label="DTI business name registration *"
+                  fieldId="listing-dti_file"
+                  expiryFieldId="listing-dti_expiry"
+                  fileError={listingError("dti_file")}
+                  expiryError={listingError("dti_expiry")}
                   action="DTI"
                   file={dtiFile}
                   onFile={setDtiFile}
@@ -2092,6 +2178,10 @@ export default function MyVehiclesPage() {
                 />
                 <DocumentField
                   label="Business / Mayor's Permit *"
+                  fieldId="listing-mayors_permit_file"
+                  expiryFieldId="listing-mayors_permit_expiry"
+                  fileError={listingError("mayors_permit_file")}
+                  expiryError={listingError("mayors_permit_expiry")}
                   action="Permit"
                   file={mayorsPermitFile}
                   onFile={setMayorsPermitFile}
@@ -2105,6 +2195,8 @@ export default function MyVehiclesPage() {
                 />
                 <DocumentField
                   label="BIR Certificate of Registration *"
+                  fieldId="listing-bir_file"
+                  fileError={listingError("bir_file")}
                   action="BIR"
                   file={birFile}
                   onFile={setBirFile}
@@ -2115,7 +2207,7 @@ export default function MyVehiclesPage() {
                 />
               </div>
 
-              <div className="space-y-2">
+              <div id="listing-rental_agreement" className="space-y-2">
                 <Label>Rental Agreement (PDF) *</Label>
                 {rentalAgreementFile ? (
                   <div className="flex items-center justify-between p-4 rounded-lg border border-green-500/50 bg-green-500/10">
@@ -2129,7 +2221,11 @@ export default function MyVehiclesPage() {
                     <Button type="button" variant="ghost" size="sm" onClick={() => setRentalAgreementFile(null)}>Remove</Button>
                   </div>
                 ) : (
-                  <label className="flex flex-col items-center justify-center h-24 rounded-lg border-2 border-dashed border-border hover:border-primary/50 cursor-pointer transition-colors">
+                  <label
+                    className={`flex flex-col items-center justify-center h-24 rounded-lg border-2 border-dashed hover:border-primary/50 cursor-pointer transition-colors ${
+                      listingError("rental_agreement") ? "border-destructive bg-destructive/5" : "border-border"
+                    }`}
+                  >
                     <Upload className="w-5 h-5 text-muted-foreground mb-1" />
                     <span className="text-xs text-muted-foreground">Upload rental agreement (PDF only)</span>
                     <input
@@ -2151,6 +2247,7 @@ export default function MyVehiclesPage() {
                     />
                   </label>
                 )}
+                <FieldError message={listingError("rental_agreement")} />
                 <p className="text-xs text-muted-foreground">
                   If you require a security deposit from renters, state its terms directly in this agreement - SafeDrive does not collect, hold, or mediate security deposits between you and the renter.
                 </p>
@@ -2362,6 +2459,7 @@ export default function MyVehiclesPage() {
                         setEditRentalUseConfirmed(Boolean(v.insurer_rental_use_confirmed));
                         setEditRentalAgreement(null);
                         setEditCarImages([]);
+                        setEditSubmitAttempted(false);
                       }}
                       disabled={vehicleActionId === v.id}
                     >
@@ -2450,8 +2548,13 @@ export default function MyVehiclesPage() {
                   </button>
                 </CardHeader>
                 <CardContent className="max-h-[calc(100vh-11rem)] space-y-4 overflow-y-auto px-6 py-5">
-                  <div className="space-y-2">
-                    <Label>Price Per Day (PHP)</Label>
+                  <ListingErrorSummary
+                    id="edit-listing-error-summary"
+                    errors={shownEditErrors}
+                    fieldIdPrefix="edit-listing-"
+                  />
+                  <div id="edit-listing-price_per_day" className="space-y-2">
+                    <Label>Price Per Day (PHP) *</Label>
                     <div className="relative">
                       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
                         PHP
@@ -2461,6 +2564,7 @@ export default function MyVehiclesPage() {
                         min="500"
                         max={MAX_LISTING_PRICE}
                         required
+                        aria-invalid={Boolean(editListingError("price_per_day"))}
                         value={editPrice}
                         onChange={(e) => {
                           const value = e.target.value;
@@ -2473,11 +2577,12 @@ export default function MyVehiclesPage() {
                         className="pl-12"
                       />
                     </div>
-                    {editPrice !== "" && validateListingPrice(editPrice) && (
-                      <p className="text-xs font-medium text-red-500">
-                        {validateListingPrice(editPrice)}
-                      </p>
-                    )}
+                    <FieldError
+                      message={
+                        editListingError("price_per_day") ??
+                        (editPrice !== "" ? validateListingPrice(editPrice) : null)
+                      }
+                    />
                     {editPrice !== "" && !validateListingPrice(editPrice) && (
                       <p className="text-xs text-muted-foreground">
                         Renters pay ₱{Number(editPrice).toLocaleString()}/day. You'll earn
@@ -2490,9 +2595,10 @@ export default function MyVehiclesPage() {
                       </p>
                     )}
                   </div>
-                  <div className="space-y-2">
+                  <div id="edit-listing-early_return_response_window_hours" className="space-y-2">
                     <Label>Early-return response limit (hours) *</Label>
                     <Input
+                      aria-invalid={Boolean(editListingError("early_return_response_window_hours"))}
                       type="number"
                       inputMode="numeric"
                       min={MIN_EARLY_RETURN_RESPONSE_HOURS}
@@ -2510,6 +2616,7 @@ export default function MyVehiclesPage() {
                       {MIN_EARLY_RETURN_RESPONSE_HOURS} to {MAX_EARLY_RETURN_RESPONSE_HOURS} hours.
                       Past this it rejects itself and the original return date stands.
                     </p>
+                    <FieldError message={editListingError("early_return_response_window_hours")} />
                   </div>
                   <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
                     <p className="font-medium text-foreground">
@@ -2535,7 +2642,16 @@ export default function MyVehiclesPage() {
                       page, not here.
                     </p>
                   </div>
-                  <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm"><input type="checkbox" className="mt-1" checked={editRentalUseConfirmed} onChange={(event) => setEditRentalUseConfirmed(event.target.checked)} /><span>I reconfirmed intended rental use with the insurer. Changing any insurance declaration sends this vehicle back to admin review.</span></label>
+                  <div id="edit-listing-insurer_rental_use_confirmed" className="space-y-1">
+                    <label
+                      className={`flex items-start gap-3 rounded-lg border p-3 text-sm ${
+                        editListingError("insurer_rental_use_confirmed")
+                          ? "border-destructive bg-destructive/5"
+                          : "border-amber-500/30 bg-amber-500/5"
+                      }`}
+                    ><input type="checkbox" className="mt-1" checked={editRentalUseConfirmed} onChange={(event) => setEditRentalUseConfirmed(event.target.checked)} aria-invalid={Boolean(editListingError("insurer_rental_use_confirmed"))} /><span>I reconfirmed intended rental use with the insurer. Changing any insurance declaration sends this vehicle back to admin review. *</span></label>
+                    <FieldError message={editListingError("insurer_rental_use_confirmed")} />
+                  </div>
                   <div className="space-y-2">
                     <Label>Pickup Region</Label>
                     <select
@@ -2595,13 +2711,14 @@ export default function MyVehiclesPage() {
                       car silently changes who is licensed to drive it. The admin
                       compares this against the CR and rejects a mismatch. */}
                   {["pending", "rejected"].includes(editVehicle.status) ? (
-                    <div className="space-y-2">
+                    <div id="edit-listing-transmission" className="space-y-2">
                       <Label>Transmission *</Label>
                       <select
                         value={editTransmission}
                         onChange={(event) => setEditTransmission(event.target.value)}
                         required
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        aria-invalid={Boolean(editListingError("transmission"))}
+                        className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${INVALID_CONTROL_CLASSES}`}
                       >
                         <option value="">Select transmission</option>
                         <option value="automatic">Automatic</option>
@@ -2611,6 +2728,7 @@ export default function MyVehiclesPage() {
                         Must match the Certificate of Registration. It locks once the
                         listing is approved.
                       </p>
+                      <FieldError message={editListingError("transmission")} />
                     </div>
                   ) : (
                     <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
