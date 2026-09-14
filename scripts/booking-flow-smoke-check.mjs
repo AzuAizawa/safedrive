@@ -8,6 +8,43 @@ const frontendCriticalWritePattern =
 
 const checks = [
   {
+    // What a car's calendar and Browse Cars treat as taken (CHAPTERS 87, 88):
+    // every date-holding booking status, plus the days of an approved
+    // extension waiting for payment, which the booking guards also enforce.
+    file: "database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql",
+    markers: [
+      "create or replace function public.get_car_booked_ranges",
+      "create or replace function public.get_available_car_ids",
+      "'downpayment_paid', 'fully_paid', 'active'",
+      "'pending', 'confirmed', 'awaiting_payment',",
+      "from public.approved_extension_holds() h",
+      "create trigger guard_booking_against_extension_holds",
+      "create trigger guard_extension_approval",
+      "create trigger guard_blackout_against_extension_holds",
+    ],
+  },
+  {
+    // An approved extension holds its days everywhere a day is decided.
+    file: "server/extensionHolds.ts",
+    markers: ["findHoldConflict", "findExtensionCollision", "closePendingExtensionsTakenBy"],
+  },
+  {
+    file: "api/create-booking.ts",
+    markers: ["findHoldConflict"],
+  },
+  {
+    file: "api/booking-action.ts",
+    markers: ["findHoldConflict", "closePendingExtensionsTakenBy"],
+  },
+  {
+    file: "api/create-booking-extension-checkout.ts",
+    markers: ["findExtensionCollision"],
+  },
+  {
+    file: "api/booking-extension-action.ts",
+    markers: ["findExtensionCollision"],
+  },
+  {
     file: "api/booking-early-return-action.ts",
     markers: [
       "RESPONSE_WINDOW_HOURS",
@@ -297,7 +334,11 @@ const checks = [
     markers: [
       "/api/create-booking",
       "getSession",
-      "awaiting_payment",
+      // The calendar's booked days come from get_car_booked_ranges (CHAPTER
+      // 87): the bookings table shows a renter only their own bookings, so the
+      // statuses that hold a date - awaiting_payment among them - are listed in
+      // that function, checked in the master SQL entry below.
+      "get_car_booked_ranges",
       "fetchPublicCarReviews",
       "fetchListerRatingSummaries",
       "setListerRating",

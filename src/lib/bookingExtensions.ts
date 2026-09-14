@@ -22,6 +22,66 @@ export const getExtensionDisplayStatus = (
   return extension.status;
 };
 
+// CHAPTER 88 - an approved extension holds the days it adds until it is paid
+// or its payment deadline passes; a pending request holds nothing. The server
+// applies the same rules in server/extensionHolds.ts (api code cannot import
+// src/); scripts/extension-holds.test.mjs pins the two copies together.
+
+const nextDateOnly = (dateOnly: string) => {
+  const [year, month, day] = dateOnly.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+};
+
+/** The days an extension adds: the day after the current return through the requested one. */
+export const extensionAddedDays = (extension: {
+  current_end_date: string;
+  requested_end_date: string;
+}) => ({
+  start: nextDateOnly(extension.current_end_date),
+  end: extension.requested_end_date,
+});
+
+export const isExtensionHoldingDates = (
+  extension: { status: string; payment_deadline: string | null },
+  bookingStatus: string,
+  now = Date.now(),
+) =>
+  extension.status === "approved" &&
+  (!extension.payment_deadline || new Date(extension.payment_deadline).getTime() > now) &&
+  ["fully_paid", "active"].includes(bookingStatus);
+
+type BookingDatesLike = {
+  id: string;
+  car_id: string;
+  renter_id: string;
+  start_date: string;
+  end_date: string;
+};
+
+/**
+ * Pending extension requests that accepting `booking` would close: requests on
+ * the lister's other bookings that need some of the same days on the same car,
+ * or belong to the same renter. Mirrors closePendingExtensionsTakenBy.
+ */
+export const findPendingExtensionsTakenBy = <
+  B extends BookingDatesLike,
+  E extends { booking_id: string; status: string; current_end_date: string; requested_end_date: string },
+>(
+  booking: B,
+  bookings: B[],
+  extensions: E[],
+) =>
+  extensions.flatMap((extension) => {
+    if (extension.status !== "pending") return [];
+    const parent = bookings.find((candidate) => candidate.id === extension.booking_id);
+    if (!parent || parent.id === booking.id) return [];
+    if (parent.car_id !== booking.car_id && parent.renter_id !== booking.renter_id) return [];
+    const days = extensionAddedDays(extension);
+    return days.start <= booking.end_date && days.end >= booking.start_date
+      ? [{ extension, booking: parent }]
+      : [];
+  });
+
 export const getExtensionStatusLabel = (status: string) =>
   (
     {

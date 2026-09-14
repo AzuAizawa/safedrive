@@ -19,6 +19,7 @@ import {
 } from "@/lib/incidents";
 import { openBookingConversation } from "@/lib/bookingConversation";
 import {
+  findPendingExtensionsTakenBy,
   getExtensionDisplayStatus,
   getExtensionStatusLabel,
   getExtensionTone,
@@ -331,6 +332,12 @@ export default function ListerBookingsPage() {
   const [bookingExtensionsByBooking, setBookingExtensionsByBooking] = useState<
     Record<string, BookingExtensionRow[]>
   >({});
+  // A booking whose acceptance would close pending extension requests; the
+  // lister confirms with those requests in front of them.
+  const [acceptTarget, setAcceptTarget] = useState<{
+    booking: ListerBooking;
+    takes: { extension: BookingExtensionRow; booking: ListerBooking }[];
+  } | null>(null);
   const [extensionDecisionNotes, setExtensionDecisionNotes] = useState<Record<string, string>>({});
   const [earlyReturnsByBooking, setEarlyReturnsByBooking] = useState<
     Record<string, EarlyReturnRow[]>
@@ -846,11 +853,36 @@ export default function ListerBookingsPage() {
     return agreementUrls[path] ?? "";
   };
 
-  const handleAccept = async (bookingId: string) => {
+  // Accepting a booking closes pending extension requests that need some of
+  // the same days (server/extensionHolds.ts). The lister is told before, not after.
+  const requestAccept = (booking: ListerBooking) => {
+    const takes = findPendingExtensionsTakenBy(
+      booking,
+      bookings,
+      Object.values(bookingExtensionsByBooking).flat(),
+    );
+    if (takes.length === 0) {
+      void handleAccept(booking.id);
+      return;
+    }
+    setAcceptTarget({ booking, takes });
+  };
+
+  const handleAccept = async (bookingId: string, closesExtensionRequests = 0) => {
     setActionLoading(bookingId);
     try {
       await runBookingAction(bookingId, "accept");
-      toast.success("Booking accepted! Renter has 24 hrs to pay downpayment.");
+      toast.success(
+        "Booking accepted! Renter has 24 hrs to pay downpayment.",
+        closesExtensionRequests > 0
+          ? {
+              description:
+                closesExtensionRequests === 1
+                  ? "The overlapping extension request was closed, and that renter was told why."
+                  : `${closesExtensionRequests} overlapping extension requests were closed, and those renters were told why.`,
+            }
+          : undefined,
+      );
       fetchBookings();
     } catch (error) {
       toast.error("Failed to accept booking", {
@@ -3266,7 +3298,7 @@ export default function ListerBookingsPage() {
                         <div className="flex gap-2 mt-2 justify-end">
                           <Button
                             size="sm"
-                            onClick={() => handleAccept(b.id)}
+                            onClick={() => requestAccept(b)}
                             disabled={actionLoading === b.id}
                             className="gap-1"
                           >
@@ -4175,6 +4207,46 @@ export default function ListerBookingsPage() {
           </div>,
           document.body,
         )}
+      <ConfirmDialog
+        open={Boolean(acceptTarget)}
+        title="Accept this booking?"
+        description={
+          acceptTarget
+            ? acceptTarget.takes.length === 1
+              ? "Accepting it closes a pending extension request that needs some of the same days. That renter will be told why, and their current return date stays."
+              : `Accepting it closes ${acceptTarget.takes.length} pending extension requests that need some of the same days. Those renters will be told why, and their current return dates stay.`
+            : ""
+        }
+        confirmText="Accept and close the request"
+        isLoading={Boolean(acceptTarget && actionLoading === acceptTarget.booking.id)}
+        onCancel={() => setAcceptTarget(null)}
+        onConfirm={async () => {
+          if (!acceptTarget) return;
+          const { booking, takes } = acceptTarget;
+          setAcceptTarget(null);
+          await handleAccept(booking.id, takes.length);
+        }}
+      >
+        <ul className="space-y-2 text-left text-sm">
+          {acceptTarget?.takes.map(({ extension, booking }) => (
+            <li
+              key={extension.id}
+              className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2"
+            >
+              <p className="font-medium">
+                {booking.renter?.full_name || "A renter"} ·{" "}
+                {booking.cars.car_models.car_brands.name} {booking.cars.car_models.name} (
+                {booking.cars.plate_number})
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Asked to extend the return from{" "}
+                {format(new Date(extension.current_end_date), "MMM d")} to{" "}
+                {format(new Date(extension.requested_end_date), "MMM d, yyyy")}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </ConfirmDialog>
       <ConfirmDialog
         open={Boolean(incidentTarget)}
         title={

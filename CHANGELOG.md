@@ -3,6 +3,53 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - An approved extension holds its dates until it is paid
+
+Asked while reviewing extensions: *if the lister already approved it and it is
+only waiting for payment, shouldn't those dates be blocked?*
+
+They were not. The flow is request → lister approves (up to 24 h) → renter pays
+(up to 24 h). The request and the approval checked the dates, but nothing held
+them: `create-booking` never looked at extensions, so another renter could book
+the extra days in between, and the paid extension then failed to apply - a
+captured payment, a refund ticket, and no email to the renter. A pending
+request overlapped by an accepted booking also stayed "pending" until its
+deadline, then expired with a message blaming the lister for not responding.
+
+**Now, an approved extension holds its days** - the day after the current return
+through the requested one - from approval until it is paid or its payment
+deadline passes, the same way an accepted booking holds its dates while it waits
+for payment. A pending request still holds nothing: first come, first served.
+Every place that decides whether a day is free was connected:
+
+| Where | What changed |
+|---|---|
+| `api/create-booking.ts` | Refuses held days on the car; for the same renter, on any car (one trip at a time). |
+| `api/booking-action.ts` (accept) | Refuses held days; **closes pending requests** that needed the accepted days (car or same renter), notifying and emailing both sides with the real reason. |
+| `ListerBookingsPage.tsx` | Before accepting, the lister sees which pending requests it will close and confirms. |
+| `api/booking-extension-action.ts` | Request and approve also check owner blackouts and other held days; a database refusal at approve is a 409, not a 500. |
+| `api/create-booking-extension-checkout.ts` | Re-checks the booking state and the days **before** opening checkout, so no payment is taken for days that are gone. |
+| `api/webhooks/paymongo.ts` | If a paid extension still cannot be applied (documents or booking state changed), renter and lister get a notification and email. |
+| Car Details, Browse Cars (CHAPTER 87 functions) | Held days count as booked. |
+| `VehicleAvailabilityPage.tsx` | Held days show as booked and cannot be blocked. |
+
+The shared rules are `server/extensionHolds.ts`; the browser copy is in
+`src/lib/bookingExtensions.ts`. **CHAPTER 88** (paste by hand, after 87) adds
+the internal `approved_extension_holds()` and three backstop triggers - on
+bookings, on approving an extension, and on owner blackouts - and replaces
+CHAPTER 87's two read functions to count held days. A booking that already held
+its dates keeps moving through its statuses; only days it did not hold before
+are checked. Proved on PGlite by `scripts/extension-holds.test.mjs`
+(`check:extension-holds`, in `check:all`), which also pins the server and
+browser copies to the same answers.
+
+**Also fixed - a regression from the date-filter change.** That change removed
+Car Details' direct read of bookings, and with it the `"awaiting_payment"`
+marker `check:booking-flow` looks for, so that check had been failing since
+`f60dd67`; it was not run then. The check now looks for `get_car_booked_ranges`
+in the page, and checks the master SQL for the statuses and holds that function
+counts, plus the hold helpers in every API that uses them.
+
 ## 2026-09-14 - Browse Cars filters by date, and every calendar sees every booking
 
 Tester request: a renter who wants a car on Oct 25 had to open each listing,

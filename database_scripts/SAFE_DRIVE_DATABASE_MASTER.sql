@@ -13220,4 +13220,311 @@ commit;
 -- select * from public.get_car_booked_ranges('<a listed car id>');
 --   (expect only start_date and end_date columns - never who booked)
 
+-- ============================================================================
+-- CHAPTER 88 - An approved extension holds its dates until it is paid
+-- Apply this chapter only, after CHAPTER 87, staging first. One internal
+-- function, three guards, and CHAPTER 87's two read functions replaced.
+-- No row changes.
+-- ============================================================================
+begin;
+
+-- Reported while reviewing extensions: a lister approves a renter's extension,
+-- the renter has 24 hours to pay, and in that window the extra days were free
+-- for anyone else to book. The payment then could not be applied - the overlap
+-- constraint refused to stretch the booking - and the renter was left with a
+-- captured payment and a refund ticket.
+--
+-- An approval is the lister saying yes, the same as accepting a booking, and an
+-- accepted booking already holds its dates while it waits for payment. So does
+-- an approved extension now: from approval until it is paid (the booking itself
+-- then covers the days) or its payment deadline passes (the days are free
+-- again). A PENDING request still holds nothing - first come, first served -
+-- and api/booking-action.ts closes such a request, with the real reason, when
+-- the lister accepts a booking that takes its days.
+--
+-- The days held are the ones the extension adds: the day after the current
+-- return through the requested return. The return day is already the booking's.
+-- server/extensionHolds.ts applies the same rules before each write so the APIs
+-- can explain a refusal; these guards are the backstop for races.
+
+create or replace function public.approved_extension_holds()
+returns table(
+  extension_id uuid,
+  booking_id uuid,
+  car_id uuid,
+  renter_id uuid,
+  start_date date,
+  end_date date
+)
+language sql
+stable
+security definer
+set search_path = public
+as $approved_extension_holds$
+  select e.id, e.booking_id, b.car_id, b.renter_id,
+         e.current_end_date + 1, e.requested_end_date
+  from public.booking_extensions e
+  join public.bookings b on b.id = e.booking_id
+  where e.status = 'approved'
+    and (e.payment_deadline is null or e.payment_deadline > now())
+    -- api/webhooks/paymongo.ts applies an extension only to these.
+    and b.status in ('fully_paid', 'active');
+$approved_extension_holds$;
+
+-- Internal: it names the renter, so it is never exposed to a browser.
+revoke all on function public.approved_extension_holds() from public, anon, authenticated;
+grant execute on function public.approved_extension_holds() to service_role;
+
+-- A booking may not take days an approved extension holds, on the car or for
+-- the renter (one trip at a time).
+create or replace function public.guard_booking_against_extension_holds()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $guard_booking_against_extension_holds$
+begin
+  if new.status not in (
+    'pending', 'confirmed', 'awaiting_payment',
+    'downpayment_paid', 'fully_paid', 'active'
+  ) then
+    return new;
+  end if;
+
+  -- A booking that already held these dates keeps moving through its
+  -- statuses, and may shrink (an early return). Only dates it did not hold
+  -- before are checked.
+  if tg_op = 'UPDATE'
+     and old.status in (
+       'pending', 'confirmed', 'awaiting_payment',
+       'downpayment_paid', 'fully_paid', 'active'
+     )
+     and new.car_id = old.car_id
+     and new.renter_id = old.renter_id
+     and new.start_date >= old.start_date
+     and new.end_date <= old.end_date then
+    return new;
+  end if;
+
+  if exists (
+    select 1 from public.approved_extension_holds() h
+    where h.booking_id <> new.id
+      and h.car_id = new.car_id
+      and daterange(h.start_date, h.end_date, '[]')
+          && daterange(new.start_date, new.end_date, '[]')
+  ) then
+    raise exception 'Those dates are held for an approved extension that is waiting for payment.';
+  end if;
+
+  if exists (
+    select 1 from public.approved_extension_holds() h
+    where h.booking_id <> new.id
+      and h.renter_id = new.renter_id
+      and daterange(h.start_date, h.end_date, '[]')
+          && daterange(new.start_date, new.end_date, '[]')
+  ) then
+    raise exception 'You have an approved extension waiting for payment on those dates. You can only be on one trip at a time.';
+  end if;
+
+  return new;
+end;
+$guard_booking_against_extension_holds$;
+
+drop trigger if exists guard_booking_against_extension_holds on public.bookings;
+create trigger guard_booking_against_extension_holds
+  before insert or update of car_id, renter_id, start_date, end_date, status
+  on public.bookings
+  for each row execute function public.guard_booking_against_extension_holds();
+
+-- An extension may only become approved while its days are still free.
+create or replace function public.guard_extension_approval()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $guard_extension_approval$
+declare
+  parent public.bookings%rowtype;
+  added daterange;
+begin
+  if new.status <> 'approved' or old.status = 'approved' then
+    return new;
+  end if;
+
+  select * into parent from public.bookings where id = new.booking_id;
+  if not found then
+    return new;
+  end if;
+  added := daterange(new.current_end_date + 1, new.requested_end_date, '[]');
+
+  if exists (
+    select 1 from public.bookings b
+    where b.id <> parent.id
+      and b.status in (
+        'pending', 'confirmed', 'awaiting_payment',
+        'downpayment_paid', 'fully_paid', 'active'
+      )
+      and (b.car_id = parent.car_id or b.renter_id = parent.renter_id)
+      and daterange(b.start_date, b.end_date, '[]') && added
+  ) then
+    raise exception 'This extension can no longer be approved - the new dates overlap another booking.';
+  end if;
+
+  if exists (
+    select 1 from public.vehicle_unavailability u
+    where u.car_id = parent.car_id
+      and daterange(u.start_date, u.end_date, '[]') && added
+  ) then
+    raise exception 'This extension can no longer be approved - the owner blocked some of those dates.';
+  end if;
+
+  if exists (
+    select 1 from public.approved_extension_holds() h
+    where h.booking_id <> parent.id
+      and (h.car_id = parent.car_id or h.renter_id = parent.renter_id)
+      and daterange(h.start_date, h.end_date, '[]') && added
+  ) then
+    raise exception 'This extension can no longer be approved - those days are held for another approved extension.';
+  end if;
+
+  return new;
+end;
+$guard_extension_approval$;
+
+drop trigger if exists guard_extension_approval on public.booking_extensions;
+create trigger guard_extension_approval
+  before update of status on public.booking_extensions
+  for each row execute function public.guard_extension_approval();
+
+-- An owner may not block days an approved extension holds. A separate trigger,
+-- so prevent_blackout_booking_conflict is left exactly as it was. The message
+-- keeps "conflicts", which VehicleAvailabilityPage.tsx already explains.
+create or replace function public.guard_blackout_against_extension_holds()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $guard_blackout_against_extension_holds$
+begin
+  if exists (
+    select 1 from public.approved_extension_holds() h
+    where h.car_id = new.car_id
+      and daterange(h.start_date, h.end_date, '[]')
+          && daterange(new.start_date, new.end_date, '[]')
+  ) then
+    raise exception 'Vehicle blackout conflicts with an approved extension waiting for payment';
+  end if;
+  return new;
+end;
+$guard_blackout_against_extension_holds$;
+
+drop trigger if exists guard_blackout_against_extension_holds on public.vehicle_unavailability;
+create trigger guard_blackout_against_extension_holds
+  before insert or update on public.vehicle_unavailability
+  for each row execute function public.guard_blackout_against_extension_holds();
+
+-- CHAPTER 87's calendar and Browse filter, now counting held days too.
+create or replace function public.get_car_booked_ranges(p_car_id uuid)
+returns table(start_date date, end_date date)
+language sql
+security definer
+set search_path = public
+stable
+as $get_car_booked_ranges$
+  select b.start_date, b.end_date
+  from public.bookings b
+  join public.cars c on c.id = b.car_id
+  where b.car_id = p_car_id
+    and c.status in ('approved', 'active')
+    and c.deleted_at is null
+    and b.status in (
+      'pending', 'confirmed', 'awaiting_payment',
+      'downpayment_paid', 'fully_paid', 'active'
+    )
+    and b.end_date >= current_date
+  union all
+  select h.start_date, h.end_date
+  from public.approved_extension_holds() h
+  join public.cars c on c.id = h.car_id
+  where h.car_id = p_car_id
+    and c.status in ('approved', 'active')
+    and c.deleted_at is null
+    and h.end_date >= current_date
+  order by start_date;
+$get_car_booked_ranges$;
+
+create or replace function public.get_available_car_ids(
+  p_start date,
+  p_end date default null
+)
+returns table(car_id uuid)
+language plpgsql
+security definer
+set search_path = public
+stable
+as $get_available_car_ids$
+declare
+  trip_end date := coalesce(p_end, p_start + 1);
+begin
+  if p_start is null or trip_end <= p_start then
+    raise exception 'The return date must be after the pickup date.';
+  end if;
+  if trip_end - p_start > 30 then
+    raise exception 'A single trip can run at most 30 days.';
+  end if;
+
+  return query
+  select c.id
+  from public.cars c
+  where c.status in ('approved', 'active')
+    and c.deleted_at is null
+    and not exists (
+      select 1
+      from public.bookings b
+      where b.car_id = c.id
+        and b.status in (
+          'pending', 'confirmed', 'awaiting_payment',
+          'downpayment_paid', 'fully_paid', 'active'
+        )
+        and daterange(b.start_date, b.end_date, '[]')
+            && daterange(p_start, trip_end, '[]')
+    )
+    and not exists (
+      select 1
+      from public.approved_extension_holds() h
+      where h.car_id = c.id
+        and daterange(h.start_date, h.end_date, '[]')
+            && daterange(p_start, trip_end, '[]')
+    )
+    and not exists (
+      select 1
+      from public.vehicle_unavailability u
+      where u.car_id = c.id
+        and daterange(u.start_date, u.end_date, '[]')
+            && daterange(p_start, trip_end, '[]')
+    )
+    and coalesce((public.vehicle_compliance_summary(
+          c.id,
+          (p_start + time '09:00') at time zone 'Asia/Manila',
+          (trip_end + time '09:00') at time zone 'Asia/Manila'
+        ) ->> 'eligible')::boolean, false);
+end;
+$get_available_car_ids$;
+
+revoke all on function public.get_car_booked_ranges(uuid) from public, anon;
+grant execute on function public.get_car_booked_ranges(uuid) to authenticated, service_role;
+revoke all on function public.get_available_car_ids(date, date) from public, anon;
+grant execute on function public.get_available_car_ids(date, date) to authenticated, service_role;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select tgname from pg_trigger
+--   where tgname in ('guard_booking_against_extension_holds',
+--                    'guard_extension_approval',
+--                    'guard_blackout_against_extension_holds');
+--   (expect three rows)
+-- select count(*) from public.approved_extension_holds();
+--   (expect the number of approved, unpaid extensions still inside their payment window)
+
 -- End of SafeDrive chaptered database master.

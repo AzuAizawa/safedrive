@@ -2,6 +2,7 @@ import { getVehicleCompliance, rentalInstant, complianceBlockedResponse } from "
 import { createClient } from "@supabase/supabase-js";
 import { sendUserNotificationEmail } from "../server/email.js";
 import { blockedIpResponse } from "../server/ipBlock.js";
+import { findHoldConflict } from "../server/extensionHolds.js";
 
 export const config = {
   runtime: "edge",
@@ -654,6 +655,30 @@ export default async function handler(req: Request) {
       );
     }
 
+    // Days an approved extension holds until it is paid (CHAPTER 88): on this
+    // car they are booked as far as anyone else is concerned, and for this
+    // renter they are part of a trip already under way.
+    const heldByExtension = await findHoldConflict(supabase, {
+      carId: car.id,
+      renterId: user.id,
+      window: { start: startDate.iso, end: endDate.iso },
+    });
+    if (heldByExtension.car) {
+      return jsonResponse(
+        { error: "Selected dates overlap with an existing booking" },
+        409,
+      );
+    }
+    if (heldByExtension.renter) {
+      return jsonResponse(
+        {
+          error:
+            "You have an approved extension waiting for payment on these dates. You can only be on one trip at a time - pay or let that extension lapse first.",
+        },
+        409,
+      );
+    }
+
     const { data: bookingData, error: createError } = await supabase
       .from("bookings")
       .insert({
@@ -784,6 +809,13 @@ export default async function handler(req: Request) {
         },
         409,
       );
+    }
+
+    // guard_booking_against_extension_holds (CHAPTER 88): the check above is a
+    // read-then-write too, and an extension can be approved in between. Its
+    // messages are written for the renter.
+    if (/approved extension/i.test(message)) {
+      return jsonResponse({ error: message }, 409);
     }
 
     return jsonResponse({ error: message }, 500);

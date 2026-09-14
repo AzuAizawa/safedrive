@@ -9,6 +9,7 @@ import { processAutomaticRefundForBooking } from "../server/refundAutomation.js"
 import { runBookingCompletionSideEffects } from "../server/bookingCompletion.js";
 import { sendUserNotificationEmail } from "../server/email.js";
 import { blockedIpResponse } from "../server/ipBlock.js";
+import { closePendingExtensionsTakenBy, findHoldConflict } from "../server/extensionHolds.js";
 
 export const config = {
   runtime: "edge",
@@ -562,6 +563,26 @@ export default async function handler(req: Request) {
         );
       }
 
+      // An approved extension holds its days until it is paid (CHAPTER 88). A
+      // request for those days can only exist through a race, but accepting it
+      // would promise the same car twice.
+      const heldByExtension = await findHoldConflict(supabase, {
+        carId: bookingRecord.car_id,
+        renterId: bookingRecord.renter_id,
+        window: { start: bookingRecord.start_date, end: bookingRecord.end_date },
+        excludeBookingId: bookingRecord.id,
+      });
+      if (heldByExtension.car || heldByExtension.renter) {
+        return jsonResponse(
+          {
+            error: heldByExtension.car
+              ? "Some of these dates are held for an approved extension that is waiting for payment. Accept this request only if that extension lapses unpaid."
+              : "This renter has an approved extension waiting for payment on these dates, and can only be on one trip at a time.",
+          },
+          409,
+        );
+      }
+
       nextStatus = "confirmed";
       // 24 hours to pay the reservation, but never past the trip's pickup time
       // so a next-day booking that stalls is auto-cancelled instead of blocking
@@ -614,6 +635,22 @@ export default async function handler(req: Request) {
         eventKey: `booking-accepted:${bookingRecord.id}`,
       });
 
+      // Pending extension requests that needed these days can never be
+      // approved now. Close them with the real reason rather than letting them
+      // expire later as if the lister had ignored them. The acceptance stands
+      // even if this part fails; the deadline sweep still closes them.
+      let closedExtensionIds: string[] = [];
+      try {
+        closedExtensionIds = await closePendingExtensionsTakenBy(
+          supabase,
+          bookingRecord,
+          new URL(req.url).origin,
+        );
+      } catch (closeError) {
+        console.error("Could not close extension requests taken by an accepted booking", closeError);
+      }
+
+      auditDetails.closed_extension_ids = closedExtensionIds;
       auditDetails.payment_deadline = paymentDeadline;
       await supabase.from("audit_log").insert({
         user_id: user.id,
@@ -628,6 +665,7 @@ export default async function handler(req: Request) {
         bookingId: bookingRecord.id,
         state: "accepted",
         status: nextStatus,
+        closedExtensionIds,
       });
     }
 

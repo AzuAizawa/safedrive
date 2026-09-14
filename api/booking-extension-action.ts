@@ -3,6 +3,7 @@ import { addDays } from "date-fns";
 import { createClient } from "@supabase/supabase-js";
 import { sendUserNotificationEmail } from "../server/email.js";
 import { blockedIpResponse } from "../server/ipBlock.js";
+import { findExtensionCollision, type ExtensionCollision } from "../server/extensionHolds.js";
 
 export const config = {
   runtime: "edge",
@@ -129,49 +130,22 @@ const manilaEndOfDayMs = (dateOnly: string) => {
   return Date.UTC(y, m - 1, d, 23, 59, 59) - 8 * 60 * 60 * 1000;
 };
 
-// The extra days must not collide with another active booking: another
-// renter's trip on this same car, or another trip of this renter on any car
-// (one trip at a time - the account holder is the driver). Shared between
-// request time and approve time, since the calendar can change in between.
-const findExtensionCollision = async (
-  supabase: ReturnType<typeof getSupabaseAdmin>,
-  carId: string,
-  renterId: string,
-  bookingId: string,
-  windowStart: Date,
-  windowEnd: Date,
+// The extra days must be free: no other booking on this car or of this renter
+// (one trip at a time), no owner blackout, and no other approved extension
+// holding them (CHAPTER 88). server/extensionHolds.ts checks all three, at
+// request time, approve time and checkout, since the calendar can change.
+const extensionCollisionMessage = (
+  collision: Exclude<ExtensionCollision, null>,
+  when: "request" | "approve",
 ) => {
-  const { data: activeBookings, error } = await supabase
-    .from("bookings")
-    .select("id, car_id, renter_id, start_date, end_date")
-    .in("status", [
-      "pending",
-      "confirmed",
-      "awaiting_payment",
-      "downpayment_paid",
-      "fully_paid",
-      "active",
-    ])
-    .neq("id", bookingId)
-    // Narrowed to the only rows that can possibly collide - this same car, or
-    // this same renter. Without it the query pulled EVERY active booking on
-    // the platform with no limit, so past PostgREST's max-rows cap (1000 by
-    // default) real collisions were silently missed and an overlapping
-    // extension would be approved. Both ids are server-derived from the
-    // booking row, never client input.
-    .or(`car_id.eq.${carId},renter_id.eq.${renterId}`);
-  if (error) throw error;
-
-  return (activeBookings ?? []).some((other) => {
-    const otherStart = parseDateOnly(other.start_date);
-    const otherEnd = parseDateOnly(other.end_date);
-    if (!otherStart || !otherEnd) return false;
-    const datesOverlap =
-      windowStart.getTime() <= otherEnd.getTime() &&
-      windowEnd.getTime() >= otherStart.getTime();
-    if (!datesOverlap) return false;
-    return other.car_id === carId || other.renter_id === renterId;
-  });
+  if (collision === "blackout") {
+    return when === "request"
+      ? "The owner has blocked some of those days. Choose an earlier return date."
+      : "This extension can no longer be approved - you blocked some of those days. Unblock them first, or reject the request.";
+  }
+  return when === "request"
+    ? "The new return date overlaps another booking - this car is reserved by someone else then, or you already have a trip on those dates."
+    : "This extension can no longer be approved - the new dates now overlap another booking. Ask the renter to submit a new request.";
 };
 
 export default async function handler(req: Request) {
@@ -353,26 +327,14 @@ export default async function handler(req: Request) {
         }
       }
 
-      const extWindowStart = parseDateOnly(bookingRecord.end_date);
-      const extWindowEnd = parseDateOnly(payload.requestedEndDate);
-      if (extWindowStart && extWindowEnd) {
-        const collides = await findExtensionCollision(
-          supabase,
-          bookingRecord.car_id,
-          bookingRecord.renter_id,
-          bookingRecord.id,
-          extWindowStart,
-          extWindowEnd,
-        );
-        if (collides) {
-          return jsonResponse(
-            {
-              error:
-                "The new return date overlaps another booking - this car is reserved by someone else then, or you already have a trip on those dates.",
-            },
-            409,
-          );
-        }
+      const collision = await findExtensionCollision(supabase, {
+        bookingId: bookingRecord.id,
+        carId: bookingRecord.car_id,
+        renterId: bookingRecord.renter_id,
+        window: { start: bookingRecord.end_date, end: payload.requestedEndDate },
+      });
+      if (collision) {
+        return jsonResponse({ error: extensionCollisionMessage(collision, "request") }, 409);
       }
 
       const requestedTotalDays = bookingRecord.total_days + extensionDays;
@@ -514,26 +476,17 @@ export default async function handler(req: Request) {
       if (parentBookingError || !parentBooking) {
         throw parentBookingError ?? new Error("Booking not found for this extension");
       }
-      const approveWindowStart = parseDateOnly(extensionRecord.current_end_date);
-      const approveWindowEnd = parseDateOnly(extensionRecord.requested_end_date);
-      if (approveWindowStart && approveWindowEnd) {
-        const collides = await findExtensionCollision(
-          supabase,
-          parentBooking.car_id,
-          extensionRecord.renter_id,
-          extensionRecord.booking_id,
-          approveWindowStart,
-          approveWindowEnd,
-        );
-        if (collides) {
-          return jsonResponse(
-            {
-              error:
-                "This extension can no longer be approved - the new dates now overlap another booking. Ask the renter to submit a new request.",
-            },
-            409,
-          );
-        }
+      const collision = await findExtensionCollision(supabase, {
+        bookingId: extensionRecord.booking_id,
+        carId: parentBooking.car_id,
+        renterId: extensionRecord.renter_id,
+        window: {
+          start: extensionRecord.current_end_date,
+          end: extensionRecord.requested_end_date,
+        },
+      });
+      if (collision) {
+        return jsonResponse({ error: extensionCollisionMessage(collision, "approve") }, 409);
       }
 
       const paymentDeadline = addDays(new Date(), 1).toISOString();
@@ -552,7 +505,14 @@ export default async function handler(req: Request) {
         .select("id")
         .maybeSingle();
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        // guard_extension_approval (CHAPTER 88) closes the race between the
+        // check above and this write; its message is written for the lister.
+        if (/can no longer be approved/i.test(updateError.message)) {
+          return jsonResponse({ error: updateError.message }, 409);
+        }
+        throw updateError;
+      }
       if (!extensionStateChanged) {
         return jsonResponse(
           {

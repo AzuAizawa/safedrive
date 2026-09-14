@@ -1,6 +1,7 @@
 import { bookingCompliance, complianceBlockedResponse } from "../server/vehicleCompliance.js";
 import { createClient } from "@supabase/supabase-js";
 import { blockedIpResponse } from "../server/ipBlock.js";
+import { findExtensionCollision } from "../server/extensionHolds.js";
 
 export const config = {
   runtime: "edge",
@@ -201,6 +202,40 @@ export default async function handler(req: Request) {
     if (extensionRecord.status !== "approved") {
       return jsonResponse(
         { error: "This extension is not currently accepting payment." },
+        409,
+      );
+    }
+
+    // Last look before money is taken. An approved extension holds its days
+    // (CHAPTER 88), so this should always pass - but if the booking left the
+    // states an extension can be applied to, or the days were taken anyway,
+    // saying so now beats capturing a payment that cannot be applied.
+    const { data: parentBooking, error: parentBookingError } = await supabase
+      .from("bookings")
+      .select("id, car_id, renter_id, status, end_date")
+      .eq("id", extensionRecord.booking_id)
+      .single();
+    if (parentBookingError || !parentBooking) {
+      return jsonResponse({ error: "Booking not found for this extension" }, 404);
+    }
+    if (!["fully_paid", "active"].includes(parentBooking.status)) {
+      return jsonResponse(
+        { error: "This booking can no longer be extended, so no payment was taken." },
+        409,
+      );
+    }
+    const collision = await findExtensionCollision(supabase, {
+      bookingId: parentBooking.id,
+      carId: parentBooking.car_id,
+      renterId: parentBooking.renter_id,
+      window: { start: parentBooking.end_date, end: extensionRecord.requested_end_date },
+    });
+    if (collision) {
+      return jsonResponse(
+        {
+          error:
+            "Some of the extra days are no longer available, so this extension can't be paid. No payment was taken.",
+        },
         409,
       );
     }

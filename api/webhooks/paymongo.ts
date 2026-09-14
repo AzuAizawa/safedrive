@@ -1308,6 +1308,49 @@ export default async function handler(req: Request) {
           status: "open",
         });
         if (reviewTicketError) console.error("Could not queue paid extension for refund review", reviewTicketError);
+
+        // The renter paid: say so, and what happens next, instead of leaving a
+        // captured payment unexplained. An approved extension holds its days
+        // (CHAPTER 88), so this is now a document-validity or booking-state
+        // change, not someone else taking the dates.
+        const notAppliedRenterTitle = "Extension payment received - not applied";
+        const notAppliedRenterMessage =
+          "We received your extension payment, but the extra days could not be added - the booking or the vehicle's documents changed before it went through. Your current return date stands, and SafeDrive support will review the payment and refund you.";
+        const notAppliedOwnerTitle = "Extension payment not applied";
+        const notAppliedOwnerMessage =
+          "A renter's extension payment could not be applied - the booking or the vehicle's documents changed before it went through. The return date did not change, and SafeDrive support will refund the renter.";
+        await supabase.from("notifications").insert([
+          {
+            user_id: booking.renter_id,
+            title: notAppliedRenterTitle,
+            message: notAppliedRenterMessage,
+            type: "warning",
+            link: "/my-bookings",
+          },
+          {
+            user_id: extension.owner_id,
+            title: notAppliedOwnerTitle,
+            message: notAppliedOwnerMessage,
+            type: "info",
+            link: "/lister-bookings",
+          },
+        ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: booking.renter_id,
+          title: notAppliedRenterTitle,
+          message: notAppliedRenterMessage,
+          link: "/my-bookings",
+          baseOrigin: new URL(req.url).origin,
+          eventKey: `extension-not-applied-renter:${extension.id}`,
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: extension.owner_id,
+          title: notAppliedOwnerTitle,
+          message: notAppliedOwnerMessage,
+          link: "/lister-bookings",
+          baseOrigin: new URL(req.url).origin,
+          eventKey: `extension-not-applied-owner:${extension.id}`,
+        });
         await recordWebhookSecurityEvent("failed", {
           reason: "Extension payment captured but the booking could not be extended",
           reference_number: referenceNumber,

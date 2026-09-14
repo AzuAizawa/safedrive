@@ -10,9 +10,17 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import type { Car, Database } from "@/types/database";
+import { extensionAddedDays, isExtensionHoldingDates } from "@/lib/bookingExtensions";
 
 type Blackout = Database["public"]["Tables"]["vehicle_unavailability"]["Row"];
-type BookingRow = { car_id: string; start_date: string; end_date: string; status: string };
+type BookingRow = { id: string; car_id: string; start_date: string; end_date: string; status: string };
+type ExtensionRow = {
+  booking_id: string;
+  current_end_date: string;
+  requested_end_date: string;
+  status: string;
+  payment_deadline: string | null;
+};
 
 // Blackouts carry a reason/category column for legacy records, but the lister no
 // longer sees or picks them - an unavailable date is simply unavailable.
@@ -44,6 +52,7 @@ export default function VehicleAvailabilityPage() {
   const [cars, setCars] = useState<Car[]>([]);
   const [blackouts, setBlackouts] = useState<Blackout[]>([]);
   const [bookings, setBookings] = useState<BookingRow[]>([]);
+  const [extensions, setExtensions] = useState<ExtensionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [carId, setCarId] = useState("");
@@ -52,7 +61,7 @@ export default function VehicleAvailabilityPage() {
   const load = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
-    const [carsResult, blackoutResult, bookingResult] = await Promise.all([
+    const [carsResult, blackoutResult, bookingResult, extensionResult] = await Promise.all([
       supabase
         .from("cars")
         .select("*")
@@ -65,12 +74,18 @@ export default function VehicleAvailabilityPage() {
         .order("start_date"),
       supabase
         .from("bookings")
-        .select("car_id, start_date, end_date, status")
+        .select("id, car_id, start_date, end_date, status")
         .eq("owner_id", user.id)
         .in("status", BOOKING_BLOCKING_STATUSES),
+      supabase
+        .from("booking_extensions")
+        .select("booking_id, current_end_date, requested_end_date, status, payment_deadline")
+        .eq("owner_id", user.id)
+        .eq("status", "approved"),
     ]);
 
-    const anyError = carsResult.error || blackoutResult.error || bookingResult.error;
+    const anyError =
+      carsResult.error || blackoutResult.error || bookingResult.error || extensionResult.error;
     if (anyError) {
       toast.error("Vehicle availability could not be loaded", {
         description: anyError.message,
@@ -80,6 +95,7 @@ export default function VehicleAvailabilityPage() {
       setCars(loadedCars);
       setBlackouts((blackoutResult.data ?? []) as Blackout[]);
       setBookings((bookingResult.data ?? []) as BookingRow[]);
+      setExtensions((extensionResult.data ?? []) as ExtensionRow[]);
       setCarId((current) => current || loadedCars[0]?.id || "");
     }
     setLoading(false);
@@ -125,9 +141,29 @@ export default function VehicleAvailabilityPage() {
     [carBlackouts],
   );
 
+  // An approved extension holds the days it adds until it is paid (CHAPTER 88).
+  // They cannot be blocked either, so they show as booked.
+  const heldRanges = useMemo(
+    () =>
+      extensions.flatMap((extension) => {
+        const parent = bookings.find((booking) => booking.id === extension.booking_id);
+        if (!parent || parent.car_id !== carId) return [];
+        if (!isExtensionHoldingDates(extension, parent.status)) return [];
+        const days = extensionAddedDays(extension);
+        return [{ from: toDate(days.start), to: toDate(days.end) }];
+      }),
+    [extensions, bookings, carId],
+  );
+
   const disabledDays = useMemo(
-    () => [{ before: startOfToday() }, ...bookedRanges, ...requestedRanges, ...blockedRanges],
-    [bookedRanges, requestedRanges, blockedRanges],
+    () => [
+      { before: startOfToday() },
+      ...bookedRanges,
+      ...heldRanges,
+      ...requestedRanges,
+      ...blockedRanges,
+    ],
+    [bookedRanges, heldRanges, requestedRanges, blockedRanges],
   );
 
   const blockDates = async () => {
@@ -210,8 +246,9 @@ export default function VehicleAvailabilityPage() {
         </h1>
         <p className="mt-1 text-muted-foreground">
           Tap dates on the calendar to block them for maintenance, repairs, or personal use.
-          Booked dates (red) and dates with a pending request (orange) cannot be blocked -
-          accept or reject the request first.
+          Booked dates (red, including extra days of an approved extension waiting for payment)
+          and dates with a pending request (orange) cannot be blocked - accept or reject the
+          request first.
         </p>
       </div>
 
@@ -264,7 +301,7 @@ export default function VehicleAvailabilityPage() {
                 onSelect={setRange}
                 disabled={disabledDays}
                 modifiers={{
-                  booked: bookedRanges,
+                  booked: [...bookedRanges, ...heldRanges],
                   requested: requestedRanges,
                   blocked: blockedRanges,
                 }}
