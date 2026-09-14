@@ -38,7 +38,9 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import BookingPagination from "@/components/BookingPagination";
 import { formatDayCount } from "@/lib/formatCount";
 import { getBookingReference } from "@/lib/bookingReference";
+import { matchesBookingSearch } from "@/lib/bookingSearch";
 import { paginateItems } from "@/lib/pagination";
+import { Input } from "@/components/ui/input";
 import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
 import {
   DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
@@ -58,6 +60,7 @@ import {
   Star,
   ChevronRight,
   MessageCircle,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -272,6 +275,7 @@ export default function MyBookingsPage() {
   const [bookingView, setBookingView] = useState<"active" | "history">("active");
   const [openBookingId, setOpenBookingId] = useState<string | null>(null);
   const [bookingPage, setBookingPage] = useState(1);
+  const [bookingSearch, setBookingSearch] = useState("");
   const [paymentLogs, setPaymentLogs] = useState<Payment[]>([]);
   const [paymentLogsLoading, setPaymentLogsLoading] = useState(false);
   const [cancelTargetBooking, setCancelTargetBooking] = useState<BookingRow | null>(null);
@@ -1628,8 +1632,23 @@ export default function MyBookingsPage() {
   const bookingHistory = bookings.filter((booking) =>
     historyStatuses.has(getApparentStatus(booking)),
   );
-  const visibleBookings =
-    bookingView === "active" ? activeBookings : bookingHistory;
+  const visibleBookings = (
+    bookingView === "active" ? activeBookings : bookingHistory
+  ).filter((booking) =>
+    matchesBookingSearch(
+      {
+        id: booking.id,
+        startDate: booking.start_date,
+        endDate: booking.end_date,
+        carBrand: booking.cars?.car_models?.car_brands?.name,
+        carModel: booking.cars?.car_models?.name,
+        plateNumber: booking.cars?.plate_number,
+        location: booking.cars?.location,
+        counterpartName: booking.owner?.full_name,
+      },
+      bookingSearch,
+    ),
+  );
   const bookingPagination = paginateItems(visibleBookings, bookingPage);
 
   useEffect(() => {
@@ -1928,6 +1947,20 @@ export default function MyBookingsPage() {
             ))}
           </div>
 
+          <div className="relative w-full sm:max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={bookingSearch}
+              onChange={(event) => {
+                setBookingSearch(event.target.value);
+                setBookingPage(1);
+              }}
+              placeholder="Search car, plate, lister, ref, or date..."
+              aria-label="Search your bookings"
+              className="h-10 pl-9"
+            />
+          </div>
+
           <div className="space-y-1">
             <h2 className="text-xl font-semibold">
               {bookingView === "active" ? "Active Bookings" : "Booking History"}
@@ -1941,9 +1974,11 @@ export default function MyBookingsPage() {
 
           {visibleBookings.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border/60 py-14 text-center text-sm text-muted-foreground">
-              {bookingView === "active"
-                ? "No active bookings right now."
-                : "No past bookings yet."}
+              {bookingSearch.trim()
+                ? `No ${bookingView === "active" ? "active" : "past"} bookings match "${bookingSearch.trim()}".`
+                : bookingView === "active"
+                  ? "No active bookings right now."
+                  : "No past bookings yet."}
             </div>
           ) : null}
 

@@ -3,6 +3,29 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - Bookings can be searched
+
+Tester request: Browse Cars has a search, but a lister with many scheduled
+bookings had no way to find one except scrolling tab after tab, page after page.
+Neither My Bookings (renter) nor Lister Bookings (lister) had a search.
+
+Both pages now have one search box beside their existing tabs and filters. It
+filters as you type, returns to page 1, and works inside the current tab/status
+(on the lister page, *All* searches everything). It matches the car brand and
+model, the plate (with or without its space), the *Booking Ref* printed on the
+card, the other party's name (renter on the lister page, lister on the renter
+page), the pickup location, and the trip's start and end date (*sep 20*,
+*september*). Every word typed must match, in any order: *vios juan*.
+
+A one- or two-digit number must be a whole word, so *sep 20* is the 20th and not
+every September booking via the *20* in *2026*; longer numbers (plates, years,
+references) may be partial. The other party's email and phone are not searched.
+
+The matching is one function, `src/lib/bookingSearch.ts`, used by both pages and
+pinned by `scripts/booking-search.test.mjs` (`check:booking-search`, part of
+`check:all`). It only reads rows each page already loads - no API, SQL or RLS
+change.
+
 ## 2026-09-14 - "I Do Not Agree" finally means no
 
 Tester report on the car page's rental agreement modal: the disabled *Yes, I Agree

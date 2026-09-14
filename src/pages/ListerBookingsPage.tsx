@@ -48,6 +48,7 @@ import BookingPagination from "@/components/BookingPagination";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { formatDayCount } from "@/lib/formatCount";
 import { getBookingReference } from "@/lib/bookingReference";
+import { matchesBookingSearch } from "@/lib/bookingSearch";
 import { paginateItems } from "@/lib/pagination";
 import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
 import {
@@ -63,6 +64,7 @@ import {
   X,
   Star,
   Filter,
+  Search,
   CarFront,
   CircleAlert,
   CreditCard,
@@ -308,6 +310,7 @@ export default function ListerBookingsPage() {
     "all" | "incoming" | "active" | "completed" | "issues"
   >("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [bookingSearch, setBookingSearch] = useState("");
   const [bookingPage, setBookingPage] = useState(1);
   const [rejectingBooking, setRejectingBooking] = useState<ListerBooking | null>(null);
   const [cancellingBooking, setCancellingBooking] = useState<ListerBooking | null>(null);
@@ -1637,9 +1640,27 @@ export default function ListerBookingsPage() {
         ? bookings
         : bookings.filter((booking) => getBookingSection(booking) === bookingSection);
 
-    if (statusFilter === "all") return sectionFiltered;
-    return sectionFiltered.filter((booking) => getApparentStatus(booking) === statusFilter);
-  }, [bookingSection, bookings, getApparentStatus, getBookingSection, statusFilter]);
+    const statusFiltered =
+      statusFilter === "all"
+        ? sectionFiltered
+        : sectionFiltered.filter((booking) => getApparentStatus(booking) === statusFilter);
+
+    return statusFiltered.filter((booking) =>
+      matchesBookingSearch(
+        {
+          id: booking.id,
+          startDate: booking.start_date,
+          endDate: booking.end_date,
+          carBrand: booking.cars?.car_models?.car_brands?.name,
+          carModel: booking.cars?.car_models?.name,
+          plateNumber: booking.cars?.plate_number,
+          location: booking.cars?.location,
+          counterpartName: booking.renter?.full_name,
+        },
+        bookingSearch,
+      ),
+    );
+  }, [bookingSearch, bookingSection, bookings, getApparentStatus, getBookingSection, statusFilter]);
   const bookingPagination = paginateItems(filteredBookings, bookingPage);
 
   useEffect(() => {
@@ -2608,6 +2629,19 @@ export default function ListerBookingsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-72">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={bookingSearch}
+            onChange={(event) => {
+              setBookingSearch(event.target.value);
+              setBookingPage(1);
+            }}
+            placeholder="Search car, plate, renter, ref, or date..."
+            aria-label="Search your listing bookings"
+            className="h-10 pl-9"
+          />
+        </div>
         <div className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm">
           <Filter className="h-4 w-4 text-muted-foreground" />
           <span className="text-muted-foreground">Status</span>
@@ -2663,9 +2697,15 @@ export default function ListerBookingsPage() {
       ) : filteredBookings.length === 0 ? (
         <div className="text-center py-20">
           <LayoutDashboard className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
-          <h3 className="text-lg font-semibold">No bookings match this view</h3>
+          <h3 className="text-lg font-semibold">
+            {bookingSearch.trim()
+              ? `No bookings match "${bookingSearch.trim()}"`
+              : "No bookings match this view"}
+          </h3>
           <p className="text-muted-foreground text-sm mt-1">
-            Change the filter or wait for new booking activity.
+            {bookingSearch.trim()
+              ? "Try another word, or choose All to search every booking."
+              : "Change the filter or wait for new booking activity."}
           </p>
         </div>
       ) : (
