@@ -3,6 +3,36 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - A time is three clicks, not a 48-row scroll
+
+Tester report: the pickup time was one list of all 48 half hours, so 5:00 PM
+meant scrolling past 34 rows. They pointed to a phone's alarm wheel instead.
+
+Only two places choose a time: the **pickup time** on Car Details (drop-off
+follows it) and the **new return time** of an early-return request. Both now use
+`src/components/TimePicker.tsx`: three columns, **Hour | Min | AM/PM**. One click
+on an hour already gives a valid time; changing a column keeps the other two.
+
+- **Minutes stay 00 and 30.** Bookings, the grace period and the early-return
+  rules all run on half hours; a 00-59 column would add 58 choices nobody needs.
+- **It still opens on nothing chosen**, for the reason recorded in
+  `CarDetailPage.tsx`: a time shown before anyone picks it reads as fixed.
+- **Early return keeps its limits.** Times already past, or not before the
+  current return, cannot be clicked; a click lands on the nearest time allowed.
+- The panel opens in the page flow, so the scrolling early-return dialog never
+  clips it.
+
+Left alone on purpose: every date field. Extensions move the **date** only - the
+extension payment updates `end_date` and never `dropoff_time`
+(`api/webhooks/paymongo.ts`) - so a 10 AM return stays 10 AM. Birthday, document
+expiry and admin dates have no time at all, and the booking calendar has to show
+unavailable dates and a range, which a wheel cannot.
+
+The column rules (`pickTimeValue`, `isTimePartAvailable` in
+`src/lib/timeOptions.ts`) are pinned by `scripts/time-picker.test.mjs`
+(`check:time-picker`, part of `check:all`). No API or SQL change; stored times
+are the same `HH:MM` values.
+
 ## 2026-09-14 - Bookings can be searched
 
 Tester request: Browse Cars has a search, but a lister with many scheduled

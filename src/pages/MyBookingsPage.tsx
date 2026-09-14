@@ -30,6 +30,7 @@ import {
   type EarlyReturnRow,
 } from "@/lib/earlyReturns";
 import { TIME_OPTIONS, formatTimeLabel } from "@/lib/timeOptions";
+import TimePicker from "@/components/TimePicker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -3330,25 +3331,15 @@ export default function MyBookingsPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">New return time</label>
-                  <select
+                  <TimePicker
                     value={earlyReturnDraft.requestedEndTime}
-                    onChange={(e) =>
-                      setEarlyReturnDraft((d) => ({
-                        ...d,
-                        requestedEndTime: e.target.value,
-                      }))
+                    onChange={(requestedEndTime) =>
+                      setEarlyReturnDraft((d) => ({ ...d, requestedEndTime }))
                     }
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    <option value="" disabled>
-                      Select return time
-                    </option>
-                    {earlyReturnTimeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={earlyReturnTimeOptions}
+                    placeholder="Select return time"
+                    ariaLabel="New return time"
+                  />
                   {!earlyReturnDraft.requestedEndDate ? (
                     <p className="text-[11px] text-muted-foreground">
                       Pick the date first.

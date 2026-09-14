@@ -8,7 +8,8 @@ import {
   DEFAULT_DOWNPAYMENT_RATE,
   fetchPlatformPricingSettings,
 } from "@/lib/platformSettings";
-import { TIME_OPTIONS, formatTimeLabel } from "@/lib/timeOptions";
+import { formatTimeLabel } from "@/lib/timeOptions";
+import TimePicker from "@/components/TimePicker";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 
@@ -65,15 +66,16 @@ const MAX_BOOKING_TOTAL = 100000;
 const MAX_ADVANCE_BOOKING_DAYS = 60;
 const MAX_TOTAL_RENTAL_DAYS = 30;
 
-// Pickup/drop-off time is an explicit <select> (30-minute increments, full
+// Pickup/drop-off time is an explicit choice (30-minute increments, full
 // day) rather than a raw <input type="time">. Reported issue: a renter saw
 // the pickup/drop-off time as if it were already fixed and couldn't tell it
 // was editable - a known pitfall of native time inputs, whose collapsed
 // display can show the current device time as soon as the field mounts, on
 // some mobile browsers indistinguishable from an actual chosen value. A
-// <select> that starts on a disabled placeholder forces an unambiguous,
-// explicit choice on every platform. TIME_OPTIONS/formatTimeLabel now live
-// in src/lib/timeOptions.ts - also used by the early-return request form.
+// picker that starts on a placeholder forces an unambiguous, explicit choice
+// on every platform. It was a 48-row <select>; it is now the hour | minute |
+// AM/PM columns of src/components/TimePicker.tsx, also used by the
+// early-return request form.
 
 type AgreementAccess = {
   agreementVersionId: string;
@@ -1208,21 +1210,13 @@ export default function CarDetailPage() {
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                     Pickup Time
                   </label>
-                  <select
+                  <TimePicker
                     value={pickupTime}
-                    onChange={(e) => setPickupTime(e.target.value)}
+                    onChange={setPickupTime}
                     disabled={Boolean(licenceGateReason)}
-                    className="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="" disabled>
-                      Select pickup time
-                    </option>
-                    {TIME_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Select pickup time"
+                    ariaLabel="Pickup time"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
