@@ -253,3 +253,71 @@ export const pickupBlocksCancellation = (
   if (role === "lister") return false;
   return Boolean(booking.renter_arrived_at || booking.lister_arrived_at);
 };
+
+// A paid pickup nobody checks in for (CHAPTER 92). Both sides are told once
+// the no-show grace window has passed; closeHours after the pickup time -
+// never before that notice - the booking is cancelled and the renter refunded
+// in full. api/expire-booking-deadlines.ts acts on these times and both
+// booking pages show them.
+export const getMutualNoShowTimes = (
+  booking: Pick<CancellationPolicyBooking, "start_date" | "pickup_time">,
+  graceMinutes: number,
+  closeHours: number,
+) => {
+  const pickupMs = getPickupMs(booking);
+  if (pickupMs === null) return null;
+  const noticeAtMs = pickupMs + graceMinutes * 60_000;
+  return {
+    pickupMs,
+    noticeAtMs,
+    closeAtMs: Math.max(pickupMs + closeHours * HOUR_MS, noticeAtMs),
+  };
+};
+
+// Hours both sides may stand at the meetup before a missing handover counts as
+// stalled - the same 2 hours api/expire-booking-deadlines.ts has always waited.
+export const HANDOVER_WAIT_HOURS = 2;
+
+export type StalledPickup = {
+  situation: "renter_only" | "lister_only" | "no_handover";
+  noticeAtMs: number;
+  closeAtMs: number;
+};
+
+// A pickup that started but never became a trip: only one side checked in and
+// nobody reported it, or both did and the car was never handed over. Both used
+// to wait forever. The same clock as a pickup nobody came to (CHAPTER 92) -
+// warned after the grace window, closed closeHours after the pickup time - with
+// two guarantees on top: a missing handover is not warned about before the two
+// have been together for HANDOVER_WAIT_HOURS, and nothing closes within an hour
+// of its warning going out. null means this booking is not a stalled pickup.
+export const getStalledPickup = (
+  booking: PickupProgress & Pick<CancellationPolicyBooking, "start_date" | "pickup_time">,
+  graceMinutes: number,
+  closeHours: number,
+  noticeSentAtMs: number | null,
+): StalledPickup | null => {
+  if (booking.lister_handover_confirmed_at || booking.renter_handover_received_at) return null;
+  const renterArrivedMs = booking.renter_arrived_at ? Date.parse(booking.renter_arrived_at) : null;
+  const listerArrivedMs = booking.lister_arrived_at ? Date.parse(booking.lister_arrived_at) : null;
+  if (renterArrivedMs === null && listerArrivedMs === null) return null;
+  const times = getMutualNoShowTimes(booking, graceMinutes, closeHours);
+  if (!times) return null;
+
+  let situation: StalledPickup["situation"] = renterArrivedMs === null ? "lister_only" : "renter_only";
+  let noticeAtMs = times.noticeAtMs;
+  if (renterArrivedMs !== null && listerArrivedMs !== null) {
+    situation = "no_handover";
+    const lastArrivalMs = Math.max(renterArrivedMs, listerArrivedMs);
+    if (Number.isFinite(lastArrivalMs)) {
+      noticeAtMs = Math.max(noticeAtMs, lastArrivalMs + HANDOVER_WAIT_HOURS * HOUR_MS);
+    }
+  }
+  const warnedAtLeastAnHourAgo =
+    noticeSentAtMs !== null && Number.isFinite(noticeSentAtMs) ? noticeSentAtMs + HOUR_MS : noticeAtMs;
+  return {
+    situation,
+    noticeAtMs,
+    closeAtMs: Math.max(times.closeAtMs, noticeAtMs, warnedAtLeastAnHourAgo),
+  };
+};

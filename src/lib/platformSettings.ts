@@ -69,6 +69,10 @@ export const DEFAULT_NO_SHOW_GRACE_MINUTES = 30;
 export const NO_SHOW_GRACE_MINUTES_MIN = 15;
 export const NO_SHOW_GRACE_MINUTES_MAX = 180;
 
+// Hours after the pickup time before SafeDrive cancels a paid booking that
+// neither side checked in for (CHAPTER 92). Read live.
+export const DEFAULT_MUTUAL_NO_SHOW_CLOSE_HOURS = 6;
+
 const clampWholeNumber = (
   value: unknown,
   min: number,
@@ -84,6 +88,7 @@ export type PlatformPolicyTimings = {
   arrivalCheckinLeadHours: number;
   listerCompletionTimeoutHours: number;
   noShowGraceMinutes: number;
+  mutualNoShowCloseHours: number;
 };
 
 export const fetchPlatformPolicyTimings = async (): Promise<PlatformPolicyTimings> => {
@@ -91,12 +96,13 @@ export const fetchPlatformPolicyTimings = async (): Promise<PlatformPolicyTiming
     arrivalCheckinLeadHours: DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
     listerCompletionTimeoutHours: DEFAULT_LISTER_COMPLETION_TIMEOUT_HOURS,
     noShowGraceMinutes: DEFAULT_NO_SHOW_GRACE_MINUTES,
+    mutualNoShowCloseHours: DEFAULT_MUTUAL_NO_SHOW_CLOSE_HOURS,
   };
 
   const { data, error } = await supabase
     .from("platform_settings")
     .select(
-      "arrival_checkin_lead_hours, lister_completion_timeout_hours, no_show_grace_minutes",
+      "arrival_checkin_lead_hours, lister_completion_timeout_hours, no_show_grace_minutes, mutual_no_show_close_hours",
     )
     .eq("id", "default")
     .maybeSingle();
@@ -124,6 +130,12 @@ export const fetchPlatformPolicyTimings = async (): Promise<PlatformPolicyTiming
       NO_SHOW_GRACE_MINUTES_MIN,
       NO_SHOW_GRACE_MINUTES_MAX,
       DEFAULT_NO_SHOW_GRACE_MINUTES,
+    ),
+    mutualNoShowCloseHours: clampWholeNumber(
+      data?.mutual_no_show_close_hours,
+      1,
+      72,
+      DEFAULT_MUTUAL_NO_SHOW_CLOSE_HOURS,
     ),
   };
 };

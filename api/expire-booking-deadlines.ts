@@ -2,16 +2,19 @@ import { createClient } from "@supabase/supabase-js";
 import {
   fetchNoShowGraceMinutes,
   runBookingCompletionSideEffects,
+  settleCompletedBookingCase,
 } from "../server/bookingCompletion.js";
 import {
   createManualRefundReview,
   describeRenterCharge,
   formatPeso,
   getCancellationRefundPlan,
+  getCapturedBookingPaymentTotal,
   getVehicleLabel,
   type RefundableBooking,
 } from "../server/cancellationRefundPlan.js";
-import { sendUserNotificationEmail } from "../server/email.js";
+import { getMutualNoShowTimes, getStalledPickup } from "../server/cancellationPolicy.js";
+import { sendAdminAlertEmail, sendUserNotificationEmail } from "../server/email.js";
 import { processAutomaticPayoutForBooking } from "../server/payoutAutomation.js";
 import { vehicleGuardMessage } from "../server/vehicleCompliance.js";
 
@@ -796,6 +799,633 @@ export default async function handler(req: Request) {
       }
     }
 
+    // --- Nobody checked in at pickup (CHAPTER 92). A paid booking where
+    // neither side recorded arrival used to stay fully_paid forever: no report
+    // is possible (each needs the reporter's own check-in), so the renter's
+    // money sat held, the lister was never paid, and the car's calendar stayed
+    // blocked for the whole rental. Once the grace window has passed both sides
+    // are told once; mutual_no_show_close_hours after pickup (a live setting)
+    // the booking is cancelled and the renter's full refund goes to super-admin
+    // review - the car was never handed over, and there is no check-in to say
+    // whose fault that was - and the missed pickup is recorded against both.
+    const DEFAULT_MUTUAL_NO_SHOW_CLOSE_HOURS = 6;
+    const { data: mutualSettingsRow } = await supabase
+      .from("platform_settings")
+      .select("mutual_no_show_close_hours")
+      .eq("id", "default")
+      .maybeSingle();
+    const mutualNoShowCloseHours = (() => {
+      const parsed = Number(mutualSettingsRow?.mutual_no_show_close_hours);
+      return Number.isFinite(parsed) && parsed >= 1 && parsed <= 72
+        ? Math.round(parsed)
+        : DEFAULT_MUTUAL_NO_SHOW_CLOSE_HOURS;
+    })();
+    const pickupGraceMinutes = await fetchNoShowGraceMinutes(supabase);
+    const manilaToday = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+    const { data: unattendedPickups, error: unattendedError } = await supabase
+      .from("bookings")
+      .select(
+        "id, renter_id, owner_id, car_id, start_date, pickup_time, pickup_no_show_notified_at, payments(payment_type, status, amount, created_at), cars(plate_number, car_models(name, car_brands(name)))",
+      )
+      .eq("compliance_hold", false)
+      .eq("status", "fully_paid")
+      .is("renter_arrived_at", null)
+      .is("lister_arrived_at", null)
+      .lte("start_date", manilaToday)
+      .limit(200);
+    if (unattendedError) throw unattendedError;
+
+    const formatManilaTime = (ms: number) =>
+      new Date(ms).toLocaleString("en-PH", {
+        timeZone: "Asia/Manila",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+
+    let mutualNoShowNotified = 0;
+    let mutualNoShowClosed = 0;
+    for (const unattended of (unattendedPickups ?? []) as unknown as Array<
+      RefundableBooking & { car_id: string; pickup_no_show_notified_at: string | null }
+    >) {
+      const times = getMutualNoShowTimes(unattended, pickupGraceMinutes, mutualNoShowCloseHours);
+      if (!times || Date.now() < times.noticeAtMs) continue;
+      const vehicleLabel = getVehicleLabel(unattended);
+
+      if (Date.now() >= times.closeAtMs) {
+        // Only a booking still untouched is closed: a check-in a moment ago wins.
+        const { data: closed, error: closeError } = await supabase
+          .from("bookings")
+          .update({ status: "cancelled", payment_deadline: null })
+          .eq("id", unattended.id)
+          .eq("compliance_hold", false)
+          .eq("status", "fully_paid")
+          .is("renter_arrived_at", null)
+          .is("lister_arrived_at", null)
+          .select("id")
+          .maybeSingle();
+        if (closeError) throw closeError;
+        if (!closed) continue;
+
+        try {
+          const captured = getCapturedBookingPaymentTotal(unattended);
+          const refundPaymentId =
+            captured > 0
+              ? await createManualRefundReview(
+                  supabase,
+                  unattended,
+                  unattended.renter_id,
+                  `Automatic cancellation for ${vehicleLabel}: neither the renter nor the lister checked in within ${mutualNoShowCloseHours} hours of the pickup time, and no handover took place.`,
+                  "Neither party checked in at pickup - full refund recommended, released by admin review.",
+                  captured,
+                  "neither party checked in at pickup",
+                )
+              : null;
+
+          const { error: cancellationRecordError } = await supabase
+            .from("booking_cancellations")
+            .upsert(
+              {
+                booking_id: unattended.id,
+                cancelled_by_role: "both",
+                cancelled_by_id: null,
+                lister_id: unattended.owner_id,
+                renter_id: unattended.renter_id,
+                car_id: unattended.car_id,
+                reason: "Neither party checked in at pickup.",
+                hours_before_pickup: Math.round((times.pickupMs - Date.now()) / 3_600_000),
+                was_late: true,
+                had_captured_payment: captured > 0,
+              },
+              { onConflict: "booking_id" },
+            );
+          if (cancellationRecordError) {
+            console.warn("Missed pickup was not recorded for reliability", unattended.id, cancellationRecordError.message);
+          }
+
+          const mutualRenterTitle = "Booking cancelled - nobody checked in";
+          const mutualRenterMessage = `Neither you nor the lister checked in for ${vehicleLabel} within ${mutualNoShowCloseHours} hours of the pickup time, so SafeDrive cancelled the booking.${
+            captured > 0 ? ` Your full ${formatPeso(captured)} refund is being released through SafeDrive support review.` : ""
+          } The missed pickup is recorded on both accounts.`;
+          const mutualOwnerTitle = "Booking cancelled - nobody checked in";
+          const mutualOwnerMessage = `Neither you nor the renter checked in for ${vehicleLabel} within ${mutualNoShowCloseHours} hours of the pickup time, so SafeDrive cancelled the booking and the dates are free again. The renter is refunded in full, and the missed pickup is recorded on both accounts.`;
+          await supabase.from("notifications").insert([
+            { user_id: unattended.renter_id, title: mutualRenterTitle, message: mutualRenterMessage, type: "warning", link: "/my-bookings" },
+            { user_id: unattended.owner_id, title: mutualOwnerTitle, message: mutualOwnerMessage, type: "warning", link: "/lister-bookings" },
+          ]);
+          await sendUserNotificationEmail(supabase, {
+            userId: unattended.renter_id,
+            title: mutualRenterTitle,
+            message: mutualRenterMessage,
+            link: "/my-bookings",
+            baseOrigin,
+            eventKey: `mutual-no-show-closed-renter:${unattended.id}`,
+          });
+          await sendUserNotificationEmail(supabase, {
+            userId: unattended.owner_id,
+            title: mutualOwnerTitle,
+            message: mutualOwnerMessage,
+            link: "/lister-bookings",
+            baseOrigin,
+            eventKey: `mutual-no-show-closed-owner:${unattended.id}`,
+          });
+          await supabase.from("audit_log").insert({
+            user_id: null,
+            action: "mutual_no_show_auto_cancelled",
+            entity_type: "booking",
+            entity_id: unattended.id,
+            details: {
+              automated: true,
+              close_hours: mutualNoShowCloseHours,
+              captured_total: captured,
+              refund_payment_id: refundPaymentId,
+            },
+          });
+        } catch (error) {
+          console.error("Unattended-pickup cancellation follow-up failed", unattended.id, error);
+        }
+        mutualNoShowClosed += 1;
+      } else if (!unattended.pickup_no_show_notified_at) {
+        const { data: claimedNotice, error: claimNoticeError } = await supabase
+          .from("bookings")
+          .update({ pickup_no_show_notified_at: new Date().toISOString() })
+          .eq("id", unattended.id)
+          .eq("status", "fully_paid")
+          .is("pickup_no_show_notified_at", null)
+          .select("id")
+          .maybeSingle();
+        if (claimNoticeError) throw claimNoticeError;
+        if (!claimedNotice) continue;
+
+        const closesAt = formatManilaTime(times.closeAtMs);
+        const noticeRenterTitle = "Nobody has checked in yet";
+        const noticeRenterMessage = `The pickup time for ${vehicleLabel} has passed and neither you nor the lister has checked in. Tap "I Have Arrived" when you are there. If nobody checks in by ${closesAt}, SafeDrive cancels the booking and refunds you in full; a missed pickup is recorded on both accounts.`;
+        const noticeOwnerTitle = "Nobody has checked in yet";
+        const noticeOwnerMessage = `The pickup time for ${vehicleLabel} has passed and neither you nor the renter has checked in. Tap "I Have Arrived" when you are there. If nobody checks in by ${closesAt}, SafeDrive cancels the booking, refunds the renter in full and frees the dates; a missed pickup is recorded on both accounts.`;
+        await supabase.from("notifications").insert([
+          { user_id: unattended.renter_id, title: noticeRenterTitle, message: noticeRenterMessage, type: "warning", link: "/my-bookings" },
+          { user_id: unattended.owner_id, title: noticeOwnerTitle, message: noticeOwnerMessage, type: "warning", link: "/lister-bookings" },
+        ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: unattended.renter_id,
+          title: noticeRenterTitle,
+          message: noticeRenterMessage,
+          link: "/my-bookings",
+          baseOrigin,
+          eventKey: `mutual-no-show-notice-renter:${unattended.id}`,
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: unattended.owner_id,
+          title: noticeOwnerTitle,
+          message: noticeOwnerMessage,
+          link: "/lister-bookings",
+          baseOrigin,
+          eventKey: `mutual-no-show-notice-owner:${unattended.id}`,
+        });
+        await supabase.from("audit_log").insert({
+          user_id: null,
+          action: "mutual_no_show_notified",
+          entity_type: "booking",
+          entity_id: unattended.id,
+          details: { automated: true, closes_at: new Date(times.closeAtMs).toISOString() },
+        });
+        mutualNoShowNotified += 1;
+      }
+    }
+
+    // --- A pickup that started but never became a trip. Only one side checked
+    // in and nobody filed the report, or both did and the car was never handed
+    // over. Each used to wait forever - money held, calendar blocked - because
+    // every way out needed someone to press a button. On the same clock as a
+    // pickup nobody came to (above), both sides are warned once
+    // (pickup_no_show_notified_at), then the booking is settled exactly the way
+    // the report would have settled it:
+    //   renter_only  -> as a no-car report: full refund, counted on the lister
+    //                   (waived when a previous renter's overstay is the cause)
+    //   lister_only  -> as a renter no-show report: the no-show fee applies
+    //   no_handover  -> the lister did not hand the car over: full refund,
+    //                   counted on the lister
+    // Refunds go to super-admin review like every other automatic cancellation.
+    const { data: stalledCandidates, error: stalledError } = await supabase
+      .from("bookings")
+      .select(
+        "id, renter_id, owner_id, car_id, start_date, pickup_time, total_days, total_price, base_price, refund_full_hours_snapshot, refund_late_renter_percent_snapshot, short_notice_free_hours_snapshot, late_cancel_fee_days_snapshot, short_trip_late_cancel_fee_days_snapshot, no_show_fee_days_snapshot, short_trip_no_show_fee_days_snapshot, renter_arrived_at, lister_arrived_at, lister_handover_confirmed_at, renter_handover_received_at, pickup_no_show_notified_at, payments(payment_type, status, amount, created_at), cars(plate_number, car_models(name, car_brands(name)))",
+      )
+      .eq("compliance_hold", false)
+      .eq("status", "fully_paid")
+      .is("lister_handover_confirmed_at", null)
+      .lte("start_date", manilaToday)
+      .or("renter_arrived_at.not.is.null,lister_arrived_at.not.is.null")
+      .limit(200);
+    if (stalledError) throw stalledError;
+
+    let stalledPickupNotified = 0;
+    let stalledPickupClosed = 0;
+    for (const stalledBooking of (stalledCandidates ?? []) as unknown as Array<
+      RefundableBooking & {
+        car_id: string;
+        renter_arrived_at: string | null;
+        lister_arrived_at: string | null;
+        lister_handover_confirmed_at: string | null;
+        renter_handover_received_at: string | null;
+        pickup_no_show_notified_at: string | null;
+      }
+    >) {
+      const noticeSentAtMs = stalledBooking.pickup_no_show_notified_at
+        ? Date.parse(stalledBooking.pickup_no_show_notified_at)
+        : null;
+      const stalled = getStalledPickup(stalledBooking, pickupGraceMinutes, mutualNoShowCloseHours, noticeSentAtMs);
+      if (!stalled || Date.now() < stalled.noticeAtMs) continue;
+      const vehicleLabel = getVehicleLabel(stalledBooking);
+
+      if (noticeSentAtMs === null) {
+        const { data: claimedNotice, error: claimNoticeError } = await supabase
+          .from("bookings")
+          .update({ pickup_no_show_notified_at: new Date().toISOString() })
+          .eq("id", stalledBooking.id)
+          .eq("status", "fully_paid")
+          .is("pickup_no_show_notified_at", null)
+          .select("id")
+          .maybeSingle();
+        if (claimNoticeError) throw claimNoticeError;
+        if (!claimedNotice) continue;
+
+        // The close time as it stands once this warning is on record.
+        const closesAt = formatManilaTime(Math.max(stalled.closeAtMs, Date.now() + 3_600_000));
+        const notices =
+          stalled.situation === "renter_only"
+            ? {
+                renter: `The lister still hasn't checked in for ${vehicleLabel}. You can report "no car at pickup" from the booking now. If nothing changes by ${closesAt}, SafeDrive cancels the booking and refunds you in full.`,
+                owner: `The renter is waiting at pickup for ${vehicleLabel} and you haven't checked in. Tap "I Have Arrived" if you are there. If nothing changes by ${closesAt}, SafeDrive cancels the booking, refunds the renter in full, and it counts as a missed handover on your record.`,
+              }
+            : stalled.situation === "lister_only"
+              ? {
+                  renter: `The lister is waiting at pickup for ${vehicleLabel} and you haven't checked in. Tap "I Have Arrived" if you are there. If nothing changes by ${closesAt}, SafeDrive cancels the booking as a no-show and the no-show fee applies.`,
+                  owner: `The renter still hasn't checked in for ${vehicleLabel}. You can report a no-show from the booking now. If nothing changes by ${closesAt}, SafeDrive records the renter no-show and cancels the booking for you.`,
+                }
+              : {
+                  renter: `You and the lister both checked in for ${vehicleLabel}, but the car hasn't been handed over. If it isn't handed over by ${closesAt}, SafeDrive cancels the booking and refunds you in full.`,
+                  owner: `You and the renter both checked in for ${vehicleLabel}, but you haven't handed over the car. If it isn't handed over by ${closesAt}, SafeDrive cancels the booking, refunds the renter in full, and it counts as a missed handover on your record.`,
+                };
+        const noticeTitle = "Pickup not finished yet";
+        await supabase.from("notifications").insert([
+          { user_id: stalledBooking.renter_id, title: noticeTitle, message: notices.renter, type: "warning", link: "/my-bookings" },
+          { user_id: stalledBooking.owner_id, title: noticeTitle, message: notices.owner, type: "warning", link: "/lister-bookings" },
+        ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: stalledBooking.renter_id,
+          title: noticeTitle,
+          message: notices.renter,
+          link: "/my-bookings",
+          baseOrigin,
+          eventKey: `stalled-pickup-notice-renter:${stalledBooking.id}`,
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: stalledBooking.owner_id,
+          title: noticeTitle,
+          message: notices.owner,
+          link: "/lister-bookings",
+          baseOrigin,
+          eventKey: `stalled-pickup-notice-owner:${stalledBooking.id}`,
+        });
+        await supabase.from("audit_log").insert({
+          user_id: null,
+          action: "stalled_pickup_notified",
+          entity_type: "booking",
+          entity_id: stalledBooking.id,
+          details: { automated: true, situation: stalled.situation },
+        });
+        stalledPickupNotified += 1;
+        continue;
+      }
+
+      if (Date.now() < stalled.closeAtMs) continue;
+
+      // Claim only a booking still in exactly this state: a check-in, a
+      // handover or a report a moment ago wins.
+      const renterMustHaveArrived = stalled.situation !== "lister_only";
+      const listerMustHaveArrived = stalled.situation !== "renter_only";
+      const { data: closed, error: closeError } = await supabase
+        .from("bookings")
+        .update({ status: "cancelled", payment_deadline: null })
+        .eq("id", stalledBooking.id)
+        .eq("compliance_hold", false)
+        .eq("status", "fully_paid")
+        .is("lister_handover_confirmed_at", null)
+        .filter("renter_arrived_at", renterMustHaveArrived ? "not.is" : "is", null)
+        .filter("lister_arrived_at", listerMustHaveArrived ? "not.is" : "is", null)
+        .select("id")
+        .maybeSingle();
+      if (closeError) throw closeError;
+      if (!closed) continue;
+
+      try {
+        const captured = getCapturedBookingPaymentTotal(stalledBooking);
+        let refundPaymentId: string | null = null;
+        let renterTitle: string;
+        let renterMessage: string;
+        let ownerTitle: string;
+        let ownerMessage: string;
+        let cancellation: {
+          cancelled_by_role: "renter" | "lister";
+          reason: string;
+          strike_waived: boolean;
+        };
+        let overstayBookingId: string | null = null;
+
+        if (stalled.situation === "lister_only") {
+          // As api/booking-incident-action.ts's renter_no_show.
+          const noShowPlan = getCancellationRefundPlan(stalledBooking, "no_show");
+          const noShowCharge = describeRenterCharge(noShowPlan);
+          refundPaymentId =
+            captured > 0
+              ? await createManualRefundReview(
+                  supabase,
+                  stalledBooking,
+                  stalledBooking.renter_id,
+                  `Automatic renter no-show for ${vehicleLabel}: the lister checked in, the renter never did, and no report was filed within ${mutualNoShowCloseHours} hours of pickup. Policy: ${noShowCharge}; about ${formatPeso(noShowPlan.listerCompensation)} is lister compensation.`,
+                  "Renter no-show at pickup, settled automatically - refund of the remainder released by admin review.",
+                  noShowPlan.renterRefund,
+                  "renter no-show at pickup",
+                )
+              : null;
+          cancellation = { cancelled_by_role: "renter", reason: "renter_no_show", strike_waived: false };
+          renterTitle = "Booking cancelled — you did not show up";
+          renterMessage =
+            captured > 0
+              ? noShowPlan.renterRefund > 0
+                ? `You did not check in for ${vehicleLabel} at pickup, so the no-show policy charges ${noShowCharge}. SafeDrive support will release the remaining ${formatPeso(noShowPlan.renterRefund)} to you. This affects your completion rate.`
+                : `You did not check in for ${vehicleLabel} at pickup, so the no-show policy charges ${noShowCharge} and no refund is due. This affects your completion rate.`
+              : `You did not check in for ${vehicleLabel} at pickup. This affects your completion rate.`;
+          ownerTitle = "Renter no-show recorded";
+          ownerMessage = `The renter never checked in for ${vehicleLabel}, so SafeDrive recorded the no-show and cancelled the booking. Your record is not affected.${
+            noShowPlan.listerCompensation > 0
+              ? ` About ${formatPeso(noShowPlan.listerCompensation)} is due to you as no-show compensation once SafeDrive support releases it.`
+              : ""
+          }`;
+        } else {
+          let overstay: { id: string; renter_id: string; end_date: string } | undefined;
+          if (stalled.situation === "renter_only") {
+            // As renter_no_car: a previous renter still out with this car is the
+            // cause, not the lister.
+            const { data: overstays } = await supabase
+              .from("bookings")
+              .select("id, renter_id, end_date")
+              .eq("car_id", stalledBooking.car_id)
+              .eq("status", "active")
+              .lt("end_date", new Date().toISOString().slice(0, 10))
+              .neq("id", stalledBooking.id);
+            overstay = (overstays ?? [])[0] as typeof overstay;
+          }
+          refundPaymentId =
+            captured > 0
+              ? await createManualRefundReview(
+                  supabase,
+                  stalledBooking,
+                  stalledBooking.renter_id,
+                  stalled.situation === "renter_only"
+                    ? `Automatic no-car settlement for ${vehicleLabel}: the renter checked in, the lister never did${overstay ? " (the previous renter is overdue with this car)" : ""}, and no report was filed within ${mutualNoShowCloseHours} hours of pickup.`
+                    : `Automatic settlement for ${vehicleLabel}: both sides checked in but the lister never handed over the car within ${mutualNoShowCloseHours} hours of pickup.`,
+                  "Car not handed over at pickup - full refund recommended, released by admin review.",
+                  captured,
+                  "car not handed over at pickup",
+                )
+              : null;
+          cancellation = {
+            cancelled_by_role: "lister",
+            reason: overstay
+              ? "previous_renter_overstay"
+              : stalled.situation === "renter_only"
+                ? "lister_no_show"
+                : "lister_did_not_hand_over",
+            strike_waived: Boolean(overstay),
+          };
+          if (overstay) {
+            overstayBookingId = overstay.id;
+            await supabase
+              .from("bookings")
+              .update({ dispute_status: "open" })
+              .eq("id", overstay.id)
+              .eq("status", "active");
+            const overdueTitle = "Vehicle overdue";
+            const overdueMessage = `Your rental of ${vehicleLabel} is past its return date and another renter could not pick it up. Return it immediately and file your return report.`;
+            await supabase.from("notifications").insert({
+              user_id: overstay.renter_id,
+              title: overdueTitle,
+              message: overdueMessage,
+              type: "error",
+              link: "/my-bookings",
+            });
+            await sendUserNotificationEmail(supabase, {
+              userId: overstay.renter_id,
+              title: overdueTitle,
+              message: overdueMessage,
+              link: "/my-bookings",
+              baseOrigin,
+              eventKey: `overdue-overstay:${overstay.id}`,
+            });
+          }
+          renterTitle = "Booking cancelled — full refund";
+          renterMessage = `${vehicleLabel} was not handed over to you at pickup, so SafeDrive cancelled the booking.${
+            captured > 0 ? ` Your full ${formatPeso(captured)} refund is being released through SafeDrive support review.` : ""
+          } Your record is not affected. Browse other cars to rebook.`;
+          ownerTitle = overstay ? "Renter couldn't pick up — previous renter overdue" : "You missed a handover";
+          ownerMessage = overstay
+            ? `${vehicleLabel} could not be handed over because the previous renter has not returned it. The booking was cancelled and refunded, and that trip is flagged.`
+            : `${vehicleLabel} was not handed over at pickup, so SafeDrive cancelled the booking and refunds the renter in full. This affects your completion rate.`;
+        }
+
+        const { error: cancellationRecordError } = await supabase
+          .from("booking_cancellations")
+          .upsert(
+            {
+              booking_id: stalledBooking.id,
+              cancelled_by_role: cancellation.cancelled_by_role,
+              cancelled_by_id: null,
+              lister_id: stalledBooking.owner_id,
+              renter_id: stalledBooking.renter_id,
+              car_id: stalledBooking.car_id,
+              reason: cancellation.reason,
+              was_late: true,
+              had_captured_payment: captured > 0,
+              strike_waived: cancellation.strike_waived,
+            },
+            { onConflict: "booking_id" },
+          );
+        if (cancellationRecordError) {
+          console.warn("Stalled pickup was not recorded for reliability", stalledBooking.id, cancellationRecordError.message);
+        }
+
+        await supabase.from("notifications").insert([
+          { user_id: stalledBooking.renter_id, title: renterTitle, message: renterMessage, type: stalled.situation === "lister_only" ? "error" : "info", link: "/my-bookings" },
+          { user_id: stalledBooking.owner_id, title: ownerTitle, message: ownerMessage, type: stalled.situation === "lister_only" ? "info" : "error", link: "/lister-bookings" },
+        ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: stalledBooking.renter_id,
+          title: renterTitle,
+          message: renterMessage,
+          link: "/my-bookings",
+          baseOrigin,
+          eventKey: `stalled-pickup-closed-renter:${stalledBooking.id}`,
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: stalledBooking.owner_id,
+          title: ownerTitle,
+          message: ownerMessage,
+          link: "/lister-bookings",
+          baseOrigin,
+          eventKey: `stalled-pickup-closed-owner:${stalledBooking.id}`,
+        });
+        await supabase.from("audit_log").insert({
+          user_id: null,
+          action: "stalled_pickup_auto_resolved",
+          entity_type: "booking",
+          entity_id: stalledBooking.id,
+          details: {
+            automated: true,
+            situation: stalled.situation,
+            close_hours: mutualNoShowCloseHours,
+            captured_total: captured,
+            refund_payment_id: refundPaymentId,
+            overstay_booking_id: overstayBookingId,
+          },
+        });
+      } catch (error) {
+        console.error("Stalled-pickup settlement follow-up failed", stalledBooking.id, error);
+      }
+      stalledPickupClosed += 1;
+    }
+
+    // --- A booking still on a vehicle-document hold when its pickup comes.
+    // Every sweep above skips a held booking, and nothing ended the hold unless
+    // the lister's documents were approved - so a hold that never cleared kept
+    // the booking, any payment and the car's calendar forever. The renter
+    // cannot cancel a held booking (api/booking-action.ts refuses, so it is
+    // never a renter late cancellation). Once the pickup time and its grace
+    // window have passed with the hold still on, the booking is cancelled and
+    // anything paid goes back in full through super-admin review. It is
+    // recorded as the lister's cancellation with the strike waived, since the
+    // cause can be a review still in progress rather than the lister.
+    const { data: heldCandidates, error: heldError } = await supabase
+      .from("bookings")
+      .select(
+        "id, renter_id, owner_id, car_id, status, start_date, pickup_time, payments(payment_type, status, amount, created_at), cars(plate_number, car_models(name, car_brands(name)))",
+      )
+      .eq("compliance_hold", true)
+      .in("status", ["pending", "confirmed", "awaiting_payment", "downpayment_paid", "fully_paid"])
+      .is("lister_handover_confirmed_at", null)
+      .lte("start_date", manilaToday)
+      .limit(200);
+    if (heldError) throw heldError;
+
+    let heldBookingsCancelled = 0;
+    for (const heldBooking of (heldCandidates ?? []) as unknown as Array<
+      RefundableBooking & { car_id: string; status: string }
+    >) {
+      const heldTimes = getMutualNoShowTimes(heldBooking, pickupGraceMinutes, mutualNoShowCloseHours);
+      if (!heldTimes || Date.now() < heldTimes.noticeAtMs) continue;
+
+      const { data: heldClosed, error: heldCloseError } = await supabase
+        .from("bookings")
+        .update({
+          status: "cancelled",
+          payment_deadline: null,
+          balance_deadline: null,
+          owner_response_deadline: null,
+        })
+        .eq("id", heldBooking.id)
+        .eq("compliance_hold", true)
+        .in("status", ["pending", "confirmed", "awaiting_payment", "downpayment_paid", "fully_paid"])
+        .is("lister_handover_confirmed_at", null)
+        .select("id")
+        .maybeSingle();
+      if (heldCloseError) throw heldCloseError;
+      if (!heldClosed) continue;
+
+      try {
+        const vehicleLabel = getVehicleLabel(heldBooking);
+        const captured = getCapturedBookingPaymentTotal(heldBooking);
+        const refundPaymentId =
+          captured > 0
+            ? await createManualRefundReview(
+                supabase,
+                heldBooking,
+                heldBooking.renter_id,
+                `Automatic cancellation for ${vehicleLabel}: the vehicle's approved documents still did not cover the rental when the pickup time passed.`,
+                "Vehicle documents still under review at pickup - full refund recommended, released by admin review.",
+                captured,
+                "vehicle documents not cleared by pickup",
+              )
+            : null;
+        if (captured > 0) {
+          const { error: heldRecordError } = await supabase
+            .from("booking_cancellations")
+            .upsert(
+              {
+                booking_id: heldBooking.id,
+                cancelled_by_role: "lister",
+                cancelled_by_id: null,
+                lister_id: heldBooking.owner_id,
+                renter_id: heldBooking.renter_id,
+                car_id: heldBooking.car_id,
+                reason: "vehicle_documents_not_cleared",
+                was_late: true,
+                had_captured_payment: true,
+                strike_waived: true,
+              },
+              { onConflict: "booking_id" },
+            );
+          if (heldRecordError) {
+            console.warn("Held booking cancellation was not recorded", heldBooking.id, heldRecordError.message);
+          }
+        }
+
+        const heldTitle = "Booking cancelled - vehicle documents not cleared";
+        const heldRenterMessage = `The documents for ${vehicleLabel} were still under review when the pickup time passed, so SafeDrive cancelled the booking.${
+          captured > 0 ? ` Your full ${formatPeso(captured)} refund is being released through SafeDrive support review.` : ""
+        } Your record is not affected. Browse other cars to rebook.`;
+        const heldOwnerMessage = `The documents for ${vehicleLabel} still did not cover this booking when the pickup time passed, so SafeDrive cancelled it${
+          captured > 0 ? " and refunds the renter in full" : ""
+        }. Renew the vehicle documents to take new bookings.`;
+        await supabase.from("notifications").insert([
+          { user_id: heldBooking.renter_id, title: heldTitle, message: heldRenterMessage, type: "warning", link: "/my-bookings" },
+          { user_id: heldBooking.owner_id, title: heldTitle, message: heldOwnerMessage, type: "warning", link: "/lister-bookings" },
+        ]);
+        await sendUserNotificationEmail(supabase, {
+          userId: heldBooking.renter_id,
+          title: heldTitle,
+          message: heldRenterMessage,
+          link: "/my-bookings",
+          baseOrigin,
+          eventKey: `held-booking-cancelled-renter:${heldBooking.id}`,
+        });
+        await sendUserNotificationEmail(supabase, {
+          userId: heldBooking.owner_id,
+          title: heldTitle,
+          message: heldOwnerMessage,
+          link: "/lister-bookings",
+          baseOrigin,
+          eventKey: `held-booking-cancelled-owner:${heldBooking.id}`,
+        });
+        await supabase.from("audit_log").insert({
+          user_id: null,
+          action: "compliance_hold_auto_cancelled",
+          entity_type: "booking",
+          entity_id: heldBooking.id,
+          details: {
+            automated: true,
+            previous_status: heldBooking.status,
+            captured_total: captured,
+            refund_payment_id: refundPaymentId,
+          },
+        });
+      } catch (error) {
+        console.error("Held-booking cancellation follow-up failed", heldBooking.id, error);
+      }
+      heldBookingsCancelled += 1;
+    }
+
     // --- Return-leg no-show reminder: never auto-cancels - the rental
     // period is already consumed by this point, so unlike pickup no-show
     // there is no refund-eligible outcome the same way; this is purely
@@ -1252,6 +1882,90 @@ export default async function handler(req: Request) {
       unreturnedPayoutReleased += 1;
     }
 
+    // --- A completed trip whose lister was never paid.
+    //
+    // The payout is attempted once, at completion. When that attempt is
+    // skipped - an incident ticket still open at that moment, payout details
+    // missing, Money Movement not configured - it wrote nothing, alerted no one,
+    // and was never tried again, while the lister had already been emailed that
+    // the payout was on its way. This retries any completed trip that has no
+    // payout record at all (a pending or failed one is already in the admin's
+    // queue), at most a few per run and each at most every 6 hours, settling
+    // the trip's incident ticket first. A skip is written to the audit log and
+    // emailed to the admins once per booking and reason.
+    const PAYOUT_RETRY_BATCH = 5;
+    const PAYOUT_RETRY_QUIET_HOURS = 6;
+    const { data: completedCandidates, error: completedCandidatesError } = await supabase
+      .from("bookings")
+      .select("id, cars(plate_number, car_models(name, car_brands(name))), payments(payment_type, status)")
+      .eq("status", "completed")
+      .eq("owner_completed", true)
+      // Clear of the completion request's own payout attempt.
+      .lte("updated_at", new Date(Date.now() - 30 * 60_000).toISOString())
+      .order("updated_at", { ascending: false })
+      .limit(200);
+    if (completedCandidatesError) throw completedCandidatesError;
+
+    const neverPaid = ((completedCandidates ?? []) as unknown as Array<{
+      id: string;
+      cars: RefundableBooking["cars"];
+      payments: Array<{ payment_type: string; status: string }> | null;
+    }>).filter((booking) => !(booking.payments ?? []).some((payment) => payment.payment_type === "payout"));
+    const neverPaidIds = neverPaid.map((booking) => booking.id);
+    const { data: recentPayoutSkips } = neverPaidIds.length
+      ? await supabase
+          .from("audit_log")
+          .select("entity_id")
+          .eq("action", "payout_retry_skipped")
+          .in("entity_id", neverPaidIds)
+          .gte("created_at", new Date(Date.now() - PAYOUT_RETRY_QUIET_HOURS * 3_600_000).toISOString())
+      : { data: [] as { entity_id: string }[] };
+    const recentlySkipped = new Set((recentPayoutSkips ?? []).map((row) => row.entity_id));
+
+    let payoutRetried = 0;
+    let payoutRetrySkipped = 0;
+    for (const unpaid of neverPaid.filter((booking) => !recentlySkipped.has(booking.id)).slice(0, PAYOUT_RETRY_BATCH)) {
+      try {
+        await settleCompletedBookingCase(supabase, unpaid.id);
+        const retryOutcome = await processAutomaticPayoutForBooking({
+          supabase,
+          bookingId: unpaid.id,
+          initiatedByUserId: null,
+          baseOrigin,
+        });
+        if (retryOutcome.state !== "skipped") {
+          payoutRetried += 1;
+          continue;
+        }
+
+        const { count: sameReasonBefore } = await supabase
+          .from("audit_log")
+          .select("id", { count: "exact", head: true })
+          .eq("action", "payout_retry_skipped")
+          .eq("entity_id", unpaid.id)
+          .eq("details->>reason", retryOutcome.reason);
+        await supabase.from("audit_log").insert({
+          user_id: null,
+          action: "payout_retry_skipped",
+          entity_type: "booking",
+          entity_id: unpaid.id,
+          details: { automated: true, reason: retryOutcome.reason },
+        });
+        if (!sameReasonBefore) {
+          await sendAdminAlertEmail(supabase, {
+            subject: "A completed trip's payout is waiting",
+            message: `The lister payout for ${getVehicleLabel({ id: unpaid.id, cars: unpaid.cars })} has not gone out: ${retryOutcome.reason} SafeDrive retries it every ${PAYOUT_RETRY_QUIET_HOURS} hours; fix the cause, or release it from Financial Reviews -> Lister payouts.`,
+            link: "/admin/financial-reviews?view=payouts",
+            baseOrigin,
+            eventKey: `payout-retry-skipped:${unpaid.id}:${retryOutcome.reason.slice(0, 60)}`,
+          }).catch(() => undefined);
+        }
+        payoutRetrySkipped += 1;
+      } catch (error) {
+        console.error("Payout retry failed", unpaid.id, error);
+      }
+    }
+
     // --- Extension response deadline: the lister never approved or rejected
     // a pending extension request within its response window
     // (booking_extensions.response_deadline, stamped at request time in
@@ -1424,6 +2138,13 @@ export default async function handler(req: Request) {
       handoverAutoActivated,
       handoverStallFlagged,
       returnNoShowReminderSent,
+      mutualNoShowNotified,
+      mutualNoShowClosed,
+      stalledPickupNotified,
+      stalledPickupClosed,
+      heldBookingsCancelled,
+      payoutRetried,
+      payoutRetrySkipped,
       returnAutoCompleted,
       unreturnedPayoutReleased,
       extensionRequestExpired,

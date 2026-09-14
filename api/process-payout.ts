@@ -84,7 +84,7 @@ export default async function handler(req: Request) {
     // invocation (or the caller re-running) drains the rest.
     const { data: bookings, error: bookingsError } = await supabase
       .from("bookings")
-      .select("id")
+      .select("id, payments(payment_type, status)")
       .eq("status", "completed")
       .eq("owner_completed", true)
       // renter_completed is deliberately not required - see the matching
@@ -92,12 +92,29 @@ export default async function handler(req: Request) {
       // the admin's manual "process payouts" batch skipped every booking
       // too, so there was no way to release a payout at all.
       .order("updated_at", { ascending: false })
-      .limit(10);
+      .limit(200);
 
     if (bookingsError) throw bookingsError;
 
+    // The batch is still ten per run, but ten that are actually unpaid: taking
+    // the ten most recent completed trips - mostly paid already - meant an older
+    // unpaid one was never reached once there were more than ten.
+    const unpaidBookings = ((bookings ?? []) as Array<{
+      id: string;
+      payments: Array<{ payment_type: string; status: string }> | null;
+    }>)
+      .filter(
+        (booking) =>
+          !(booking.payments ?? []).some(
+            (payment) =>
+              payment.payment_type === "payout" &&
+              ["pending", "completed"].includes(payment.status),
+          ),
+      )
+      .slice(0, 10);
+
     const results = [];
-    for (const booking of bookings ?? []) {
+    for (const booking of unpaidBookings) {
       results.push(
         await processAutomaticPayoutForBooking({
           supabase,

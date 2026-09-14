@@ -13918,4 +13918,259 @@ commit;
 --   where status = 'published' and document_key in ('terms_of_service', 'platform_agreement');
 --   (expect version 2 of both, with the matching column true)
 
+-- ============================================================================
+-- CHAPTER 92 - A pickup nobody checks in for is closed, not left hanging
+-- Apply this chapter only, staging first. Adds one setting, one booking column
+-- and a third cancellation role, and republishes Terms 6.4 as a new version.
+-- ============================================================================
+begin;
+
+-- Found while checking the booking flow: a paid booking where NEITHER side
+-- checked in at pickup had no way to end. Every no-show report needs the
+-- reporter's own check-in, and the scheduled sweeps only handled a handover
+-- where both had arrived, or a trip already under way. So the booking stayed
+-- fully_paid for good - the renter's money held, the lister never paid, and
+-- the car's calendar blocked for the whole rental (30 days, at most).
+--
+-- Now (api/expire-booking-deadlines.ts):
+--   pickup + no_show_grace_minutes   both sides are warned once
+--                                    (bookings.pickup_no_show_notified_at)
+--   pickup + mutual_no_show_close_hours (default 6, a live setting)
+--                                    the booking is cancelled, the renter's
+--                                    FULL refund goes to super-admin review,
+--                                    the dates are free, and the missed pickup
+--                                    is recorded against both sides
+-- Full refund because the car was never handed over and there is no check-in
+-- to say whose fault that was; an admin who has evidence adjusts it in review.
+-- A check-in at any moment before the close still wins.
+
+alter table public.platform_settings
+  add column if not exists mutual_no_show_close_hours integer not null default 6;
+alter table public.platform_settings
+  drop constraint if exists platform_settings_mutual_no_show_close_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_mutual_no_show_close_hours_check
+  check (mutual_no_show_close_hours >= 1 and mutual_no_show_close_hours <= 72);
+
+alter table public.bookings
+  add column if not exists pickup_no_show_notified_at timestamptz;
+
+-- One cancellation row per booking, so a missed pickup that is both sides'
+-- is its own role rather than two rows. The original check was declared
+-- inline in CHAPTER 27, so it is found by what it checks, not by a name.
+do $cancellation_roles$
+declare
+  existing record;
+begin
+  for existing in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.booking_cancellations'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%cancelled_by_role%'
+  loop
+    execute format('alter table public.booking_cancellations drop constraint %I', existing.conname);
+  end loop;
+end;
+$cancellation_roles$;
+alter table public.booking_cancellations
+  add constraint booking_cancellations_cancelled_by_role_check
+  check (cancelled_by_role in ('renter', 'lister', 'both'));
+
+-- Reliability RPCs, verbatim from CHAPTER 31 except that a 'both' row counts
+-- for each side. A missed pickup is always late, so it lands in the renter's
+-- was_late count as well.
+create or replace function public.get_lister_reliability(p_lister_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with completed as (
+    select count(*)::int as n
+    from public.bookings b
+    where b.owner_id = p_lister_id
+      and b.status = 'completed'
+      and b.end_date >= (now() - interval '365 days')::date
+  ),
+  cancels as (
+    select
+      count(*)::int as n,
+      count(*) filter (where c.was_late)::int as late_n
+    from public.booking_cancellations c
+    where c.lister_id = p_lister_id
+      and c.cancelled_by_role in ('lister', 'both')
+      and not coalesce(c.strike_waived, false)
+      and c.cancelled_at >= now() - interval '365 days'
+  )
+  select jsonb_build_object(
+    'completed_trips', (select n from completed),
+    'cancellations', (select n from cancels),
+    'late_cancellations', (select late_n from cancels),
+    'total', (select n from completed) + (select n from cancels),
+    'has_enough_history', ((select n from completed) + (select n from cancels)) >= 3,
+    'cancellation_rate',
+      case
+        when ((select n from completed) + (select n from cancels)) >= 3
+        then round(
+          (select n from cancels)::numeric
+          / nullif((select n from completed) + (select n from cancels), 0) * 100,
+          0
+        )
+        else null
+      end
+  );
+$$;
+grant execute on function public.get_lister_reliability(uuid) to anon, authenticated;
+
+create or replace function public.get_renter_reliability(p_renter_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with completed as (
+    select count(*)::int as n
+    from public.bookings b
+    where b.renter_id = p_renter_id
+      and b.status = 'completed'
+      and b.end_date >= (now() - interval '365 days')::date
+  ),
+  cancels as (
+    select count(*)::int as n
+    from public.booking_cancellations c
+    where c.renter_id = p_renter_id
+      and c.cancelled_by_role in ('renter', 'both')
+      and c.was_late
+      and not coalesce(c.strike_waived, false)
+      and c.cancelled_at >= now() - interval '365 days'
+  )
+  select jsonb_build_object(
+    'completed_trips', (select n from completed),
+    'cancellations', (select n from cancels),
+    'total', (select n from completed) + (select n from cancels),
+    'has_enough_history', ((select n from completed) + (select n from cancels)) >= 3,
+    'cancellation_rate',
+      case
+        when ((select n from completed) + (select n from cancels)) >= 3
+        then round(
+          (select n from cancels)::numeric
+          / nullif((select n from completed) + (select n from cancels), 0) * 100,
+          0
+        )
+        else null
+      end
+  );
+$$;
+grant execute on function public.get_renter_reliability(uuid) to authenticated;
+
+-- The consensus-vote whitelist, reproduced verbatim from CHAPTER 91 with the
+-- new key.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $validate$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'short_notice_free_hours' then
+      if v < 0 or v > 24 or v <> floor(v) then raise exception 'short_notice_free_hours must be a whole number 0-24'; end if;
+    elsif k in ('late_cancel_fee_days', 'no_show_fee_days') then
+      if v < 0 or v > 30 then raise exception '% must be 0-30 days', k; end if;
+    elsif k in ('short_trip_late_cancel_fee_days', 'short_trip_no_show_fee_days') then
+      if v < 0 or v > 2 then raise exception '% must be 0-2 days', k; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    elsif k = 'dormant_account_days' then
+      if v < 90 or v > 3650 or v <> floor(v) then raise exception 'dormant_account_days must be a whole number 90-3650'; end if;
+    elsif k = 'no_show_grace_minutes' then
+      if v < 15 or v > 180 or v <> floor(v) then raise exception 'no_show_grace_minutes must be a whole number 15-180'; end if;
+    elsif k = 'mutual_no_show_close_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'mutual_no_show_close_hours must be a whole number 1-72'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$validate$;
+
+-- Terms 6.4 gains the rule, replaced only where it still reads as CHAPTER 91
+-- published it, as a new version the same way. Running this again changes
+-- nothing.
+do $chapter92_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published' and document_key = 'terms_of_service'
+  loop
+    next_html := replace(doc.content_html,
+      $o64$<p><strong>6.4 No-Show and Disputes:</strong> After the 30-minute pickup grace period, either participant may open a booking-linked no-show support report. A Renter who does not appear, or who cancels after the pickup time has passed, is charged a no-show fee counted the same way: by default two days for a trip longer than two days, and three quarters of a day for a trip of two days or less, never more than was paid. Admin review may use arrival timestamps, optional consented location/photos, messages, payment records, and other lawful evidence before any refund or compensation is released.</p>$o64$,
+      $n64$<p><strong>6.4 No-Show and Disputes:</strong> After the 30-minute pickup grace period, either participant may open a booking-linked no-show support report. A Renter who does not appear, or who cancels after the pickup time has passed, is charged a no-show fee counted the same way: by default two days for a trip longer than two days, and three quarters of a day for a trip of two days or less, never more than was paid. If neither participant checks in within a set number of hours after the pickup time (default 6), both are warned first, then the booking is cancelled automatically, the Renter is refunded in full after SafeDrive support review, and the missed pickup is recorded against both participants. Admin review may use arrival timestamps, optional consented location/photos, messages, payment records, and other lawful evidence before any refund or compensation is released.</p>$n64$);
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 92'));
+    end if;
+  end loop;
+end;
+$chapter92_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select mutual_no_show_close_hours from public.platform_settings where id = 'default';
+--   (expect 6)
+-- select version_number,
+--        position('If neither participant checks in' in content_html) > 0 as has_rule
+--   from public.legal_document_versions
+--   where status = 'published' and document_key = 'terms_of_service';
+--   (expect version 3, has_rule true)
+-- select pg_get_constraintdef(oid) from pg_constraint
+--   where conname = 'booking_cancellations_cancelled_by_role_check';
+--   (expect the check to list renter, lister, both)
+
 -- End of SafeDrive chaptered database master.

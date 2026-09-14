@@ -1006,7 +1006,8 @@ export default async function handler(req: Request) {
           .from("booking_cancellations")
           .select("booking_id", { count: "exact", head: true })
           .eq("lister_id", bookingRecord.owner_id)
-          .eq("cancelled_by_role", "lister")
+          // A pickup nobody showed up for counts against the lister too (CHAPTER 92).
+          .in("cancelled_by_role", ["lister", "both"])
           .eq("was_late", true)
           .eq("had_captured_payment", true)
           .eq("strike_waived", false)

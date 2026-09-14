@@ -93,7 +93,7 @@ export const helpArticles: HelpArticle[] = [
     title: "If the other side does not show up",
     question: "What should I do if I arrive but the other person does not?",
     answer:
-      "Record your own arrival first. SafeDrive uses the server-timestamped arrival check-in plus the pickup grace window as its main evidence base, together with any optional photo you submit. Your booking screen shows exactly how long that wait is and the time it ends. After the grace window, report the no-show from the booking flow so support can review the dispute quickly.",
+      "Record your own arrival first. SafeDrive uses the server-timestamped arrival check-in plus the pickup grace window as its main evidence base, together with any optional photo you submit. Your booking screen shows exactly how long that wait is and the time it ends. After the grace window, report the no-show from the booking flow so support can review the dispute quickly. If neither side checks in at all, both are warned, and a few hours after the pickup time (default 6) SafeDrive cancels the booking, refunds the renter in full after support review, frees the dates, and records the missed pickup on both accounts. The same clock settles a pickup where only one side checks in and nobody reports it, or both check in but the car is never handed over, the way the report would have: a missing lister or a car not handed over refunds the renter in full, and a missing renter is a no-show.",
     relatedTags: ["no-show", "arrival", "pickup", "dispute"],
     suggestedTicketTag: "no_show",
   },

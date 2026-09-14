@@ -3,6 +3,83 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - No trip, payout or hold is left waiting forever
+
+A gap hunt after CHAPTER 92, against the current code and the live data. No
+database change.
+
+**Lister payouts.** Three completed trips (PHP 4,679.10) were never paid, and
+the same would happen to any future trip:
+
+1. **Admin Payouts hid them.** The page listed only trips both sides had
+   confirmed, while the server - and the batch release - have long paid on the
+   lister's confirmation alone. A trip the renter never tapped could not be
+   seen or released. The filter is removed (`AdminPayoutsPage.tsx`).
+2. **A skipped payout was never retried.** The payout runs once, at
+   completion; a skip wrote nothing and alerted no one. The deadline sweep now
+   retries any completed trip with no payout record - five per run, each at
+   most every 6 hours - and emails the admins once per booking and reason.
+3. **Completing a trip never closed its incident ticket**, so the open ticket
+   blocked the payout. `settleCompletedBookingCase` (`server/bookingCompletion.ts`)
+   now closes it before every completion payout and every retry, and resolves a
+   lister-no-show-at-return case the way the return auto-completion already
+   did. An open non-return case is still only closed by the lister or support.
+4. **"Process payouts" took the ten newest completed trips**, mostly paid, so an
+   older unpaid one was never reached. It now takes ten unpaid ones.
+5. **The earned-rental release during an open case never ran**: the case's own
+   incident ticket blocked it. That ticket no longer counts for a running trip;
+   any other open case still does (`server/payoutAutomation.ts`).
+
+**Pickups that never became a trip** (`getStalledPickup`, both policy copies),
+on CHAPTER 92's clock - warned once after the grace window, settled at the
+pickup time plus the close hours, never within an hour of the warning:
+
+- only the renter checked in, no report -> as a no-car report: full refund,
+  counted on the lister (waived when a previous renter's overstay is the cause);
+- only the lister checked in, no report -> as a renter no-show: the no-show fee;
+- both checked in, the car never handed over -> full refund, counted on the
+  lister.
+
+**Vehicle-document holds.** A held booking is skipped by every sweep and the
+renter cannot cancel it, so a hold that never cleared kept the booking and any
+payment forever. Once the pickup time and grace window pass with the hold still
+on, it is cancelled and anything paid is refunded in full; the lister's
+cancellation is recorded with the strike waived. The booking notice says so.
+
+Every refund above goes to super-admin review, as with the other automatic
+cancellations. Pinned in `scripts/cancellation-policy.test.mjs`.
+
+## 2026-09-14 - A pickup nobody checks in for is closed, not left hanging
+
+Asked: what happens when neither the renter nor the lister shows up? Nothing
+did. Every no-show report needs the reporter's own check-in, and the scheduled
+sweeps only handled a handover where both had arrived or a trip under way, so
+a paid booking nobody checked in for stayed `fully_paid` for good - the
+renter's money held, the lister never paid, and the car's calendar blocked for
+the whole rental.
+
+**Now** (`api/expire-booking-deadlines.ts`, every ~15 minutes):
+
+1. After the no-show grace window (30 min), both sides get one warning
+   (notification + email, and a notice on both booking pages) with the time
+   the booking will close.
+2. At the pickup time plus **Close a pickup nobody checked in for** (new
+   Platform Setting, default 6 hours, 1-72, applies live) the booking is
+   cancelled: the dates are free at once, the renter's **full** refund is
+   queued for super-admin review, and the missed pickup is recorded against
+   **both** sides - a new `both` cancellation role that counts in the lister's
+   and the renter's reliability and in the lister's auto-pause strikes.
+
+Full refund because the car was never handed over and there is no check-in to
+say whose fault that was; an admin with evidence adjusts it in review. A
+check-in at any moment before the close still wins. The shared times come from
+`getMutualNoShowTimes` (`server/cancellationPolicy.ts` and its browser copy).
+
+**SQL:** CHAPTER 92 - the setting, `bookings.pickup_no_show_notified_at`, the
+`both` role and the two reliability functions, the vote whitelist, and Terms
+6.4 republished as version 3. Paste it **before** deploying. Pinned in
+`scripts/cancellation-policy.test.mjs`.
+
 ## 2026-09-14 - A lister can still cancel at the pickup, up to the handover
 
 Found while confirming the booking flow: the Cancel button disappeared for

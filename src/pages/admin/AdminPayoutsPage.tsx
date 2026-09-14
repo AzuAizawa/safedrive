@@ -347,7 +347,10 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
         )
         .eq("status", "completed")
         .eq("owner_completed", true)
-        .eq("renter_completed", true)
+        // renter_completed is not required, matching server/payoutAutomation.ts
+        // and api/process-payout.ts: the lister's confirmation completes a trip
+        // on its own. Requiring the renter's tap here hid every such trip, so
+        // an unpaid one could not be seen or released.
         .order("updated_at", { ascending: false });
 
       if (error) throw error;

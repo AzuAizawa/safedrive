@@ -738,12 +738,21 @@ export const processAutomaticPayoutForBooking = async ({
   // same filter in src/lib/adminWorkQueue.ts): the three conversation
   // creators always set it, and real support/incident/refund tickets never
   // do - so a dispute still blocks the payout exactly as before.
-  const { count: blockingTicketCount } = await supabase
+  let blockingTicketQuery = supabase
     .from("support_tickets")
     .select("id", { count: "exact", head: true })
     .eq("booking_id", bookingId)
     .is("participant_user_id", null)
     .in("status", ["open", "in_progress"]);
+  // A running trip only reaches this line through payoutReleaseState's
+  // earned-rental release during an open case. That case's own incident
+  // ticket IS the open case the release was designed for, so it cannot also be
+  // what blocks it - counting it meant the release never happened at all.
+  // Any other open support case still blocks.
+  if (payoutBooking.status === "active") {
+    blockingTicketQuery = blockingTicketQuery.neq("tag", "booking_incident");
+  }
+  const { count: blockingTicketCount } = await blockingTicketQuery;
 
   if ((blockingTicketCount ?? 0) > 0) {
     return {

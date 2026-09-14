@@ -83,6 +83,7 @@ import {
 } from "@/lib/ratings";
 import {
   DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+  DEFAULT_MUTUAL_NO_SHOW_CLOSE_HOURS,
   DEFAULT_NO_SHOW_GRACE_MINUTES,
   fetchPlatformPolicyTimings,
 } from "@/lib/platformSettings";
@@ -90,6 +91,7 @@ import {
   describeRenterCharge,
   formatPeso,
   getCancellationOutcome,
+  getMutualNoShowTimes,
   pickupBlocksCancellation,
 } from "@/lib/cancellationPolicy";
 
@@ -289,6 +291,9 @@ export default function ListerBookingsPage() {
   const [graceMinutes, setGraceMinutes] = useState(
     DEFAULT_NO_SHOW_GRACE_MINUTES,
   );
+  const [mutualNoShowCloseHours, setMutualNoShowCloseHours] = useState(
+    DEFAULT_MUTUAL_NO_SHOW_CLOSE_HOURS,
+  );
   // What a renter no-show costs, in the words the lister reads before
   // cancelling - the same fee api/booking-incident-action.ts will charge.
   // renter_no_show only accepts a fully paid booking, so what was paid is the
@@ -392,6 +397,7 @@ export default function ListerBookingsPage() {
       if (active) {
         setArrivalLeadHours(timings.arrivalCheckinLeadHours);
         setGraceMinutes(timings.noShowGraceMinutes);
+        setMutualNoShowCloseHours(timings.mutualNoShowCloseHours);
       }
     });
     return () => {
@@ -2801,6 +2807,14 @@ export default function ListerBookingsPage() {
               graceMinutes,
               new Date(clockNow),
             );
+            // Nobody has checked in past the grace window (CHAPTER 92): say when
+            // SafeDrive closes the booking, the same time the server uses.
+            const unattendedPickup =
+              b.status === "fully_paid" && !b.renter_arrived_at && !b.lister_arrived_at
+                ? getMutualNoShowTimes(b, graceMinutes, mutualNoShowCloseHours)
+                : null;
+            const showUnattendedNotice =
+              unattendedPickup !== null && clockNow >= unattendedPickup.noticeAtMs;
             const canReportNonReturnNow = canReportNonReturn(
               b,
               graceMinutes,
@@ -3494,6 +3508,20 @@ export default function ListerBookingsPage() {
                           </div>
                         </div>
                       )}
+
+                      {showUnattendedNotice && unattendedPickup ? (
+                        <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+                          <p className="font-semibold text-amber-900 dark:text-amber-100">
+                            Nobody has checked in yet.
+                          </p>
+                          <p className="mt-1">
+                            If neither you nor the renter checks in by{" "}
+                            {format(new Date(unattendedPickup.closeAtMs), "MMM d, h:mm a")}, SafeDrive
+                            cancels this booking, refunds the renter in full and frees the dates. A
+                            missed pickup is recorded on both accounts.
+                          </p>
+                        </div>
+                      ) : null}
 
                       {noShowState ? (
                         <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">

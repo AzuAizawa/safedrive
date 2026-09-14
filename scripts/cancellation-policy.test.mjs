@@ -341,6 +341,134 @@ test("a lister can cancel at the meetup until the handover; a renter cannot once
   }
 });
 
+const HEADING_92 = "-- CHAPTER 92 - A pickup nobody checks in for is closed, not left hanging";
+
+const chapter92Text = (master) => {
+  const body = master.split(HEADING_92)[1]?.split("-- Read-only verification")[0];
+  assert.ok(body, "CHAPTER 92 exists in the master file");
+  return "-- chapter\n" + body.slice(body.indexOf("\n"));
+};
+
+// CHAPTER 92 sits on top of CHAPTER 91, so both are applied, in order.
+async function fixture92() {
+  const db = await fixture();
+  await db.exec(`
+    create role anon; create role authenticated;
+    alter table public.platform_settings add column no_show_grace_minutes integer not null default 30;
+    alter table public.bookings
+      add column owner_id uuid, add column renter_id uuid,
+      add column status text, add column end_date date;
+    create table public.booking_cancellations(
+      booking_id uuid primary key,
+      cancelled_by_role text not null check (cancelled_by_role in ('renter', 'lister')),
+      lister_id uuid, renter_id uuid,
+      was_late boolean not null default false,
+      strike_waived boolean not null default false,
+      cancelled_at timestamptz not null default now());
+  `);
+  await db.exec(chapter92Text(await loadMaster()));
+  return db;
+}
+
+test("CHAPTER 92: the close-hours setting, its bounds, and the vote whitelist", async () => {
+  const db = await fixture92();
+  const { rows } = await db.query("select mutual_no_show_close_hours as h from public.platform_settings");
+  assert.equal(Number(rows[0].h), 6);
+  await assert.rejects(db.exec("update public.platform_settings set mutual_no_show_close_hours = 0"), /_check/);
+  await assert.rejects(db.exec("update public.platform_settings set mutual_no_show_close_hours = 73"), /_check/);
+  const validate = (changes) =>
+    db.query("select public.validate_platform_setting_change($1::jsonb)", [JSON.stringify(changes)]);
+  await validate({ mutual_no_show_close_hours: 12, late_cancel_fee_days: 1 });
+  await assert.rejects(validate({ mutual_no_show_close_hours: 2.5 }), /whole number 1-72/);
+});
+
+test("CHAPTER 92: a missed pickup is one 'both' row, and it counts for each side", async () => {
+  const db = await fixture92();
+  const LISTER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const RENTER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  await db.query(
+    "insert into public.booking_cancellations(booking_id, cancelled_by_role, lister_id, renter_id, was_late) values ($1, 'both', $2, $3, true)",
+    ["cccccccc-cccc-4ccc-8ccc-cccccccccccc", LISTER, RENTER],
+  );
+  await assert.rejects(
+    db.query(
+      "insert into public.booking_cancellations(booking_id, cancelled_by_role) values ('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'system')",
+    ),
+    /cancelled_by_role_check/,
+  );
+  const lister = (await db.query("select public.get_lister_reliability($1) as r", [LISTER])).rows[0].r;
+  const renter = (await db.query("select public.get_renter_reliability($1) as r", [RENTER])).rows[0].r;
+  assert.equal(lister.cancellations, 1, "counts against the lister");
+  assert.equal(lister.late_cancellations, 1);
+  assert.equal(renter.cancellations, 1, "and against the renter");
+});
+
+test("CHAPTER 92: Terms 6.4 is republished with the rule, once", async () => {
+  const db = await fixture92();
+  const published = async () =>
+    (
+      await db.query(
+        "select version_number, content_html from public.legal_document_versions where status = 'published' and document_key = 'terms_of_service'",
+      )
+    ).rows[0];
+  const terms = await published();
+  assert.equal(terms.version_number, 3);
+  assert.match(terms.content_html, /If neither participant checks in within a set number of hours/);
+  assert.match(terms.content_html, /6\.2 Late Renter Cancellation Fee/, "CHAPTER 91's clauses are kept");
+  const agreement = await db.query(
+    "select version_number from public.legal_document_versions where status = 'published' and document_key = 'platform_agreement'",
+  );
+  assert.equal(agreement.rows[0].version_number, 2, "the agreement is untouched");
+  await db.exec(chapter92Text(await loadMaster()));
+  assert.equal((await published()).version_number, 3, "a second run changes nothing");
+});
+
+test("a pickup nobody checks in for is warned after the grace window and closed hours after pickup", () => {
+  const booking = { start_date: "2030-10-10", pickup_time: "10:00" };
+  for (const policy of [server, browser]) {
+    const times = policy.getMutualNoShowTimes(booking, 30, 6);
+    assert.equal(times.pickupMs, PICKUP);
+    assert.equal(times.noticeAtMs, PICKUP + 30 * 60_000);
+    assert.equal(times.closeAtMs, PICKUP + 6 * HOUR);
+    const tight = policy.getMutualNoShowTimes(booking, 180, 1);
+    assert.equal(tight.closeAtMs, tight.noticeAtMs, "never closed before the warning is due");
+    assert.equal(policy.getMutualNoShowTimes({ start_date: "", pickup_time: null }, 30, 6), null);
+  }
+});
+
+test("a pickup that started but never became a trip is warned, then settled", () => {
+  const at = (hours) => new Date(PICKUP + hours * HOUR).toISOString();
+  const base = { start_date: "2030-10-10", pickup_time: "10:00" };
+  for (const policy of [server, browser]) {
+    assert.equal(policy.getStalledPickup(base, 30, 6, null), null, "nobody arrived is CHAPTER 92's case");
+
+    const renterOnly = policy.getStalledPickup({ ...base, renter_arrived_at: at(-0.5) }, 30, 6, null);
+    assert.equal(renterOnly.situation, "renter_only");
+    assert.equal(renterOnly.noticeAtMs, PICKUP + 30 * 60_000);
+    assert.equal(renterOnly.closeAtMs, PICKUP + 6 * HOUR);
+
+    const warnedLate = policy.getStalledPickup({ ...base, lister_arrived_at: at(0) }, 30, 6, PICKUP + 5.5 * HOUR);
+    assert.equal(warnedLate.situation, "lister_only");
+    assert.equal(warnedLate.closeAtMs, PICKUP + 6.5 * HOUR, "never closed within an hour of its warning");
+
+    const bothHere = policy.getStalledPickup(
+      { ...base, renter_arrived_at: at(1), lister_arrived_at: at(3) },
+      30,
+      6,
+      null,
+    );
+    assert.equal(bothHere.situation, "no_handover");
+    assert.equal(bothHere.noticeAtMs, PICKUP + 5 * HOUR, "two hours after both are there");
+    assert.equal(bothHere.closeAtMs, PICKUP + 6 * HOUR);
+
+    assert.equal(
+      policy.getStalledPickup({ ...base, renter_arrived_at: at(0), lister_arrived_at: at(0), lister_handover_confirmed_at: at(1) }, 30, 6, null),
+      null,
+      "a handed-over car is not a stalled pickup",
+    );
+  }
+});
+
 test("the server plan reads what was paid, and when, off the booking's own payments", () => {
   const booking = {
     id: "booking",

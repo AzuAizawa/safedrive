@@ -703,6 +703,7 @@ export interface Database {
           short_trip_late_cancel_fee_days_snapshot: number | null;
           no_show_fee_days_snapshot: number | null;
           short_trip_no_show_fee_days_snapshot: number | null;
+          pickup_no_show_notified_at: string | null;
           payment_processing_fee: number;
           created_at: string;
           updated_at: string;
@@ -768,6 +769,7 @@ export interface Database {
           short_trip_late_cancel_fee_days_snapshot?: number | null;
           no_show_fee_days_snapshot?: number | null;
           short_trip_no_show_fee_days_snapshot?: number | null;
+          pickup_no_show_notified_at?: string | null;
           payment_processing_fee?: number;
           created_at?: string;
           updated_at?: string;
@@ -833,6 +835,7 @@ export interface Database {
           short_trip_late_cancel_fee_days_snapshot?: number | null;
           no_show_fee_days_snapshot?: number | null;
           short_trip_no_show_fee_days_snapshot?: number | null;
+          pickup_no_show_notified_at?: string | null;
           payment_processing_fee?: number;
           created_at?: string;
           updated_at?: string;
@@ -1481,6 +1484,7 @@ export interface Database {
           balance_reminder_hours_before: number;
           dormant_account_days: number;
           no_show_grace_minutes: number;
+          mutual_no_show_close_hours: number;
           contact_email: string;
           user_verification_eta_message: string;
           vehicle_verification_eta_message: string;
@@ -1507,6 +1511,7 @@ export interface Database {
           balance_reminder_hours_before?: number;
           dormant_account_days?: number;
           no_show_grace_minutes?: number;
+          mutual_no_show_close_hours?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;
@@ -1533,6 +1538,7 @@ export interface Database {
           balance_reminder_hours_before?: number;
           dormant_account_days?: number;
           no_show_grace_minutes?: number;
+          mutual_no_show_close_hours?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;

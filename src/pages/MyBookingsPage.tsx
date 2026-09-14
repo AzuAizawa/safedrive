@@ -45,6 +45,7 @@ import { Input } from "@/components/ui/input";
 import { downloadReceiptPdf, RECEIPT_NOTICES } from "@/lib/receiptPdf";
 import {
   DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
+  DEFAULT_MUTUAL_NO_SHOW_CLOSE_HOURS,
   DEFAULT_NO_SHOW_GRACE_MINUTES,
   fetchPlatformPolicyTimings,
 } from "@/lib/platformSettings";
@@ -52,6 +53,7 @@ import {
   describeRenterCharge,
   formatPeso,
   getCancellationOutcome,
+  getMutualNoShowTimes,
   pickupBlocksCancellation,
 } from "@/lib/cancellationPolicy";
 import {
@@ -276,6 +278,9 @@ export default function MyBookingsPage() {
   const [graceMinutes, setGraceMinutes] = useState(
     DEFAULT_NO_SHOW_GRACE_MINUTES,
   );
+  const [mutualNoShowCloseHours, setMutualNoShowCloseHours] = useState(
+    DEFAULT_MUTUAL_NO_SHOW_CLOSE_HOURS,
+  );
   const [payingFor, setPayingFor] = useState<string | null>(null);
   const [selectedOwner, setSelectedOwner] = useState<BookingRow | null>(null);
   const [ratingBooking, setRatingBooking] = useState<BookingRow | null>(null);
@@ -380,6 +385,7 @@ export default function MyBookingsPage() {
       if (active) {
         setArrivalLeadHours(timings.arrivalCheckinLeadHours);
         setGraceMinutes(timings.noShowGraceMinutes);
+        setMutualNoShowCloseHours(timings.mutualNoShowCloseHours);
       }
     });
     return () => {
@@ -2075,6 +2081,16 @@ export default function MyBookingsPage() {
               graceMinutes,
               new Date(clockNow),
             );
+            // Nobody has checked in past the grace window (CHAPTER 92): say when
+            // SafeDrive closes the booking, the same time the server uses.
+            const unattendedPickup =
+              booking.status === "fully_paid" &&
+              !booking.renter_arrived_at &&
+              !booking.lister_arrived_at
+                ? getMutualNoShowTimes(booking, graceMinutes, mutualNoShowCloseHours)
+                : null;
+            const showUnattendedNotice =
+              unattendedPickup !== null && clockNow >= unattendedPickup.noticeAtMs;
             const returnNoShowState = getReturnNoShowWindowState(
               booking,
               "renter",
@@ -2813,6 +2829,20 @@ export default function MyBookingsPage() {
                             </div>
                           );
                         })()}
+
+                      {showUnattendedNotice && unattendedPickup ? (
+                        <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+                          <p className="font-semibold text-amber-900 dark:text-amber-100">
+                            Nobody has checked in yet.
+                          </p>
+                          <p className="mt-1">
+                            If neither you nor the lister checks in by{" "}
+                            {format(new Date(unattendedPickup.closeAtMs), "MMM d, h:mm a")}, SafeDrive
+                            cancels this booking and refunds you in full. A missed pickup is
+                            recorded on both accounts.
+                          </p>
+                        </div>
+                      ) : null}
 
                       {noShowState ? (
                         <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">

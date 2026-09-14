@@ -42,6 +42,18 @@ export async function runBookingCompletionSideEffects(
     eventKey: `lister-trip-completed:${booking.id}`,
   });
 
+  // The completion itself settles the pickup/return case the booking carried,
+  // so its incident ticket is closed first - otherwise the payout below is
+  // refused with "Open booking support case found" and nothing ever retries.
+  try {
+    await settleCompletedBookingCase(supabase, booking.id);
+  } catch (settleError) {
+    console.error(
+      "Could not settle the booking case before payout:",
+      settleError instanceof Error ? settleError.message : settleError,
+    );
+  }
+
   try {
     await processAutomaticPayoutForBooking({
       supabase,
@@ -64,6 +76,67 @@ export async function runBookingCompletionSideEffects(
       eventKey: `payout-exception:${booking.id}`,
     }).catch(() => undefined);
   }
+}
+
+/**
+ * Close the incident ticket of a booking that has completed.
+ *
+ * booking_incident tickets are opened only by api/booking-incident-action.ts:
+ * no car / renter no-show at pickup (those bookings are cancelled, never
+ * completed), a non-return report, and a lister no-show at the return. A
+ * completed trip has settled the last two - resolving a non-return case is what
+ * completes it, and completing the trip is the return handover happening - but
+ * nothing closed the ticket, and an open ticket blocks the lister's payout.
+ *
+ * A non-return case still open is left alone: only the lister or support
+ * closes that one. A lister-no-show-at-return case is marked resolved here, the
+ * same way the return auto-completion in api/expire-booking-deadlines.ts
+ * already does. Returns how many tickets were closed.
+ */
+export async function settleCompletedBookingCase(
+  supabase: ServiceRoleSupabaseClient,
+  bookingId: string,
+): Promise<number> {
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("status, dispute_status, dispute_reason")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (bookingError) throw bookingError;
+  if (!booking || booking.status !== "completed") return 0;
+
+  if (booking.dispute_status === "open") {
+    if (booking.dispute_reason !== "lister_no_show_at_return") return 0;
+    const { error: resolveError } = await supabase
+      .from("bookings")
+      .update({ dispute_status: "resolved" })
+      .eq("id", bookingId)
+      .eq("status", "completed")
+      .eq("dispute_status", "open");
+    if (resolveError) throw resolveError;
+  }
+
+  const { data: closedTickets, error: closeError } = await supabase
+    .from("support_tickets")
+    .update({ status: "closed" })
+    .eq("booking_id", bookingId)
+    .eq("tag", "booking_incident")
+    .is("participant_user_id", null)
+    .in("status", ["open", "in_progress"])
+    .select("id");
+  if (closeError) throw closeError;
+
+  const closedIds = (closedTickets ?? []).map((ticket) => ticket.id as string);
+  if (closedIds.length) {
+    await supabase.from("audit_log").insert({
+      user_id: null,
+      action: "booking_incident_closed_on_completion",
+      entity_type: "booking",
+      entity_id: bookingId,
+      details: { ticket_ids: closedIds, automated: true },
+    });
+  }
+  return closedIds.length;
 }
 
 /* ---------------------------------------------------------------------------
