@@ -1,6 +1,10 @@
 import { createSupabaseAdmin } from "../server/payoutAutomation.js";
 import { sendRefundReceiptEmail } from "../server/email.js";
 import { postCompletedRefundToLedger } from "../server/ledger.js";
+import {
+  releaseCancellationCompensation,
+  type CompensationResult,
+} from "../server/cancellationCompensation.js";
 
 export const config = {
   runtime: "edge",
@@ -138,7 +142,25 @@ export default async function handler(req: Request) {
     }
 
     if (refundPayment.status === "completed") {
-      return jsonResponse({ error: "This refund is already completed." }, 409);
+      // The renter's half is done. If the lister's half was interrupted, this
+      // is the only place a super admin can reach it again, so try it here.
+      const retried = await releaseCancellationCompensation(supabase, {
+        bookingId: refundPayment.booking_id,
+        actorId: user.id,
+        baseOrigin: new URL(req.url).origin,
+      }).catch((error: unknown) => ({
+        state: "failed" as const,
+        reason: error instanceof Error ? error.message : "Compensation retry failed",
+      }));
+      if (retried.state === "completed" || retried.state === "pending") {
+        return jsonResponse({
+          success: true,
+          state: "already_completed",
+          paymentId: refundPayment.id,
+          compensation: retried,
+        });
+      }
+      return jsonResponse({ error: "This refund is already completed.", compensation: retried }, 409);
     }
 
     const providerRefundStillPending =
@@ -297,11 +319,37 @@ export default async function handler(req: Request) {
       },
     });
 
+    // One decision settles both sides of a short-notice cancellation: the
+    // renter's share above, and here whatever the ledger still holds as owed to
+    // the lister, with no commission because the trip never happened. It only
+    // acts on a cancelled booking with something left over, so a lister-side
+    // cancellation (full refund) or an early-return goodwill refund is left
+    // alone. A failure here does not undo the renter's refund - it is reported
+    // back, and repeating the release retries only this half.
+    let compensation: CompensationResult | { state: "failed"; reason: string };
+    try {
+      compensation = await releaseCancellationCompensation(supabase, {
+        bookingId: refundPayment.booking_id,
+        actorId: user.id,
+        baseOrigin: new URL(req.url).origin,
+      });
+    } catch (compensationError) {
+      console.error("Short-notice compensation was not released", compensationError);
+      compensation = {
+        state: "failed",
+        reason:
+          compensationError instanceof Error
+            ? compensationError.message
+            : "Short-notice compensation could not be released",
+      };
+    }
+
     return jsonResponse({
       success: true,
       state: "completed",
       paymentId: refundPayment.id,
       transactionId: referenceNumber,
+      compensation,
     });
   } catch (error) {
     return jsonResponse(

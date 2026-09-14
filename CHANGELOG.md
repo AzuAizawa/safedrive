@@ -3,6 +3,92 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - A cancelled renter's share goes back; the lister's share is finally paid
+
+Asked while reviewing a pending PHP 7,996 refund: *the car was used, so shouldn't
+this be a payout to the lister rather than a refund?*
+
+Two bookings had been read as one. The refund belonged to a Toyota Ativ booking
+the renter **cancelled 16 hours before pickup** — never picked up, never used.
+Policy (Terms 6.1/6.2, the Platform Agreement, the help center) gives a late
+canceller half back and keeps the other half as **short-notice compensation for
+the lister**. So the PHP 7,996 refund was right.
+
+The question still found a real defect. **The lister's half was never paid.**
+The refund plan computed `listerCompensation` in `booking-action.ts` and
+`server/cancellationRefundPlan.ts` and used it for exactly two things: a sentence
+in a notification and a field in an audit row. The only payout path
+(`processAutomaticPayoutForBooking`) releases money for a **completed** booking,
+and a cancelled one never completes. `mark-manual-refund` paid the renter and
+closed the ticket. The ledger confirmed it: after the refund, PHP 7,196.40 would
+have sat in the lister payable and PHP 799.60 in "platform fee deferred until
+completion" — owed, and unreachable, for good.
+
+**Commission.** None is taken from compensation. SafeDrive's commission is booked
+as deferred and recognised only when both parties complete a trip
+(`server/bookingCompletion.ts`); the Terms tie it to the rental price and never
+mention compensation. A cancelled booking has no trip, so the deferred fee is
+moved to the lister. The renter's refund was already free of commission — the
+ledger reversal is proportional.
+
+**One click.** Releasing a manual refund now settles both sides.
+`server/cancellationCompensation.ts` reads what the lister is owed straight off
+the booking's own ledger once the refund journal has posted — the lister payable
+plus the deferred fee — so the figure matches the books to the centavo whatever
+share was actually refunded, and the processing-fee recovery stays with SafeDrive.
+It posts the commission-waived move and a `payout:<txn>` journal, which is the key
+reconciliation expects on every completed payout, then notifies the lister.
+
+It only acts on a **cancelled** booking with something left over, so a lister-side
+cancellation (full refund) and an early-return goodwill refund are left alone. It
+cannot pay twice: the journals are idempotent on their keys and
+`payments_one_active_payout_per_booking` refuses a second payout. If it is
+interrupted, the renter's refund still stands, the admin is told, and releasing
+the same refund again retries only the lister's half. A booking with no ledger
+record is refused rather than guessed at — an unpaid lister is recoverable, an
+overpaid one is not.
+
+In demo mode the payout is recorded as completed, like every other payout here.
+With a live key there is no automatic transfer: the payout is recorded as
+pending with instructions to send it manually, which reconciliation will keep
+flagging until it is.
+
+The lister also gets a **receipt email** — in demo mode it is the proof of the
+payout, since no real transfer is sent, the same way every other demo payout here
+is evidenced. It is its own receipt rather than the ordinary payout receipt, which
+itemizes a payout as "base rental minus SafeDrive commission" and would have told
+the lister they were charged a commission on a trip that never happened. This one
+shows what the renter paid, what was refunded, a commission of PHP 0, and the
+compensation paid. A delivery failure is logged and never undoes the payout.
+
+Doing this exposed a wider gap: the ordinary **payout** and **refund** receipts
+never said they were demo either. In demo mode the lister was told "SafeDrive
+released your lister payout" and the renter "Your refund was completed ... your
+payment provider may take additional time to show it" - both reading as real
+money that never moved, while the in-app notifications for the same events did
+say demo. Both receipts now carry the same line as the compensation receipt,
+shown only when the reference is a `sandbox_` one, so a real payout or a manual
+GCash/Maya refund is unaffected. In that case the refund receipt also drops the
+provider-timing sentence, because there is no provider transfer to wait for.
+
+The refund review dialog now shows, before the click, roughly what the lister
+receives in the same release, and the result reports both halves.
+
+No migration.
+
+Files: `server/cancellationCompensation.ts` (new), `server/email.ts`, `api/mark-manual-refund.ts`,
+`src/pages/admin/AdminRefundReviewPage.tsx`,
+`scripts/cancellation-compensation.test.mjs` (new), `package.json`.
+
+Proved before shipping: `npm run check:cancellation-compensation` — the live case
+(renter PHP 7,996 back, lister PHP 7,996 owed, no commission), a full refund
+owing nothing, the processing fee staying with SafeDrive, an existing payout
+never paid twice, an empty ledger, and an over-reversed account never becoming
+a negative payout. `check:financial-logic` and `check:reconciliation-logic` still
+pass.
+
+---
+
 ## 2026-09-11 - Early return finally reads the clock
 
 Reported by a tester with a booking running Sep 10, 12:00 AM to Sep 11, 12:00 AM.

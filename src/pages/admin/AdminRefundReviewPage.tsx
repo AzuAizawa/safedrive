@@ -28,6 +28,7 @@ type RefundPayment = {
   created_at: string;
   bookings: {
     id: string;
+    status: string;
     start_date: string;
     end_date: string;
     renter: { full_name: string | null; email: string };
@@ -181,6 +182,10 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
     note: "",
   });
   const [manualLoading, setManualLoading] = useState(false);
+  // What the lister will receive in the same click, shown before it is made.
+  // An estimate from the booking's payments - the release itself reads the
+  // exact figure from the ledger.
+  const [compensationEstimate, setCompensationEstimate] = useState<number | null>(null);
 
   const fetchRefunds = async () => {
     setLoading(true);
@@ -200,6 +205,7 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
           created_at,
           bookings(
             id,
+            status,
             start_date,
             end_date,
             renter:profiles!bookings_renter_id_fkey(full_name, email),
@@ -339,6 +345,33 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
       referenceNumber: "",
       note: "",
     });
+    setCompensationEstimate(null);
+    if (refund.bookings.status !== "cancelled") return;
+
+    void supabase
+      .from("payments")
+      .select("id, amount, payment_type, status")
+      .eq("booking_id", refund.booking_id)
+      .then(({ data }) => {
+        const rows = (data ?? []) as Array<{
+          id: string;
+          amount: number;
+          payment_type: string;
+          status: string;
+        }>;
+        const captured = rows
+          .filter(
+            (row) =>
+              ["downpayment", "balance"].includes(row.payment_type) &&
+              row.status === "completed",
+          )
+          .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const refundedAlready = rows
+          .filter((row) => row.payment_type === "refund" && row.status === "completed")
+          .reduce((sum, row) => sum + Math.abs(Number(row.amount || 0)), 0);
+        const remainder = captured - refundedAlready - Math.abs(Number(refund.amount || 0));
+        setCompensationEstimate(remainder > 0.005 ? Math.round(remainder * 100) / 100 : null);
+      });
   };
 
   const markManualRefundReleased = async () => {
@@ -364,14 +397,36 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
         }),
       });
 
-      const payload = (await res.json()) as { error?: string };
+      const payload = (await res.json()) as {
+        error?: string;
+        compensation?: { state: string; amount?: number; reason?: string };
+      };
       if (!res.ok) {
         throw new Error(payload.error || "Failed to mark refund as released");
       }
 
-      toast.success("Refund released", {
-        description: "The renter was notified and the audit trail was updated.",
-      });
+      const compensation = payload.compensation;
+      if (compensation?.state === "completed") {
+        toast.success("Refund and lister compensation released", {
+          description: `The renter was refunded and the lister received ${formatCurrency(
+            compensation.amount ?? 0,
+          )} as short-notice compensation, with no commission.`,
+        });
+      } else if (compensation?.state === "pending") {
+        toast.warning("Refund released - lister compensation still to send", {
+          description: `${formatCurrency(compensation.amount ?? 0)} is owed to the lister. ${
+            compensation.reason ?? ""
+          }`,
+        });
+      } else if (compensation?.state === "failed") {
+        toast.warning("Refund released - lister compensation did not go through", {
+          description: `${compensation.reason ?? "Please try again."} Releasing this refund again retries only the lister's share.`,
+        });
+      } else {
+        toast.success("Refund released", {
+          description: "The renter was notified and the audit trail was updated.",
+        });
+      }
       setManualTarget(null);
       await fetchRefunds();
     } catch (error) {
@@ -625,6 +680,17 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                     {formatCurrency(manualTarget.amount)}
                   </span>
                 </p>
+                {compensationEstimate !== null ? (
+                  <p className="mt-1 text-muted-foreground">
+                    Lister receives in the same click:{" "}
+                    <span className="font-semibold text-foreground">
+                      about {formatCurrency(compensationEstimate)}
+                    </span>{" "}
+                    <span className="text-xs">
+                      (short-notice compensation, no commission - exact figure read from the ledger on release)
+                    </span>
+                  </p>
+                ) : null}
                 {manualTarget.notes ? (
                   <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
                     {manualTarget.notes}

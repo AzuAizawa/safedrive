@@ -300,13 +300,23 @@ export const sendRefundReceiptEmail = async (
 
   const vehicle = getVehicleLabel(recipient.booking);
   const bookingLink = getAppLink(input.baseOrigin, "/my-bookings");
+  // A demo refund carries a sandbox_ reference and moves no money, so the
+  // provider-timing sentence would be false - there is no provider transfer to
+  // wait for. Said plainly instead, the way the in-app notification for the same
+  // refund already says it. A real PayMongo or GCash/Maya refund is unaffected.
+  const demo = String(input.refundId || "").startsWith("sandbox_");
+  const demoNote =
+    "This build runs in demo mode, so no real transfer was sent - this email is the record of the refund.";
+  const timingNote = demo ? demoNote : "Refund posting times can vary by provider.";
   return sendTransactionalEmail({
     to: recipient.profile.email,
     subject: `SafeDrive refund receipt · ${peso(input.amount)}`,
-    text: `Hello ${recipient.profile.full_name || "there"},\n\nYour refund for ${vehicle} was completed.\nAmount refunded: ${peso(input.amount)}\nReturn method: ${input.refundMethod}\nReference: ${input.refundId}\n\nRefund posting times can vary by provider. View your booking: ${bookingLink}\n\nSafeDrive`,
+    text: `Hello ${recipient.profile.full_name || "there"},\n\nYour refund for ${vehicle} was completed.\nAmount refunded: ${peso(input.amount)}\nReturn method: ${input.refundMethod}\nReference: ${input.refundId}\n\n${timingNote} View your booking: ${bookingLink}\n\nSafeDrive`,
     html: page(
       "Refund receipt",
-      `Your refund for ${vehicle} was marked completed. Your payment provider may take additional time to show it in your account.`,
+      demo
+        ? `Your refund for ${vehicle} was recorded. ${demoNote}`
+        : `Your refund for ${vehicle} was marked completed. Your payment provider may take additional time to show it in your account.`,
       [
         ["Vehicle", vehicle],
         ["Amount refunded", peso(input.amount)],
@@ -408,10 +418,18 @@ export const sendPayoutReceiptEmail = async (
     commission > 0
       ? ` SafeDrive's ${peso(commission)} commission was deducted from your base rental before this payout.`
       : "";
+  // A demo payout carries a sandbox_ reference and moves no money. Without this
+  // the lister reads "SafeDrive released your lister payout" as money on its
+  // way, while the in-app notification for the same payout already says demo.
+  // A real PayMongo payout carries a provider reference and is unaffected.
+  const demoNote = input.transactionId?.startsWith("sandbox_")
+    ? " This build runs in demo mode, so no real transfer was sent - this email is the record of the payout."
+    : "";
   const intro =
     `SafeDrive released your lister payout for ${vehicle}.` +
     (timeline ? ` Renter payments: ${timeline}.` : "") +
     commissionNote +
+    demoNote +
     " Keep this email with your booking records.";
 
   return sendTransactionalEmail({
@@ -423,6 +441,67 @@ export const sendPayoutReceiptEmail = async (
       `\n\nView your lister bookings: ${bookingLink}\n\nSafeDrive`,
     html: page("Payout receipt", intro, rows, "View lister bookings", bookingLink),
     idempotencyKey: `payout-receipt:${input.payoutId}:${recipient.booking.owner_id}`,
+  });
+};
+
+/**
+ * Receipt for short-notice compensation on a cancelled booking.
+ *
+ * Deliberately not sendPayoutReceiptEmail: that receipt itemizes a payout as
+ * "base rental minus SafeDrive commission", which on a trip that never took
+ * place would tell the lister they paid a commission they did not. And in demo
+ * mode no money moves at all, so this email is the record that the payout
+ * happened - it has to state the split exactly.
+ */
+export const sendCompensationReceiptEmail = async (
+  supabase: ServiceRoleSupabaseClient,
+  input: {
+    bookingId: string;
+    amount: number;
+    capturedAmount: number;
+    refundedAmount: number;
+    payoutId: string;
+    payoutMethod: string;
+    transactionId: string | null;
+    baseOrigin: string;
+  },
+) => {
+  const recipient = await loadPayoutRecipient(supabase, input.bookingId);
+  if (!recipient) return { state: "failed" as const, reason: "Payout recipient could not be loaded" };
+
+  const vehicle = getVehicleLabel(recipient.booking);
+  const bookingLink = getAppLink(input.baseOrigin, "/lister-bookings");
+  const reference = input.transactionId || input.payoutId;
+  const destination = formatPayoutDestination(recipient.profile, input.payoutMethod);
+  const demo = Boolean(input.transactionId?.startsWith("sandbox_"));
+
+  const rows: Array<[string, string]> = [
+    ["Vehicle", vehicle],
+    ["Renter paid", peso(input.capturedAmount)],
+    ["Refunded to renter", `-${peso(input.refundedAmount)}`],
+    ["SafeDrive commission", peso(0)],
+    ["Compensation paid to you", peso(input.amount)],
+    [destination ? "Sent to" : "Method", destination || input.payoutMethod],
+    ["Reference", reference],
+  ];
+
+  const intro =
+    `The renter cancelled ${vehicle} shortly before pickup. Under SafeDrive's cancellation policy, the part of their payment that was not refunded is paid to you as short-notice compensation.` +
+    " SafeDrive took no commission, because the trip never took place." +
+    (demo
+      ? " This build runs in demo payout mode, so no real transfer was sent - this email is the record of the payout."
+      : "") +
+    " Keep this email with your booking records.";
+
+  return sendTransactionalEmail({
+    to: recipient.profile.email,
+    subject: `SafeDrive compensation receipt · ${peso(input.amount)}`,
+    text:
+      `Hello ${recipient.profile.full_name || "there"},\n\n${intro}\n\n` +
+      rows.map(([label, value]) => `${label}: ${value}`).join("\n") +
+      `\n\nView your lister bookings: ${bookingLink}\n\nSafeDrive`,
+    html: page("Compensation receipt", intro, rows, "View lister bookings", bookingLink),
+    idempotencyKey: `compensation-receipt:${input.payoutId}:${recipient.booking.owner_id}`,
   });
 };
 
