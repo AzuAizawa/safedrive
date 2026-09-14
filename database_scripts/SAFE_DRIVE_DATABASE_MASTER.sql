@@ -13709,4 +13709,213 @@ commit;
 --   from public.guest_inquiries;
 --   (expect linked to be the inquiries whose email matches a verified account)
 
+-- ============================================================================
+-- CHAPTER 91 - Cancellation and no-show fees are counted in rental days
+-- Apply this chapter only, staging first. Adds five settings and their
+-- per-booking snapshots, and republishes the matching Terms and Platform
+-- Agreement clauses as new versions. No existing booking's money changes.
+-- ============================================================================
+begin;
+
+-- Reported: a renter who paid in full lost more on a late cancellation than
+-- one who paid only the downpayment, though both cost the lister the same
+-- dates. The unit was wrong: the renter got refund_late_renter_percent
+-- (default 50%) of whatever had been captured, so the penalty grew with how
+-- the renter chose to pay, not with what the cancellation cost the lister. A
+-- no-show used the same number.
+--
+-- Now the fee is counted in rental days, the way Turo counts it:
+--   free        at least refund_full_hours before pickup (unchanged, default
+--               24) - or, for a booking paid closer to pickup than that,
+--               within short_notice_free_hours of the first payment (default
+--               4), never past the pickup time
+--   late cancel late_cancel_fee_days (default 1) of the booking's average
+--               daily cost, or short_trip_late_cancel_fee_days (default 0.5)
+--               for a trip of two days or less; a missed balance deadline is
+--               a late cancellation
+--   no-show     no_show_fee_days (default 2) / short_trip_no_show_fee_days
+--               (default 0.75) - the renter never came, or cancelled after
+--               the pickup time
+-- and always capped at what was paid. The arithmetic is in
+-- server/cancellationPolicy.ts.
+--
+-- Every value is snapshotted per booking by api/create-booking.ts. A booking
+-- made before this chapter has no fee-day snapshots and keeps the percentage
+-- terms it was sold under - its refund_late_renter_percent_snapshot is still
+-- read. The live refund_late_renter_percent setting stays in place but is no
+-- longer offered in Platform Settings, since no new booking uses it.
+
+alter table public.platform_settings
+  add column if not exists short_notice_free_hours integer not null default 4,
+  add column if not exists late_cancel_fee_days numeric not null default 1,
+  add column if not exists short_trip_late_cancel_fee_days numeric not null default 0.5,
+  add column if not exists no_show_fee_days numeric not null default 2,
+  add column if not exists short_trip_no_show_fee_days numeric not null default 0.75;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_short_notice_free_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_short_notice_free_hours_check
+  check (short_notice_free_hours >= 0 and short_notice_free_hours <= 24);
+alter table public.platform_settings
+  drop constraint if exists platform_settings_late_cancel_fee_days_check;
+alter table public.platform_settings
+  add constraint platform_settings_late_cancel_fee_days_check
+  check (late_cancel_fee_days >= 0 and late_cancel_fee_days <= 30);
+alter table public.platform_settings
+  drop constraint if exists platform_settings_short_trip_late_cancel_fee_days_check;
+alter table public.platform_settings
+  add constraint platform_settings_short_trip_late_cancel_fee_days_check
+  check (short_trip_late_cancel_fee_days >= 0 and short_trip_late_cancel_fee_days <= 2);
+alter table public.platform_settings
+  drop constraint if exists platform_settings_no_show_fee_days_check;
+alter table public.platform_settings
+  add constraint platform_settings_no_show_fee_days_check
+  check (no_show_fee_days >= 0 and no_show_fee_days <= 30);
+alter table public.platform_settings
+  drop constraint if exists platform_settings_short_trip_no_show_fee_days_check;
+alter table public.platform_settings
+  add constraint platform_settings_short_trip_no_show_fee_days_check
+  check (short_trip_no_show_fee_days >= 0 and short_trip_no_show_fee_days <= 2);
+
+-- Left empty on existing bookings on purpose: an empty
+-- late_cancel_fee_days_snapshot is how the code knows a booking was sold under
+-- the percentage terms (usesFeeDayTerms in server/cancellationPolicy.ts).
+alter table public.bookings
+  add column if not exists short_notice_free_hours_snapshot integer,
+  add column if not exists late_cancel_fee_days_snapshot numeric,
+  add column if not exists short_trip_late_cancel_fee_days_snapshot numeric,
+  add column if not exists no_show_fee_days_snapshot numeric,
+  add column if not exists short_trip_no_show_fee_days_snapshot numeric;
+
+-- The consensus-vote whitelist, reproduced verbatim from CHAPTER 68 with the
+-- five new keys. Propose, vote, schedule and apply all read keys dynamically
+-- (platform_settings_snapshot() is to_jsonb of the row; apply is
+-- format('... set %I ...')), so this validator is the only gate to open.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $validate$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'short_notice_free_hours' then
+      if v < 0 or v > 24 or v <> floor(v) then raise exception 'short_notice_free_hours must be a whole number 0-24'; end if;
+    elsif k in ('late_cancel_fee_days', 'no_show_fee_days') then
+      if v < 0 or v > 30 then raise exception '% must be 0-30 days', k; end if;
+    elsif k in ('short_trip_late_cancel_fee_days', 'short_trip_no_show_fee_days') then
+      if v < 0 or v > 2 then raise exception '% must be 0-2 days', k; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    elsif k = 'dormant_account_days' then
+      if v < 90 or v > 3650 or v <> floor(v) then raise exception 'dormant_account_days must be a whole number 90-3650'; end if;
+    elsif k = 'no_show_grace_minutes' then
+      if v < 15 or v > 180 or v <> floor(v) then raise exception 'no_show_grace_minutes must be a whole number 15-180'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$validate$;
+
+-- The published Terms and Platform Agreement still describe the percentage.
+-- Each old clause is replaced only where it still reads exactly as first
+-- published (live on this date: version 1 of both), and the result is written
+-- as a new version through the same superseded/published pair
+-- publish_legal_document_version() writes - so the history keeps the wording
+-- that bookings made before today were agreed under. A clause an admin has
+-- already rewritten is left alone (check it by hand in Admin Legal Content),
+-- and running this chapter again changes nothing.
+do $chapter91_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key in ('terms_of_service', 'platform_agreement')
+  loop
+    next_html := doc.content_html;
+
+    if doc.document_key = 'terms_of_service' then
+      next_html := replace(next_html,
+        $o61$<p><strong>6.1 Renter Cancellation (Full-Refund Window):</strong> A paid booking cancelled at least a set number of hours before the scheduled pickup time (currently shown on the vehicle page and in My Bookings, default 24 hours) is refunded in full, handled automatically. Cancelling an unpaid request is always free.</p>$o61$,
+        $n61$<p><strong>6.1 Free Renter Cancellation:</strong> Cancelling an unpaid request is always free. A paid booking cancelled at least a set number of hours before the scheduled pickup time (default 24 hours) is refunded in full, handled automatically. If the booking was paid when pickup was already closer than that, the Renter may still cancel free of charge for a set number of hours after the first payment (default 4 hours), but never after the pickup time. My Bookings shows when free cancellation ends.</p>$n61$);
+      next_html := replace(next_html,
+        $o62$<p><strong>6.2 Short-Notice Renter Cancellation:</strong> A paid booking cancelled inside the full-refund window (or after the pickup time has passed) is not refunded automatically. A policy share of the captured amount (default 50%) is recommended back to the Renter, with the remainder recorded as short-notice compensation to the Lister; the exact amount and return method are confirmed by SafeDrive support review against provider evidence. The system does not apply any penalty beyond this published share.</p>$o62$,
+        $n62$<p><strong>6.2 Late Renter Cancellation Fee:</strong> A paid booking cancelled after free cancellation has ended, but before the pickup time, carries a cancellation fee counted in rental days at the booking's average daily cost (the booking total divided by its number of days): by default one day for a trip longer than two days, and half a day for a trip of two days or less. The fee is the same whether the Renter paid the downpayment or the full amount, never exceeds what the Renter has paid, and the rest is refunded after SafeDrive support confirms the return method. The rental portion of the fee is paid to the Lister as compensation, with no commission taken. A booking whose remaining balance is not paid by its deadline is cancelled under this same rule. Fee values are fixed for each booking when it is made; bookings made before these fees took effect keep the terms that applied when they were made.</p>$n62$);
+      next_html := replace(next_html,
+        $o64$<p><strong>6.4 No-Show and Disputes:</strong> After the 30-minute pickup grace period, either participant may open a booking-linked no-show support report. Admin review may use arrival timestamps, optional consented location/photos, messages, payment records, and other lawful evidence. A no-show allegation does not automatically decide a refund or payout.</p>$o64$,
+        $n64$<p><strong>6.4 No-Show and Disputes:</strong> After the 30-minute pickup grace period, either participant may open a booking-linked no-show support report. A Renter who does not appear, or who cancels after the pickup time has passed, is charged a no-show fee counted the same way: by default two days for a trip longer than two days, and three quarters of a day for a trip of two days or less, never more than was paid. Admin review may use arrival timestamps, optional consented location/photos, messages, payment records, and other lawful evidence before any refund or compensation is released.</p>$n64$);
+    else
+      next_html := replace(next_html,
+        $ocp$<li><strong>Cancellation Policy:</strong> A renter who cancels a paid booking at least the configured number of hours before pickup (default 24) gets an automatic full refund. Inside that window, or after pickup time, only a published share of the captured amount (default 50% to the renter) is recommended, the rest is short-notice lister compensation, and the exact figure is confirmed by support review. A pre-trip lister cancellation always starts a full refund attempt, with super-admin review if provider confirmation is unavailable.</li>$ocp$,
+        $ncp$<li><strong>Cancellation Policy:</strong> A renter who cancels a paid booking at least the configured number of hours before pickup (default 24) gets an automatic full refund; a booking paid when pickup was already closer than that can still be cancelled free for a set number of hours after payment (default 4, never past pickup). After that, a cancellation fee counted in rental days applies - by default one day of the booking's average daily cost for trips longer than two days, and half a day for shorter trips - the same whether the downpayment or the full amount was paid and never more than was paid; the rest is refunded after support review. A pre-trip lister cancellation always starts a full refund attempt, with super-admin review if provider confirmation is unavailable.</li>$ncp$);
+      next_html := replace(next_html,
+        $ons$<li><strong>Renter No-Show:</strong> If the Lister completes their arrival check-in and the Renter fails to appear within the 30-minute grace period, the Lister may cancel the booking through the app. The Renter forfeits the same published share of the amount captured (default 50%) as short-notice compensation to the Lister; the remainder is refunded to the Renter only after SafeDrive support confirms the return method. The no-show is recorded against the Renter.</li>$ons$,
+        $nns$<li><strong>Renter No-Show:</strong> If the Lister completes their arrival check-in and the Renter fails to appear within the 30-minute grace period, the Lister may cancel the booking through the app. The Renter is charged a no-show fee counted in rental days (by default two days for trips longer than two days, three quarters of a day for shorter trips), never more than was paid, as compensation to the Lister; the remainder is refunded to the Renter only after SafeDrive support confirms the return method. The no-show is recorded against the Renter.</li>$nns$);
+    end if;
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 91'));
+    end if;
+  end loop;
+end;
+$chapter91_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days,
+--        no_show_fee_days, short_trip_no_show_fee_days
+--   from public.platform_settings where id = 'default';
+--   (expect 4, 1, 0.5, 2, 0.75)
+-- select document_key, version_number,
+--        position('Late Renter Cancellation Fee' in content_html) > 0 as terms_fee_clause,
+--        position('no-show fee counted in rental days' in content_html) > 0 as agreement_no_show_clause
+--   from public.legal_document_versions
+--   where status = 'published' and document_key in ('terms_of_service', 'platform_agreement');
+--   (expect version 2 of both, with the matching column true)
+
 -- End of SafeDrive chaptered database master.

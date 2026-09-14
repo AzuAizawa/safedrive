@@ -5,6 +5,11 @@ import {
   fetchNoShowGraceMinutes,
   runBookingCompletionSideEffects,
 } from "../server/bookingCompletion.js";
+import {
+  describeRenterCharge,
+  formatPeso,
+  getCancellationRefundPlan,
+} from "../server/cancellationRefundPlan.js";
 
 export const config = {
   runtime: "edge",
@@ -74,7 +79,16 @@ type BookingRow = {
   lister_return_arrived_at: string | null;
   renter_completed: boolean;
   owner_completed: boolean;
+  total_days: number | string;
+  total_price: number | string;
+  base_price: number | string;
+  refund_full_hours_snapshot: number | string | null;
   refund_late_renter_percent_snapshot: number | string | null;
+  short_notice_free_hours_snapshot: number | string | null;
+  late_cancel_fee_days_snapshot: number | string | null;
+  short_trip_late_cancel_fee_days_snapshot: number | string | null;
+  no_show_fee_days_snapshot: number | string | null;
+  short_trip_no_show_fee_days_snapshot: number | string | null;
   payments: PaymentRow[];
   cars: {
     plate_number: string;
@@ -89,18 +103,8 @@ type BookingRow = {
 // diverted from instant automatic to manual admin review. Generous enough
 // to cover typical GPS accuracy plus a short walk from parking.
 const REFUNDABLE = ["downpayment", "balance"];
-// Renter no-show forfeit share. Snapshot per booking on the same field the
-// short-notice cancellation policy uses (Terms 6.2) - one admin-configurable
-// number covers both "renter bailed with notice" and "renter never showed",
-// and existing bookings keep the split they were created under even if the
-// platform-wide setting changes later.
-const DEFAULT_REFUND_LATE_RENTER_PERCENT = 50;
-
-const clampNumber = (value: unknown, min: number, max: number, fallback: number) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return fallback;
-  return parsed;
-};
+// The renter no-show fee is counted in rental days since CHAPTER 91 - see
+// server/cancellationPolicy.ts.
 
 const jsonResponse = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -315,7 +319,11 @@ export default async function handler(req: Request) {
         lister_arrival_latitude, lister_arrival_longitude,
         renter_return_arrived_at, lister_return_arrived_at,
         renter_completed, owner_completed,
-        refund_late_renter_percent_snapshot,
+        total_days, total_price, base_price,
+        refund_full_hours_snapshot, refund_late_renter_percent_snapshot,
+        short_notice_free_hours_snapshot, late_cancel_fee_days_snapshot,
+        short_trip_late_cancel_fee_days_snapshot, no_show_fee_days_snapshot,
+        short_trip_no_show_fee_days_snapshot,
         payments ( payment_type, status, amount ),
         cars ( plate_number, pickup_latitude, pickup_longitude, car_models ( name, car_brands ( name ) ) )
       `,
@@ -557,21 +565,19 @@ export default async function handler(req: Request) {
       }
 
       const captured = capturedTotal(b);
-      const noShowRefundPercent = clampNumber(
-        b.refund_late_renter_percent_snapshot,
-        0,
-        100,
-        DEFAULT_REFUND_LATE_RENTER_PERCENT,
-      );
-      const renterShare =
-        Math.round(captured * (noShowRefundPercent / 100) * 100) / 100;
+      // The no-show fee is counted in rental days (CHAPTER 91) - or, for a
+      // booking made before it, the percentage terms it was sold under.
+      const noShowPlan = getCancellationRefundPlan(b, "no_show");
+      const noShowCharge = describeRenterCharge(noShowPlan);
+      const renterShare = noShowPlan.renterRefund;
+      const listerCompensation = noShowPlan.listerCompensation;
       const refundPaymentId =
         captured > 0
           ? await queueManualRefundReview(
               supabase,
               b,
               renterShare,
-              `Renter no-show at pickup. Policy: renter keeps ${noShowRefundPercent}% forfeit — refund PHP ${renterShare.toLocaleString()} of PHP ${captured.toLocaleString()} captured; the rest is lister compensation. Admin confirms the return method.`,
+              `Renter no-show at pickup. Policy: ${noShowCharge} — refund ${formatPeso(renterShare)} of ${formatPeso(captured)} captured; about ${formatPeso(listerCompensation)} is lister compensation. Admin confirms the return method.`,
             )
           : null;
 
@@ -598,7 +604,7 @@ export default async function handler(req: Request) {
         `Renter no-show at pickup: ${label(b)}`,
         `The lister checked in at pickup and the renter did not appear within the ${graceMinutes}-minute grace window. Booking cancelled. ${
           captured > 0
-            ? `PHP ${captured.toLocaleString()} was captured; policy releases a ${noShowRefundPercent}% refund (PHP ${renterShare.toLocaleString()}) to the renter after admin confirms the return method.`
+            ? `${formatPeso(captured)} was captured; the policy charges ${noShowCharge}, releasing ${formatPeso(renterShare)} to the renter and about ${formatPeso(listerCompensation)} to the lister as no-show compensation after admin confirms the return method.`
             : "No captured payment to refund."
         } ${note ?? ""}`.trim(),
       );
@@ -606,10 +612,16 @@ export default async function handler(req: Request) {
       const noShowRenterTitle = "Booking cancelled — you did not show up";
       const noShowRenterMessage =
         captured > 0
-          ? `You did not appear for ${label(b)} at pickup. Per the no-show policy you keep a ${noShowRefundPercent}% forfeit; SafeDrive support will release your ${renterShare.toLocaleString()} refund. This affects your completion rate.`
+          ? renterShare > 0
+            ? `You did not appear for ${label(b)} at pickup, so the no-show policy charges ${noShowCharge}. SafeDrive support will release the remaining ${formatPeso(renterShare)} to you. This affects your completion rate.`
+            : `You did not appear for ${label(b)} at pickup, so the no-show policy charges ${noShowCharge} and no refund is due. This affects your completion rate.`
           : `You did not appear for ${label(b)} at pickup. This affects your completion rate.`;
       const noShowOwnerTitle = "Renter no-show recorded";
-      const noShowOwnerMessage = `The renter did not appear for ${label(b)}. The booking was cancelled and your record is not affected.`;
+      const noShowOwnerMessage = `The renter did not appear for ${label(b)}. The booking was cancelled and your record is not affected.${
+        listerCompensation > 0
+          ? ` About ${formatPeso(listerCompensation)} is due to you as no-show compensation once SafeDrive support releases it.`
+          : ""
+      }`;
       await supabase.from("notifications").insert([
         {
           user_id: b.renter_id,
@@ -650,7 +662,10 @@ export default async function handler(req: Request) {
         entity_id: b.id,
         details: {
           captured,
+          no_show_fee: noShowPlan.fee,
+          cancellation_terms: noShowPlan.terms,
           renter_refund_share: renterShare,
+          lister_compensation: listerCompensation,
           refund_payment_id: refundPaymentId,
           note,
         },

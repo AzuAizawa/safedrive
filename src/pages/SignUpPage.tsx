@@ -316,7 +316,7 @@ export default function SignUpPage() {
 
                   <div>
                     <h4 className="font-semibold text-foreground mb-1">5. Cancellations & No-Show</h4>
-                    <p>A 24-hour automated-refund window follows captured booking payment. After that, cancellation requires documented support review; no percentage penalty is automatic. No-shows are reviewed through the in-app arrival trail, optional evidence, payment records, and the booking-linked report.</p>
+                    <p>A paid booking cancelled at least the configured number of hours before pickup (default 24) is refunded in full automatically; if it was paid closer to pickup than that, it can still be cancelled free for a few hours after paying (default 4, never past pickup). After that, a cancellation fee counted in rental days applies (default one day, or half a day for trips of two days or less), never more than was paid and the same whether the downpayment or the full amount was paid. Not showing up, or cancelling after the pickup time, carries a higher no-show fee. Fees go to the lister as compensation after support review. No-shows are reviewed through the in-app arrival trail, optional evidence, payment records, and the booking-linked report.</p>
                   </div>
 
                   <div>

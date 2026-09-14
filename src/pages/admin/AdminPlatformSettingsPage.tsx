@@ -33,7 +33,11 @@ type SettingsRow = {
   commission_rate: number;
   downpayment_rate: number;
   refund_full_hours: number;
-  refund_late_renter_percent: number;
+  short_notice_free_hours: number;
+  late_cancel_fee_days: number;
+  short_trip_late_cancel_fee_days: number;
+  no_show_fee_days: number;
+  short_trip_no_show_fee_days: number;
   arrival_checkin_lead_hours: number;
   lister_completion_timeout_hours: number;
   balance_deadline_hours: number;
@@ -56,6 +60,23 @@ type ChangeRequest = {
 };
 
 type VoteRow = { request_id: string; voter_id: string; vote: "approve" | "reject" };
+
+// Fees counted in rental days (CHAPTER 91). Decimals are allowed - 0.5 is
+// half a day - but an empty box is not read as 0.
+const feeDaysField = (label: string, hint: string, max: number) => ({
+  label,
+  hint,
+  unit: "days" as const,
+  toDisplay: (s: number) => String(Math.round(s * 100) / 100),
+  fromDisplay: (i: string) => {
+    const n = Number(i);
+    return i.trim() !== "" && Number.isFinite(n) && n >= 0 && n <= max ? n : null;
+  },
+  formatStored: (s: number) => {
+    const days = Math.round(s * 100) / 100;
+    return `${days} ${days === 1 ? "day" : "days"}`;
+  },
+});
 
 // key -> { label, unit, toDisplay(stored), fromDisplay(input) -> stored | null }
 const FIELDS: Record<
@@ -93,7 +114,7 @@ const FIELDS: Record<
   },
   refund_full_hours: {
     label: "Full-refund window before pickup",
-    hint: "Cancel this many hours before pickup for a full refund (0-720).",
+    hint: "A paid booking cancelled at least this many hours before pickup is refunded in full, automatically (0-720).",
     unit: "hours",
     toDisplay: (s) => String(Math.round(s)),
     fromDisplay: (i) => {
@@ -104,17 +125,39 @@ const FIELDS: Record<
     },
     formatStored: (s) => `${Math.round(s)} h`,
   },
-  refund_late_renter_percent: {
-    label: "Short-notice renter refund share",
-    hint: "Percent the renter gets back on a short-notice cancellation, or when the renter no-shows at pickup (0-100).",
-    unit: "%",
-    toDisplay: (s) => String(Math.round(s * 100) / 100),
+  short_notice_free_hours: {
+    label: "Free cancellation after paying (late bookings)",
+    hint: "When a booking is paid closer to pickup than the window above, the renter can still cancel free for this many hours after the first payment - never past pickup (0-24).",
+    unit: "hours",
+    toDisplay: (s) => String(Math.round(s)),
     fromDisplay: (i) => {
       const n = Number(i);
-      return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+      return i.trim() !== "" && Number.isFinite(n) && n >= 0 && n <= 24 && Number.isInteger(n)
+        ? n
+        : null;
     },
-    formatStored: (s) => `${Math.round(s * 100) / 100}%`,
+    formatStored: (s) => `${Math.round(s)} h`,
   },
+  late_cancel_fee_days: feeDaysField(
+    "Late-cancellation fee (trips over 2 days)",
+    "Cancelling after free cancellation ends costs this many days of the booking's average daily cost, never more than was paid (0-30). Paid to the lister as compensation.",
+    30,
+  ),
+  short_trip_late_cancel_fee_days: feeDaysField(
+    "Late-cancellation fee (trips of 2 days or less)",
+    "The same fee for short trips - 0.5 is half a day (0-2).",
+    2,
+  ),
+  no_show_fee_days: feeDaysField(
+    "No-show fee (trips over 2 days)",
+    "Charged when the renter never shows up, or cancels after the pickup time - days of the booking's average daily cost, never more than was paid (0-30). Normally higher than the late-cancellation fee.",
+    30,
+  ),
+  short_trip_no_show_fee_days: feeDaysField(
+    "No-show fee (trips of 2 days or less)",
+    "The same fee for short trips - 0.75 is three quarters of a day (0-2).",
+    2,
+  ),
   arrival_checkin_lead_hours: {
     label: "Arrival check-in lead time",
     hint: "How early before pickup the arrival check-in opens (0-48 hours). Applies live.",
@@ -143,7 +186,7 @@ const FIELDS: Record<
   },
   balance_deadline_hours: {
     label: "Balance payment window",
-    hint: "Hours from downpayment to pay the remaining balance, capped at pickup time (1-168). A renter who misses this is auto-cancelled through the short-notice refund policy above. Applies live.",
+    hint: "Hours from downpayment to pay the remaining balance, capped at pickup time (1-168). A renter who misses this is auto-cancelled and the cancellation fees above apply. Applies live.",
     unit: "hours",
     toDisplay: (s) => String(Math.round(s)),
     fromDisplay: (i) => {
@@ -257,7 +300,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, downpayment_rate, refund_full_hours, refund_late_renter_percent, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes",
+          "commission_rate, downpayment_rate, refund_full_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes",
         )
         .eq("id", "default")
         .maybeSingle(),

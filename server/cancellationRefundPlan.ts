@@ -1,28 +1,29 @@
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
+import {
+  getCancellationOutcome,
+  type CancellationEvent,
+  type CancellationPolicyBooking,
+} from "./cancellationPolicy.js";
+
+export { describeRenterCharge, formatPeso } from "./cancellationPolicy.js";
 
 /**
- * The narrow booking shape this module needs. Deliberately not the full
- * BookingRecord from booking-action.ts - that file keeps its own local copy
- * of this same calculation (getCancellationRefundPlan / createManualRefundReview)
- * for its user-initiated `cancel` action, unchanged, to avoid touching a
- * large payment-critical file for this feature. This module exists so
- * api/expire-booking-deadlines.ts (the balance-payment-deadline auto-cancel,
- * CHAPTER 42) can reuse the exact same policy without duplicating the math a
- * third time - if you change the calculation here, check booking-action.ts's
- * copy too.
+ * The narrow booking shape this module needs. Every path that settles a
+ * renter's cancellation or no-show reads its plan from here - the user's
+ * `cancel` in api/booking-action.ts, the balance-deadline auto-cancel in
+ * api/expire-booking-deadlines.ts (CHAPTER 42) and `renter_no_show` in
+ * api/booking-incident-action.ts - so the three can never charge different
+ * fees. The rules themselves are in server/cancellationPolicy.ts.
  */
-export type RefundableBooking = {
+export type RefundableBooking = CancellationPolicyBooking & {
   id: string;
   renter_id: string;
   owner_id: string;
-  start_date: string;
-  pickup_time: string | null;
-  refund_full_hours_snapshot: number | string | null;
-  refund_late_renter_percent_snapshot: number | string | null;
   payments: Array<{
     payment_type: string;
     status: string;
     amount: number | string;
+    created_at?: string | null;
   }>;
   cars?: {
     plate_number: string;
@@ -33,15 +34,7 @@ export type RefundableBooking = {
   } | null;
 };
 
-const DEFAULT_REFUND_FULL_HOURS = 24;
-const DEFAULT_REFUND_LATE_RENTER_PERCENT = 50;
 const REFUNDABLE_BOOKING_PAYMENT_TYPES = ["downpayment", "balance"];
-
-const clampNumber = (value: unknown, min: number, max: number, fallback: number) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return fallback;
-  return parsed;
-};
 
 export const getVehicleLabel = (booking: Pick<RefundableBooking, "id" | "cars">) => {
   if (!booking.cars) return `Booking ${booking.id}`;
@@ -58,66 +51,42 @@ export const getCapturedBookingPaymentTotal = (booking: RefundableBooking) =>
     )
     .reduce((total, payment) => total + Number(payment.amount || 0), 0);
 
-// Same Manila-correct pattern used across booking-action.ts /
-// booking-incident-action.ts - start_date is a plain calendar date, pickup
-// time is treated as Manila local time (-8h from the naive UTC instant).
-const getBookingPickupMs = (booking: RefundableBooking) => {
-  const [year, month, day] = (booking.start_date || "")
-    .split("-")
-    .map((part) => Number(part));
-  const [hour, minute] = (booking.pickup_time || "09:00")
-    .split(":")
-    .map((part) => Number(part));
-  if (!year || !month || !day) return null;
-  const asUtc = Date.UTC(year, month - 1, day, hour || 0, minute || 0);
-  return asUtc - 8 * 60 * 60 * 1000;
+// When the renter first paid - the start of the short-notice free window.
+export const getFirstCapturedPaymentAtMs = (booking: RefundableBooking) => {
+  const times = booking.payments
+    .filter(
+      (payment) =>
+        REFUNDABLE_BOOKING_PAYMENT_TYPES.includes(payment.payment_type) &&
+        payment.status === "completed" &&
+        Number(payment.amount) > 0,
+    )
+    .map((payment) => new Date(payment.created_at ?? "").getTime())
+    .filter((value) => Number.isFinite(value));
+  return times.length ? Math.min(...times) : null;
 };
 
 /**
- * Cancellation-refund policy (Terms 6.1/6.2, values snapshot per booking):
- * cancelling >= refund_full_hours before pickup earns an automatic full refund;
- * inside that window the renter's share is refund_late_renter_percent and the
- * rest is short-notice lister compensation, released through admin review.
- * Identical to booking-action.ts's local copy - kept in sync manually.
+ * Cancellation policy (Terms 6.1/6.2/6.4, values snapshotted per booking): a
+ * free cancellation is refunded automatically; otherwise the renter is charged
+ * the late-cancellation or no-show fee and the rest is refunded through admin
+ * review, with the lister's compensation released in the same decision.
  */
-export const getCancellationRefundPlan = (booking: RefundableBooking) => {
-  const capturedTotal = getCapturedBookingPaymentTotal(booking);
-  const fullHours = Math.round(
-    clampNumber(
-      booking.refund_full_hours_snapshot,
-      0,
-      720,
-      DEFAULT_REFUND_FULL_HOURS,
-    ),
-  );
-  const lateRenterPercent = clampNumber(
-    booking.refund_late_renter_percent_snapshot,
-    0,
-    100,
-    DEFAULT_REFUND_LATE_RENTER_PERCENT,
-  );
-  const pickupMs = getBookingPickupMs(booking);
-  const hoursToPickup =
-    pickupMs === null ? null : (pickupMs - Date.now()) / (60 * 60 * 1000);
-  const isLate = hoursToPickup !== null && hoursToPickup < fullHours;
-  const pastPickup = hoursToPickup !== null && hoursToPickup <= 0;
-
-  const recommendedRenterRefund = !isLate
-    ? capturedTotal
-    : pastPickup
-      ? 0
-      : Math.round(capturedTotal * (lateRenterPercent / 100) * 100) / 100;
-
+export const getCancellationRefundPlan = (
+  booking: RefundableBooking,
+  event: CancellationEvent = "cancel",
+  nowMs = Date.now(),
+) => {
+  const plan = getCancellationOutcome({
+    booking,
+    capturedTotal: getCapturedBookingPaymentTotal(booking),
+    firstPaymentAtMs: getFirstCapturedPaymentAtMs(booking),
+    nowMs,
+    event,
+  });
   return {
-    capturedTotal,
-    fullHours,
-    lateRenterPercent,
-    hoursToPickup,
-    isLate,
-    pastPickup,
-    recommendedRenterRefund,
-    listerCompensation:
-      Math.round((capturedTotal - recommendedRenterRefund) * 100) / 100,
+    ...plan,
+    isLate: plan.outcome !== "free",
+    recommendedRenterRefund: plan.renterRefund,
   };
 };
 

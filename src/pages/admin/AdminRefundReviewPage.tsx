@@ -127,7 +127,21 @@ const formatCurrency = (value: number) =>
 const getVehicleLabel = (refund: RefundPayment) =>
   `${refund.bookings.cars.car_models.car_brands.name} ${refund.bookings.cars.car_models.name}`;
 
+// A policy refund of PHP 0: the cancellation fee covered everything the
+// renter paid. Settled without a transfer (api/mark-manual-refund.ts).
+const isNoRefundDue = (refund: RefundPayment) =>
+  Math.abs(Number(refund.amount || 0)) < 0.005;
+
 const getRefundStatusCopy = (refund: RefundPayment) => {
+  if (refund.status === "completed" && refund.payment_method === "No refund due") {
+    return {
+      label: "Settled",
+      detail:
+        "No refund was due - the cancellation fee covered what the renter paid. The lister's compensation was released with this decision.",
+      tone: "bg-green-500/10 text-green-700 dark:text-green-300",
+    };
+  }
+
   if (refund.status === "completed") {
     return {
       label: "Released",
@@ -145,6 +159,15 @@ const getRefundStatusCopy = (refund: RefundPayment) => {
       detail:
         "PayMongo could not complete this refund. Retry PayMongo after checking the issue, or send the refund manually through GCash/Maya and record the reference.",
       tone: "bg-red-500/10 text-red-700 dark:text-red-300",
+    };
+  }
+
+  if (refund.payment_method === "manual_review" && isNoRefundDue(refund)) {
+    return {
+      label: "No refund due",
+      detail:
+        "The cancellation fee covers everything the renter paid, so nothing goes back. Settle it to release the lister's compensation.",
+      tone: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
     };
   }
 
@@ -380,7 +403,7 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
 
   const markManualRefundReleased = async () => {
     if (!manualTarget || !session?.access_token) return;
-    if (!manualDraft.referenceNumber.trim()) {
+    if (!isNoRefundDue(manualTarget) && !manualDraft.referenceNumber.trim()) {
       toast.error("Enter the refund reference number");
       return;
     }
@@ -579,12 +602,14 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                         title={
                           providerRefundStillPending
                             ? "PayMongo is still processing this refund. Wait for provider confirmation before using manual fallback."
-                            : "Record a manual GCash or Maya refund release"
+                            : isNoRefundDue(refund)
+                              ? "The fee covers everything the renter paid - settle it to release the lister's compensation"
+                              : "Record a manual GCash or Maya refund release"
                         }
                         onClick={() => openManualRefund(refund)}
                       >
                         <CheckCircle2 className="h-4 w-4" />
-                        Mark Manual Released
+                        {isNoRefundDue(refund) ? "Settle - No Refund Due" : "Mark Manual Released"}
                       </Button>
                     ) : null}
                   </div>
@@ -673,9 +698,15 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
               onClick={(event) => event.stopPropagation()}
             >
               <div className="space-y-1">
-                <h2 className="text-lg font-semibold">Mark manual refund as released</h2>
+                <h2 className="text-lg font-semibold">
+                  {isNoRefundDue(manualTarget)
+                    ? "Settle cancellation - no refund due"
+                    : "Mark manual refund as released"}
+                </h2>
                 <p className="text-sm text-muted-foreground">
-                  Use this after the admin sends the refund back through GCash or Maya outside SafeDrive, then record the method and reference here.
+                  {isNoRefundDue(manualTarget)
+                    ? "The cancellation fee covers everything the renter paid, so nothing is sent back and no reference is needed. Settling releases the lister's compensation."
+                    : "Use this after the admin sends the refund back through GCash or Maya outside SafeDrive, then record the method and reference here."}
                 </p>
               </div>
 
@@ -709,6 +740,8 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
               </div>
 
               <div className="mt-4 grid gap-3">
+                {isNoRefundDue(manualTarget) ? null : (
+                <>
                 <label className="space-y-1 text-sm">
                   <span className="font-medium">Refund return method</span>
                   <select
@@ -740,6 +773,8 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                     className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
                 </label>
+                </>
+                )}
 
                 <label className="space-y-1 text-sm">
                   <span className="font-medium">Admin note</span>
@@ -778,7 +813,7 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                   ) : (
                     <CheckCircle2 className="h-4 w-4" />
                   )}
-                  Mark Released
+                  {isNoRefundDue(manualTarget) ? "Settle & Release Compensation" : "Mark Released"}
                 </Button>
               </div>
             </div>

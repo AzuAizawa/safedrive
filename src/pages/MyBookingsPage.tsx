@@ -49,6 +49,12 @@ import {
   fetchPlatformPolicyTimings,
 } from "@/lib/platformSettings";
 import {
+  describeRenterCharge,
+  formatPeso,
+  getCancellationOutcome,
+  pickupBlocksCancellation,
+} from "@/lib/cancellationPolicy";
+import {
   Calendar,
   Clock,
   CheckCircle2,
@@ -138,11 +144,15 @@ interface BookingRow {
   }[];
   refund_full_hours_snapshot: number | null;
   refund_late_renter_percent_snapshot: number | null;
+  short_notice_free_hours_snapshot: number | null;
+  late_cancel_fee_days_snapshot: number | null;
+  short_trip_late_cancel_fee_days_snapshot: number | null;
+  no_show_fee_days_snapshot: number | null;
+  short_trip_no_show_fee_days_snapshot: number | null;
 }
 
-// Cancellation-refund policy (Terms 6.1/6.2). Values are snapshot per booking.
-const DEFAULT_REFUND_FULL_HOURS = 24;
-const DEFAULT_REFUND_LATE_RENTER_PERCENT = 50;
+// Cancellation terms (Terms 6.1/6.2/6.4) are in src/lib/cancellationPolicy.ts,
+// read off each booking's own snapshots.
 const UNPAID_STATES = ["pending", "awaiting_payment", "confirmed"];
 const PAID_STATES = ["downpayment_paid", "fully_paid"];
 
@@ -1302,17 +1312,6 @@ export default function MyBookingsPage() {
     return `${expired ? "Expired" : "Ends"} ${expired ? "" : "in "}${parts.join(" ")}`.trim();
   };
 
-  const getCapturedBookingTotal = (bookingId: string) =>
-    paymentLogs
-      .filter(
-        (payment) =>
-          payment.booking_id === bookingId &&
-          payment.payment_type !== "refund" &&
-          payment.status === "completed" &&
-          Number(payment.amount) > 0,
-      )
-      .reduce((total, payment) => total + Number(payment.amount || 0), 0);
-
   const getCancellationGuidance = (
     booking: BookingRow,
     apparentState: string,
@@ -1330,50 +1329,75 @@ export default function MyBookingsPage() {
     }
 
     if (PAID_STATES.includes(apparentState)) {
-      // Explicit null/undefined check, not `|| DEFAULT`. Zero is a valid,
-      // admin-settable value meaning "always refund in full" (the DB check
-      // constraint allows >= 0), and the server honours it - but `0 || 24`
-      // silently became 24 here, so a renter cancelling 2 hours before
-      // pickup was told they'd get ~50% back and was then refunded 100%.
-      // The latePercent check directly below already used this shape.
-      const fullHours =
-        booking.refund_full_hours_snapshot === null ||
-        booking.refund_full_hours_snapshot === undefined
-          ? DEFAULT_REFUND_FULL_HOURS
-          : Number(booking.refund_full_hours_snapshot);
-      const latePercent =
-        booking.refund_late_renter_percent_snapshot === null ||
-        booking.refund_late_renter_percent_snapshot === undefined
-          ? DEFAULT_REFUND_LATE_RENTER_PERCENT
-          : Number(booking.refund_late_renter_percent_snapshot);
-      const pickupMs = getBookingPickupMs(booking);
-      const hoursToPickup =
-        pickupMs === null ? null : (pickupMs - clockNow) / (3600 * 1000);
+      // The same rules the server applies when Cancel is clicked
+      // (server/cancellationPolicy.ts), on the same payments: what was
+      // captured, and when the first of it was paid.
+      const capturedPayments = paymentLogs.filter(
+        (payment) =>
+          payment.booking_id === booking.id &&
+          ["downpayment", "balance"].includes(payment.payment_type) &&
+          payment.status === "completed" &&
+          Number(payment.amount) > 0,
+      );
+      const capturedTotal = capturedPayments.reduce(
+        (total, payment) => total + Number(payment.amount || 0),
+        0,
+      );
+      const paidAtTimes = capturedPayments
+        .map((payment) => new Date(payment.created_at).getTime())
+        .filter((value) => Number.isFinite(value));
+      const plan = getCancellationOutcome({
+        booking,
+        capturedTotal,
+        firstPaymentAtMs: paidAtTimes.length ? Math.min(...paidAtTimes) : null,
+        nowMs: clockNow,
+        event: "cancel",
+      });
 
-      if (hoursToPickup === null || hoursToPickup >= fullHours) {
+      if (plan.outcome === "free") {
         return {
           tone: freeTone,
-          note: `Cancel now for a full 100% refund, handled automatically. The full-refund window closes ${fullHours} hours before pickup.`,
+          note:
+            plan.freeReason === "short_notice_grace" && plan.freeUntilMs !== null
+              ? `You paid close to pickup, so you can still cancel for a full 100% refund, handled automatically, until ${new Date(
+                  plan.freeUntilMs,
+                ).toLocaleString([], {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}.`
+              : `Cancel now for a full 100% refund, handled automatically. Free cancellation closes ${plan.fullHours} hours before pickup.`,
         };
       }
 
-      if (hoursToPickup <= 0) {
+      // A booking made before CHAPTER 91 keeps the percentage terms it was sold under.
+      if (plan.terms === "legacy_percent") {
+        if (plan.pastPickup) {
+          return {
+            tone: reviewTone,
+            note: "Your pickup time has passed. You can still cancel, but any refund is decided by SafeDrive support review.",
+          };
+        }
+        const estimate =
+          capturedTotal > 0
+            ? ` About ${formatCurrency(Math.round(plan.renterRefund))} of ${formatCurrency(capturedTotal)}.`
+            : "";
         return {
           tone: reviewTone,
-          note: "Your pickup time has passed. You can still cancel, but any refund is decided by SafeDrive support review.",
+          note: `Short-notice cancellation (less than ${plan.fullHours} hours before pickup). You would get about ${plan.lateRenterPercent}% back; the rest compensates the lister.${estimate} Released through SafeDrive support review - no automatic penalty beyond this share.`,
         };
       }
 
-      const capturedTotal = getCapturedBookingTotal(booking.id);
-      const estimate =
+      const refundEstimate =
         capturedTotal > 0
-          ? ` About ${formatCurrency(
-              Math.round(capturedTotal * (latePercent / 100)),
-            )} of ${formatCurrency(capturedTotal)}.`
-          : "";
+          ? ` You would get ${formatPeso(plan.renterRefund)} of the ${formatPeso(capturedTotal)} you paid back, released through SafeDrive support review.`
+          : " The rest of what you paid is refunded through SafeDrive support review.";
       return {
         tone: reviewTone,
-        note: `Short-notice cancellation (less than ${fullHours} hours before pickup). You would get about ${latePercent}% back; the rest compensates the lister.${estimate} Released through SafeDrive support review - no automatic penalty beyond this share.`,
+        note: plan.pastPickup
+          ? `Your pickup time has passed, so cancelling now counts as a no-show: ${describeRenterCharge(plan)}.${refundEstimate}`
+          : `Free cancellation has ended, so cancelling now costs ${describeRenterCharge(plan)} - the same whether you paid the downpayment or in full, and never more than you paid.${refundEstimate} The fee goes to the lister.`,
       };
     }
 
@@ -1418,7 +1442,7 @@ export default function MyBookingsPage() {
   };
 
   const canCancelBooking = (booking: BookingRow, apparentState: string) => {
-    if (booking.renter_arrived_at || booking.lister_arrived_at) return false;
+    if (pickupBlocksCancellation(booking, "renter")) return false;
     return [
       "pending",
       "confirmed",
@@ -1461,7 +1485,7 @@ export default function MyBookingsPage() {
         tone: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
         title: "Downpayment confirmed",
         body: booking.balance_deadline
-          ? `${formatCountdown(booking.balance_deadline)} to pay the remaining balance. Missing this auto-cancels the booking under the short-notice refund policy.`
+          ? `${formatCountdown(booking.balance_deadline)} to pay the remaining balance. Missing this auto-cancels the booking, and the cancellation fee applies once free cancellation has ended.`
           : "Your request is reserved. Settle the remaining balance before pickup so the rental can move into the arrival stage.",
         footnote: booking.balance_deadline
           ? `Balance deadline: ${formatDeadlineStamp(booking.balance_deadline)}`

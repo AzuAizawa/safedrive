@@ -84,10 +84,14 @@ import {
 import {
   DEFAULT_ARRIVAL_CHECKIN_LEAD_HOURS,
   DEFAULT_NO_SHOW_GRACE_MINUTES,
-  DEFAULT_REFUND_LATE_RENTER_PERCENT,
   fetchPlatformPolicyTimings,
-  fetchPlatformPricingSettings,
 } from "@/lib/platformSettings";
+import {
+  describeRenterCharge,
+  formatPeso,
+  getCancellationOutcome,
+  pickupBlocksCancellation,
+} from "@/lib/cancellationPolicy";
 
 const getBookingPickupMs = (booking: {
   start_date: string;
@@ -117,12 +121,17 @@ interface ListerBooking {
   total_price: number;
   base_price: number;
   commission: number;
-  // Snapshotted per booking when it was created. The forfeit shown to the
-  // lister must come from this, not from live platform settings - the
-  // server decides the refund from the snapshot
-  // (api/booking-incident-action.ts), so reading the live value meant the
-  // dialog could promise a percentage the refund would not use.
+  // Snapshotted per booking when it was created. What the lister is told a
+  // no-show costs must come from these, not from live platform settings -
+  // the server charges the fee from the same snapshots
+  // (api/booking-incident-action.ts via server/cancellationPolicy.ts).
+  refund_full_hours_snapshot?: number | string | null;
   refund_late_renter_percent_snapshot: number | string | null;
+  short_notice_free_hours_snapshot?: number | string | null;
+  late_cancel_fee_days_snapshot?: number | string | null;
+  short_trip_late_cancel_fee_days_snapshot?: number | string | null;
+  no_show_fee_days_snapshot?: number | string | null;
+  short_trip_no_show_fee_days_snapshot?: number | string | null;
   downpayment_amount: number;
   balance_amount: number;
   status: string;
@@ -280,16 +289,27 @@ export default function ListerBookingsPage() {
   const [graceMinutes, setGraceMinutes] = useState(
     DEFAULT_NO_SHOW_GRACE_MINUTES,
   );
-  const [noShowRefundPercent, setNoShowRefundPercent] = useState(
-    DEFAULT_REFUND_LATE_RENTER_PERCENT,
-  );
-  // Prefers the booking's own snapshot; the live setting is only the
-  // fallback for a booking created before snapshots existed.
-  const getNoShowForfeitPercent = (booking: ListerBooking | null | undefined) =>
-    booking?.refund_late_renter_percent_snapshot === null ||
-    booking?.refund_late_renter_percent_snapshot === undefined
-      ? noShowRefundPercent
-      : Number(booking.refund_late_renter_percent_snapshot);
+  // What a renter no-show costs, in the words the lister reads before
+  // cancelling - the same fee api/booking-incident-action.ts will charge.
+  // renter_no_show only accepts a fully paid booking, so what was paid is the
+  // booking total. (The old "renter keeps a 50% forfeit" was really the
+  // renter's refund; it only read right because half is half.)
+  const describeNoShowSplit = (booking: ListerBooking | null | undefined) => {
+    if (!booking) return "";
+    const plan = getCancellationOutcome({
+      booking,
+      capturedTotal: Number(booking.total_price) || 0,
+      firstPaymentAtMs: null,
+      nowMs: clockNow,
+      event: "no_show",
+    });
+    if (plan.fee <= 0) return "The renter is refunded in full.";
+    const refundPart =
+      plan.renterRefund > 0
+        ? `${formatPeso(plan.renterRefund)} is refunded to the renter`
+        : "nothing is refunded to the renter";
+    return `The renter is charged ${describeRenterCharge(plan)}: about ${formatPeso(plan.listerCompensation)} of it comes to you as compensation, and ${refundPart}.`;
+  };
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedRenter, setSelectedRenter] = useState<ListerBooking | null>(
     null,
@@ -373,9 +393,6 @@ export default function ListerBookingsPage() {
         setArrivalLeadHours(timings.arrivalCheckinLeadHours);
         setGraceMinutes(timings.noShowGraceMinutes);
       }
-    });
-    void fetchPlatformPricingSettings().then((pricing) => {
-      if (active) setNoShowRefundPercent(pricing.refundLateRenterPercent);
     });
     return () => {
       active = false;
@@ -3327,8 +3344,8 @@ export default function ListerBookingsPage() {
                       {["confirmed", "downpayment_paid", "fully_paid"].includes(
                         apparentState,
                       ) &&
-                        !b.lister_arrived_at &&
-                        !b.renter_arrived_at && (
+                        // Stays until the handover, even at the meetup.
+                        !pickupBlocksCancellation(b, "lister") && (
                           <div className="mt-2 flex justify-end">
                             <Button
                               size="sm"
@@ -3340,7 +3357,10 @@ export default function ListerBookingsPage() {
                               disabled={actionLoading === b.id}
                               className="gap-1 text-red-500 hover:bg-red-500/10 hover:text-red-600"
                             >
-                              <XCircle className="w-3.5 h-3.5" /> Cancel booking
+                              <XCircle className="w-3.5 h-3.5" />{" "}
+                              {b.lister_arrived_at || b.renter_arrived_at
+                                ? "Can't hand over - cancel"
+                                : "Cancel booking"}
                             </Button>
                           </div>
                         )}
@@ -3484,7 +3504,7 @@ export default function ListerBookingsPage() {
                           </p>
                           <p className="mt-1">
                             {noShowState.canReport
-                              ? `Your arrival check-in is on file and the renter has not shown up. You can cancel this booking as a renter no-show — your reliability record is not affected and the renter keeps a ${getNoShowForfeitPercent(b)}% forfeit.`
+                              ? `Your arrival check-in is on file and the renter has not shown up. You can cancel this booking as a renter no-show — your reliability record is not affected. ${describeNoShowSplit(b)}`
                               : `SafeDrive waits ${noShowState.graceMinutes} minutes after the pickup time — until ${noShowState.reportReadyAt.toLocaleTimeString([], {
                                   hour: "numeric",
                                   minute: "2-digit",
@@ -3881,9 +3901,15 @@ export default function ListerBookingsPage() {
             >
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-lg font-semibold">Cancel this booking?</h3>
+                  <h3 className="text-lg font-semibold">
+                    {cancellingBooking.lister_arrived_at || cancellingBooking.renter_arrived_at
+                      ? "Can't hand over the car?"
+                      : "Cancel this booking?"}
+                  </h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    The renter gets an automatic full refund and is notified to rebook.
+                    {cancellingBooking.lister_arrived_at || cancellingBooking.renter_arrived_at
+                      ? "Cancelling at the pickup gives the renter an automatic full refund - they came for nothing - and tells them to rebook. Only do this if the car cannot be handed over."
+                      : "The renter gets an automatic full refund and is notified to rebook."}
                   </p>
                 </div>
                 <Button
@@ -4293,7 +4319,7 @@ export default function ListerBookingsPage() {
         )}
         <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
           {incidentTarget?.kind === "renter_no_show"
-            ? `The renter keeps a ${getNoShowForfeitPercent(incidentTarget?.booking)}% forfeit; SafeDrive support releases the rest after confirming the return method. Your completion rate is not affected.`
+            ? `${describeNoShowSplit(incidentTarget?.booking)} SafeDrive support releases the money after confirming the return method. Your completion rate is not affected.`
             : "SafeDrive support contacts the renter and manages recovery. Keep any pickup evidence ready. You can take the car offline from My Vehicles while the case is open."}
         </div>
       </ConfirmDialog>

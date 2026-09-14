@@ -5,6 +5,8 @@ import {
 } from "../server/bookingCompletion.js";
 import {
   createManualRefundReview,
+  describeRenterCharge,
+  formatPeso,
   getCancellationRefundPlan,
   getVehicleLabel,
   type RefundableBooking,
@@ -228,16 +230,15 @@ export default async function handler(req: Request) {
     // renter never paid the remaining balance before bookings.balance_deadline
     // (stamped once, at downpayment success, in api/webhooks/paymongo.ts).
     // Unlike the unpaid-reservation case above, money was already captured -
-    // reuse the same late-cancellation refund policy a renter-initiated
-    // cancel already goes through (refund_full_hours_snapshot /
-    // refund_late_renter_percent_snapshot via server/cancellationRefundPlan.ts),
-    // released through the same manual-refund-review queue in Financial
-    // Reviews, not automatically.
+    // it is settled exactly as if the renter had cancelled at that moment
+    // (server/cancellationRefundPlan.ts: the fee counted in rental days since
+    // CHAPTER 91), released through the same manual-refund-review queue in
+    // Financial Reviews, not automatically.
     const nowIso = new Date().toISOString();
     const { data: unpaidBalanceBookings, error: unpaidBalanceError } = await supabase
       .from("bookings")
       .select(
-        "id, renter_id, owner_id, car_id, start_date, pickup_time, refund_full_hours_snapshot, refund_late_renter_percent_snapshot, payments(payment_type, status, amount), cars(plate_number, car_models(name, car_brands(name)))",
+        "id, renter_id, owner_id, car_id, start_date, pickup_time, total_days, total_price, base_price, refund_full_hours_snapshot, refund_late_renter_percent_snapshot, short_notice_free_hours_snapshot, late_cancel_fee_days_snapshot, short_trip_late_cancel_fee_days_snapshot, no_show_fee_days_snapshot, short_trip_no_show_fee_days_snapshot, payments(payment_type, status, amount, created_at), cars(plate_number, car_models(name, car_brands(name)))",
       )
       .eq("compliance_hold", false)
       .eq("status", "downpayment_paid")
@@ -296,9 +297,21 @@ export default async function handler(req: Request) {
         );
 
         const balanceRenterTitle = "Booking Cancelled - Balance Unpaid";
-        const balanceRenterMessage = `Your booking for ${vehicleLabel} was cancelled because the remaining balance was not paid in time. SafeDrive support will review and release your ${refundPlan.lateRenterPercent}% refund. This affects your completion rate.`;
+        const balanceChargeSentence =
+          refundPlan.outcome === "free"
+            ? "It was still inside free cancellation, so no fee applies."
+            : `Under the cancellation policy this carries ${describeRenterCharge(refundPlan)}.`;
+        const balanceRefundSentence =
+          refundPlan.renterRefund > 0
+            ? `SafeDrive support will review and release your ${formatPeso(refundPlan.renterRefund)} refund.`
+            : "No refund is due.";
+        const balanceRenterMessage = `Your booking for ${vehicleLabel} was cancelled because the remaining balance was not paid in time. ${balanceChargeSentence} ${balanceRefundSentence} This affects your completion rate.`;
         const balanceOwnerTitle = "Booking Cancelled - Balance Unpaid";
-        const balanceOwnerMessage = `A renter did not pay the remaining balance for ${vehicleLabel} in time, so the booking was cancelled and those dates are free again.`;
+        const balanceOwnerMessage = `A renter did not pay the remaining balance for ${vehicleLabel} in time, so the booking was cancelled and those dates are free again.${
+          refundPlan.listerCompensation > 0
+            ? ` About ${formatPeso(refundPlan.listerCompensation)} comes to you as compensation once SafeDrive support releases it.`
+            : ""
+        }`;
         await supabase.from("notifications").insert([
           {
             user_id: rawBooking.renter_id,

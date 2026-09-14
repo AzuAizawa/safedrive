@@ -3,6 +3,94 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - A lister can still cancel at the pickup, up to the handover
+
+Found while confirming the booking flow: the Cancel button disappeared for
+**both** sides the moment either checked in on arrival, and the server refused
+too. So a lister who found the car undrivable at the meetup - both people
+there, nothing handed over - had no way out but a support ticket, and the
+renter's refund waited on a person.
+
+- **Lister:** Cancel now stays until they confirm the handover; once anyone has
+  checked in it reads **Can't hand over - cancel**. The renter is refunded in
+  full through the same automatic path as any pre-trip lister cancellation,
+  is told the lister cancelled "at the pickup, before handing over the car",
+  and it counts as a last-minute cancellation on the lister's record (three in
+  60 days pauses their listings).
+- **Renter:** unchanged - no self-service cancel after either side checks in.
+  The no-car and no-show reports decide that, and a renter cancel at the
+  meetup would be a free way around the late fee. Trying it now explains to
+  use the no-car report.
+- A handover confirmed at the same moment wins: the cancel only claims a
+  booking whose handover is still empty.
+
+The rule is one function, `pickupBlocksCancellation` in
+`server/cancellationPolicy.ts` (and its browser copy), used by
+`api/booking-action.ts` and both booking pages, pinned in
+`scripts/cancellation-policy.test.mjs`. No database change.
+
+## 2026-09-14 - Cancellation and no-show fees are counted in rental days
+
+Reported: a renter who paid in full lost more on a late cancellation than one
+who paid only the downpayment, though both cost the lister the same dates. The
+fee was a percentage of whatever had been paid (`refund_late_renter_percent`,
+default 50%), so it grew with how the renter chose to pay. A no-show used the
+same number.
+
+**Now, following Turo's policy** (CHAPTER 91, `server/cancellationPolicy.ts`):
+
+| Situation | Renter is charged (defaults) |
+|---|---|
+| Cancelled 24h or more before pickup | nothing - automatic full refund (unchanged) |
+| Paid when pickup was already closer than 24h | nothing for 4h after the first payment, never past pickup |
+| Late cancellation, or balance not paid by its deadline | 1 day of the booking's average daily cost; half a day for trips of 2 days or less |
+| No-show, or cancelled after the pickup time | 2 days; three quarters of a day for trips of 2 days or less |
+
+The day cost is the booking total divided by its days, so paying in full and
+paying the downpayment cost the same fee; it is only capped at what was paid.
+Two days at PHP 1,000, cancelled late: fee PHP 500 - refund PHP 1,500 after
+paying in full, PHP 500 after a PHP 1,000 downpayment. The lister receives the
+fee's rental part as compensation, no commission, when the super admin
+releases the refund.
+
+- **Platform Settings:** the percentage setting is replaced by five - free
+  hours after paying, and the late-cancellation and no-show fees for long and
+  short trips - voted like the others and snapshotted on every new booking.
+- **Old bookings keep their terms.** A booking made before CHAPTER 91 has no
+  fee-day snapshots and is still settled by its percentage snapshot.
+- **A PHP 0 refund can be settled.** When the fee uses up everything paid, the
+  refund row is PHP 0. Releasing it demanded a GCash reference, then failed in
+  the ledger ("Ledger refund amount is invalid") after the row was already
+  marked completed - and a completed row has no button, so the lister's
+  compensation was stranded. This already happened to any renter who cancelled
+  after the pickup time. It is now **Settle - No Refund Due**: no transfer, no
+  reference, no ledger journal, a "Cancellation Settled" notice to the renter,
+  and the lister's compensation released in the same click.
+- **Wording:** the chapter republishes Terms 6.1, 6.2 and 6.4 and the Platform
+  Agreement's Cancellation Policy and Renter No-Show clauses as version 2
+  (version 1 stays in the history). Help Center, Sign Up, My Bookings (the fee
+  and refund in pesos before confirming, and when free cancellation ends), the
+  lister's no-show dialog and all notifications state the fee. The lister's
+  "Refund processing has started if it was still inside the 24-hour grace
+  period" is gone.
+- `api/booking-action.ts` now uses the shared plan instead of its own copy, so
+  cancel, balance-deadline expiry and no-show can no longer charge different
+  fees. A renter's cancellation counts as late for reliability only when a fee
+  applied.
+
+Files: `server/cancellationPolicy.ts` and `src/lib/cancellationPolicy.ts` (the
+same rules, pinned by `scripts/cancellation-policy.test.mjs` -
+`check:cancellation-policy`, in `check:all` - which also applies the chapter to
+real PostgreSQL), `server/cancellationRefundPlan.ts`, `api/booking-action.ts`,
+`api/expire-booking-deadlines.ts`, `api/booking-incident-action.ts`,
+`api/create-booking.ts`, `api/mark-manual-refund.ts`,
+`AdminRefundReviewPage.tsx`, `AdminPlatformSettingsPage.tsx`,
+`MyBookingsPage.tsx`, `ListerBookingsPage.tsx`, `src/lib/platformSettings.ts`,
+`src/lib/helpCenter.ts`, `SignUpPage.tsx`, `src/types/database.ts`.
+
+**Follow-up.** Paste CHAPTER 91 **before** deploying - booking creation and
+every cancellation path read the new columns.
+
 ## 2026-09-14 - A form says everything that is missing, at once, in red
 
 Tester report: listing a car told you what was missing one field at a time -

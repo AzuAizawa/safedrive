@@ -77,14 +77,8 @@ export default async function handler(req: Request) {
     const referenceNumber = payload.referenceNumber?.trim();
     const note = payload.note?.trim() || null;
 
-    if (!paymentId || !refundMethod || !referenceNumber) {
-      return jsonResponse(
-        {
-          error:
-            "Refund payment, GCash/Maya return method, and reference number are required.",
-        },
-        400,
-      );
+    if (!paymentId) {
+      return jsonResponse({ error: "Refund payment is required." }, 400);
     }
 
     const supabase = createSupabaseAdmin();
@@ -178,6 +172,24 @@ export default async function handler(req: Request) {
       );
     }
 
+    // A policy refund of PHP 0 - the fee used up everything the renter paid -
+    // has nothing to send back, so there is no GCash/Maya transfer to record.
+    // It used to demand a reference anyway and then fail in the ledger after
+    // the row was already marked completed, and a completed row has no
+    // button, so the lister's compensation below was stranded. Settling it
+    // is still the super admin's click: that click releases the compensation.
+    const noRefundDue =
+      Math.round(Math.abs(Number(refundPayment.amount || 0)) * 100) === 0;
+    if (!noRefundDue && (!refundMethod || !referenceNumber)) {
+      return jsonResponse(
+        {
+          error:
+            "Refund payment, GCash/Maya return method, and reference number are required.",
+        },
+        400,
+      );
+    }
+
     // Guard against releasing more than the booking ever collected. This row
     // being pending was previously the only check - nothing looked at the
     // OTHER refunds on the same booking. If a full refund already went
@@ -218,7 +230,9 @@ export default async function handler(req: Request) {
     }
 
     const notes = [
-      `Refund released by super admin through ${refundMethod}.`,
+      noRefundDue
+        ? "Settled by super admin: no refund was due under the cancellation policy."
+        : `Refund released by super admin through ${refundMethod}.`,
       note,
     ]
       .filter(Boolean)
@@ -228,8 +242,10 @@ export default async function handler(req: Request) {
       .from("payments")
       .update({
         status: "completed",
-        payment_method: refundMethod,
-        transaction_id: referenceNumber,
+        payment_method: noRefundDue ? "No refund due" : refundMethod,
+        // No transfer means no reference, and reconciliation only expects a
+        // ledger journal for a completed refund that carries one.
+        transaction_id: noRefundDue ? null : referenceNumber,
         notes,
       })
       .eq("id", refundPayment.id)
@@ -270,12 +286,14 @@ export default async function handler(req: Request) {
     // The event key is `refund:<transaction_id>`, which is exactly what
     // reconciliation looks for, and posting is idempotent on that key - so a
     // retry after a transient failure cannot double-post.
-    await postCompletedRefundToLedger(supabase, {
-      bookingId: refundPayment.booking_id,
-      amount: Math.abs(Number(refundPayment.amount)),
-      refundId: referenceNumber,
-      actorId: user.id,
-    });
+    if (!noRefundDue && referenceNumber) {
+      await postCompletedRefundToLedger(supabase, {
+        bookingId: refundPayment.booking_id,
+        amount: Math.abs(Number(refundPayment.amount)),
+        refundId: referenceNumber,
+        actorId: user.id,
+      });
+    }
 
     await supabase
       .from("support_tickets")
@@ -283,26 +301,38 @@ export default async function handler(req: Request) {
       .eq("booking_id", refundPayment.booking_id)
       .eq("tag", "manual_refund");
 
-    await supabase.from("notifications").insert({
-      user_id: refundPayment.bookings.renter_id,
-      title: "Refund Released",
-      message: `Your SafeDrive refund for ${getVehicleLabel(refundPayment)} was marked released through ${refundMethod}. Reference: ${referenceNumber}.`,
-      type: "success",
-      link: "/my-bookings",
-    });
+    await supabase.from("notifications").insert(
+      noRefundDue
+        ? {
+            user_id: refundPayment.bookings.renter_id,
+            title: "Cancellation Settled",
+            message: `No refund was due for ${getVehicleLabel(refundPayment)} under the cancellation policy - the fee covered what was paid.`,
+            type: "info",
+            link: "/my-bookings",
+          }
+        : {
+            user_id: refundPayment.bookings.renter_id,
+            title: "Refund Released",
+            message: `Your SafeDrive refund for ${getVehicleLabel(refundPayment)} was marked released through ${refundMethod}. Reference: ${referenceNumber}.`,
+            type: "success",
+            link: "/my-bookings",
+          },
+    );
 
-    const receipt = await sendRefundReceiptEmail(supabase, {
-      bookingId: refundPayment.booking_id,
-      amount: Math.abs(Number(refundPayment.amount)),
-      refundId: referenceNumber,
-      refundMethod,
-      baseOrigin: new URL(req.url).origin,
-    });
-    if (receipt.state !== "sent" && receipt.state !== "not_configured") {
-      console.warn("Manual refund receipt email was not delivered", {
-        state: receipt.state,
+    if (!noRefundDue && refundMethod && referenceNumber) {
+      const receipt = await sendRefundReceiptEmail(supabase, {
         bookingId: refundPayment.booking_id,
+        amount: Math.abs(Number(refundPayment.amount)),
+        refundId: referenceNumber,
+        refundMethod,
+        baseOrigin: new URL(req.url).origin,
       });
+      if (receipt.state !== "sent" && receipt.state !== "not_configured") {
+        console.warn("Manual refund receipt email was not delivered", {
+          state: receipt.state,
+          bookingId: refundPayment.booking_id,
+        });
+      }
     }
 
     await supabase.from("audit_log").insert({
@@ -315,7 +345,7 @@ export default async function handler(req: Request) {
         refund_method: refundMethod,
         reference_number: referenceNumber,
         booking_id: refundPayment.booking_id,
-        mode: "manual",
+        mode: noRefundDue ? "no_refund_due" : "manual",
       },
     });
 

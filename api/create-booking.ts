@@ -545,7 +545,7 @@ export default async function handler(req: Request) {
     const { data: settingData, error: settingError } = await supabase
       .from("platform_settings")
       .select(
-        "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent",
+        "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days",
       )
       .eq("id", "default")
       .maybeSingle();
@@ -573,6 +573,32 @@ export default async function handler(req: Request) {
       rawLatePercent <= 100
         ? rawLatePercent
         : 50;
+    // Cancellation and no-show fees counted in rental days (CHAPTER 91),
+    // frozen onto the booking like every other money term. An unreadable
+    // setting falls back to the published default, never to 0 - Number(null)
+    // is 0, which would mean "no fee".
+    const feeSetting = (value: unknown, min: number, max: number, fallback: number) => {
+      if (value === null || value === undefined) return fallback;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+    };
+    const shortNoticeFreeHours = Math.round(
+      feeSetting(settingData?.short_notice_free_hours, 0, 24, 4),
+    );
+    const lateCancelFeeDays = feeSetting(settingData?.late_cancel_fee_days, 0, 30, 1);
+    const shortTripLateCancelFeeDays = feeSetting(
+      settingData?.short_trip_late_cancel_fee_days,
+      0,
+      2,
+      0.5,
+    );
+    const noShowFeeDays = feeSetting(settingData?.no_show_fee_days, 0, 30, 2);
+    const shortTripNoShowFeeDays = feeSetting(
+      settingData?.short_trip_no_show_fee_days,
+      0,
+      2,
+      0.75,
+    );
 
     const totalDays = Math.round((endDate.utcMs - startDate.utcMs) / DAY_MS);
     const commissionRate = normalizeCommissionRate(settingData?.commission_rate);
@@ -715,6 +741,11 @@ export default async function handler(req: Request) {
         downpayment_rate_snapshot: downpaymentRate,
         refund_full_hours_snapshot: refundFullHours,
         refund_late_renter_percent_snapshot: refundLateRenterPercent,
+        short_notice_free_hours_snapshot: shortNoticeFreeHours,
+        late_cancel_fee_days_snapshot: lateCancelFeeDays,
+        short_trip_late_cancel_fee_days_snapshot: shortTripLateCancelFeeDays,
+        no_show_fee_days_snapshot: noShowFeeDays,
+        short_trip_no_show_fee_days_snapshot: shortTripNoShowFeeDays,
       })
       .select(
         "id, total_days, base_price, commission, total_price, downpayment_amount, balance_amount, status",

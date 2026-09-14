@@ -10,6 +10,12 @@ import { runBookingCompletionSideEffects } from "../server/bookingCompletion.js"
 import { sendUserNotificationEmail } from "../server/email.js";
 import { blockedIpResponse } from "../server/ipBlock.js";
 import { closePendingExtensionsTakenBy, findHoldConflict } from "../server/extensionHolds.js";
+import {
+  describeRenterCharge,
+  formatPeso,
+  getCancellationRefundPlan,
+} from "../server/cancellationRefundPlan.js";
+import { pickupBlocksCancellation } from "../server/cancellationPolicy.js";
 
 export const config = {
   runtime: "edge",
@@ -48,8 +54,15 @@ type BookingRecord = {
   dropoff_time: string | null;
   commission: number | string;
   total_price: number | string;
+  total_days: number | string;
+  base_price: number | string;
   refund_full_hours_snapshot: number | string | null;
   refund_late_renter_percent_snapshot: number | string | null;
+  short_notice_free_hours_snapshot: number | string | null;
+  late_cancel_fee_days_snapshot: number | string | null;
+  short_trip_late_cancel_fee_days_snapshot: number | string | null;
+  no_show_fee_days_snapshot: number | string | null;
+  short_trip_no_show_fee_days_snapshot: number | string | null;
   owner_response_deadline: string | null;
   renter_completed: boolean;
   owner_completed: boolean;
@@ -170,7 +183,6 @@ const getCapturedBookingPaymentTotal = (booking: BookingRecord) =>
     .reduce((total, payment) => total + Number(payment.amount || 0), 0);
 
 const DEFAULT_REFUND_FULL_HOURS = 24;
-const DEFAULT_REFUND_LATE_RENTER_PERCENT = 50;
 
 const clampNumber = (value: unknown, min: number, max: number, fallback: number) => {
   const parsed = Number(value);
@@ -256,53 +268,6 @@ const getReturnCheckinEligibleMs = (booking: BookingRecord, approvedEarly: Appro
     if (earlyMs !== null) return earlyMs;
   }
   return getBookingDropoffMs(booking);
-};
-
-/**
- * Cancellation-refund policy (Terms 6.1/6.2, values snapshot per booking):
- * cancelling >= refund_full_hours before pickup earns an automatic full refund;
- * inside that window the renter's share is refund_late_renter_percent and the
- * rest is short-notice lister compensation, released through admin review.
- */
-const getCancellationRefundPlan = (booking: BookingRecord) => {
-  const capturedTotal = getCapturedBookingPaymentTotal(booking);
-  const fullHours = Math.round(
-    clampNumber(
-      booking.refund_full_hours_snapshot,
-      0,
-      720,
-      DEFAULT_REFUND_FULL_HOURS,
-    ),
-  );
-  const lateRenterPercent = clampNumber(
-    booking.refund_late_renter_percent_snapshot,
-    0,
-    100,
-    DEFAULT_REFUND_LATE_RENTER_PERCENT,
-  );
-  const pickupMs = getBookingPickupMs(booking);
-  const hoursToPickup =
-    pickupMs === null ? null : (pickupMs - Date.now()) / (60 * 60 * 1000);
-  const isLate = hoursToPickup !== null && hoursToPickup < fullHours;
-  const pastPickup = hoursToPickup !== null && hoursToPickup <= 0;
-
-  const recommendedRenterRefund = !isLate
-    ? capturedTotal
-    : pastPickup
-      ? 0
-      : Math.round(capturedTotal * (lateRenterPercent / 100) * 100) / 100;
-
-  return {
-    capturedTotal,
-    fullHours,
-    lateRenterPercent,
-    hoursToPickup,
-    isLate,
-    pastPickup,
-    recommendedRenterRefund,
-    listerCompensation:
-      Math.round((capturedTotal - recommendedRenterRefund) * 100) / 100,
-  };
 };
 
 const createManualRefundReview = async (
@@ -467,6 +432,13 @@ export default async function handler(req: Request) {
         total_price,
         refund_full_hours_snapshot,
         refund_late_renter_percent_snapshot,
+        total_days,
+        base_price,
+        short_notice_free_hours_snapshot,
+        late_cancel_fee_days_snapshot,
+        short_trip_late_cancel_fee_days_snapshot,
+        no_show_fee_days_snapshot,
+        short_trip_no_show_fee_days_snapshot,
         owner_response_deadline,
         renter_completed,
         owner_completed,
@@ -754,16 +726,23 @@ export default async function handler(req: Request) {
           Number(payment.amount) > 0,
       );
 
+      // A lister may still cancel at the meetup, up to the handover; a renter
+      // not once either side has checked in (pickupBlocksCancellation).
+      const pickupUnderWay = Boolean(
+        bookingRecord.renter_arrived_at || bookingRecord.lister_arrived_at,
+      );
       const isPreTripCancellation =
-        !bookingRecord.renter_arrived_at &&
-        !bookingRecord.lister_arrived_at &&
+        !pickupBlocksCancellation(bookingRecord, renter ? "renter" : "lister") &&
         !["active", "completed"].includes(bookingRecord.status);
+      if (pickupUnderWay) auditDetails.cancelled_at_pickup = true;
 
       if (!isPreTripCancellation) {
         return jsonResponse(
           {
             error:
-              "This booking can no longer be cancelled automatically because the trip has already started or was completed.",
+              renter && pickupUnderWay && !bookingRecord.lister_handover_confirmed_at
+                ? "The pickup is already under way, so this booking can't be cancelled here. If the lister hasn't come with the car, use the no-car report on the booking."
+                : "This booking can no longer be cancelled automatically because the trip has already started or was completed.",
           },
           409,
         );
@@ -787,10 +766,10 @@ export default async function handler(req: Request) {
       const refundPlan = hasCapturedBookingPayment
         ? getCancellationRefundPlan(bookingRecord)
         : null;
-      // A renter cancelling a paid booking inside the "full refund" window keeps
-      // the automatic full-refund path. Inside the short-notice window the
-      // cancellation still goes through, but the refund is a policy-recommended
-      // partial handled by admin review rather than an automatic full return.
+      // A renter cancelling a paid booking during free cancellation keeps the
+      // automatic full-refund path. After it ends the cancellation still goes
+      // through, but the renter is charged the late-cancellation (or, past the
+      // pickup time, no-show) fee and the rest is refunded by admin review.
       const renterLateCancellation = Boolean(
         renter && refundPlan && refundPlan.isLate,
       );
@@ -820,6 +799,8 @@ export default async function handler(req: Request) {
         .from("bookings")
         .update(updateFields)
         .eq("id", bookingRecord.id)
+        // A handover confirmed a moment ago wins over a cancel still in flight.
+        .is("lister_handover_confirmed_at", null)
         .in("status", [
           "pending",
           "confirmed",
@@ -842,8 +823,15 @@ export default async function handler(req: Request) {
       }
 
       if (hasCapturedBookingPayment && renterLateCancellation && refundPlan) {
-        // Short-notice renter cancellation: policy-recommended partial refund,
-        // released by admin review (Terms 6.2 - no automatic money movement).
+        // Free cancellation has ended: the renter is charged the fee counted in
+        // rental days (CHAPTER 91, or the percentage terms of an older booking)
+        // and the rest is released by admin review (Terms 6.2 - no automatic
+        // money movement).
+        const charge = describeRenterCharge(refundPlan);
+        const refundSentence =
+          refundPlan.renterRefund > 0
+            ? `SafeDrive support will review and release your ${formatPeso(refundPlan.renterRefund)} refund.`
+            : "No refund is due.";
         const manualRefundPaymentId = await createManualRefundReview(
           supabase,
           bookingRecord,
@@ -854,20 +842,20 @@ export default async function handler(req: Request) {
               refundPlan.hoursToPickup !== null
                 ? `${Math.max(0, Math.round(refundPlan.hoursToPickup))}h`
                 : "shortly"
-            } before pickup (policy threshold ${refundPlan.fullHours}h).`,
+            } before pickup (free cancellation closes ${refundPlan.fullHours}h before pickup).`,
             refundPlan.pastPickup
-              ? "Pickup time had already passed with no check-in."
-              : `Recommended renter share ${refundPlan.lateRenterPercent}%; short-notice lister compensation PHP ${refundPlan.listerCompensation.toLocaleString()}.`,
+              ? `Pickup time had already passed with no check-in, so this counts as a no-show: ${charge}.`
+              : `Policy: ${charge}; lister compensation about ${formatPeso(refundPlan.listerCompensation)}.`,
           ]
             .filter(Boolean)
             .join(" "),
-          "Short-notice cancellation - automatic full refund not applied.",
+          "Late cancellation - automatic full refund not applied.",
           refundPlan.recommendedRenterRefund,
         );
         cancelState = "cancelled_refund_pending";
         cancelMessage = refundPlan.pastPickup
-          ? "Booking cancelled. Because pickup had already passed, any refund is decided by SafeDrive support review."
-          : `Booking cancelled. Because this was a short-notice cancellation, SafeDrive support will review and release the recommended ${refundPlan.lateRenterPercent}% refund.`;
+          ? `Booking cancelled after the pickup time, which counts as a no-show: ${charge}. ${refundSentence}`
+          : `Booking cancelled after free cancellation ended: ${charge}. ${refundSentence}`;
         auditDetails.refund_state = "manual_review";
         auditDetails.refund_payment_ids = manualRefundPaymentId
           ? [manualRefundPaymentId]
@@ -875,6 +863,9 @@ export default async function handler(req: Request) {
         auditDetails.refund_auto_reason = "short_notice_partial_policy";
         auditDetails.recommended_renter_refund = refundPlan.recommendedRenterRefund;
         auditDetails.lister_compensation = refundPlan.listerCompensation;
+        auditDetails.cancellation_fee = refundPlan.fee;
+        auditDetails.cancellation_terms = refundPlan.terms;
+        auditDetails.cancellation_outcome = refundPlan.outcome;
       } else if (hasCapturedBookingPayment) {
         const refundResult = await processAutomaticRefundForBooking({
           supabase,
@@ -969,8 +960,13 @@ export default async function handler(req: Request) {
           DEFAULT_REFUND_FULL_HOURS,
         ),
       );
+      // A paid renter cancellation is late exactly when the policy charged a
+      // fee - cancelling inside the free hours after paying is not (CHAPTER 91).
+      // Everyone else is still judged on the hours-before-pickup window.
       const cancelWasLate =
-        hoursBeforePickup !== null && hoursBeforePickup < cancelFullHours;
+        renter && refundPlan
+          ? refundPlan.outcome !== "free"
+          : hoursBeforePickup !== null && hoursBeforePickup < cancelFullHours;
       const strikeWaived = !renter && payload.waiveStrike === true;
 
       await supabase.from("booking_cancellations").upsert(
@@ -1053,6 +1049,16 @@ export default async function handler(req: Request) {
       const counterpartyId = renter
         ? bookingRecord.owner_id
         : bookingRecord.renter_id;
+      const renterCancelledNote = !hasCapturedBookingPayment
+        ? `The renter cancelled ${getVehicleLabel(bookingRecord)} before payment capture.`
+        : !refundPlan || refundPlan.outcome === "free"
+          ? `The renter cancelled ${getVehicleLabel(bookingRecord)} during free cancellation, so their full refund is being processed.`
+          : refundPlan.listerCompensation > 0
+            ? `The renter cancelled ${getVehicleLabel(bookingRecord)} after free cancellation ended. About ${formatPeso(refundPlan.listerCompensation)} comes to you as compensation once SafeDrive support releases it.`
+            : `The renter cancelled ${getVehicleLabel(bookingRecord)} after free cancellation ended.`;
+      const listerCancelledWhen = pickupUnderWay
+        ? "at the pickup, before handing over the car"
+        : "before the trip started";
 
       await supabase.from("notifications").insert([
         {
@@ -1066,12 +1072,10 @@ export default async function handler(req: Request) {
           user_id: counterpartyId,
           title: renter ? "Renter Cancelled the Booking" : "Lister Cancelled the Booking",
           message: renter
-            ? hasCapturedBookingPayment
-              ? `The renter cancelled ${getVehicleLabel(bookingRecord)}. Refund processing has started if it was still inside the 24-hour grace period.`
-              : `The renter cancelled ${getVehicleLabel(bookingRecord)} before payment capture.`
+            ? renterCancelledNote
             : hasCapturedBookingPayment
-              ? `The lister cancelled ${getVehicleLabel(bookingRecord)} before the trip started. Your full refund is being processed - browse other cars to rebook.`
-              : `The lister cancelled ${getVehicleLabel(bookingRecord)} before the trip started. Browse other cars to rebook.`,
+              ? `The lister cancelled ${getVehicleLabel(bookingRecord)} ${listerCancelledWhen}. Your full refund is being processed - browse other cars to rebook.`
+              : `The lister cancelled ${getVehicleLabel(bookingRecord)} ${listerCancelledWhen}. Browse other cars to rebook.`,
           type: renter ? (hasCapturedBookingPayment ? "info" : "error") : "error",
           link: renter ? "/lister-bookings" : "/browse",
         },
@@ -1080,12 +1084,10 @@ export default async function handler(req: Request) {
         userId: counterpartyId,
         title: renter ? "Renter Cancelled the Booking" : "Lister Cancelled the Booking",
         message: renter
-          ? hasCapturedBookingPayment
-            ? `The renter cancelled ${getVehicleLabel(bookingRecord)}. Refund processing has started if it was still inside the 24-hour grace period.`
-            : `The renter cancelled ${getVehicleLabel(bookingRecord)} before payment capture.`
+          ? renterCancelledNote
           : hasCapturedBookingPayment
-            ? `The lister cancelled ${getVehicleLabel(bookingRecord)} before the trip started. Renter refund processing has started.`
-            : `The lister cancelled ${getVehicleLabel(bookingRecord)} before the trip started.`,
+            ? `The lister cancelled ${getVehicleLabel(bookingRecord)} ${listerCancelledWhen}. Renter refund processing has started.`
+            : `The lister cancelled ${getVehicleLabel(bookingRecord)} ${listerCancelledWhen}.`,
         link: renter ? "/lister-bookings" : "/my-bookings",
         baseOrigin: new URL(req.url).origin,
         eventKey: `booking-cancelled:${bookingRecord.id}:${renter ? "renter" : "lister"}`,
