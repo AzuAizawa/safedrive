@@ -1839,6 +1839,15 @@ export interface Database {
         Args: { p_car_id: string };
         Returns: { start_date: string; end_date: string; category: string }[];
       };
+      // CHAPTER 87 - dates and car ids only, never who booked.
+      get_car_booked_ranges: {
+        Args: { p_car_id: string };
+        Returns: { start_date: string; end_date: string }[];
+      };
+      get_available_car_ids: {
+        Args: { p_start: string; p_end?: string | null };
+        Returns: { car_id: string }[];
+      };
       propose_platform_setting_change: {
         Args: {
           p_changes: Json;

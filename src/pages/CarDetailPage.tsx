@@ -10,6 +10,7 @@ import {
 } from "@/lib/platformSettings";
 import { formatTimeLabel } from "@/lib/timeOptions";
 import TimePicker from "@/components/TimePicker";
+import { parseTripDatesQuery } from "@/lib/tripDates";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 
@@ -102,7 +103,13 @@ export default function CarDetailPage() {
   const [car, setCar] = useState<CarWithDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [dateRange, setDateRange] = useState<DateRange | undefined>();
+  // Dates the renter already chose on Browse Cars arrive as ?pickup=&return=.
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
+    parseTripDatesQuery(location.search, new Date(), {
+      maxAdvanceDays: MAX_ADVANCE_BOOKING_DAYS,
+      maxTripDays: MAX_TOTAL_RENTAL_DAYS,
+    }),
+  );
   const [pickupTime, setPickupTime] = useState("");
   // Reported inconsistency: total_days is a pure calendar-date difference
   // (Sept 5 -> Sept 6 is always "1 day"), independent of whatever pickup/
@@ -197,21 +204,17 @@ export default function CarDetailPage() {
     ) {
       const carRow = data as unknown as CarWithDetails;
       setCar(carRow);
-      // Fetch active bookings to block dates
-      const { data: bookings } = await supabase
-        .from("bookings")
-        .select("start_date, end_date")
-        .eq("car_id", id)
-        .in("status", [
-          "pending",
-          "confirmed",
-          "awaiting_payment",
-          "downpayment_paid",
-          "fully_paid",
-          "active",
-        ]);
-
-      if (bookings) {
+      // Every booking holding this car's dates. This used to read the bookings
+      // table directly, but a person may only read bookings they are part of,
+      // so everyone else's dates looked free until the booking was refused at
+      // submit. The function returns dates only, never who booked (CHAPTER 87).
+      const { data: bookings, error: bookedError } = await supabase.rpc(
+        "get_car_booked_ranges",
+        { p_car_id: id },
+      );
+      if (bookedError) {
+        console.warn("Unable to load booked dates:", bookedError.message);
+      } else if (bookings) {
         setBookedDates(
           bookings.map((b) => ({ start: b.start_date, end: b.end_date })),
         );

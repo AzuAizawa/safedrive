@@ -13098,4 +13098,126 @@ commit;
 --   where c.deleted_at is not null group by c.plate_number;
 --   (after a lister deletes one: the row is still there, still explaining its bookings)
 
+-- ============================================================================
+-- CHAPTER 87 - Browse Cars can filter by date, and every calendar sees every booking
+-- Apply this chapter only, staging first. Two read-only functions are added.
+-- No table, row, policy or trigger changes.
+-- ============================================================================
+begin;
+
+-- Reported: a renter who wants a car on Oct 25 had to open every listing, one
+-- by one, to read its calendar. Browse Cars now takes a pickup date, and an
+-- optional return date, and keeps only the cars that can actually be booked.
+--
+-- Checking that exposed an older defect. "Participants see bookings" lets a
+-- person read only bookings they are part of, so CarDetailPage's direct read of
+-- a car's bookings returned the viewer's OWN bookings and nobody else's.
+-- Another renter's dates looked free on the calendar and failed only at submit,
+-- when api/create-booking.ts (service role) found the overlap. Nothing could be
+-- double-booked - the overlap constraint holds - but the calendar was wrong.
+--
+-- Both are answered the way get_car_blackout_ranges already answers blackouts:
+-- SECURITY DEFINER functions that return dates and car ids, never who booked.
+-- The bookings policy itself is untouched.
+--
+-- The statuses that hold a car's dates are ACTIVE_BOOKING_STATUSES in
+-- api/create-booking.ts.
+
+create or replace function public.get_car_booked_ranges(p_car_id uuid)
+returns table(start_date date, end_date date)
+language sql
+security definer
+set search_path = public
+stable
+as $get_car_booked_ranges$
+  select b.start_date, b.end_date
+  from public.bookings b
+  join public.cars c on c.id = b.car_id
+  where b.car_id = p_car_id
+    and c.status in ('approved', 'active')
+    and c.deleted_at is null
+    and b.status in (
+      'pending', 'confirmed', 'awaiting_payment',
+      'downpayment_paid', 'fully_paid', 'active'
+    )
+    and b.end_date >= current_date
+  order by b.start_date;
+$get_car_booked_ranges$;
+
+-- p_end is optional. Without it the question is "can a trip start on
+-- p_start?". The shortest trip is one day, returning the next day, and a
+-- booking's return day is part of it ('[]', as the overlap constraint and
+-- create-booking count it). So a car booked from the 26th cannot be picked up
+-- on the 25th, and is not offered for it.
+create or replace function public.get_available_car_ids(
+  p_start date,
+  p_end date default null
+)
+returns table(car_id uuid)
+language plpgsql
+security definer
+set search_path = public
+stable
+as $get_available_car_ids$
+declare
+  trip_end date := coalesce(p_end, p_start + 1);
+begin
+  if p_start is null or trip_end <= p_start then
+    raise exception 'The return date must be after the pickup date.';
+  end if;
+  -- MAX_TOTAL_RENTAL_DAYS in api/create-booking.ts; also bounds the work.
+  if trip_end - p_start > 30 then
+    raise exception 'A single trip can run at most 30 days.';
+  end if;
+
+  return query
+  select c.id
+  from public.cars c
+  where c.status in ('approved', 'active')
+    and c.deleted_at is null
+    and not exists (
+      select 1
+      from public.bookings b
+      where b.car_id = c.id
+        and b.status in (
+          'pending', 'confirmed', 'awaiting_payment',
+          'downpayment_paid', 'fully_paid', 'active'
+        )
+        and daterange(b.start_date, b.end_date, '[]')
+            && daterange(p_start, trip_end, '[]')
+    )
+    and not exists (
+      select 1
+      from public.vehicle_unavailability u
+      where u.car_id = c.id
+        and daterange(u.start_date, u.end_date, '[]')
+            && daterange(p_start, trip_end, '[]')
+    )
+    -- The car's documents must cover the whole trip. 09:00 Manila is the time
+    -- CarDetailPage assumes before a pickup time is chosen.
+    and coalesce((public.vehicle_compliance_summary(
+          c.id,
+          (p_start + time '09:00') at time zone 'Asia/Manila',
+          (trip_end + time '09:00') at time zone 'Asia/Manila'
+        ) ->> 'eligible')::boolean, false);
+end;
+$get_available_car_ids$;
+
+-- Browse Cars and Car Details are signed-in pages; nothing here is for anon.
+revoke all on function public.get_car_booked_ranges(uuid) from public, anon;
+grant execute on function public.get_car_booked_ranges(uuid) to authenticated, service_role;
+revoke all on function public.get_available_car_ids(date, date) from public, anon;
+grant execute on function public.get_available_car_ids(date, date) to authenticated, service_role;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select proname from pg_proc
+--   where proname in ('get_car_booked_ranges', 'get_available_car_ids');
+--   (expect two rows)
+-- select count(*) from public.get_available_car_ids(current_date + 1);
+--   (expect the number of listed cars free tomorrow)
+-- select * from public.get_car_booked_ranges('<a listed car id>');
+--   (expect only start_date and end_date columns - never who booked)
+
 -- End of SafeDrive chaptered database master.

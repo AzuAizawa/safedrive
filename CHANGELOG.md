@@ -3,6 +3,48 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-14 - Browse Cars filters by date, and every calendar sees every booking
+
+Tester request: a renter who wants a car on Oct 25 had to open each listing,
+one by one, to read its calendar.
+
+**Browse Cars** now has a date button beside the search (*Any dates*). It opens
+the same calendar as a booking. A **pickup date** alone keeps the cars a trip
+can start on; an optional **return date** keeps only the cars free for the whole
+trip. Opening a car carries the dates along (`?pickup=2026-10-25&return=...`),
+so its calendar is already filled in. Clearing the dates, or *Clear All
+Filters*, shows every car again.
+
+A pickup date alone still checks **the shortest possible trip**: one day,
+returning the next day. A booking's return day belongs to that booking (the
+overlap constraint and `create-booking` both count it), so a car booked from the
+26th cannot be picked up on the 25th, and is not offered for it.
+
+**The defect this exposed.** The `bookings` select policy lets a person read only
+bookings they are part of. `CarDetailPage.tsx` read a car's bookings directly,
+so it got the viewer's own and nobody else's: another renter's dates looked free
+and were refused only at submit ("Selected dates overlap with an existing
+booking"). Nothing was ever double-booked - the server and the constraint held -
+but the calendar was wrong.
+
+**CHAPTER 87** (paste by hand) adds two SECURITY DEFINER functions, returning
+dates and car ids and never who booked, callable by signed-in users only:
+
+- `get_car_booked_ranges(car)` - the car's calendar, now used by Car Details.
+- `get_available_car_ids(pickup, return?)` - listed, undeleted cars with no
+  holding booking (`ACTIVE_BOOKING_STATUSES`), no owner blackout, and documents
+  covering the whole trip (`vehicle_compliance_summary`, 09:00 Manila as Car
+  Details assumes). A return on/before pickup or a trip over 30 days is refused.
+
+The bookings policy is untouched. Proved on PGlite by
+`scripts/trip-date-availability.test.mjs` (`check:trip-availability`, in
+`check:all`), which also pins `src/lib/tripDates.ts` - a link with a date
+outside the booking windows is dropped, not half-applied.
+
+**Before CHAPTER 87 is applied**, Browse shows every car with a note that
+availability couldn't be checked, and Car Details shows no booked dates - the
+same as its behaviour before this change.
+
 ## 2026-09-14 - A time is three clicks, not a 48-row scroll
 
 Tester report: the pickup time was one list of all 48 half hours, so 5:00 PM

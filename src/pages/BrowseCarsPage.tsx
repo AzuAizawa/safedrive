@@ -24,7 +24,11 @@ import {
   Star,
   X,
 } from "lucide-react";
+import { DayPicker, type DateRange } from "react-day-picker";
+import "react-day-picker/dist/style.css";
+import { addDays, format, startOfDay } from "date-fns";
 import type { CarWithDetails } from "@/types/database";
+import { formatDateOnly, tripDatesQuery } from "@/lib/tripDates";
 import {
   fetchCarRatingSummaries,
   formatAverage,
@@ -33,6 +37,10 @@ import {
 
 const MAX_PAYMENT_AMOUNT = 100000;
 const CARS_PER_PAGE = 12;
+// Mirrored from api/create-booking.ts, like CarDetailPage.tsx: how far ahead a
+// trip can start, and how long one trip can run.
+const MAX_ADVANCE_BOOKING_DAYS = 60;
+const MAX_TOTAL_RENTAL_DAYS = 30;
 const UNIVERSAL_FUEL_TYPES = ["gasoline", "diesel", "hybrid", "electric", "full electric"];
 
 const titleCase = (value: string) =>
@@ -59,6 +67,34 @@ export default function BrowseCarsPage() {
   const [sortBy, setSortBy] = useState("recommended");
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Trip dates (CHAPTER 87). A pickup date keeps the cars a trip can start on;
+  // an optional return date keeps the cars free for the whole trip. Which cars
+  // qualify is asked of the database - no one here can read other renters'
+  // bookings.
+  const [tripDates, setTripDates] = useState<DateRange | undefined>();
+  const [showTripDates, setShowTripDates] = useState(false);
+  const [availability, setAvailability] = useState<{
+    key: string;
+    ids: Set<string> | null;
+  } | null>(null);
+  const tripStart = tripDates?.from ? formatDateOnly(tripDates.from) : "";
+  const tripEnd = tripDates?.to ? formatDateOnly(tripDates.to) : "";
+  const tripKey = tripStart ? `${tripStart}|${tripEnd}` : "";
+  const availabilityLoading = Boolean(tripKey) && availability?.key !== tripKey;
+  // A failed check shows every car, with a note, rather than an empty list.
+  const availabilityError =
+    Boolean(tripKey) && availability?.key === tripKey && availability.ids === null;
+  const listLoading = loading || availabilityLoading;
+  const tripMinDate = startOfDay(addDays(new Date(), 1));
+  const tripMaxDate = tripDates?.from
+    ? addDays(tripDates.from, MAX_TOTAL_RENTAL_DAYS)
+    : addDays(new Date(), MAX_ADVANCE_BOOKING_DAYS);
+  const tripButtonLabel = !tripDates?.from
+    ? "Any dates"
+    : tripDates.to
+      ? `${format(tripDates.from, "MMM d")} - ${format(tripDates.to, "MMM d")}`
+      : `From ${format(tripDates.from, "MMM d")}`;
 
   const navigate = useNavigate();
   const isVerified = profile?.verified_status === "verified";
@@ -107,6 +143,7 @@ export default function BrowseCarsPage() {
     setMinPrice("");
     setMaxPrice("");
     setSortBy("recommended");
+    setTripDates(undefined);
     setCurrentPage(1);
   };
 
@@ -119,7 +156,8 @@ export default function BrowseCarsPage() {
     seatsFilter !== "all" ||
     minPrice !== "" ||
     maxPrice !== "" ||
-    sortBy !== "recommended";
+    sortBy !== "recommended" ||
+    Boolean(tripKey);
 
   const getSelectedLabel = (value: string, fallback: string) =>
     value === "all" ? fallback : titleCase(value);
@@ -153,7 +191,28 @@ export default function BrowseCarsPage() {
     minPrice,
     maxPrice,
     sortBy,
+    tripKey,
   ]);
+
+  useEffect(() => {
+    if (!tripStart) return;
+    let cancelled = false;
+    const key = `${tripStart}|${tripEnd}`;
+    void supabase
+      .rpc("get_available_car_ids", { p_start: tripStart, p_end: tripEnd || null })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.warn("Unable to check availability for those dates:", error.message);
+          setAvailability({ key, ids: null });
+          return;
+        }
+        setAvailability({ key, ids: new Set((data ?? []).map((row) => row.car_id)) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tripStart, tripEnd]);
 
   useEffect(() => {
     if (bodyTypeFilter === "sedan" && !["all", "4", "5"].includes(seatsFilter)) {
@@ -222,6 +281,8 @@ export default function BrowseCarsPage() {
     const matchesMinPrice = minPrice === "" || price >= Number(minPrice);
     const cappedMaxPrice = maxPrice === "" ? "" : Math.min(Number(maxPrice), MAX_PAYMENT_AMOUNT);
     const matchesMaxPrice = cappedMaxPrice === "" || price <= cappedMaxPrice;
+    const matchesTripDates =
+      !tripKey || availabilityError || Boolean(availability?.ids?.has(car.id));
 
     return (
       matchesSearch &&
@@ -231,7 +292,8 @@ export default function BrowseCarsPage() {
       matchesFuelType &&
       matchesSeats &&
       matchesMinPrice &&
-      matchesMaxPrice
+      matchesMaxPrice &&
+      matchesTripDates
     );
   }).sort((a, b) => {
     if (sortBy === "price-low") {
@@ -306,6 +368,15 @@ export default function BrowseCarsPage() {
             />
           </div>
           <Button
+            variant={showTripDates || tripKey ? "secondary" : "outline"}
+            onClick={() => setShowTripDates(!showTripDates)}
+            aria-expanded={showTripDates}
+            className="gap-2 h-10 shrink-0"
+          >
+            <Calendar className="w-4 h-4" />
+            {tripButtonLabel}
+          </Button>
+          <Button
             variant={showFilters ? "secondary" : "outline"}
             onClick={() => setShowFilters(!showFilters)}
             className="gap-2 h-10 shrink-0"
@@ -324,6 +395,36 @@ export default function BrowseCarsPage() {
             </Button>
           )}
         </div>
+
+        {showTripDates && (
+          <div className="rounded-lg border bg-muted/30 p-4 animate-in slide-in-from-top-2">
+            <p className="text-sm font-medium">When do you need the car?</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Pick a pickup date. A return date is optional - add one to see
+              only cars free for the whole trip.
+            </p>
+            <div className="booking-calendar mt-3 flex justify-center overflow-x-auto">
+              <DayPicker
+                mode="range"
+                selected={tripDates}
+                onSelect={setTripDates}
+                min={1}
+                disabled={[{ before: tripMinDate }, { after: tripMaxDate }]}
+                className="font-sans"
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+              {tripKey && (
+                <Button variant="ghost" size="sm" onClick={() => setTripDates(undefined)}>
+                  Clear dates
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setShowTripDates(false)}>
+                Done
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Expandable Advanced Filters */}
         {showFilters && (
@@ -494,14 +595,28 @@ export default function BrowseCarsPage() {
       <p className="text-sm text-muted-foreground">
         {loading
           ? "Loading..."
-          : `${filteredCars.length} car${filteredCars.length !== 1 ? "s" : ""} found`}
-        {!loading && filteredCars.length > CARS_PER_PAGE
+          : availabilityLoading
+            ? "Checking which cars are free on those dates..."
+            : `${filteredCars.length} car${filteredCars.length !== 1 ? "s" : ""} found${
+                tripKey && !availabilityError && tripDates?.from
+                  ? tripDates.to
+                    ? ` free ${format(tripDates.from, "MMM d")} - ${format(tripDates.to, "MMM d")}`
+                    : ` you can pick up on ${format(tripDates.from, "MMM d")}`
+                  : ""
+              }`}
+        {!listLoading && filteredCars.length > CARS_PER_PAGE
           ? ` - page ${currentPage} of ${totalPages}`
           : ""}
       </p>
+      {availabilityError && (
+        <p className="text-sm text-amber-600 dark:text-amber-400">
+          Availability for those dates couldn't be checked, so every car is
+          shown. Open a car to see its calendar.
+        </p>
+      )}
 
       {/* Car Grid */}
-      {loading ? (
+      {listLoading ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {Array.from({ length: 6 }).map((_, i) => (
             <Card key={i} className="overflow-hidden">
@@ -519,7 +634,9 @@ export default function BrowseCarsPage() {
           <CarFront className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
           <h3 className="text-lg font-semibold mb-1">No cars found</h3>
           <p className="text-muted-foreground text-sm mb-6">
-            {hasActiveFilters
+            {tripKey
+              ? "No car matching your filters is free on those dates. Try other dates, or clear them."
+              : hasActiveFilters
               ? "We couldn't find any cars matching your current filters."
               : "There are no listed cars available right now. Check back soon."}
           </p>
@@ -543,7 +660,7 @@ export default function BrowseCarsPage() {
                 key={car.id}
                 className="group overflow-hidden cursor-pointer hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 hover:border-primary/20 animate-fade-in"
                 style={{ animationDelay: `${i * 0.05}s` }}
-                onClick={() => navigate(`/cars/${car.id}`)}
+                onClick={() => navigate(`/cars/${car.id}${tripDatesQuery(tripDates)}`)}
               >
                 {/* Image */}
                 <div className="relative h-48 bg-muted overflow-hidden">
@@ -640,7 +757,7 @@ export default function BrowseCarsPage() {
           })}
         </div>
       )}
-      {!loading && filteredCars.length > CARS_PER_PAGE && (
+      {!listLoading && filteredCars.length > CARS_PER_PAGE && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <p className="text-xs text-muted-foreground">
             Showing {pageStart + 1}-{Math.min(pageStart + CARS_PER_PAGE, filteredCars.length)} of {filteredCars.length}
