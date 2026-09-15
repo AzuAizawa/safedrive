@@ -3,6 +3,34 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-15 - Once the car is handed over, nothing paid is refunded
+
+**Policy:** after the lister hands the vehicle over, the renter gets nothing
+back - not for returning it early, for unused days, or for extension days they
+paid for, whatever the reason.
+
+- **Goodwill refund removed.** Approving an early return let the lister set a
+  "goodwill refund" of any amount, which queued a refund for admin release. It
+  was off-policy, and SafeDrive would have paid it: the lister's payout was
+  never reduced by it. Approving now only moves the return time. The lister's
+  goodwill field and the renter's goodwill line are gone, and a database
+  constraint (`booking_early_returns_no_goodwill_refund`) keeps the column at
+  zero. No early return had ever been requested live.
+- **The one exception stays:** an extension payment SafeDrive could not apply
+  to the booking (the booking or the vehicle's documents changed before it went
+  through) is still refunded after support review - those days were never
+  granted (Civil Code Art. 22, the Consumer Act).
+- **Legal.** Platform Agreement v4 ("Early Return and No Refund After
+  Handover") states the rule and the exception. The Help Center has an article.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 98),
+`scripts/no-refund-after-handover.test.mjs`, `api/booking-early-return-action.ts`,
+`src/pages/ListerBookingsPage.tsx`, `src/pages/MyBookingsPage.tsx`,
+`src/lib/helpCenter.ts`, `project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`,
+`package.json`.
+
+**Follow-up:** paste CHAPTER 98.
+
 ## 2026-09-15 - A member can delete their own account, with time to change their mind
 
 **Reported:** only an admin could delete an account. A member could file a

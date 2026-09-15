@@ -28,6 +28,16 @@ export const helpCategories: Array<{ id: "all" | HelpCategory; label: string }> 
 
 export const helpArticles: HelpArticle[] = [
   {
+    id: "booking-early-return",
+    category: "booking",
+    title: "Returning the car early",
+    question: "If I return the car early or no longer need my extension, do I get money back?",
+    answer:
+      "No. Once the lister has handed you the car, the booked days are yours, so nothing you paid is refunded - not for returning it early, for unused days, or for extension days you paid for, whatever the reason. You can still ask the lister from My Bookings to move your return time earlier. The one exception: if you paid for an extension that SafeDrive could not add to your booking, you never got those days, so that payment is refunded after support review.",
+    relatedTags: ["early return", "refund", "extension", "unused days"],
+    suggestedTicketTag: "booking",
+  },
+  {
     id: "account-delete",
     category: "account",
     title: "Deleting your account",
@@ -35,7 +45,7 @@ export const helpArticles: HelpArticle[] = [
     answer:
       "Open Account settings and choose Delete account. Your account is scheduled for deletion after a grace period (30 days unless SafeDrive changes it; the exact date is shown before you confirm). Until then it is hidden: your listings are off SafeDrive and you cannot book or be booked. To keep it, sign in before the date and choose Keep my account. After the date, your personal details, ID photos and payout details are erased and your login is closed, so the email can be used for a new account; bookings and payments you took part in are kept without your name. A booking not yet finished, a refund or payout not yet completed, or an open booking support case must be settled first, and a suspended account is handled through a privacy request.",
     relatedTags: ["account", "delete", "deletion", "privacy", "close account"],
-    suggestedTicketTag: "account",
+    suggestedTicketTag: "general",
   },
   {
     id: "verification-review-time",

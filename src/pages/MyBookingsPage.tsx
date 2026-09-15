@@ -2587,16 +2587,7 @@ export default function MyBookingsPage() {
                               Lister note: {latestEarly.owner_decision_note}
                             </p>
                           ) : null}
-                          {latestEarly.status === "approved" &&
-                          Number(latestEarly.goodwill_refund_amount) > 0 ? (
-                            <p className="mt-1 font-medium">
-                              Goodwill refund:{" "}
-                              {formatCurrency(
-                                Number(latestEarly.goodwill_refund_amount),
-                              )}{" "}
-                              (released by SafeDrive support)
-                            </p>
-                          ) : latestEarly.status === "approved" ? (
+                          {latestEarly.status === "approved" ? (
                             <p className="mt-1">
                               No refund for the unused days.
                             </p>
@@ -3339,9 +3330,9 @@ export default function MyBookingsPage() {
               <div className="shrink-0 border-b border-border px-5 py-4">
                 <h2 className="text-lg font-semibold">Request early return</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Ask the lister to move the return date earlier. There is no
-                  automatic refund for the unused days — the lister may choose to
-                  give a goodwill refund.
+                  Ask the lister to move the return date earlier. Nothing you paid
+                  is refunded for the unused days or for extension days you paid
+                  for - once you have the car, the booked period stays yours.
                 </p>
                 {earlyReturnModalBooking.cars.early_return_response_window_hours != null && (
                   <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">

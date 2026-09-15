@@ -23,6 +23,7 @@
     "check:car-deletion": "tsx --test scripts/car-deletion.test.mjs",
     "check:vehicle-removal": "tsx --test scripts/vehicle-removal.test.mjs",
     "check:account-deletion": "tsx --test scripts/account-deletion.test.mjs",
+    "check:no-refund-after-handover": "tsx --test scripts/no-refund-after-handover.test.mjs",
     "check:cancellation-compensation": "tsx --test scripts/cancellation-compensation.test.mjs",
     "check:booking-search": "tsx --test scripts/booking-search.test.mjs",
     "check:time-picker": "tsx --test scripts/time-picker.test.mjs",
@@ -45,7 +46,7 @@
     "check:targeted-ui": "tsx scripts/targeted-authenticated-ui-check.mjs",
     "check:api": "tsc -p tsconfig.api.json",
     "check:alignment": "node scripts/repository-alignment-check.mjs",
-    "check:all": "npm run lint && npm run check:api && npm run check:booking-flow && npm run check:vehicle-compliance && npm run check:agreement-storage && npm run check:financial-logic && npm run check:reconciliation-logic && npm run check:process-logic && npm run check:kyc-ocr && npm run check:conversation-closure && npm run check:notification-retention && npm run check:catalog-discontinue && npm run check:account-suspension && npm run check:car-deletion && npm run check:vehicle-removal && npm run check:account-deletion && npm run check:cancellation-compensation && npm run check:booking-search && npm run check:time-picker && npm run check:trip-availability && npm run check:extension-holds && npm run check:audit-trail-paging && npm run check:inquiry-linking && npm run check:form-validation && npm run check:cancellation-policy && npm run check:booking-notice && npm run check:api-boundaries && npm run check:alignment && npm run check:browser && npm run check:local-env",
+    "check:all": "npm run lint && npm run check:api && npm run check:booking-flow && npm run check:vehicle-compliance && npm run check:agreement-storage && npm run check:financial-logic && npm run check:reconciliation-logic && npm run check:process-logic && npm run check:kyc-ocr && npm run check:conversation-closure && npm run check:notification-retention && npm run check:catalog-discontinue && npm run check:account-suspension && npm run check:car-deletion && npm run check:vehicle-removal && npm run check:account-deletion && npm run check:no-refund-after-handover && npm run check:cancellation-compensation && npm run check:booking-search && npm run check:time-picker && npm run check:trip-availability && npm run check:extension-holds && npm run check:audit-trail-paging && npm run check:inquiry-linking && npm run check:form-validation && npm run check:cancellation-policy && npm run check:booking-notice && npm run check:api-boundaries && npm run check:alignment && npm run check:browser && npm run check:local-env",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"api/**/*.ts\" \"server/**/*.ts\" \"*.{js,ts}\"",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort"
   },

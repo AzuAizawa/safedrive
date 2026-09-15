@@ -368,7 +368,6 @@ export default function ListerBookingsPage() {
     Record<string, EarlyReturnRow[]>
   >({});
   const [earlyReturnNotes, setEarlyReturnNotes] = useState<Record<string, string>>({});
-  const [earlyReturnGoodwill, setEarlyReturnGoodwill] = useState<Record<string, string>>({});
   const [earlyReturnActionLoading, setEarlyReturnActionLoading] = useState<string | null>(null);
   const [extensionActionLoading, setExtensionActionLoading] = useState<string | null>(null);
   const [openBookingId, setOpenBookingId] = useState<string | null>(null);
@@ -792,10 +791,6 @@ export default function ListerBookingsPage() {
         earlyReturnId: earlyReturn.id,
         ownerDecisionNote:
           earlyReturnNotes[earlyReturn.id]?.trim() || null,
-        goodwillRefundAmount:
-          action === "approve"
-            ? Number(earlyReturnGoodwill[earlyReturn.id] || 0) || 0
-            : undefined,
       });
       toast.success(
         action === "approve"
@@ -3247,19 +3242,6 @@ export default function ListerBookingsPage() {
                           {latestEarly.status === "pending" ? (
                             <div className="mt-2 space-y-2">
                               <input
-                                type="number"
-                                min={0}
-                                placeholder="Goodwill refund (optional, PHP)"
-                                value={earlyReturnGoodwill[latestEarly.id] ?? ""}
-                                onChange={(e) =>
-                                  setEarlyReturnGoodwill((m) => ({
-                                    ...m,
-                                    [latestEarly.id]: e.target.value,
-                                  }))
-                                }
-                                className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
-                              />
-                              <input
                                 type="text"
                                 placeholder="Note to the renter (optional)"
                                 value={earlyReturnNotes[latestEarly.id] ?? ""}
@@ -3301,21 +3283,11 @@ export default function ListerBookingsPage() {
                                 </Button>
                               </div>
                               <p className="text-[10px] opacity-80">
-                                No refund is owed for unused days. A goodwill
-                                refund, if you set one, is released by SafeDrive
-                                support.
+                                Approving only moves the return time. Nothing
+                                the renter paid is refunded once they have the
+                                car.
                               </p>
                             </div>
-                          ) : null}
-                          {latestEarly.status === "approved" &&
-                          Number(latestEarly.goodwill_refund_amount) > 0 ? (
-                            <p className="mt-1 font-medium">
-                              Goodwill refund: PHP{" "}
-                              {Number(
-                                latestEarly.goodwill_refund_amount,
-                              ).toLocaleString()}{" "}
-                              (SafeDrive support will release it)
-                            </p>
                           ) : null}
                           {latestEarly.owner_decision_note ? (
                             <p className="mt-1 opacity-80">

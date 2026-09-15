@@ -16,7 +16,6 @@ type EarlyReturnPayload = {
   requestedEndTime?: string;
   reason?: string | null;
   ownerDecisionNote?: string | null;
-  goodwillRefundAmount?: number | string | null;
 };
 
 type BookingRecord = {
@@ -413,34 +412,13 @@ export default async function handler(req: Request) {
         );
       }
 
-      // The amount arrives straight from the client body, and the floor
-      // below used to be the ONLY bound on it - a lister could approve a
-      // goodwill refund of any size at all, far beyond what the renter ever
-      // paid, and mark-manual-refund.ts would happily release it. Clamp to
-      // what was actually captured for this booking, the same way
-      // api/booking-incident-action.ts already clamps its recommended
-      // refund. Same refundable payment types as
-      // server/cancellationRefundPlan.ts.
-      const { data: bookingPayments, error: bookingPaymentsError } = await supabase
-        .from("payments")
-        .select("amount, payment_type, status")
-        .eq("booking_id", er.booking_id);
-      if (bookingPaymentsError) throw bookingPaymentsError;
-      const capturedTotal = (bookingPayments ?? [])
-        .filter(
-          (payment) =>
-            ["downpayment", "balance"].includes(String(payment.payment_type)) &&
-            payment.status === "completed" &&
-            Number(payment.amount) > 0,
-        )
-        .reduce((total, payment) => total + Number(payment.amount || 0), 0);
-
-      const requestedGoodwill = Math.max(
-        0,
-        Number(payload.goodwillRefundAmount ?? 0) || 0,
-      );
-      const goodwill =
-        Math.round(Math.min(requestedGoodwill, Math.max(capturedTotal, 0)) * 100) / 100;
+      // Once the vehicle is handed over, nothing paid is refunded - not for an
+      // early return, for unused days, or for extension days paid for,
+      // whatever the reason (Platform Agreement, Early Return; CHAPTER 98).
+      // Approving only moves the return time. The lister-set "goodwill refund"
+      // this used to accept is gone: it was a refund the policy does not allow,
+      // and SafeDrive would have paid it - the lister's payout was never
+      // reduced by it.
       const decisionNote = payload.ownerDecisionNote?.trim() || null;
 
       // Deliberately does NOT touch bookings.end_date/dropoff_time - those
@@ -461,7 +439,6 @@ export default async function handler(req: Request) {
           status: "approved",
           approved_at: new Date().toISOString(),
           owner_decision_note: decisionNote,
-          goodwill_refund_amount: goodwill,
         })
         .eq("id", er.id)
         .eq("status", "pending")
@@ -475,46 +452,7 @@ export default async function handler(req: Request) {
         );
       }
 
-      let refundPaymentId: string | null = null;
-      if (goodwill > 0) {
-        const { data: refundPayment, error: refundError } = await supabase
-          .from("payments")
-          .insert({
-            booking_id: er.booking_id,
-            amount: -Math.abs(goodwill),
-            payment_type: "refund",
-            status: "pending",
-            payment_method: "manual_review",
-            transaction_id: null,
-            notes: `Lister-approved goodwill refund for an early return (requested return ${er.requested_end_date} at ${requestedTimeLabel}). Admin confirms the return method during refund review.`,
-          })
-          .select("id")
-          .single();
-        if (refundError) throw refundError;
-        refundPaymentId = (refundPayment?.id as string | undefined) ?? null;
-
-        const { data: superAdmins } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("role", "super_admin")
-          .is("deleted_at", null);
-        if (superAdmins?.length) {
-          await supabase.from("notifications").insert(
-            superAdmins.map((admin) => ({
-              user_id: admin.id,
-              title: "Goodwill refund to review",
-              message: `A lister approved a PHP ${goodwill.toLocaleString()} goodwill refund for an early return. Confirm and release it in Financial Reviews.`,
-              type: "warning",
-              link: "/admin/financial-reviews?view=refunds",
-            })),
-          );
-        }
-      }
-
-      const renterMsg =
-        goodwill > 0
-          ? `Your early return was approved. Return by ${er.requested_end_date} at ${requestedTimeLabel} and the lister approved a PHP ${goodwill.toLocaleString()} goodwill refund, which SafeDrive support will release. If neither of you confirms return arrival by then (plus a short grace window), the original return time becomes available again automatically.`
-          : `Your early return was approved. Return by ${er.requested_end_date} at ${requestedTimeLabel}. There is no refund for the unused days. If neither of you confirms return arrival by then (plus a short grace window), the original return time becomes available again automatically.`;
+      const renterMsg = `Your early return was approved. Return by ${er.requested_end_date} at ${requestedTimeLabel}. Nothing you paid is refunded for the unused days - the booked period stays yours. If neither of you confirms return arrival by then (plus a short grace window), the original return time becomes available again automatically.`;
       await supabase.from("notifications").insert({
         user_id: er.renter_id,
         title: "Early return approved",
@@ -539,8 +477,6 @@ export default async function handler(req: Request) {
           booking_id: er.booking_id,
           requested_end_date: er.requested_end_date,
           requested_end_time: er.requested_end_time,
-          goodwill_refund_amount: goodwill,
-          refund_payment_id: refundPaymentId,
           note: decisionNote,
         },
       });

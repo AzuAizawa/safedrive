@@ -15787,4 +15787,83 @@ commit;
 --   where n.nspname = 'public' and p.proname = 'account_deletion_blockers';
 --   (expect true)
 
+-- ============================================================================
+-- CHAPTER 98 - Once the car is handed over, nothing paid is refunded
+-- Apply this chapter only, staging first. One constraint is added and the
+-- Platform Agreement is republished. No booking or payment changes.
+-- ============================================================================
+begin;
+
+-- The policy: once the lister has handed the vehicle over, the renter gets
+-- nothing back - not for returning it early, for unused days, or for extension
+-- days they paid for, whatever the reason. The Platform Agreement said the same
+-- about unused days, then let the lister grant a "goodwill refund" of any
+-- amount on approving an early return. That exception is gone from the app
+-- (api/booking-early-return-action.ts no longer accepts it), and it was worse
+-- than off-policy: the lister's payout was never reduced by it, so SafeDrive
+-- would have paid the lister's generosity.
+--
+-- One refund after handover stays, because it is not a refund of anything the
+-- renter received: an extension payment SafeDrive could not apply to the
+-- booking (api/webhooks/paymongo.ts - the booking or the vehicle's documents
+-- changed before the payment went through). Those days were never granted, and
+-- keeping money for a service not given is not something a platform may do
+-- (Civil Code Art. 22; the Consumer Act). It still goes through support review.
+
+-- No insert or update policy exists on booking_early_returns - only the server
+-- writes it - so this is a backstop: a goodwill amount can never be recorded.
+alter table public.booking_early_returns
+  drop constraint if exists booking_early_returns_no_goodwill_refund;
+alter table public.booking_early_returns
+  add constraint booking_early_returns_no_goodwill_refund
+  check (coalesce(goodwill_refund_amount, 0) = 0);
+
+-- Republished as CHAPTER 94 did: replaced only where it still reads exactly as
+-- published, as a new version, and running this again changes nothing.
+do $chapter98_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key = 'platform_agreement'
+  loop
+    next_html := replace(doc.content_html,
+      $early_old$<li><strong>Early Return:</strong> A renter may request, through the booking, to return the vehicle before the booked end date. The booked rental period belongs to the renter, so an early return does <em>not</em> entitle the renter to any refund for the unused days. If the lister approves the early return, the lister may - at their sole discretion - grant a goodwill refund of an amount they choose; any such goodwill refund is released only after SafeDrive support review. The lister may also decline the request, in which case the original return date and full booking amount stand.</li>$early_old$,
+      $early_new$<li><strong>Early Return and No Refund After Handover:</strong> A renter may request, through the booking, to return the vehicle before the booked end date. The booked rental period belongs to the renter, so once the vehicle has been handed over <em>no refund is given</em> for returning it early, for unused days, or for extension days already paid for, whatever the reason. If the lister approves the early return, the vehicle is returned at the new time; if the lister declines, the original return date stands. Either way the full amount paid stands. The only exception is an extension payment that SafeDrive could not apply to the booking (for example, because the booking or the vehicle's documents changed before the payment went through): those days were never granted, so that payment is refunded after SafeDrive support review.</li>$early_new$);
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 98'));
+    end if;
+  end loop;
+end;
+$chapter98_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'no goodwill constraint' as check_name,
+--        (select count(*) from pg_constraint where conname = 'booking_early_returns_no_goodwill_refund')::text as result, '1' as expected
+-- union all
+-- select 'platform agreement',
+--        (select 'v' || version_number || case when position('No Refund After Handover' in content_html) > 0
+--                  and position('goodwill refund' in content_html) = 0 then ' updated' else ' NOT updated' end
+--           from public.legal_document_versions where status = 'published' and document_key = 'platform_agreement'),
+--        'v4 updated';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.
