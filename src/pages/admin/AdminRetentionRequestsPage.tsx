@@ -116,19 +116,38 @@ export default function AdminRetentionRequestsPage() {
     }
     if (
       !window.confirm(
-        "Run scripted anonymization now? This blanks the account's personal data, deletes verification images, pulls their car listings offline, and soft-deletes the account. Transactional records are kept. This cannot be undone.",
+        "Run scripted anonymization now? This blanks the account's personal data, deletes verification images, pulls their car listings offline, soft-deletes the account, closes its login and emails the person that their request was carried out. Transactional records are kept. This cannot be undone.",
       )
     ) {
       return;
     }
     setAnonymizingId(item.id);
     try {
-      const { data, error } = await supabase.rpc("anonymize_user", {
-        p_user_id: item.subject_user_id,
-        p_request_id: item.id,
+      // Through api/account-deletion.ts (CHAPTER 96), so the person is told at
+      // the address about to be erased and their login is closed as well.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Your session expired. Sign in again.");
+      const response = await fetch("/api/account-deletion", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: "admin_delete",
+          userId: item.subject_user_id,
+          requestId: item.id,
+          reason: `Your privacy request (${item.request_type}) was approved and carried out`,
+        }),
       });
-      if (error) throw error;
-      const report = JSON.stringify(data);
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        report?: unknown;
+      };
+      if (!response.ok) throw new Error(payload.error || "Please try again.");
+      const report = JSON.stringify(payload.report);
       toast.success("Account anonymized", {
         description: "Review the manual-review counts in the recorded execution note.",
       });
@@ -146,7 +165,7 @@ export default function AdminRetentionRequestsPage() {
     <div className="space-y-8">
       <div><h1 className="flex items-center gap-2 text-3xl font-bold"><DatabaseZap className="h-7 w-7" /> Privacy Requests</h1><p className="mt-1 text-muted-foreground">When someone asks for a copy of their data, or asks to be deleted or corrected, it is handled here - the Data Privacy Act gives them 30 days for an answer. Check who they are, check whether a legal hold applies, write down the decision, then carry it out or refuse with a reason.</p></div>
       <form onSubmit={create} className="grid gap-4 rounded-xl border bg-card p-5 md:grid-cols-2"><label className="space-y-2"><Label>Requester email</Label><Input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required /></label><label className="space-y-2"><Label>Request type</Label><select className="h-10 w-full rounded-md border bg-background px-3" value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}><option value="access">Access</option><option value="correction">Correction</option><option value="deletion">Deletion</option><option value="anonymization">Anonymization</option><option value="restriction">Restriction</option></select></label><label className="space-y-2 md:col-span-2"><Label>Request details</Label><textarea className="min-h-24 w-full rounded-md border bg-background p-3 text-sm" value={form.details} onChange={(event) => setForm({ ...form, details: event.target.value })} required /></label><Button type="submit" className="md:col-span-2"><Plus className="mr-2 h-4 w-4" />Record request</Button></form>
-      {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : <div className="space-y-3">{requestPages.items.map((item) => <article key={item.id} className="rounded-xl border bg-card p-4"><div className="flex flex-col justify-between gap-3 lg:flex-row"><div><h2 className="font-semibold">{item.request_type} · {item.requester_email}</h2><p className="mt-1 text-sm text-muted-foreground">{item.request_details}</p><p className="mt-2 text-xs text-muted-foreground">Status: {item.status.replace(/_/g, " ")} · Received {new Date(item.created_at).toLocaleString()}{item.due_at ? ` · Target ${new Date(item.due_at).toLocaleDateString()}` : ""}</p>{(item.decision_reason || item.legal_hold_reason) && <p className="mt-2 text-sm">Reason: {item.decision_reason || item.legal_hold_reason}</p>}</div><div className="flex flex-wrap gap-2">{["submitted", "identity_check"].includes(item.status) && <Button size="sm" variant="outline" onClick={() => void advance(item)}>Advance review</Button>}{item.status === "legal_hold" && <Button size="sm" variant="outline" onClick={() => void advance(item)}>Release legal hold</Button>}{item.status === "under_review" && <><Button size="sm" onClick={() => void decide(item, "approved")}>Approve</Button><Button size="sm" variant="outline" onClick={() => void decide(item, "denied")}>Deny</Button><Button size="sm" variant="outline" onClick={() => void decide(item, "legal_hold")}>Legal hold</Button></>}{item.status === "approved" && ["deletion", "anonymization"].includes(item.request_type) && item.subject_user_id && <Button size="sm" disabled={anonymizingId === item.id} onClick={() => void runAnonymization(item)}>{anonymizingId === item.id && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}Run anonymization</Button>}{item.status === "approved" && <Button size="sm" variant="outline" onClick={() => void markExecuted(item)}>Record execution</Button>}</div></div></article>)}<BookingPagination {...requestPages.paginationProps} noun="requests" /></div>}
+      {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : <div className="space-y-3">{requestPages.items.map((item) => <article key={item.id} className="rounded-xl border bg-card p-4"><div className="flex flex-col justify-between gap-3 lg:flex-row"><div><h2 className="font-semibold">{item.request_type} · {item.requester_email}</h2><p className="mt-1 text-sm text-muted-foreground">{item.request_details}</p><p className="mt-2 text-xs text-muted-foreground">Status: {item.status.replace(/_/g, " ")} · Received {new Date(item.created_at).toLocaleString()}{item.due_at ? ` · Target ${new Date(item.due_at).toLocaleDateString()}` : ""}</p>{(item.decision_reason || item.legal_hold_reason) && <p className="mt-2 text-sm">Reason: {item.decision_reason || item.legal_hold_reason}</p>}</div><div className="flex flex-wrap gap-2">{["submitted", "identity_check"].includes(item.status) && <Button size="sm" variant="outline" onClick={() => void advance(item)}>Advance review</Button>}{item.status === "legal_hold" && <Button size="sm" variant="outline" onClick={() => void advance(item)}>Release legal hold</Button>}{item.status === "under_review" && <><Button size="sm" onClick={() => void decide(item, "approved")}>Approve</Button><Button size="sm" variant="outline" onClick={() => void decide(item, "denied")}>Deny</Button><Button size="sm" variant="outline" onClick={() => void decide(item, "legal_hold")}>Legal hold</Button></>}{/* A member's own deletion (CHAPTER 96) runs itself on its date - or is cancelled when they sign in and keep the account - so it must not be carried out early from here. */}{["approved", "legal_hold"].includes(item.status) && item.request_details.startsWith("Self-service account deletion") && <p className="max-w-xs text-xs text-muted-foreground">Self-service deletion: runs automatically on its target date, or is cancelled if the member signs in and keeps the account.</p>}{item.status === "approved" && ["deletion", "anonymization"].includes(item.request_type) && item.subject_user_id && !item.request_details.startsWith("Self-service account deletion") && <Button size="sm" disabled={anonymizingId === item.id} onClick={() => void runAnonymization(item)}>{anonymizingId === item.id && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}Run anonymization</Button>}{item.status === "approved" && !item.request_details.startsWith("Self-service account deletion") && <Button size="sm" variant="outline" onClick={() => void markExecuted(item)}>Record execution</Button>}</div></div></article>)}<BookingPagination {...requestPages.paginationProps} noun="requests" /></div>}
       <section><h2 className="text-xl font-semibold">Active retention schedule</h2><div className="mt-3 grid gap-3 md:grid-cols-2">{rules.map((rule) => <div key={rule.record_category} className="rounded-xl border bg-card p-4"><p className="font-medium">{rule.record_category.replace(/_/g, " ")}</p><p className="text-sm text-muted-foreground">{rule.retention_days === null ? "While legally or operationally required" : formatDayCount(rule.retention_days)} · {rule.rationale}</p></div>)}</div></section>
     </div>
   );

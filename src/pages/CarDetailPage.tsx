@@ -207,20 +207,24 @@ export default function CarDetailPage() {
           car_brands!inner (*)
         ),
         car_images (*),
-        profiles!cars_owner_id_fkey (full_name, phone, email, deleted_at)
+        profiles!cars_owner_id_fkey (full_name, phone, email, deleted_at, deletion_scheduled_for)
       `,
       )
       .eq("id", id)
       .single();
 
     // A deleted or removed car keeps its row only to explain past bookings
-    // (CHAPTERS 86 and 95); to anyone opening its page it is simply gone.
+    // (CHAPTERS 86 and 95); to anyone opening its page it is simply gone. So is
+    // a car whose owner's account is closed or scheduled for deletion (CHAPTER 96).
+    const ownerState = (data as unknown as {
+      profiles?: { deleted_at?: string | null; deletion_scheduled_for?: string | null };
+    } | null)?.profiles;
     if (
       !error &&
       data &&
       !(data as unknown as { deleted_at?: string | null }).deleted_at &&
-      !(data as unknown as { profiles?: { deleted_at?: string | null } }).profiles
-        ?.deleted_at
+      !ownerState?.deleted_at &&
+      !ownerState?.deletion_scheduled_for
     ) {
       const carRow = data as unknown as CarWithDetails;
       setCar(carRow);

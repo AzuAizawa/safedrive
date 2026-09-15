@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { supabase } from "@/lib/supabase";
-import { clearAllAuthPending } from "@/lib/authPending";
+import { clearAllAuthPending, isUserAuthPending } from "@/lib/authPending";
 import { signInWithTransientJwtRetry } from "@/lib/authRetry";
 import { recordSecurityEvent } from "@/lib/securityLog";
 import {
@@ -174,12 +174,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw error;
       }
       
+      // deleted_at is set only once an account has been erased (anonymize_user),
+      // so this account is gone - not "scheduled".
       if (data && data.deleted_at) {
         await supabase.auth.signOut();
         setProfile(null);
         setUser(null);
         setSession(null);
-        throw new Error("Your account is scheduled for deletion and cannot be accessed.");
+        throw new Error("This account has been deleted.");
+      }
+
+      // Scheduled for deletion (CHAPTER 96): the account stays hidden until its
+      // date, and the way back is the login page, which asks to keep the
+      // account and cancels the deletion once the security code is done. A
+      // session that arrives any other way - another device, an old tab - is
+      // ended here. A login still at its security-code step is left to finish,
+      // and so is a password reset: without a new password the holder could
+      // never sign in to keep the account (UpdatePasswordPage signs out after).
+      if (
+        data?.deletion_scheduled_for &&
+        !isUserAuthPending() &&
+        window.location.pathname !== "/update-password"
+      ) {
+        await supabase.auth.signOut({ scope: "local" });
+        setProfile(null);
+        setUser(null);
+        setSession(null);
+        toast.info("Your account is scheduled for deletion", {
+          description: `Sign in and choose "Keep my account" before ${new Date(
+            data.deletion_scheduled_for,
+          ).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", dateStyle: "long" })} to keep it.`,
+        });
+        throw new Error("This account is scheduled for deletion. Sign in to keep it.");
       }
 
       if (

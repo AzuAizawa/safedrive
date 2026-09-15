@@ -52,6 +52,10 @@ export interface Database {
           active_session_token: string | null;
           active_session_started_at: string | null;
           deleted_at: string | null;
+          deletion_requested_at: string | null;
+          deletion_scheduled_for: string | null;
+          deletion_request_id: string | null;
+          login_closed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -94,6 +98,10 @@ export interface Database {
           active_session_token?: string | null;
           active_session_started_at?: string | null;
           deleted_at?: string | null;
+          deletion_requested_at?: string | null;
+          deletion_scheduled_for?: string | null;
+          deletion_request_id?: string | null;
+          login_closed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -136,6 +144,10 @@ export interface Database {
           active_session_token?: string | null;
           active_session_started_at?: string | null;
           deleted_at?: string | null;
+          deletion_requested_at?: string | null;
+          deletion_scheduled_for?: string | null;
+          deletion_request_id?: string | null;
+          login_closed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1492,6 +1504,7 @@ export interface Database {
           no_show_grace_minutes: number;
           mutual_no_show_close_hours: number;
           min_booking_notice_hours: number;
+          account_deletion_grace_days: number;
           contact_email: string;
           user_verification_eta_message: string;
           vehicle_verification_eta_message: string;
@@ -1520,6 +1533,7 @@ export interface Database {
           no_show_grace_minutes?: number;
           mutual_no_show_close_hours?: number;
           min_booking_notice_hours?: number;
+          account_deletion_grace_days?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;
@@ -1548,6 +1562,7 @@ export interface Database {
           no_show_grace_minutes?: number;
           mutual_no_show_close_hours?: number;
           min_booking_notice_hours?: number;
+          account_deletion_grace_days?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;

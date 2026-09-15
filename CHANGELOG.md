@@ -3,6 +3,85 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-15 - A member can delete their own account, with time to change their mind
+
+**Reported:** only an admin could delete an account. A member could file a
+privacy request and wait, with nothing saying when, and no way back. Apple's
+App Store guideline 5.1.1(v) and Google Play require an in-app way to start
+deleting an account; the Data Privacy Act allows keeping the records needed
+for accounting, tax and disputes; the large platforms give about 30 days to
+change your mind.
+
+- **Delete account** (Account settings) opens a dialog that first checks the
+  account. A booking not finished, a refund or payout not completed (including
+  a completed trip not yet paid out - erasing the payout account would make it
+  unpayable), or an open booking support case is listed and must be settled
+  first. A suspended account is sent to a privacy request instead.
+- **Grace period.** `schedule_account_deletion()` sets the date
+  `account_deletion_grace_days` ahead (new Platform Setting, default 30, 7-90),
+  files a `data_retention_requests` row, emails the date and signs every device
+  out. Until the date the account is hidden: Browse, the landing page and the
+  car page leave out its listings, and `api/create-booking.ts` refuses it as a
+  renter or an owner.
+- **Keeping it.** Signing in asks "Keep your account?". Keeping it is carried out
+  only after the security code (`cancel_account_deletion()`), so a password
+  alone never brings an account back; a session arriving another way is signed
+  out with a notice.
+- **On the date** the daily `api/process-account-deletions.ts` runs
+  `run_due_account_deletions()`: `anonymize_user()` erases the person, the
+  bookings and payments stay without them, the request is marked executed and
+  a closing email goes to the old address. If something opened in the
+  meantime, the request goes on legal hold, super admins are told once, and it
+  is retried daily. A denied request drops the schedule.
+- **Logins are closed** for every deleted account - self-service, admin and
+  privacy-request alike: the auth email is replaced (freeing the address for a
+  new account) and sign-in is banned; `profiles.login_closed_at` records it and
+  failures are retried daily.
+- **Admin deletion now has a reason and a notice.** User Management's delete
+  and Privacy Requests' "Run anonymization" go through `api/account-deletion.ts`,
+  which emails the person the reason at their old address and closes the login.
+- **Guards.** A member cannot edit their own schedule; only a super admin or the
+  server can. The login page no longer tells a deleted account it is "queued
+  for deletion ... during the 30-day grace period" - that was never true.
+- **Legal.** Privacy Policy 6.2 (v2) and Terms section 9 (v5) describe the
+  self-service deletion; the Help Center has an article.
+- **Found on a second check, and fixed:**
+  - *Email-link sign-in.* The code email's link (`/auth/confirm`) let a
+    scheduled account straight in without keeping it. It now keeps the account
+    only if the holder chose "Keep my account" at the password step (the
+    choice lives in `src/lib/keepAccount.ts`, shared across tabs, tied to the
+    email and expiring after 30 minutes); otherwise it signs out and says how
+    to keep it.
+  - *Password reset.* A scheduled account was signed out on `/update-password`,
+    so a holder who forgot the password could never get back in to keep it.
+    The reset now finishes (the page signs out after), and its message for an
+    already-deleted account no longer says "scheduled".
+  - *Suspension during the grace period* (CHAPTER 97). An account suspended
+    after asking was still erased on its date. `account_deletion_blockers()`
+    now counts a suspension, so the deletion waits on legal hold until it is
+    lifted.
+  - *Admin deleting a scheduled account early* left its self-service request
+    "approved" forever; `api/account-deletion.ts` now closes it as executed.
+  - *Blockers only support can settle.* The dialog links to Support, since a
+    refund, payout or support case is not the member's to finish.
+  - *Admins can see it.* User Management shows when a member has scheduled
+    their account for deletion.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 96),
+`scripts/account-deletion.test.mjs`, `api/account-deletion.ts`,
+`api/process-account-deletions.ts`, `server/accountClosure.ts`,
+`server/email.ts`, `.github/workflows/scheduled-workers.yml`,
+`src/components/AccountDeletionDialog.tsx`, `src/pages/VerificationPage.tsx`,
+`src/pages/LoginPage.tsx`, `src/contexts/AuthContext.tsx`,
+`src/pages/BrowseCarsPage.tsx`, `src/pages/LandingPage.tsx`,
+`src/pages/CarDetailPage.tsx`, `api/create-booking.ts`,
+`src/pages/admin/AdminUsersPage.tsx`, `src/pages/admin/AdminRetentionRequestsPage.tsx`,
+`src/pages/admin/AdminPlatformSettingsPage.tsx`, `src/pages/admin/AdminAuditTrailPage.tsx`,
+`src/pages/PrivacyRequestPage.tsx`, `src/lib/helpCenter.ts`, `src/types/database.ts`,
+`project_docs/SAFE_DRIVE_MASTER_DOCUMENTATION.md`, `package.json`.
+
+**Follow-up:** paste CHAPTER 96 before deploying this code.
+
 ## 2026-09-15 - A removed car tells its lister why, and can be restored
 
 **Reported:** an admin deleted a lister's car and the lister was never told why.

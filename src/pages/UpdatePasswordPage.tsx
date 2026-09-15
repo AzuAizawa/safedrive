@@ -169,8 +169,11 @@ export default function UpdatePasswordPage() {
         .eq("id", activeUser.id)
         .single();
 
+      // deleted_at means the account has already been erased. An account only
+      // scheduled for deletion (CHAPTER 96) can reset its password - that is
+      // how its holder gets back in to keep it.
       if (profile?.deleted_at) {
-        setErrorProfile("This account is scheduled for deletion and cannot reset its password.");
+        setErrorProfile("This account has been deleted, so its password cannot be reset.");
       }
 
       setIsCheckingAccess(false);

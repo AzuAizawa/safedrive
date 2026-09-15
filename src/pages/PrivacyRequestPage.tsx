@@ -157,6 +157,11 @@ export default function PrivacyRequestPage() {
           dispute, fraud, or legal-hold records may need to be retained or
           anonymized instead.
         </p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          To delete your whole account, you do not need a request: use Delete
+          account in Account settings. It is carried out after a grace period,
+          and signing in before then keeps your account.
+        </p>
       </div>
 
       <form onSubmit={submit} className="space-y-4 rounded-xl border bg-card p-5">

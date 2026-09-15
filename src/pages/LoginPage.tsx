@@ -18,6 +18,12 @@ import {
 import { recordSecurityEvent } from "@/lib/securityLog";
 import { resetToRenterMode } from "@/lib/listerMode";
 import { finalizeSingleSession } from "@/lib/singleSession";
+import {
+  forgetKeepAccount,
+  keepScheduledAccount,
+  rememberKeepAccount,
+  wantsToKeepAccount,
+} from "@/lib/keepAccount";
 import { qrCodeSrc } from "@/lib/qrCode";
 import TurnstileWidget, { captchaConfigured } from "@/components/TurnstileWidget";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -104,6 +110,9 @@ export default function LoginPage() {
   const [setupCode, setSetupCode] = useState("");
   const [showAuthenticatorSetup, setShowAuthenticatorSetup] = useState(false);
   const [offerReenroll, setOfferReenroll] = useState(false);
+  // The deletion date of an account scheduled for deletion, while its holder is
+  // asked whether to keep it (CHAPTER 96).
+  const [pendingDeletionDate, setPendingDeletionDate] = useState<string | null>(null);
   const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -122,6 +131,7 @@ export default function LoginPage() {
   const {
     signIn,
     signOut,
+    refreshProfile,
     resendConfirmationEmail,
     sendOtp,
     verifyOtpCode,
@@ -378,7 +388,7 @@ export default function LoginPage() {
     // Check role and status before proceeding to OTP
     const { data: userProfile, error: profileError } = await supabase
       .from("profiles")
-      .select("role, deleted_at, login_blocked_until, login_block_reason")
+      .select("role, deleted_at, login_blocked_until, login_block_reason, deletion_scheduled_for")
       .eq("id", signedInUser.id)
       .maybeSingle();
 
@@ -403,11 +413,14 @@ export default function LoginPage() {
       return;
     }
 
+    // deleted_at is set only once an account has been erased (CHAPTER 26/96).
+    // Its login is closed shortly after, so this is the brief window before.
     if (userProfile?.deleted_at) {
       await signOut();
       clearUserAuthPending();
-      toast.error("Account Suspended", { 
-        description: "Your account is queued for deletion and is currently inaccessible during the 30-day grace period." 
+      toast.error("Account deleted", {
+        description:
+          "This SafeDrive account has been deleted. You can create a new account with this email address.",
       });
       setIsLoading(false);
       return;
@@ -428,6 +441,20 @@ export default function LoginPage() {
       return;
     }
 
+    // Scheduled for deletion (CHAPTER 96): ask first. Keeping the account is
+    // carried out only after the security code (keepScheduledAccountIfAsked),
+    // so a password alone never brings an account back.
+    if (userProfile?.deletion_scheduled_for) {
+      setPendingDeletionDate(userProfile.deletion_scheduled_for);
+      setIsLoading(false);
+      return;
+    }
+
+    await continueToSecurityCode();
+  };
+
+  const continueToSecurityCode = async () => {
+    setIsLoading(true);
     const { factorId, error: factorError } = await getAuthenticatorFactor();
     if (factorError) {
       toast.error("Authenticator check failed", {
@@ -484,6 +511,61 @@ export default function LoginPage() {
 
     await startEmailCode();
     setIsLoading(false);
+  };
+
+  // CHAPTER 96. The choice to keep an account scheduled for deletion is made
+  // here and carried out after the security code, in this tab or from the
+  // code email's link (src/lib/keepAccount.ts).
+  const handleKeepScheduledAccount = async () => {
+    rememberKeepAccount(normalizedEmail);
+    setPendingDeletionDate(null);
+    await continueToSecurityCode();
+  };
+
+  const handleLeaveScheduledAccount = async () => {
+    const date = pendingDeletionDate;
+    setPendingDeletionDate(null);
+    forgetKeepAccount();
+    await signOut();
+    clearUserAuthPending();
+    toast.info("Signed out", {
+      description: date
+        ? `Your account stays scheduled for deletion on ${new Date(date).toLocaleString("en-PH", {
+            timeZone: "Asia/Manila",
+            dateStyle: "long",
+            timeStyle: "short",
+          })}.`
+        : "Your account stays scheduled for deletion.",
+    });
+  };
+
+  // Runs after the security code and before the sign-in is marked complete -
+  // this is where keeping a scheduled account actually happens. Returns false
+  // (and signs out) if it could not be kept.
+  const keepScheduledAccountIfAsked = async () => {
+    if (!wantsToKeepAccount(normalizedEmail)) return true;
+    forgetKeepAccount();
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Your session expired. Sign in again.");
+      await keepScheduledAccount(session.access_token);
+      await refreshProfile();
+      toast.success("Your account will not be deleted", {
+        description: "Any listings you have are visible again.",
+      });
+      return true;
+    } catch (error) {
+      await signOut();
+      clearUserAuthPending();
+      setStep("password");
+      setOtpCode("");
+      toast.error("Your account is still scheduled for deletion", {
+        description: error instanceof Error ? error.message : "Please sign in again.",
+      });
+      return false;
+    }
   };
 
   const handleOtpSubmit = async (e: React.FormEvent) => {
@@ -568,6 +650,10 @@ export default function LoginPage() {
         verifiedUser?.id,
       );
       clearAuthFailures("user", normalizedEmail);
+      if (!(await keepScheduledAccountIfAsked())) {
+        setIsLoading(false);
+        return;
+      }
       clearUserAuthPending();
       toast.success("Welcome back!");
       await goToRenterHome(verifiedUser?.id);
@@ -612,6 +698,10 @@ export default function LoginPage() {
       data.user?.id,
     );
     clearAuthFailures("user", normalizedEmail);
+    if (!(await keepScheduledAccountIfAsked())) {
+      setIsLoading(false);
+      return;
+    }
     clearUserAuthPending();
 
     // Signed in with the email-code fallback while an authenticator is still
@@ -727,6 +817,10 @@ export default function LoginPage() {
       { email: normalizedEmail, method: "authenticator" },
       verifiedUser?.id,
     );
+    if (!(await keepScheduledAccountIfAsked())) {
+      setIsLoading(false);
+      return;
+    }
     clearUserAuthPending();
     toast.success("Authenticator app connected. Welcome back!");
     await goToRenterHome(verifiedUser?.id);
@@ -1218,6 +1312,25 @@ export default function LoginPage() {
         </div>,
         document.body,
       )}
+
+      <ConfirmDialog
+        open={Boolean(pendingDeletionDate)}
+        title="Keep your account?"
+        description={
+          pendingDeletionDate
+            ? `This account is scheduled for deletion on ${new Date(pendingDeletionDate).toLocaleString("en-PH", {
+                timeZone: "Asia/Manila",
+                dateStyle: "long",
+                timeStyle: "short",
+              })}. Keep it, and once you finish signing in with your security code the deletion is cancelled and any listings come back. Otherwise you are signed out and it is deleted on that date.`
+            : ""
+        }
+        confirmText="Keep my account"
+        cancelText="Sign out"
+        isLoading={isLoading}
+        onConfirm={handleKeepScheduledAccount}
+        onCancel={() => void handleLeaveScheduledAccount()}
+      />
 
       <ConfirmDialog
         open={offerReenroll}

@@ -28,6 +28,16 @@ export const helpCategories: Array<{ id: "all" | HelpCategory; label: string }> 
 
 export const helpArticles: HelpArticle[] = [
   {
+    id: "account-delete",
+    category: "account",
+    title: "Deleting your account",
+    question: "How do I delete my SafeDrive account, and can I change my mind?",
+    answer:
+      "Open Account settings and choose Delete account. Your account is scheduled for deletion after a grace period (30 days unless SafeDrive changes it; the exact date is shown before you confirm). Until then it is hidden: your listings are off SafeDrive and you cannot book or be booked. To keep it, sign in before the date and choose Keep my account. After the date, your personal details, ID photos and payout details are erased and your login is closed, so the email can be used for a new account; bookings and payments you took part in are kept without your name. A booking not yet finished, a refund or payout not yet completed, or an open booking support case must be settled first, and a suspended account is handled through a privacy request.",
+    relatedTags: ["account", "delete", "deletion", "privacy", "close account"],
+    suggestedTicketTag: "account",
+  },
+  {
     id: "verification-review-time",
     category: "verification",
     title: "How long does verification take?",

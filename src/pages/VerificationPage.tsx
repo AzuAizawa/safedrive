@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
+import AccountDeletionDialog from "@/components/AccountDeletionDialog";
 import { inspectContentProvenance } from "@/lib/contentProvenance";
 import {
   LICENSE_TRANSMISSION_LABEL,
@@ -36,7 +37,6 @@ import {
   Camera,
   CheckCircle,
   ImageIcon,
-  FileWarning,
   DatabaseZap,
   X,
   Eye,
@@ -413,7 +413,6 @@ export default function VerificationPage() {
   const { userMessage: verificationEtaMessage } = useVerificationEtaMessages();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDeactivateModal, setShowDeactivateModal] = useState(false);
-  const [deactivateError, setDeactivateError] = useState("");
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -567,7 +566,9 @@ export default function VerificationPage() {
   const showAccountSettings = isVerifiedAccount || isPrivilegedAccount;
   const canManagePayoutDetails =
     isVerifiedAccount && (profile?.is_lister || isPrivilegedAccount);
-  const canDeleteAccountFromSettings = isVerifiedAccount || isPrivilegedAccount;
+  // Every member account can be deleted by its holder, verified or not
+  // (CHAPTER 96); staff accounts are closed through admin management.
+  const canDeleteAccountFromSettings = !isPrivilegedAccount;
 
   const stopCameraStream = () => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -1797,59 +1798,19 @@ export default function VerificationPage() {
             </CardContent>
             <CardContent className="p-5 border-t border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                <div>
-                  <p className="font-semibold text-red-500">Account Deletion Request</p>
-                  <p className="text-xs text-muted-foreground">Request reviewed deletion or anonymization of eligible account data.</p>
+                  <p className="font-semibold text-red-500">Delete Account</p>
+                  <p className="text-xs text-muted-foreground">Delete your account after a grace period. Signing in before the date keeps it.</p>
                </div>
-                <Button variant="destructive" type="button" onClick={() => { setDeactivateError(""); setShowDeactivateModal(true); }}>
-                 Request Account Deletion
+                <Button variant="destructive" type="button" onClick={() => setShowDeactivateModal(true)}>
+                 Delete Account
                </Button>
             </CardContent>
           </Card>
         </div>
         )}
         
-        {showDeactivateModal &&
-          createPortal(
-          <div className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center overflow-y-auto bg-black/80 backdrop-blur-sm p-4 py-6 animate-fade-in">
-            <div className="bg-background border border-red-500/20 rounded-lg shadow-2xl w-full max-w-sm overflow-hidden animate-scale-in">
-              <div className="p-6 text-center space-y-4">
-                <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-2 border border-red-500/20">
-                  <FileWarning className="w-8 h-8 text-red-500" />
-                </div>
-                <h3 className="text-xl font-bold tracking-tight text-foreground">Request Account Deletion?</h3>
-                <p className="text-sm text-muted-foreground">
-                  You will be taken to the privacy-request page. SafeDrive must verify the request and review legal, safety, payment, dispute, and record-retention obligations before deleting or anonymizing eligible data.
-                </p>
-              </div>
-              {deactivateError && (
-                <div className="px-6 py-2 bg-red-500/10 border-t border-b border-red-500/20 text-red-500 text-xs font-semibold">
-                  Error: {deactivateError}
-                </div>
-              )}
-              <div className="p-4 bg-muted/30 border-t border-border flex gap-3">
-                <Button 
-                  variant="outline" 
-                  className="flex-1 bg-transparent hover:bg-black/5 dark:hover:bg-white/5"
-                  onClick={() => setShowDeactivateModal(false)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  variant="destructive" 
-                  type="button"
-                  className="flex-1"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setShowDeactivateModal(false);
-                    navigate("/privacy-request?type=deletion");
-                  }}
-                >
-                  Continue to Privacy Request
-                </Button>
-              </div>
-            </div>
-          </div>,
-          document.body,
+        {showDeactivateModal && (
+          <AccountDeletionDialog onClose={() => setShowDeactivateModal(false)} />
         )}
         
         {showChangePasswordModal &&
@@ -2961,11 +2922,11 @@ export default function VerificationPage() {
           {canDeleteAccountFromSettings && (
             <CardContent className="p-5 border-t border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                <div>
-                  <p className="font-semibold text-red-500">Account Deletion Request</p>
-                  <p className="text-xs text-muted-foreground">Request reviewed deletion or anonymization of eligible account data.</p>
+                  <p className="font-semibold text-red-500">Delete Account</p>
+                  <p className="text-xs text-muted-foreground">Delete your account after a grace period. Signing in before the date keeps it.</p>
                </div>
-                <Button variant="destructive" type="button" onClick={() => { setDeactivateError(""); setShowDeactivateModal(true); }}>
-                 Request Account Deletion
+                <Button variant="destructive" type="button" onClick={() => setShowDeactivateModal(true)}>
+                 Delete Account
                </Button>
             </CardContent>
           )}
@@ -3051,48 +3012,8 @@ export default function VerificationPage() {
         document.body,
       )}
       
-      {showDeactivateModal &&
-        createPortal(
-        <div className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center overflow-y-auto bg-black/80 backdrop-blur-sm p-4 py-6 animate-fade-in">
-          <div className="bg-background border border-red-500/20 rounded-lg shadow-2xl w-full max-w-sm overflow-hidden animate-scale-in">
-            <div className="p-6 text-center space-y-4">
-              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-2 border border-red-500/20">
-                <FileWarning className="w-8 h-8 text-red-500" />
-              </div>
-              <h3 className="text-xl font-bold tracking-tight text-foreground">Request Account Deletion?</h3>
-              <p className="text-sm text-muted-foreground">
-                You will be taken to the privacy-request page. SafeDrive must verify the request and review legal, safety, payment, dispute, and record-retention obligations before deleting or anonymizing eligible data.
-              </p>
-            </div>
-            {deactivateError && (
-              <div className="px-6 py-2 bg-red-500/10 border-t border-b border-red-500/20 text-red-500 text-xs font-semibold">
-                Error: {deactivateError}
-              </div>
-            )}
-            <div className="p-4 bg-muted/30 border-t border-border flex gap-3">
-              <Button 
-                variant="outline" 
-                className="flex-1 bg-transparent border-white/10 hover:bg-white/5"
-                onClick={() => setShowDeactivateModal(false)}
-              >
-                Cancel
-              </Button>
-              <Button 
-                variant="destructive" 
-                type="button"
-                className="flex-1"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setShowDeactivateModal(false);
-                  navigate("/privacy-request?type=deletion");
-                }}
-              >
-                Continue to Privacy Request
-              </Button>
-            </div>
-          </div>
-        </div>,
-        document.body,
+      {showDeactivateModal && (
+        <AccountDeletionDialog onClose={() => setShowDeactivateModal(false)} />
       )}
 
       {showPayoutModal &&

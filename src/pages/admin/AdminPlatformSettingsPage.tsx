@@ -46,6 +46,7 @@ type SettingsRow = {
   no_show_grace_minutes: number;
   mutual_no_show_close_hours: number;
   min_booking_notice_hours: number;
+  account_deletion_grace_days: number;
 };
 
 type ChangeRequest = {
@@ -264,6 +265,19 @@ const FIELDS: Record<
     },
     formatStored: (s) => `${Math.round(s)} days`,
   },
+  account_deletion_grace_days: {
+    label: "Account deletion grace period",
+    hint: "Days between a member asking to delete their account and it being erased (7-90). Meanwhile the account is hidden, and signing in and choosing to keep it cancels the deletion. Applies to new requests; an account already scheduled keeps its date.",
+    unit: "days",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return i.trim() !== "" && Number.isFinite(n) && n >= 7 && n <= 90 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} days`,
+  },
 };
 
 const FIELD_KEYS = Object.keys(FIELDS) as (keyof SettingsRow)[];
@@ -328,7 +342,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, downpayment_rate, refund_full_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes, mutual_no_show_close_hours, min_booking_notice_hours",
+          "commission_rate, downpayment_rate, refund_full_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes, mutual_no_show_close_hours, min_booking_notice_hours, account_deletion_grace_days",
         )
         .eq("id", "default")
         .maybeSingle(),

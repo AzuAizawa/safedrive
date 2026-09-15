@@ -118,6 +118,8 @@ export default function AdminUsersPage() {
   const [showDeleteWarning, setShowDeleteWarning] = useState(false);
   const [showDeleteTypeConfirm, setShowDeleteTypeConfirm] = useState(false);
   const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
+  // Sent to the person with the deletion notice (CHAPTER 96).
+  const [deleteReason, setDeleteReason] = useState("");
   const [showAuthenticatorResetConfirm, setShowAuthenticatorResetConfirm] =
     useState(false);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
@@ -1049,35 +1051,69 @@ export default function AdminUsersPage() {
     setShowDeleteWarning(false);
     setShowDeleteTypeConfirm(false);
     setDeleteConfirmEmail("");
+    setDeleteReason("");
   };
 
-  // Reuses public.anonymize_user() - the same routine the Privacy Requests
-  // queue runs. It is super-admin gated in SQL, writes its own audit_log row
-  // even without a linked request, and returns a report of what it touched.
+  // Runs public.anonymize_user() - the same routine the Privacy Requests queue
+  // and the daily self-service deletion run - through api/account-deletion.ts
+  // (CHAPTER 96), because a database function cannot do the other two things a
+  // deletion owes the person: email them the reason at the address about to be
+  // erased, and close their login.
   const handleAnonymizeUser = async () => {
     if (!selectedUser || !isSuperAdmin) return;
     if (deleteConfirmEmail.trim().toLowerCase() !== selectedUser.email.toLowerCase()) {
       toast.error("The email you typed does not match this account.");
       return;
     }
+    const reason = deleteReason.trim();
+    if (reason.length < 10) {
+      toast.error("Write a reason of at least 10 characters. The person is emailed it.");
+      return;
+    }
 
     setActionLoading(true);
     try {
-      const { data, error } = await supabase.rpc("anonymize_user", {
-        p_user_id: selectedUser.id,
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your session expired. Sign in again.");
+      }
+      const response = await fetch("/api/account-deletion", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ action: "admin_delete", userId: selectedUser.id, reason }),
       });
-      if (error) throw error;
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        report?: unknown;
+        noticeEmail?: string;
+        loginClosed?: boolean;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Please try again.");
+      }
 
-      toast.success("Account anonymized", {
-        description:
+      toast.success("Account deleted", {
+        description: [
           "Personal details and verification images are gone. Bookings, payments and ledger records were left untouched.",
+          payload.noticeEmail === "sent"
+            ? "The person was emailed the reason."
+            : "The notice email was not delivered.",
+          payload.loginClosed
+            ? "Their login is closed."
+            : "Their login will be closed by the daily job.",
+        ].join(" "),
       });
       closeDeleteDialogs();
       setSelectedUser(null);
       fetchUsers();
-      console.info("anonymize_user report", data);
+      console.info("anonymize_user report", payload.report);
     } catch (error) {
-      toast.error("Could not anonymize this account", {
+      toast.error("Could not delete this account", {
         description: error instanceof Error ? error.message : "Please try again.",
       });
     } finally {
@@ -1366,6 +1402,20 @@ export default function AdminUsersPage() {
                     {isSuspended(selectedUser) && selectedUser.suspension_reason && (
                       <p className="mt-1 text-xs text-red-600 dark:text-red-400">
                         Reason: {selectedUser.suspension_reason}
+                      </p>
+                    )}
+                    {/* The member asked to delete their own account (CHAPTER 96).
+                        Worth knowing before suspending or deleting it: a
+                        suspension now holds that deletion for review. */}
+                    {selectedUser.deletion_scheduled_for && !selectedUser.deleted_at && (
+                      <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                        The member scheduled this account for deletion on{" "}
+                        {new Date(selectedUser.deletion_scheduled_for).toLocaleString("en-PH", {
+                          timeZone: "Asia/Manila",
+                          dateStyle: "long",
+                          timeStyle: "short",
+                        })}
+                        . It is hidden until then; signing in and keeping it cancels the deletion.
                       </p>
                     )}
                   </div>
@@ -2181,7 +2231,7 @@ export default function AdminUsersPage() {
         title="Delete this account?"
         description={
           selectedUser
-            ? `This erases who ${selectedUser.email} is. Their name, phone, address, licence and ID numbers are overwritten, and their uploaded ID and licence photos are deleted from storage. None of that can be recovered. Their bookings, payments and ledger records are NOT touched - your financial totals do not change.`
+            ? `This erases who ${selectedUser.email} is. Their name, phone, address, licence and ID numbers are overwritten, and their uploaded ID and licence photos are deleted from storage. None of that can be recovered. Their login is closed, and they are emailed the reason you give. Their bookings, payments and ledger records are NOT touched - your financial totals do not change.`
             : ""
         }
         confirmText="Continue"
@@ -2192,16 +2242,17 @@ export default function AdminUsersPage() {
         onConfirm={() => {
           setShowDeleteWarning(false);
           setDeleteConfirmEmail("");
+          setDeleteReason("");
           setShowDeleteTypeConfirm(true);
         }}
       />
 
       <ConfirmDialog
         open={showDeleteTypeConfirm}
-        title="Type the email to confirm"
+        title="Give a reason, then type the email to confirm"
         description={
           selectedUser
-            ? `There is no undo. Type ${selectedUser.email} exactly to delete this account.`
+            ? `There is no undo. The reason is emailed to ${selectedUser.email} before their details are erased. Type the email exactly to delete this account.`
             : ""
         }
         confirmText="Delete Permanently"
@@ -2209,14 +2260,29 @@ export default function AdminUsersPage() {
         destructive
         isLoading={actionLoading}
         confirmDisabled={
+          deleteReason.trim().length < 10 ||
           deleteConfirmEmail.trim().toLowerCase() !==
-          (selectedUser?.email ?? "").toLowerCase()
+            (selectedUser?.email ?? "").toLowerCase()
         }
         onCancel={closeDeleteDialogs}
         onConfirm={handleAnonymizeUser}
       >
+        <label className="block text-xs font-medium" htmlFor="admin-delete-reason">
+          Reason sent to the person *
+        </label>
+        <textarea
+          id="admin-delete-reason"
+          rows={3}
+          maxLength={1000}
+          value={deleteReason}
+          onChange={(event) => setDeleteReason(event.target.value)}
+          placeholder="Why this account is being deleted - they read this."
+          className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+        />
+        <p className="mb-3 mt-1 text-[11px] text-muted-foreground">
+          At least 10 characters ({deleteReason.trim().length} so far).
+        </p>
         <Input
-          autoFocus
           value={deleteConfirmEmail}
           onChange={(event) => setDeleteConfirmEmail(event.target.value)}
           placeholder={selectedUser?.email ?? ""}

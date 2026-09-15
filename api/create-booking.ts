@@ -329,7 +329,7 @@ export default async function handler(req: Request) {
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
       .select(
-        "id, email, full_name, role, verified_status, deleted_at, login_blocked_until, suspended_at, suspension_reason",
+        "id, email, full_name, role, verified_status, deleted_at, login_blocked_until, suspended_at, suspension_reason, deletion_scheduled_for",
       )
       .eq("id", user.id)
       .single();
@@ -364,11 +364,24 @@ export default async function handler(req: Request) {
       login_blocked_until: string | null;
       suspended_at: string | null;
       suspension_reason: string | null;
+      deletion_scheduled_for: string | null;
     };
 
     if (renterState.deleted_at) {
       return jsonResponse(
         { error: "This account is closed and cannot make a booking." },
+        403,
+      );
+    }
+
+    // An account scheduled for deletion is hidden until its date (CHAPTER 96).
+    // Keeping the account - by signing in again - clears this.
+    if (renterState.deletion_scheduled_for) {
+      return jsonResponse(
+        {
+          error:
+            "Your account is scheduled for deletion, so it cannot start a booking. Sign in again and choose to keep your account first.",
+        },
         403,
       );
     }
@@ -478,16 +491,19 @@ export default async function handler(req: Request) {
     // the renter - it is about someone else's account.
     const { data: ownerState } = await supabase
       .from("profiles")
-      .select("suspended_at, deleted_at")
+      .select("suspended_at, deleted_at, deletion_scheduled_for")
       .eq("id", car.owner_id)
       .maybeSingle();
 
     const owner = (ownerState ?? null) as {
       suspended_at: string | null;
       deleted_at: string | null;
+      deletion_scheduled_for: string | null;
     } | null;
 
-    if (owner?.suspended_at || owner?.deleted_at) {
+    // An owner whose account is scheduled for deletion is hidden the same way
+    // (CHAPTER 96) - and a booking now could not finish before the deletion.
+    if (owner?.suspended_at || owner?.deleted_at || owner?.deletion_scheduled_for) {
       return jsonResponse(
         {
           error:

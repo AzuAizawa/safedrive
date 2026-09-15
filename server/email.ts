@@ -715,3 +715,28 @@ export const sendUserNotificationEmail = async (
     idempotencyKey: `notification-email:${input.eventKey}:${input.userId}`,
   });
 };
+
+/**
+ * An account notice sent to an address given directly, not read from the
+ * profile - needed when the profile is about to be, or has just been, erased
+ * (account deletion, CHAPTER 96), so the person can still be told.
+ */
+export const sendAccountNoticeEmail = async (input: {
+  to: string;
+  name: string | null;
+  title: string;
+  message: string;
+  actionLabel: string;
+  path: string;
+  baseOrigin: string;
+  eventKey: string;
+}) => {
+  const actionUrl = getAppLink(input.baseOrigin, input.path);
+  return sendTransactionalEmail({
+    to: input.to,
+    subject: `SafeDrive: ${input.title}`,
+    text: `Hello ${input.name || "there"},\n\n${input.message}\n\n${input.actionLabel}: ${actionUrl}\n\nSafeDrive`,
+    html: page(input.title, input.message, [], input.actionLabel, actionUrl),
+    idempotencyKey: `account-notice:${input.eventKey}`,
+  });
+};

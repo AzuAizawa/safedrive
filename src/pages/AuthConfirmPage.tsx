@@ -8,6 +8,11 @@ import {
 } from "@/lib/authPending";
 import { recordSecurityEvent } from "@/lib/securityLog";
 import { resetToRenterMode } from "@/lib/listerMode";
+import {
+  forgetKeepAccount,
+  keepScheduledAccount,
+  wantsToKeepAccount,
+} from "@/lib/keepAccount";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -164,6 +169,40 @@ export default function AuthConfirmPage() {
           );
           navigate("/admin", { replace: true });
           return;
+        }
+
+        // An account scheduled for deletion (CHAPTER 96) comes back through this
+        // link only if its holder chose "Keep my account" at the password step.
+        // Otherwise the link does not let it in: it is signed out and sent to
+        // sign in, where the choice is offered.
+        const { data: deletionState, error: deletionStateError } = await supabase
+          .from("profiles")
+          .select("deletion_scheduled_for")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (deletionStateError) {
+          throw deletionStateError;
+        }
+        if (deletionState?.deletion_scheduled_for) {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const keep = wantsToKeepAccount(user.email) && Boolean(session?.access_token);
+          forgetKeepAccount();
+          if (!keep || !session?.access_token) {
+            clearUserAuthPending();
+            await supabase.auth.signOut({ scope: "local" });
+            throw new Error(
+              "This account is scheduled for deletion. To keep it, sign in with your password and choose \"Keep my account\".",
+            );
+          }
+          try {
+            await keepScheduledAccount(session.access_token);
+          } catch (keepError) {
+            clearUserAuthPending();
+            await supabase.auth.signOut({ scope: "local" });
+            throw keepError;
+          }
         }
 
         clearUserAuthPending();

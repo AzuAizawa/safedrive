@@ -14881,4 +14881,910 @@ commit;
 --   order by 1;
 --   (expect four rows, all true)
 
+-- ============================================================================
+-- CHAPTER 96 - A member can delete their own account, with time to change their mind
+-- Apply this chapter only, staging first. One platform setting, four profile
+-- columns and four functions are added; anonymize_user, the two profile guards
+-- and the settings whitelist are updated; the Privacy Policy and Terms are
+-- republished. No account changes state.
+-- ============================================================================
+begin;
+
+-- Reported: only an admin could delete an account. A member could file a
+-- privacy request and wait for a super admin, with nothing telling them when -
+-- and no way to change their mind.
+--
+-- The standard this follows: Apple's App Store Review Guideline 5.1.1(v) and
+-- Google Play's account-deletion policy require an in-app way to start deleting
+-- an account; the Data Privacy Act (RA 10173) gives the right to erasure while
+-- allowing records needed for accounting, tax and legal claims to be kept; and
+-- the large platforms give about 30 days in which signing back in cancels it.
+--
+--   * The member asks from account settings. Nothing that still involves money
+--     or another person may be open: a booking not finished, a refund or a
+--     payout not completed, a booking support case still open. A suspended
+--     account is reviewed through a privacy request instead, so deleting is not
+--     a way around a suspension.
+--   * The account is scheduled account_deletion_grace_days ahead (default 30).
+--     Until then it is hidden - its listings leave Browse, it cannot book or be
+--     booked - and signing in, finishing the security code and choosing to keep
+--     the account cancels it.
+--   * When the date passes, run_due_account_deletions() (daily, from
+--     api/process-account-deletions.ts) checks the same conditions again and
+--     runs anonymize_user(): the person is erased, the bookings and payments
+--     they took part in stay, without them. If something opened in the
+--     meantime, the request goes on legal hold for a super admin and is retried
+--     every day.
+--   * The login is closed by the server afterwards (email replaced, sign-in
+--     banned), for this path and for an admin's deletion alike. That also frees
+--     the email address for a new account. login_closed_at records it.
+-- Every step is recorded on a data_retention_requests row, so the Privacy
+-- Requests page shows it like any other request.
+
+alter table public.platform_settings
+  add column if not exists account_deletion_grace_days integer not null default 30;
+alter table public.platform_settings
+  drop constraint if exists platform_settings_account_deletion_grace_days_check;
+alter table public.platform_settings
+  add constraint platform_settings_account_deletion_grace_days_check
+  check (account_deletion_grace_days >= 7 and account_deletion_grace_days <= 90);
+
+-- deletion_request_id has no foreign key on purpose: data_retention_requests
+-- already points at profiles, and a second relationship would make PostgREST
+-- embeds between the two ambiguous.
+alter table public.profiles
+  add column if not exists deletion_requested_at timestamptz,
+  add column if not exists deletion_scheduled_for timestamptz,
+  add column if not exists deletion_request_id uuid,
+  add column if not exists login_closed_at timestamptz;
+
+create index if not exists profiles_deletion_scheduled_for_idx
+  on public.profiles (deletion_scheduled_for)
+  where deletion_scheduled_for is not null;
+
+-- The settings whitelist, reproduced verbatim from CHAPTER 93 with the new key.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $validate$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'short_notice_free_hours' then
+      if v < 0 or v > 24 or v <> floor(v) then raise exception 'short_notice_free_hours must be a whole number 0-24'; end if;
+    elsif k in ('late_cancel_fee_days', 'no_show_fee_days') then
+      if v < 0 or v > 30 then raise exception '% must be 0-30 days', k; end if;
+    elsif k in ('short_trip_late_cancel_fee_days', 'short_trip_no_show_fee_days') then
+      if v < 0 or v > 2 then raise exception '% must be 0-2 days', k; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    elsif k = 'dormant_account_days' then
+      if v < 90 or v > 3650 or v <> floor(v) then raise exception 'dormant_account_days must be a whole number 90-3650'; end if;
+    elsif k = 'no_show_grace_minutes' then
+      if v < 15 or v > 180 or v <> floor(v) then raise exception 'no_show_grace_minutes must be a whole number 15-180'; end if;
+    elsif k = 'mutual_no_show_close_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'mutual_no_show_close_hours must be a whole number 1-72'; end if;
+    elsif k = 'min_booking_notice_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'min_booking_notice_hours must be a whole number 1-168'; end if;
+    elsif k = 'account_deletion_grace_days' then
+      if v < 7 or v > 90 or v <> floor(v) then raise exception 'account_deletion_grace_days must be a whole number 7-90'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$validate$;
+
+-- What still stands in the way of deleting an account, in words the member can
+-- act on. Empty means nothing does. Used when the deletion is asked for and
+-- again on the day it runs. A payout is owed for a completed trip until a
+-- completed payout is recorded - anonymize_user() clears the payout account,
+-- so an owner deleted before being paid could not be paid at all.
+create or replace function public.account_deletion_blockers(p_user_id uuid)
+returns text[]
+language sql
+stable
+security definer
+set search_path = public
+as $account_deletion_blockers$
+  select array_remove(array[
+    case when exists (
+      select 1 from public.bookings b
+      where (b.renter_id = p_user_id or b.owner_id = p_user_id)
+        and b.status in ('pending', 'confirmed', 'awaiting_payment', 'downpayment_paid', 'fully_paid', 'active')
+    ) then 'You have a booking that has not finished. Finish or cancel it first.' end,
+    case when exists (
+      select 1 from public.payments p
+      join public.bookings b on b.id = p.booking_id
+      where b.renter_id = p_user_id
+        and p.payment_type = 'refund'
+        and p.status in ('pending', 'failed')
+    ) then 'A refund to you has not been completed yet.' end,
+    case when exists (
+      select 1 from public.bookings b
+      where b.owner_id = p_user_id
+        and (
+          exists (
+            select 1 from public.payments p
+            where p.booking_id = b.id and p.payment_type = 'payout' and p.status in ('pending', 'failed')
+          )
+          or (
+            b.status = 'completed'
+            and not exists (
+              select 1 from public.payments p
+              where p.booking_id = b.id and p.payment_type = 'payout' and p.status = 'completed'
+            )
+          )
+        )
+    ) then 'A payout to you has not been completed yet.' end,
+    case when exists (
+      select 1 from public.support_tickets t
+      where t.booking_id is not null
+        and t.status in ('open', 'in_progress')
+        and (t.user_id = p_user_id or t.participant_user_id = p_user_id)
+    ) then 'A support case about one of your bookings is still open.' end
+  ], null);
+$account_deletion_blockers$;
+
+revoke all on function public.account_deletion_blockers(uuid) from public, anon, authenticated;
+grant execute on function public.account_deletion_blockers(uuid) to service_role;
+
+-- Asked for by the member, through api/account-deletion.ts (the server
+-- authenticates them and passes their id), never directly from the browser.
+create or replace function public.schedule_account_deletion(p_user_id uuid, p_reason text default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $schedule_account_deletion$
+declare
+  v_profile public.profiles%rowtype;
+  v_blockers text[];
+  v_days integer;
+  v_when timestamptz;
+  v_request_id uuid;
+  v_reason text := left(nullif(btrim(coalesce(p_reason, '')), ''), 1000);
+begin
+  if not public.is_trusted_server_context() then
+    raise exception 'Account deletion is requested from account settings';
+  end if;
+
+  select * into v_profile from public.profiles where id = p_user_id for update;
+  if not found then
+    raise exception 'Account not found';
+  end if;
+  if v_profile.role <> 'user' then
+    raise exception 'Staff accounts are closed through admin management';
+  end if;
+  if v_profile.deleted_at is not null then
+    raise exception 'This account has already been deleted';
+  end if;
+  if v_profile.deletion_scheduled_for is not null then
+    raise exception 'This account is already scheduled for deletion on %',
+      to_char(v_profile.deletion_scheduled_for at time zone 'Asia/Manila', 'Mon DD, YYYY');
+  end if;
+  if v_profile.suspended_at is not null then
+    raise exception 'A suspended account cannot be deleted from settings. Send a privacy request so SafeDrive can review it.';
+  end if;
+
+  v_blockers := public.account_deletion_blockers(p_user_id);
+  if cardinality(v_blockers) > 0 then
+    raise exception '%', array_to_string(v_blockers, ' ');
+  end if;
+
+  select account_deletion_grace_days into v_days
+  from public.platform_settings where id = 'default';
+  v_days := coalesce(v_days, 30);
+  v_when := now() + make_interval(days => v_days);
+
+  insert into public.data_retention_requests (
+    subject_user_id, requester_email, request_type, status,
+    request_details, decision_reason, due_at
+  ) values (
+    p_user_id,
+    v_profile.email,
+    'deletion',
+    'approved',
+    'Self-service account deletion from account settings.'
+      || coalesce(' Reason given: ' || v_reason, ''),
+    'Scheduled for ' || to_char(v_when at time zone 'Asia/Manila', 'Mon DD, YYYY HH12:MI AM')
+      || ' (Manila). Signing in before then cancels it; after it, the account is anonymized automatically.',
+    v_when
+  )
+  returning id into v_request_id;
+
+  update public.profiles set
+    deletion_requested_at = now(),
+    deletion_scheduled_for = v_when,
+    deletion_request_id = v_request_id,
+    updated_at = now()
+  where id = p_user_id;
+
+  insert into public.notifications (user_id, title, message, type, link)
+  values (
+    p_user_id,
+    'Your account is scheduled for deletion',
+    'Your SafeDrive account will be deleted on '
+      || to_char(v_when at time zone 'Asia/Manila', 'Mon DD, YYYY HH12:MI AM')
+      || ' (Manila). Until then it is hidden. Sign in and choose to keep your account before then if you change your mind.',
+    'warning',
+    '/verify'
+  );
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (
+    p_user_id, 'account_deletion_scheduled', 'profile', p_user_id::text,
+    jsonb_build_object('scheduled_for', v_when, 'grace_days', v_days, 'request_id', v_request_id)
+  );
+
+  return jsonb_build_object(
+    'scheduled_for', v_when,
+    'grace_days', v_days,
+    'request_id', v_request_id
+  );
+end;
+$schedule_account_deletion$;
+
+revoke all on function public.schedule_account_deletion(uuid, text) from public, anon, authenticated;
+grant execute on function public.schedule_account_deletion(uuid, text) to service_role;
+
+-- Keeping the account: the member signed in, finished the security code and
+-- chose to keep it (api/account-deletion.ts). Works while the request waits on
+-- a legal hold too.
+create or replace function public.cancel_account_deletion(p_user_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $cancel_account_deletion$
+declare
+  v_profile public.profiles%rowtype;
+begin
+  if not public.is_trusted_server_context() then
+    raise exception 'Keeping an account is done by signing in';
+  end if;
+
+  select * into v_profile from public.profiles where id = p_user_id for update;
+  if not found then
+    raise exception 'Account not found';
+  end if;
+  if v_profile.deleted_at is not null then
+    raise exception 'This account has already been deleted';
+  end if;
+  if v_profile.deletion_scheduled_for is null then
+    raise exception 'This account is not scheduled for deletion';
+  end if;
+
+  update public.data_retention_requests set
+    status = 'cancelled',
+    decision_reason = coalesce(decision_reason, '')
+      || ' Cancelled: the account holder signed in and kept the account on '
+      || to_char(now() at time zone 'Asia/Manila', 'Mon DD, YYYY HH12:MI AM') || ' (Manila).',
+    updated_at = now()
+  where id = v_profile.deletion_request_id
+    and status in ('approved', 'legal_hold', 'under_review', 'identity_check', 'submitted');
+
+  update public.profiles set
+    deletion_requested_at = null,
+    deletion_scheduled_for = null,
+    deletion_request_id = null,
+    updated_at = now()
+  where id = p_user_id;
+
+  insert into public.notifications (user_id, title, message, type, link)
+  values (
+    p_user_id,
+    'Your account will not be deleted',
+    'You signed in and kept your SafeDrive account, so the scheduled deletion was cancelled. Any listings you have are visible again.',
+    'success',
+    '/browse'
+  );
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (
+    p_user_id, 'account_deletion_cancelled', 'profile', p_user_id::text,
+    jsonb_build_object('was_scheduled_for', v_profile.deletion_scheduled_for, 'request_id', v_profile.deletion_request_id)
+  );
+
+  return jsonb_build_object('restored', true);
+end;
+$cancel_account_deletion$;
+
+revoke all on function public.cancel_account_deletion(uuid) from public, anon, authenticated;
+grant execute on function public.cancel_account_deletion(uuid) to service_role;
+
+-- The daily run. Returns one row per account it looked at: 'deleted' (with the
+-- address the closing email goes to, read before it is erased), 'waiting'
+-- (something opened in the meantime), or 'cleared' (a super admin denied or
+-- cancelled the request, so the schedule is dropped).
+create or replace function public.run_due_account_deletions()
+returns table(account_id uuid, outcome text, notice_email text, notice_name text, detail text)
+language plpgsql
+security definer
+set search_path = public
+as $run_due_account_deletions$
+declare
+  r record;
+  v_blockers text[];
+  v_status text;
+begin
+  if not public.is_trusted_server_context() then
+    raise exception 'Only the scheduled deletion job can run due deletions';
+  end if;
+
+  for r in
+    select p.id, p.email, p.full_name, p.deletion_request_id
+    from public.profiles p
+    where p.deletion_scheduled_for is not null
+      and p.deletion_scheduled_for <= now()
+      and p.deleted_at is null
+    order by p.deletion_scheduled_for
+    for update skip locked
+  loop
+    select d.status into v_status
+    from public.data_retention_requests d where d.id = r.deletion_request_id;
+
+    if v_status in ('denied', 'cancelled') then
+      update public.profiles set
+        deletion_requested_at = null, deletion_scheduled_for = null,
+        deletion_request_id = null, updated_at = now()
+      where id = r.id;
+      insert into public.notifications (user_id, title, message, type, link)
+      values (r.id, 'Your account will not be deleted',
+        'SafeDrive reviewed your account deletion and did not carry it out. Your account stays active. Open a support case if you have questions.',
+        'info', '/support');
+      account_id := r.id; outcome := 'cleared'; notice_email := null; notice_name := null; detail := v_status;
+      return next;
+      continue;
+    end if;
+
+    v_blockers := public.account_deletion_blockers(r.id);
+    if cardinality(v_blockers) > 0 then
+      -- Told once, when it first has to wait; retried every day after.
+      if v_status is distinct from 'legal_hold' then
+        update public.data_retention_requests set
+          status = 'legal_hold',
+          legal_hold_reason = 'Scheduled account deletion is waiting: ' || array_to_string(v_blockers, ' '),
+          updated_at = now()
+        where id = r.deletion_request_id;
+        insert into public.notifications (user_id, title, message, type, link)
+        select admin.id, 'Scheduled account deletion is waiting',
+          coalesce(r.email, 'An account') || ' reached its deletion date, but ' || array_to_string(v_blockers, ' ')
+            || ' It is retried daily and runs once this is settled.',
+          'warning', '/admin/retention-requests?request=' || r.deletion_request_id
+        from public.profiles admin
+        where admin.role = 'super_admin' and admin.deleted_at is null;
+      end if;
+      account_id := r.id; outcome := 'waiting'; notice_email := null; notice_name := null;
+      detail := array_to_string(v_blockers, ' ');
+      return next;
+      continue;
+    end if;
+
+    perform public.anonymize_user(r.id, r.deletion_request_id);
+
+    update public.data_retention_requests set
+      status = 'executed',
+      completed_at = now(),
+      legal_hold_reason = null,
+      decision_reason = coalesce(decision_reason, '')
+        || ' Executed automatically on '
+        || to_char(now() at time zone 'Asia/Manila', 'Mon DD, YYYY HH12:MI AM') || ' (Manila).',
+      updated_at = now()
+    where id = r.deletion_request_id;
+
+    account_id := r.id; outcome := 'deleted'; notice_email := r.email; notice_name := r.full_name; detail := null;
+    return next;
+  end loop;
+end;
+$run_due_account_deletions$;
+
+revoke all on function public.run_due_account_deletions() from public, anon, authenticated;
+grant execute on function public.run_due_account_deletions() to service_role;
+
+-- anonymize_user(), reproduced verbatim from CHAPTER 26 with two changes: the
+-- server may run it (the daily job and api/account-deletion.ts, which close
+-- the login and send the notice a database function cannot), and it clears a
+-- pending deletion schedule along with the rest of the profile.
+create or replace function public.anonymize_user(p_user_id uuid, p_request_id uuid default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor uuid := auth.uid();
+  v_target public.profiles%rowtype;
+  v_open_bookings integer;
+  v_cars integer := 0;
+  v_vimages integer := 0;
+  v_notifs integer := 0;
+  v_audit integer := 0;
+  v_manual jsonb;
+  v_report jsonb;
+begin
+  if not (public.is_super_admin() or public.is_trusted_server_context()) then
+    raise exception 'Only a super admin can anonymize a user';
+  end if;
+
+  select * into v_target from public.profiles where profiles.id = p_user_id;
+  if not found then
+    raise exception 'User % not found', p_user_id;
+  end if;
+  if v_target.role in ('admin', 'super_admin') then
+    raise exception 'Demote this staff account to a regular user before anonymizing it';
+  end if;
+  if v_target.deleted_at is not null then
+    raise exception 'This account is already anonymized / deleted';
+  end if;
+
+  -- A live rental must finish (payout, dispute window) before identity data
+  -- is scrubbed.
+  select count(*) into v_open_bookings
+  from public.bookings b
+  where (b.renter_id = p_user_id or b.owner_id = p_user_id)
+    and b.status in ('confirmed', 'awaiting_payment', 'downpayment_paid', 'fully_paid', 'active');
+  if v_open_bookings > 0 then
+    raise exception 'User still has % booking(s) in progress. Complete or resolve them before anonymizing.', v_open_bookings;
+  end if;
+
+  -- 1. Structured profile PII -> blanked; account soft-deleted.
+  update public.profiles set
+    email = 'deleted+' || left(p_user_id::text, 8) || '@safedrive.invalid',
+    full_name = 'Deleted user',
+    first_name = null, middle_name = null, last_name = null,
+    phone = null, secondary_phone = null, address = null, birthday = null,
+    driver_license = null, national_id = null, secondary_id_type = null,
+    avatar_url = null, gender = null,
+    payout_method = null, payout_account_name = null, payout_account_number = null,
+    emergency_contact_number = null, login_block_reason = null,
+    is_lister = false,
+    deletion_requested_at = null, deletion_scheduled_for = null,
+    deleted_at = coalesce(deleted_at, now()),
+    updated_at = now()
+  where profiles.id = p_user_id;
+
+  -- 2. Verification images: storage objects + rows.
+  delete from storage.objects
+  where bucket_id = 'user-verification'
+    and (storage.foldername(name))[1] = p_user_id::text;
+  get diagnostics v_vimages = row_count;
+  delete from public.verification_images where user_id = p_user_id;
+
+  -- 3. Car listings pulled offline, free-text contact fields cleared.
+  update public.cars set
+    status = 'inactive',
+    contact_number = null,
+    additional_info = null,
+    updated_at = now()
+  where owner_id = p_user_id;
+  get diagnostics v_cars = row_count;
+
+  -- 4. Booking arrival geolocation + photos (both roles).
+  update public.bookings set
+    renter_arrival_latitude = null, renter_arrival_longitude = null,
+    renter_arrival_accuracy_meters = null, renter_arrival_location_captured_at = null,
+    renter_arrival_photo_url = null
+  where renter_id = p_user_id;
+  update public.bookings set
+    lister_arrival_latitude = null, lister_arrival_longitude = null,
+    lister_arrival_accuracy_meters = null, lister_arrival_location_captured_at = null,
+    lister_arrival_photo_url = null
+  where owner_id = p_user_id;
+
+  -- 5. Trip-condition report geolocation for this reporter.
+  update public.trip_condition_reports set
+    latitude = null, longitude = null, location_accuracy_meters = null
+  where reporter_id = p_user_id;
+
+  -- 6. Notifications addressed to this user (text may embed a name).
+  delete from public.notifications where user_id = p_user_id;
+  get diagnostics v_notifs = row_count;
+
+  -- 7. Redact known PII keys from this user's own audit rows.
+  update public.audit_log set
+    details = details
+      - 'email' - 'admin_email' - 'renter_email' - 'owner_email'
+      - 'full_name' - 'admin_name' - 'name' - 'phone'
+  where user_id = p_user_id
+    and details ?| array['email','admin_email','renter_email','owner_email',
+                         'full_name','admin_name','name','phone'];
+  get diagnostics v_audit = row_count;
+
+  -- 8. Retention-request contact email.
+  update public.data_retention_requests
+  set requester_email = 'redacted@safedrive.invalid'
+  where subject_user_id = p_user_id;
+
+  -- Free-text records a human still has to review (cannot auto-scrub without
+  -- destroying dispute / safety evidence).
+  select jsonb_build_object(
+    'review_feedback', (
+      select count(*) from public.booking_reviews r
+      where (r.reviewer_id = p_user_id or r.reviewee_id = p_user_id)
+        and coalesce(r.feedback, '') <> ''
+    ),
+    'support_messages', (
+      select count(*) from public.ticket_messages m where m.sender_id = p_user_id
+    ),
+    'trip_condition_notes', (
+      select count(*) from public.trip_condition_reports t
+      where t.reporter_id = p_user_id and coalesce(t.damage_notes, '') <> ''
+    ),
+    'guest_inquiries', (
+      select count(*) from public.guest_inquiries g where g.submitted_by_user_id = p_user_id
+    )
+  ) into v_manual;
+
+  v_report := jsonb_build_object(
+    'user_id', p_user_id,
+    'anonymized_at', now(),
+    'actor_id', v_actor,
+    'request_id', p_request_id,
+    'profile_pii_cleared', true,
+    'verification_objects_deleted', v_vimages,
+    'cars_deactivated', v_cars,
+    'notifications_deleted', v_notifs,
+    'audit_rows_redacted', v_audit,
+    'needs_manual_review', v_manual
+  );
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (v_actor, 'user_anonymized', 'profile', p_user_id, v_report);
+
+  return v_report;
+end;
+$$;
+
+revoke all on function public.anonymize_user(uuid, uuid) from public, anon;
+grant execute on function public.anonymize_user(uuid, uuid) to authenticated;
+grant execute on function public.anonymize_user(uuid, uuid) to service_role;
+
+-- User-facing profile guard, reproduced verbatim from CHAPTER 85 with the
+-- deletion schedule added: a member cannot put off, bring forward or erase
+-- their own schedule by editing the row - only the functions above change it.
+create or replace function public.protect_profile_sensitive_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $protect_profile$
+declare
+  privileged boolean;
+begin
+  privileged := public.is_admin() or public.is_trusted_server_context();
+
+  if privileged then
+    return new;
+  end if;
+
+  if auth.uid() is null or auth.uid() <> old.id then
+    raise exception 'Only the owning user or an admin can update this profile';
+  end if;
+
+  if new.role is distinct from old.role then
+    raise exception 'Users cannot change their own role';
+  end if;
+
+  if new.rejection_reason is distinct from old.rejection_reason then
+    raise exception 'Users cannot change verification rejection reasons';
+  end if;
+
+  if new.login_blocked_until is distinct from old.login_blocked_until
+     or new.login_block_reason is distinct from old.login_block_reason then
+    raise exception 'Users cannot change login block settings';
+  end if;
+
+  if new.suspended_at is distinct from old.suspended_at
+     or new.suspension_reason is distinct from old.suspension_reason
+     or new.suspended_by is distinct from old.suspended_by then
+    raise exception 'Users cannot lift their own suspension';
+  end if;
+
+  if new.deletion_requested_at is distinct from old.deletion_requested_at
+     or new.deletion_scheduled_for is distinct from old.deletion_scheduled_for
+     or new.deletion_request_id is distinct from old.deletion_request_id
+     or new.login_closed_at is distinct from old.login_closed_at then
+    raise exception 'An account deletion is scheduled or cancelled only through account settings and sign-in';
+  end if;
+
+  if new.verified_status is distinct from old.verified_status then
+    if not (
+      old.verified_status in ('unverified', 'rejected')
+      and new.verified_status = 'pending'
+    ) then
+      raise exception 'Users cannot self-approve or directly change verification status';
+    end if;
+  end if;
+
+  if old.verified_status = 'verified' and (
+    new.first_name is distinct from old.first_name
+    or new.middle_name is distinct from old.middle_name
+    or new.last_name is distinct from old.last_name
+    or new.full_name is distinct from old.full_name
+    or new.birthday is distinct from old.birthday
+    or new.driver_license is distinct from old.driver_license
+    or new.national_id is distinct from old.national_id
+    or new.secondary_id_type is distinct from old.secondary_id_type
+  ) then
+    raise exception 'Verified identity fields require admin review to change';
+  end if;
+
+  if new.license_expiry is distinct from old.license_expiry
+     or new.license_transmission is distinct from old.license_transmission
+     or new.license_expiry_notified_at is distinct from old.license_expiry_notified_at then
+    raise exception 'Driver''s licence validity is set by an admin during review';
+  end if;
+
+  if new.license_update_pending is distinct from old.license_update_pending
+     and not (old.license_update_pending = false and new.license_update_pending = true) then
+    raise exception 'Only an admin can clear a pending licence update';
+  end if;
+
+  if new.is_lister is distinct from old.is_lister
+     and old.verified_status <> 'verified' then
+    raise exception 'Only verified users can change lister mode';
+  end if;
+
+  if old.deleted_at is not null
+     and new.deleted_at is distinct from old.deleted_at then
+    raise exception 'Deleted profiles cannot be reactivated by the user';
+  end if;
+
+  return new;
+end;
+$protect_profile$;
+
+drop trigger if exists protect_profile_sensitive_fields on public.profiles;
+create trigger protect_profile_sensitive_fields
+  before update on public.profiles
+  for each row execute function public.protect_profile_sensitive_fields();
+
+-- Admin-facing profile guard, reproduced verbatim from CHAPTER 85 with the
+-- deletion schedule added beside deleted_at: only a super admin (or the server)
+-- may touch it.
+create or replace function public.enforce_admin_profile_permission()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $admin_profile_guard$
+begin
+  if public.is_trusted_server_context() then
+    return new;
+  end if;
+
+  -- Applies to EVERYONE reaching the database through PostgREST - a plain
+  -- user, an admin, a super admin. Roles change only through
+  -- api/admin-create.ts and api/admin-delete.ts, which use the service-role
+  -- key and are exempted above.
+  if new.role is distinct from old.role then
+    raise exception 'Roles are changed only through the admin management endpoints';
+  end if;
+
+  if not public.is_admin() or public.is_super_admin() then
+    return new;
+  end if;
+
+  -- Everything below constrains a PLAIN admin.
+
+  if new.deleted_at is distinct from old.deleted_at
+     or new.admin_disabled_at is distinct from old.admin_disabled_at
+     or new.deletion_requested_at is distinct from old.deletion_requested_at
+     or new.deletion_scheduled_for is distinct from old.deletion_scheduled_for
+     or new.deletion_request_id is distinct from old.deletion_request_id
+     or new.login_closed_at is distinct from old.login_closed_at then
+    raise exception 'Only a super admin can disable or delete an account';
+  end if;
+
+  if (new.payout_method is distinct from old.payout_method
+      or new.payout_account_name is distinct from old.payout_account_name
+      or new.payout_account_number is distinct from old.payout_account_number)
+     and auth.uid() is distinct from old.id then
+    raise exception 'An admin cannot change another account''s payout details';
+  end if;
+
+  if (new.verified_status  is distinct from old.verified_status
+      or new.rejection_reason is distinct from old.rejection_reason)
+     and not public.admin_can('users.verify') then
+    raise exception 'Changing verification status requires the users.verify permission';
+  end if;
+
+  if (new.login_blocked_until is distinct from old.login_blocked_until
+      or new.login_block_reason is distinct from old.login_block_reason)
+     and not public.admin_can('users.moderate') then
+    raise exception 'Changing a login block requires the users.moderate permission';
+  end if;
+
+  if (new.suspended_at is distinct from old.suspended_at
+      or new.suspension_reason is distinct from old.suspension_reason
+      or new.suspended_by is distinct from old.suspended_by)
+     and not public.admin_can('users.moderate') then
+    raise exception 'Changing a suspension requires the users.moderate permission';
+  end if;
+
+  return new;
+end;
+$admin_profile_guard$;
+
+drop trigger if exists enforce_admin_profile_permission on public.profiles;
+create trigger enforce_admin_profile_permission
+  before update on public.profiles
+  for each row execute function public.enforce_admin_profile_permission();
+
+-- The Privacy Policy said a deletion request "starts an identity and scope
+-- review" and "is not a promise of instant blanket deletion", and the Terms
+-- mentioned only SafeDrive terminating an account. Republished the same way
+-- CHAPTER 94 did: each clause is replaced only where it still reads exactly as
+-- published, as a new version, and running this again changes nothing.
+do $chapter96_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key in ('privacy_policy', 'terms_of_service')
+  loop
+    next_html := doc.content_html;
+
+    if doc.document_key = 'privacy_policy' then
+      next_html := replace(next_html,
+        $p62$<p><strong>6.2 Requests:</strong> An account-closure or deletion request starts an identity and scope review; it is not a promise of instant blanket deletion. Approved deletion may use erasure, blocking, restricted archival, or anonymization depending on the record and applicable obligation.</p>$p62$,
+        $p62_new$<p><strong>6.2 Deleting your account:</strong> You can delete your own account from your account settings. It is first scheduled for deletion for a set number of days (shown when you ask; currently 30 by default). During that time the account is hidden - your listings are not shown and you cannot book or be booked - and signing in and choosing to keep the account cancels the deletion. When the period ends, SafeDrive erases your personal details, uploaded identity documents and payout details and closes your login, which frees your email address for a new account. The bookings and payments you took part in are kept, without your identity, for accounting, tax and dispute purposes (Section 6.3). A booking that has not finished, a refund or payout not yet completed, or an open booking support case must be settled first, and a suspended account is reviewed through a privacy request instead. Other deletion or erasure requests start an identity and scope review; approved deletion may use erasure, blocking, restricted archival, or anonymization depending on the record and applicable obligation.</p>$p62_new$);
+      next_html := replace(next_html,
+        $pcontact$Registered users may also submit and track an access, correction, restriction, anonymization, or deletion request from the Data Requests page.$pcontact$,
+        $pcontact_new$Registered users may also submit and track an access, correction, restriction, anonymization, or deletion request from the Data Requests page, and can delete their own account from their account settings.$pcontact_new$);
+    else
+      next_html := replace(next_html,
+        $t9$SafeDrive may restrict or terminate an account after authorized review of fraud, safety, security, or repeated Terms violations, with reasons and audit evidence where appropriate.</p>$t9$,
+        $t9_new$SafeDrive may restrict or terminate an account after authorized review of fraud, safety, security, or repeated Terms violations, with reasons and audit evidence where appropriate. You may delete your own account from your account settings: it is scheduled for deletion for a set number of days (default 30), during which signing in and choosing to keep it cancels the deletion; afterwards your personal details are erased and your login is closed, while the bookings and payments you took part in are kept without your identity, as the Privacy Policy describes. Bookings, refunds, payouts and booking support cases still open must be settled first, and a suspended account cannot be deleted this way.</p>$t9_new$);
+    end if;
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 96'));
+    end if;
+  end loop;
+end;
+$chapter96_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'grace setting' as check_name,
+--        (select account_deletion_grace_days::text from public.platform_settings where id = 'default') as result, '30' as expected
+-- union all
+-- select 'profile deletion columns',
+--        (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'profiles'
+--          and column_name in ('deletion_requested_at', 'deletion_scheduled_for', 'deletion_request_id', 'login_closed_at'))::text, '4'
+-- union all
+-- select 'deletion functions',
+--        (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'
+--          and p.proname in ('account_deletion_blockers', 'schedule_account_deletion', 'cancel_account_deletion', 'run_due_account_deletions'))::text, '4'
+-- union all
+-- select 'server may anonymize',
+--        (select bool_and(p.prosrc like '%is_trusted_server_context%') from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--          where n.nspname = 'public' and p.proname = 'anonymize_user')::text, 'true'
+-- union all
+-- select 'published privacy policy / terms',
+--        (select string_agg(document_key || ' v' || version_number, ', ' order by document_key) from public.legal_document_versions
+--          where status = 'published' and document_key in ('privacy_policy', 'terms_of_service')), 'privacy_policy v2, terms_of_service v5';
+--   (every result matches expected)
+
+-- ============================================================================
+-- CHAPTER 97 - A suspension during the grace period holds an account deletion
+-- Apply this chapter only, staging first. One function is replaced. No account
+-- changes state.
+-- ============================================================================
+begin;
+
+-- Found checking CHAPTER 96 again: a suspended account cannot ask to be
+-- deleted, but an account suspended AFTER asking - during its grace period,
+-- because fraud came to light, say - was still anonymized on its date, erasing
+-- the identity the suspension is about. A suspension now stands in the way the
+-- same as an open case: on the date the request goes on legal hold for a super
+-- admin, and it runs once the suspension is lifted (or the member keeps the
+-- account). CHAPTER 96's function, reproduced verbatim with one condition added.
+create or replace function public.account_deletion_blockers(p_user_id uuid)
+returns text[]
+language sql
+stable
+security definer
+set search_path = public
+as $account_deletion_blockers$
+  select array_remove(array[
+    case when exists (
+      select 1 from public.bookings b
+      where (b.renter_id = p_user_id or b.owner_id = p_user_id)
+        and b.status in ('pending', 'confirmed', 'awaiting_payment', 'downpayment_paid', 'fully_paid', 'active')
+    ) then 'You have a booking that has not finished. Finish or cancel it first.' end,
+    case when exists (
+      select 1 from public.payments p
+      join public.bookings b on b.id = p.booking_id
+      where b.renter_id = p_user_id
+        and p.payment_type = 'refund'
+        and p.status in ('pending', 'failed')
+    ) then 'A refund to you has not been completed yet.' end,
+    case when exists (
+      select 1 from public.bookings b
+      where b.owner_id = p_user_id
+        and (
+          exists (
+            select 1 from public.payments p
+            where p.booking_id = b.id and p.payment_type = 'payout' and p.status in ('pending', 'failed')
+          )
+          or (
+            b.status = 'completed'
+            and not exists (
+              select 1 from public.payments p
+              where p.booking_id = b.id and p.payment_type = 'payout' and p.status = 'completed'
+            )
+          )
+        )
+    ) then 'A payout to you has not been completed yet.' end,
+    case when exists (
+      select 1 from public.support_tickets t
+      where t.booking_id is not null
+        and t.status in ('open', 'in_progress')
+        and (t.user_id = p_user_id or t.participant_user_id = p_user_id)
+    ) then 'A support case about one of your bookings is still open.' end,
+    case when exists (
+      select 1 from public.profiles pr
+      where pr.id = p_user_id and pr.suspended_at is not null
+    ) then 'The account is suspended, so SafeDrive has to review it before it can be deleted.' end
+  ], null);
+$account_deletion_blockers$;
+
+revoke all on function public.account_deletion_blockers(uuid) from public, anon, authenticated;
+grant execute on function public.account_deletion_blockers(uuid) to service_role;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select p.prosrc like '%suspended_at%' as holds_for_suspension
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public' and p.proname = 'account_deletion_blockers';
+--   (expect true)
+
 -- End of SafeDrive chaptered database master.

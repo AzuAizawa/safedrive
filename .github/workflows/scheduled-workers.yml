@@ -15,6 +15,7 @@ on:
     - cron: "50 3 * * *" # expire stale platform-setting change proposals, daily
     - cron: "58 3 * * *" # flag dormant accounts for retention review, daily
     - cron: "12 4 * * *" # delete notifications past their retention window, daily
+    - cron: "27 4 * * *" # carry out account deletions whose grace period has ended, daily
   workflow_dispatch: {}
 
 env:
@@ -108,6 +109,21 @@ jobs:
           echo "HTTP $code"; cat /tmp/out; echo
           if [ "$code" != "200" ]; then
             echo "::error::purge-deleted-notifications returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
+            exit 1
+          fi
+
+  process-account-deletions:
+    if: github.event.schedule == '27 4 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call process-account-deletions
+        run: |
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${SITE_URL}/api/process-account-deletions")
+          echo "HTTP $code"; cat /tmp/out; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::process-account-deletions returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
             exit 1
           fi
 

@@ -54,15 +54,17 @@ export default function LandingPage() {
               car_brands!inner (*)
             ),
             car_images (*),
-            profiles!cars_owner_id_fkey!inner (full_name, phone, email, deleted_at, suspended_at)
+            profiles!cars_owner_id_fkey!inner (full_name, phone, email, deleted_at, suspended_at, deletion_scheduled_for)
           `,
           )
           .in("status", ["approved", "active"])
           // The same cars Browse shows: not deleted or removed (CHAPTERS 86,
-          // 95), and not listed by a closed or suspended account (CHAPTER 85).
+          // 95), and not listed by a closed, suspended or closing account
+          // (CHAPTERS 85, 96).
           .is("deleted_at", null)
           .is("profiles.deleted_at", null)
           .is("profiles.suspended_at", null)
+          .is("profiles.deletion_scheduled_for", null)
           .order("created_at", { ascending: false })
           .limit(FEATURED_CAR_LIMIT);
 
