@@ -571,6 +571,10 @@ const checks = [
       "Extension Payment Received",
       "fetchBalanceDeadlineHours",
       "balance_deadline: balanceDeadline",
+      // A payment that could not be applied is queued as a refund row, so it
+      // shows in Financial Reviews and "Mark Released" can settle it.
+      "queueUnappliedPaymentRefund",
+      "Unapplied payment ${input.transactionId}",
     ],
   },
   {

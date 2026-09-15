@@ -3,6 +3,29 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-15 - A payment that could not be applied can be refunded from Financial Reviews
+
+Two rare cases take the renter's money without applying it: a payment that
+arrives after the booking was cancelled or expired, and an extension payment
+that could not be added (the booking or the vehicle's documents changed first).
+Both recorded the payment, opened a `manual_refund` support ticket and told
+super admins to "review and refund" - but created no refund row, and Financial
+Reviews -> Renter refunds lists only refund rows. So the refund never appeared
+there, "Mark Released" had nothing to act on, and the open ticket kept holding
+the lister's payout and the renter's account deletion.
+
+- `api/webhooks/paymongo.ts` now also queues a pending `manual_review` refund
+  row for the full amount in both cases (once per provider transaction, so a
+  webhook retry does not queue it twice). It appears with every other manual
+  refund, and "Mark Released" records it, posts the ledger journal and closes
+  the ticket.
+- `api/mark-manual-refund.ts` counts extension payments in what a booking
+  collected, so releasing an extension's refund is not refused as more than
+  the booking took in.
+
+Files: `api/webhooks/paymongo.ts`, `api/mark-manual-refund.ts`,
+`scripts/booking-flow-smoke-check.mjs`. No database change.
+
 ## 2026-09-15 - Once the car is handed over, nothing paid is refunded
 
 **Policy:** after the lister hands the vehicle over, the renter gets nothing

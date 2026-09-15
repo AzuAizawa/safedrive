@@ -371,6 +371,43 @@ const calculateSubscriptionEndDate = (startDate = new Date()) => {
 // complained nobody would ever know. The money is real either way: record it
 // so it exists in the books, and open a manual-refund review so a human
 // decides. Deliberately not an automatic refund.
+// Puts a captured payment that could not be applied into the manual-refund
+// queue every other manual refund uses: a pending `manual_review` refund row,
+// so it appears in Financial Reviews -> Renter refunds, where "Mark Released"
+// (api/mark-manual-refund.ts) records it and closes its manual_refund ticket.
+// Before, these cases opened only the ticket: nothing appeared in that list, so
+// the refund could not be released or recorded, and the open ticket kept
+// holding the lister's payout and the renter's account deletion.
+// Keyed on the provider transaction id, so a webhook retry queues it once.
+const queueUnappliedPaymentRefund = async (
+  supabase: ServiceRoleSupabaseClient,
+  input: { bookingId: string; amount: number; transactionId: string; reason: string },
+) => {
+  if (!Number.isFinite(input.amount) || input.amount <= 0) return;
+  const marker = `Unapplied payment ${input.transactionId}`;
+  const { data: existing, error: existingError } = await supabase
+    .from("payments")
+    .select("id")
+    .eq("booking_id", input.bookingId)
+    .eq("payment_type", "refund")
+    .like("notes", `${marker}%`)
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing?.id) return;
+
+  const { error } = await supabase.from("payments").insert({
+    booking_id: input.bookingId,
+    amount: -Math.abs(input.amount),
+    payment_type: "refund",
+    status: "pending",
+    payment_method: "manual_review",
+    transaction_id: null,
+    notes: `${marker}: ${input.reason} Refund the full amount; admin confirms the return method.`.slice(0, 450),
+  });
+  if (error) throw error;
+};
+
 const recordUnclaimableCapture = async (
   supabase: ServiceRoleSupabaseClient,
   input: {
@@ -397,6 +434,13 @@ const recordUnclaimableCapture = async (
       input.baseOrigin,
       false,
     );
+
+    await queueUnappliedPaymentRefund(supabase, {
+      bookingId: input.bookingId,
+      amount: input.amount,
+      transactionId: input.transactionId,
+      reason: `Captured after the booking became "${input.bookingStatus}", so it was never applied.`,
+    });
 
     const { data: existingTicket } = await supabase
       .from("support_tickets")
@@ -1308,6 +1352,20 @@ export default async function handler(req: Request) {
           status: "open",
         });
         if (reviewTicketError) console.error("Could not queue paid extension for refund review", reviewTicketError);
+
+        // The refund row is what makes this releasable from Financial Reviews
+        // (see queueUnappliedPaymentRefund). The payment is already recorded, so
+        // a failure here is logged rather than changing the answer to PayMongo.
+        try {
+          await queueUnappliedPaymentRefund(supabase, {
+            bookingId: extension.booking_id,
+            amount: Number(extension.total_additional_amount),
+            transactionId: checkoutId,
+            reason: "Extension paid, but the extra days could not be added to the booking.",
+          });
+        } catch (refundQueueError) {
+          console.error("Could not queue the unapplied extension refund", refundQueueError);
+        }
 
         // The renter paid: say so, and what happens next, instead of leaving a
         // captured payment unexplained. An approved extension holds its days

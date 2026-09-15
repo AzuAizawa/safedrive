@@ -195,7 +195,9 @@ export default async function handler(req: Request) {
     // OTHER refunds on the same booking. If a full refund already went
     // through (for example via a "Retry PayMongo" that ignored this partial
     // row), releasing this one on top of it sends real cash out the door
-    // twice. Same refundable payment types as server/cancellationRefundPlan.ts.
+    // twice. The booking's own payments plus extension payments: an extension
+    // payment that could not be applied is refunded through this same queue
+    // (api/webhooks/paymongo.ts), and its money was collected like any other.
     const { data: siblingPayments, error: siblingPaymentsError } = await supabase
       .from("payments")
       .select("id, amount, payment_type, status")
@@ -206,7 +208,7 @@ export default async function handler(req: Request) {
     const capturedTotal = rows
       .filter(
         (row) =>
-          ["downpayment", "balance"].includes(String(row.payment_type)) &&
+          ["downpayment", "balance", "extension"].includes(String(row.payment_type)) &&
           row.status === "completed" &&
           Number(row.amount) > 0,
       )
