@@ -68,6 +68,16 @@ export const helpArticles: HelpArticle[] = [
     suggestedTicketTag: "booking",
   },
   {
+    id: "booking-notice",
+    category: "booking",
+    title: "How soon a trip can start",
+    question: "Why can't I choose a pickup time only a few hours away?",
+    answer:
+      "A trip starts no earlier than tomorrow, and its pickup time must also be at least the minimum notice away (default 12 hours) when you send the request. That leaves the lister time to accept and you time to pay before pickup. The car page only offers pickup times that meet it.",
+    relatedTags: ["booking", "pickup", "time"],
+    suggestedTicketTag: "booking",
+  },
+  {
     id: "car-inquiry",
     category: "booking",
     title: "Questions before booking",

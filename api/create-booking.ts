@@ -3,6 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 import { sendUserNotificationEmail } from "../server/email.js";
 import { blockedIpResponse } from "../server/ipBlock.js";
 import { findHoldConflict } from "../server/extensionHolds.js";
+import {
+  formatManilaDateTime,
+  getEarliestPickupMs,
+  meetsBookingNotice,
+  normalizeBookingNoticeHours,
+} from "../server/bookingNotice.js";
 
 export const config = {
   runtime: "edge",
@@ -545,12 +551,29 @@ export default async function handler(req: Request) {
     const { data: settingData, error: settingError } = await supabase
       .from("platform_settings")
       .select(
-        "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days",
+        "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, min_booking_notice_hours",
       )
       .eq("id", "default")
       .maybeSingle();
 
     if (settingError) throw settingError;
+
+    // The pickup must also be at least the minimum notice away (CHAPTER 93),
+    // on top of "tomorrow at the earliest" above: without it a request sent at
+    // 11:30 PM could ask for a 12:00 AM pickup, leaving 30 minutes for the
+    // lister to accept and the renter to pay. Read live - it only decides
+    // whether a new request is accepted.
+    const minBookingNoticeHours = normalizeBookingNoticeHours(
+      settingData?.min_booking_notice_hours,
+    );
+    if (!meetsBookingNotice(pickupInstantMs, Date.now(), minBookingNoticeHours)) {
+      return jsonResponse(
+        {
+          error: `Pickup must be at least ${minBookingNoticeHours} hours from now, so the lister has time to accept and you have time to pay. The earliest pickup is ${formatManilaDateTime(getEarliestPickupMs(Date.now(), minBookingNoticeHours))}.`,
+        },
+        400,
+      );
+    }
 
     const rawDownpaymentRate = Number(settingData?.downpayment_rate);
     const downpaymentRate =

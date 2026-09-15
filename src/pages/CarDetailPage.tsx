@@ -8,7 +8,15 @@ import {
   DEFAULT_DOWNPAYMENT_RATE,
   fetchPlatformPricingSettings,
 } from "@/lib/platformSettings";
-import { formatTimeLabel } from "@/lib/timeOptions";
+import { formatTimeLabel, TIME_OPTIONS } from "@/lib/timeOptions";
+import {
+  DEFAULT_MIN_BOOKING_NOTICE_HOURS,
+  filterPickupTimesByNotice,
+  formatManilaDateTime,
+  getEarliestPickupMs,
+  getManilaPickupMs,
+  meetsBookingNotice,
+} from "@/lib/bookingNotice";
 import TimePicker from "@/components/TimePicker";
 import { parseTripDatesQuery } from "@/lib/tripDates";
 import { useAuth } from "@/contexts/AuthContext";
@@ -146,6 +154,9 @@ export default function CarDetailPage() {
   const [processingFeeRate, setProcessingFeeRate] = useState(0);
   const [processingFixedCentavos, setProcessingFixedCentavos] = useState(0);
   const [downpaymentRate, setDownpaymentRate] = useState(DEFAULT_DOWNPAYMENT_RATE);
+  const [minBookingNoticeHours, setMinBookingNoticeHours] = useState(
+    DEFAULT_MIN_BOOKING_NOTICE_HOURS,
+  );
   const [bookedDates, setBookedDates] = useState<
     { start: string; end: string }[]
   >([]);
@@ -276,6 +287,7 @@ export default function CarDetailPage() {
       setProcessingFeeRate(settings.processingFeeRate);
       setProcessingFixedCentavos(settings.processingFixedCentavos);
       setDownpaymentRate(settings.downpaymentRate);
+      setMinBookingNoticeHours(settings.minBookingNoticeHours);
     })();
   }, []);
 
@@ -419,6 +431,18 @@ export default function CarDetailPage() {
     
     if (!pickupTime || !dropoffTime) {
       toast.error("Please specify both pickup and drop-off times.");
+      return;
+    }
+
+    // The same minimum notice api/create-booking.ts enforces (CHAPTER 93).
+    const requestedPickupMs = getManilaPickupMs(format(start, "yyyy-MM-dd"), pickupTime);
+    if (
+      requestedPickupMs === null ||
+      !meetsBookingNotice(requestedPickupMs, Date.now(), minBookingNoticeHours)
+    ) {
+      toast.error(`Pickup must be at least ${minBookingNoticeHours} hours from now`, {
+        description: `So the lister has time to accept and you have time to pay. The earliest pickup is ${formatManilaDateTime(getEarliestPickupMs(Date.now(), minBookingNoticeHours))}.`,
+      });
       return;
     }
 
@@ -615,6 +639,20 @@ export default function CarDetailPage() {
       : 0;
   const pickupDateTime = combineDateAndTime(dateRange?.from, pickupTime);
   const dropoffDateTime = combineDateAndTime(dateRange?.to, dropoffTime);
+  // Only pickup times at least the minimum notice away are offered for the date
+  // chosen (CHAPTER 93); the server refuses anything sooner anyway.
+  const pickupDateIso = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : null;
+  const pickupTimeOptions = pickupDateIso
+    ? filterPickupTimesByNotice(TIME_OPTIONS, pickupDateIso, Date.now(), minBookingNoticeHours)
+    : TIME_OPTIONS;
+  const noPickupTimeOnDate = Boolean(pickupDateIso) && pickupTimeOptions.length === 0;
+  const pickupTimeAllowed =
+    !pickupTime || pickupTimeOptions.some((option) => option.value === pickupTime);
+  // A time chosen before the date (or before the clock moved on) that the
+  // notice no longer allows is cleared, so it cannot be sent by mistake.
+  useEffect(() => {
+    if (!pickupTimeAllowed) setPickupTime("");
+  }, [pickupTimeAllowed]);
   const actualDurationMinutes =
     pickupDateTime && dropoffDateTime
       ? Math.max(0, Math.round((dropoffDateTime.getTime() - pickupDateTime.getTime()) / 60000))
@@ -643,6 +681,8 @@ export default function CarDetailPage() {
         ? "Those dates are booked or blocked by the owner. Pick another schedule."
         : exceedsPaymentLimit
           ? `Online checkout is limited to bookings worth ${MAX_BOOKING_TOTAL.toLocaleString()} pesos or less.`
+          : noPickupTimeOnDate
+            ? `No pickup time on that date is at least ${minBookingNoticeHours} hours from now. Choose a later pickup date.`
           : !pickupTime || !dropoffTime
             ? "Choose both pickup and drop-off times before sending the request."
             : sameOrEarlierDropoff
@@ -685,7 +725,12 @@ export default function CarDetailPage() {
     );
   }
 
-  const minDate = addDays(new Date(), 1);
+  // Tomorrow at the earliest, and never a day wholly inside the minimum notice
+  // (CHAPTER 93) - with a long notice the first allowed day moves later.
+  const earliestNoticeDay = new Date(getEarliestPickupMs(Date.now(), minBookingNoticeHours));
+  earliestNoticeDay.setHours(0, 0, 0, 0);
+  const tomorrow = addDays(new Date(), 1);
+  const minDate = earliestNoticeDay > tomorrow ? earliestNoticeDay : tomorrow;
   // Before a start date is picked, the ceiling is the advance-booking window.
   // Once a start date is picked, the ceiling switches to that trip's own
   // 30-day length allowance (independent of how far out the start date is) -
@@ -1216,10 +1261,14 @@ export default function CarDetailPage() {
                   <TimePicker
                     value={pickupTime}
                     onChange={setPickupTime}
-                    disabled={Boolean(licenceGateReason)}
+                    options={pickupTimeOptions}
+                    disabled={Boolean(licenceGateReason) || noPickupTimeOnDate}
                     placeholder="Select pickup time"
                     ariaLabel="Pickup time"
                   />
+                  <p className="text-[11px] text-muted-foreground">
+                    At least {minBookingNoticeHours} hours from now, so the lister can accept and you can pay in time.
+                  </p>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">

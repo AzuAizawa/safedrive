@@ -1485,6 +1485,7 @@ export interface Database {
           dormant_account_days: number;
           no_show_grace_minutes: number;
           mutual_no_show_close_hours: number;
+          min_booking_notice_hours: number;
           contact_email: string;
           user_verification_eta_message: string;
           vehicle_verification_eta_message: string;
@@ -1512,6 +1513,7 @@ export interface Database {
           dormant_account_days?: number;
           no_show_grace_minutes?: number;
           mutual_no_show_close_hours?: number;
+          min_booking_notice_hours?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;
@@ -1539,6 +1541,7 @@ export interface Database {
           dormant_account_days?: number;
           no_show_grace_minutes?: number;
           mutual_no_show_close_hours?: number;
+          min_booking_notice_hours?: number;
           contact_email?: string;
           user_verification_eta_message?: string;
           vehicle_verification_eta_message?: string;

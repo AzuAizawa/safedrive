@@ -45,6 +45,7 @@ type SettingsRow = {
   dormant_account_days: number;
   no_show_grace_minutes: number;
   mutual_no_show_close_hours: number;
+  min_booking_notice_hours: number;
 };
 
 type ChangeRequest = {
@@ -237,6 +238,19 @@ const FIELDS: Record<
     },
     formatStored: (s) => `${Math.round(s)} h`,
   },
+  min_booking_notice_hours: {
+    label: "Minimum notice before pickup",
+    hint: "A booking request is refused unless its pickup time is at least this many hours away, so the lister has time to accept and the renter to pay (1-168). The car page only offers pickup times that meet it. Applies live to new requests; existing bookings are not affected.",
+    unit: "hours",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return i.trim() !== "" && Number.isFinite(n) && n >= 1 && n <= 168 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} h`,
+  },
   dormant_account_days: {
     label: "Dormant account threshold",
     hint: "Days of no login activity before a regular account is auto-flagged for the Retention Requests queue (90-3650). A super admin still has to review and execute - this only files the request. Applies live.",
@@ -314,7 +328,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, downpayment_rate, refund_full_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes, mutual_no_show_close_hours",
+          "commission_rate, downpayment_rate, refund_full_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes, mutual_no_show_close_hours, min_booking_notice_hours",
         )
         .eq("id", "default")
         .maybeSingle(),

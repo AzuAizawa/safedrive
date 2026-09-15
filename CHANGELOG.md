@@ -3,6 +3,31 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-15 - A trip cannot start sooner than the minimum notice
+
+Reported: on Sept 14 at 11:30 PM a renter could request a Sept 15, 12:00 AM
+pickup. The only rule was "tomorrow at the earliest", counted in calendar days,
+so the lister had 30 minutes to accept and the renter whatever was left to pay
+before both deadlines - capped at pickup - cancelled it. Calendar-day notice is
+known for exactly this; car sharing (Turo's advance notice) counts it in hours.
+
+**Now:** a new Platform Setting, **Minimum notice before pickup** (default
+12 hours, 1-168, one value for every listing, voted like the others and read
+live). `api/create-booking.ts` refuses a pickup less than that far away when the
+request is sent, and says when the earliest pickup is. The car page only offers
+pickup times that meet it, clears a time the notice no longer allows, starts
+the calendar on the first day that still has one, and explains a date with no
+time left. "Tomorrow at the earliest" still applies. Existing bookings are not
+touched.
+
+- SQL: CHAPTER 93 (the column, its 1-168 check, the vote whitelist). Paste it
+  **before** deploying - booking creation reads the new column.
+- `server/bookingNotice.ts` and `src/lib/bookingNotice.ts` (the same rule,
+  pinned by `scripts/booking-notice.test.mjs` - `check:booking-notice`, in
+  `check:all` - which also applies the chapter to real PostgreSQL),
+  `CarDetailPage.tsx`, `src/lib/platformSettings.ts`,
+  `AdminPlatformSettingsPage.tsx`, `src/types/database.ts`, Help Center.
+
 ## 2026-09-14 - No trip, payout or hold is left waiting forever
 
 A gap hunt after CHAPTER 92, against the current code and the live data. No

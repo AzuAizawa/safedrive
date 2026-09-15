@@ -14173,4 +14173,95 @@ commit;
 --   where conname = 'booking_cancellations_cancelled_by_role_check';
 --   (expect the check to list renter, lister, both)
 
+-- ============================================================================
+-- CHAPTER 93 - A trip cannot start sooner than the minimum notice
+-- Apply this chapter only, staging first. Adds one setting. No row changes.
+-- ============================================================================
+begin;
+
+-- Reported: a request sent on Sept 14 at 11:30 PM for a Sept 15, 12:00 AM
+-- pickup was accepted by the system. "Tomorrow at the earliest" is counted in
+-- calendar days, so it left 30 minutes for the lister to accept and the renter
+-- to pay - the loophole calendar-day notice is known for. Car sharing counts
+-- the notice in hours (Turo's advance notice), so SafeDrive now does too:
+-- api/create-booking.ts refuses a pickup less than min_booking_notice_hours
+-- away when the request is sent, and the car page only offers pickup times
+-- that meet it (server/bookingNotice.ts). "Tomorrow at the earliest" still
+-- applies on top. One platform-wide value, read live; it only decides whether
+-- a new request is accepted, so no existing booking is touched.
+
+alter table public.platform_settings
+  add column if not exists min_booking_notice_hours integer not null default 12;
+alter table public.platform_settings
+  drop constraint if exists platform_settings_min_booking_notice_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_min_booking_notice_hours_check
+  check (min_booking_notice_hours >= 1 and min_booking_notice_hours <= 168);
+
+-- The consensus-vote whitelist, reproduced verbatim from CHAPTER 92 with the
+-- new key.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $validate$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'short_notice_free_hours' then
+      if v < 0 or v > 24 or v <> floor(v) then raise exception 'short_notice_free_hours must be a whole number 0-24'; end if;
+    elsif k in ('late_cancel_fee_days', 'no_show_fee_days') then
+      if v < 0 or v > 30 then raise exception '% must be 0-30 days', k; end if;
+    elsif k in ('short_trip_late_cancel_fee_days', 'short_trip_no_show_fee_days') then
+      if v < 0 or v > 2 then raise exception '% must be 0-2 days', k; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    elsif k = 'dormant_account_days' then
+      if v < 90 or v > 3650 or v <> floor(v) then raise exception 'dormant_account_days must be a whole number 90-3650'; end if;
+    elsif k = 'no_show_grace_minutes' then
+      if v < 15 or v > 180 or v <> floor(v) then raise exception 'no_show_grace_minutes must be a whole number 15-180'; end if;
+    elsif k = 'mutual_no_show_close_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'mutual_no_show_close_hours must be a whole number 1-72'; end if;
+    elsif k = 'min_booking_notice_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'min_booking_notice_hours must be a whole number 1-168'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$validate$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select min_booking_notice_hours from public.platform_settings where id = 'default';
+--   (expect 12)
+
 -- End of SafeDrive chaptered database master.

@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+  DEFAULT_MIN_BOOKING_NOTICE_HOURS,
+  normalizeBookingNoticeHours,
+} from "@/lib/bookingNotice";
 
 export const DEFAULT_COMMISSION_RATE = 0.1;
 export const DEFAULT_COMMISSION_PERCENT = DEFAULT_COMMISSION_RATE * 100;
@@ -171,6 +175,8 @@ export type PlatformPricingSettings = {
   downpaymentRate: number;
   refundFullHours: number;
   refundLateRenterPercent: number;
+  // Hours a pickup must be away when the request is sent (CHAPTER 93).
+  minBookingNoticeHours: number;
 };
 
 export const calculateProcessingFee = (
@@ -192,12 +198,13 @@ export const fetchPlatformPricingSettings = async (): Promise<PlatformPricingSet
     downpaymentRate: DEFAULT_DOWNPAYMENT_RATE,
     refundFullHours: DEFAULT_REFUND_FULL_HOURS,
     refundLateRenterPercent: DEFAULT_REFUND_LATE_RENTER_PERCENT,
+    minBookingNoticeHours: DEFAULT_MIN_BOOKING_NOTICE_HOURS,
   };
 
   const { data, error } = await supabase
     .from("platform_settings")
     .select(
-      "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent",
+      "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, min_booking_notice_hours",
     )
     .eq("id", "default")
     .maybeSingle();
@@ -223,6 +230,7 @@ export const fetchPlatformPricingSettings = async (): Promise<PlatformPricingSet
       Number.isFinite(latePercent) && latePercent >= 0 && latePercent <= 100
         ? latePercent
         : DEFAULT_REFUND_LATE_RENTER_PERCENT,
+    minBookingNoticeHours: normalizeBookingNoticeHours(data?.min_booking_notice_hours),
   };
 };
 
