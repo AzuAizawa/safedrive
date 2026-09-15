@@ -440,6 +440,7 @@ export default async function handler(req: Request) {
         id,
         owner_id,
         status,
+        deleted_at,
         price_per_day,
         location,
         plate_number,
@@ -454,6 +455,16 @@ export default async function handler(req: Request) {
 
     if (carError || !carData) {
       return jsonResponse({ error: "Car not found" }, 404);
+    }
+
+    // A car its lister deleted or SafeDrive removed keeps its row for the
+    // bookings it explains (CHAPTERS 86 and 95), and may still be "approved".
+    // Browse hides it, but a car page left open would otherwise book it.
+    if ((carData as unknown as { deleted_at: string | null }).deleted_at) {
+      return jsonResponse(
+        { error: "This car is no longer listed on SafeDrive. Please choose another one." },
+        409,
+      );
     }
 
     const car = carData as unknown as CarRecord;

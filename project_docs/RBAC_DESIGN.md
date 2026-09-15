@@ -77,7 +77,7 @@ Swept from `src/App.tsx` (routes), `src/components/AdminLayout.tsx` (nav), every
 | B2 | Approve vehicle | `:422` | `vehicles.review` |
 | B3 | Reject vehicle (reason) | `:494` | `vehicles.review` |
 | B4 | Revoke an approved vehicle | `:562` | `vehicles.review` |
-| B5 | **Delete a vehicle record** | `:602` | `vehicles.delete` |
+| B5 | **Remove (archive) or restore a vehicle listing, with a reason sent to the lister** | `admin_remove_car` / `admin_restore_car` (CHAPTER 95) | `vehicles.delete` |
 | B6 | Re-review flagged car documents | `:431,499` | `vehicles.review` |
 | B7 | Send vehicle decision email | `api/send-vehicle-decision-email.ts` | `vehicles.review` |
 | B8 | Update `car_renewals` (renewal review) | RLS `:752` | `vehicles.review` |
@@ -176,7 +176,7 @@ This is the entire catalog of toggles shown when creating or editing an admin. N
 | `users.verify` | Verify users | A1–A5: KYC approve / reject / re-review + decision email | ✅ |
 | `users.moderate` | Moderate users | A6–A7: block / unblock login | ✅ |
 | `vehicles.review` | Verify cars | B1–B4, B6–B8: approve / reject / revoke / re-review + renewals + email | ✅ |
-| `vehicles.delete` | Delete cars | B5: delete a vehicle record | ❌ (off by default) |
+| `vehicles.delete` | Remove and restore cars | B5: archive a vehicle listing with a reason, or restore it | ❌ (off by default) |
 | `catalog.manage` | Manage catalog | C1–C4: car brands & models | ✅ |
 | `support.handle` | Handle tickets | D1–D6: support tickets | ✅ |
 | `inquiries.handle` | Handle inquiries | E1–E4: user / guest inquiries | ✅ |
@@ -275,9 +275,10 @@ create policy "Vehicle reviewers can update cars" on public.cars
   for update using (auth.uid() = owner_id or public.admin_can('vehicles.review'))
   with check   (auth.uid() = owner_id or public.admin_can('vehicles.review'));
 
+-- Superseded by CHAPTER 95: no policy deletes a car row any more. vehicles.delete
+-- is checked inside public.admin_remove_car / public.admin_restore_car, which
+-- archive (cars.deleted_at) with a reason and notify the lister.
 drop policy if exists "Admins can delete cars" on public.cars;
-create policy "Vehicle deleters can delete cars" on public.cars
-  for delete using (public.admin_can('vehicles.delete'));
 
 drop policy if exists "Admin read audit log" on public.audit_log;
 create policy "Audit viewers read audit log" on public.audit_log

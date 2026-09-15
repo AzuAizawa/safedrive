@@ -29,7 +29,8 @@ export default function ListerCarRenewalPage() {
   const selected=cars.find(c=>c.id===params.get("car"));
   const load=useCallback(async()=>{
     if(!user) return;
-    const {data,error:e}=await supabase.from("cars").select("id,plate_number,status").eq("owner_id",user.id).order("created_at",{ascending:false});
+    // A deleted or removed car takes no documents: its review queue is gone (CHAPTER 95).
+    const {data,error:e}=await supabase.from("cars").select("id,plate_number,status").eq("owner_id",user.id).is("deleted_at",null).order("created_at",{ascending:false});
     setError(e?.message ?? "");setCars(data ?? []);setLoading(false);
     // The expiry dates live on the documents, not on cars - that is the only
     // place the DTI and the Mayor's Permit dates have ever been recorded.

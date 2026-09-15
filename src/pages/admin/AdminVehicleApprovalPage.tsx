@@ -20,7 +20,6 @@ import AdminSectionTabs from "@/components/AdminSectionTabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import ConfirmDialog from "@/components/ConfirmDialog";
 import BookingPagination from "@/components/BookingPagination";
 import { usePagedItems } from "@/lib/usePagedItems";
 import {
@@ -41,6 +40,7 @@ import {
   FileText,
   Loader2,
   RefreshCw,
+  RotateCcw,
   X,
   XCircle,
 } from "lucide-react";
@@ -54,6 +54,11 @@ interface PendingCar {
   location: string | null;
   additional_info: string | null;
   status: string;
+  owner_id: string;
+  // Set when the car is archived, by its lister or by an admin (CHAPTER 95).
+  deleted_at: string | null;
+  deleted_by: string | null;
+  deletion_reason: string | null;
   contact_number: string | null;
   created_at: string;
   registration_expiry: string | null;
@@ -96,6 +101,18 @@ interface PendingCar {
     address: string | null;
   };
 }
+
+// The codes public.admin_remove_car accepts (CHAPTER 95), with the label the
+// lister reads in front of the admin's note. Keep the two lists identical.
+const REMOVAL_REASONS = [
+  { value: "invalid_documents", label: "Fake or invalid documents" },
+  { value: "policy_violation", label: "Policy violation" },
+  { value: "owner_request", label: "The owner asked for it" },
+  { value: "other", label: "Other" },
+] as const;
+type RemovalReasonCode = (typeof REMOVAL_REASONS)[number]["value"];
+// Same floor the database enforces, so the button explains it before a refusal.
+const REMOVAL_NOTE_MIN_LENGTH = 10;
 
 const VEHICLE_VERIFICATION_DOCUMENT_TYPES = [
   "or",
@@ -181,7 +198,9 @@ export default function AdminVehicleApprovalPage() {
   const [rejectionReason, setRejectionReason] = useState("");
   const [showReject, setShowReject] = useState(false);
   const [showRevoke, setShowRevoke] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRemove, setShowRemove] = useState(false);
+  const [removeReasonCode, setRemoveReasonCode] = useState<RemovalReasonCode | "">("");
+  const [removeNote, setRemoveNote] = useState("");
   const [revokeReason, setRevokeReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
   const [ocrRunKey, setOcrRunKey] = useState(0);
@@ -203,7 +222,7 @@ export default function AdminVehicleApprovalPage() {
     national_id: null as string | null,
   });
   const [searchParams] = useSearchParams();
-  const validTabs = ["pending", "active"] as const;
+  const validTabs = ["pending", "active", "removed"] as const;
   type VehicleTab = (typeof validTabs)[number];
   const requestedTab = searchParams.get("tab");
   const initialTab: VehicleTab = validTabs.includes(requestedTab as VehicleTab)
@@ -279,10 +298,7 @@ export default function AdminVehicleApprovalPage() {
         .from("cars")
         .select(
           "*, car_models(name, body_type, seats, fuel_type, car_brands(name)), car_images(*), car_documents(*), profiles!cars_owner_id_fkey(id, full_name, email, phone, first_name, last_name, driver_license, national_id, address)",
-        )
-        // A car its owner deleted must leave the review queue with it -
-        // otherwise an admin is asked to approve a listing that is gone.
-        .is("deleted_at", null);
+        );
       // A resubmission does not change the car's status - it files a pending
       // car_documents row while the listing stays where it is. The separate
       // renewals page used to be the only place those surfaced; now they
@@ -298,18 +314,25 @@ export default function AdminVehicleApprovalPage() {
           new Set(((resubmitted ?? []) as Array<{ car_id: string }>).map((row) => row.car_id)),
         );
       }
+      // A car that is removed - by its lister or by an admin - leaves the
+      // review queue and the active list, so no one is asked to approve a
+      // listing that is gone. It is shown only under Removed, the one place
+      // to see why it went and to bring it back (CHAPTER 95).
       const scopedQuery =
-        activeTab === "pending"
-          ? baseQuery.or(
+        activeTab === "removed"
+          ? baseQuery.not("deleted_at", "is", null)
+          : activeTab === "pending"
+            ? baseQuery.is("deleted_at", null).or(
                 [
                   "status.in.(pending,renewal_required)",
                   ...(resubmittedIds.length ? [`id.in.(${resubmittedIds.join(",")})`] : []),
                 ].join(","),
               )
-            : baseQuery.in("status", ["approved", "active"]);
-      const { data, error } = await scopedQuery.order("created_at", {
-        ascending: false,
-      });
+            : baseQuery.is("deleted_at", null).in("status", ["approved", "active"]);
+      const { data, error } = await scopedQuery.order(
+        activeTab === "removed" ? "deleted_at" : "created_at",
+        { ascending: false },
+      );
       if (error) throw error;
       if (data) {
         const typedCars = data as unknown as PendingCar[];
@@ -348,7 +371,7 @@ export default function AdminVehicleApprovalPage() {
 
   const sendVehicleDecisionEmail = async (
     target: PendingCar,
-    status: "approved" | "rejected" | "pending",
+    status: "approved" | "rejected" | "pending" | "removed" | "restored",
   ) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) return "not_attempted";
@@ -643,32 +666,78 @@ export default function AdminVehicleApprovalPage() {
     setActionLoading(false);
   };
 
-  const handleDeleteVehicle = async () => {
-    if (!selected || !adminUser) return;
+  const closeRemoveForm = () => {
+    setShowRemove(false);
+    setRemoveReasonCode("");
+    setRemoveNote("");
+  };
+
+  // Removal archives the car instead of deleting its row (CHAPTER 95).
+  // public.admin_remove_car writes the reason, the lister's notification and
+  // the audit row together, and CHAPTER 86's guard refuses a car with a trip or
+  // payout still open - that refusal is shown to the admin as it is.
+  const handleRemoveVehicle = async () => {
+    if (!selected || !adminUser || !removeReasonCode) return;
+    const note = removeNote.trim();
+    if (note.length < REMOVAL_NOTE_MIN_LENGTH) {
+      toast.error(`Write a note of at least ${REMOVAL_NOTE_MIN_LENGTH} characters so the lister knows why.`);
+      return;
+    }
     setActionLoading(true);
-    const { error } = await supabase
-      .from("cars")
-      .delete()
-      .eq("id", selected.id);
-    if (!error) {
-      await supabase
-        .from("audit_log")
-        .insert({
-          user_id: adminUser.id,
-          action: "admin_deleted_vehicle",
-          entity_type: "car",
-          entity_id: selected.id,
-          details: { plate: selected.plate_number },
-        });
-      toast.success("Vehicle deleted successfully.");
+    try {
+      const { error } = await supabase.rpc("admin_remove_car", {
+        p_car_id: selected.id,
+        p_reason_code: removeReasonCode,
+        p_note: note,
+      });
+      if (error) {
+        toast.error("Vehicle was not removed", { description: error.message });
+        return;
+      }
+      showVehicleEmailWarning(
+        await sendVehicleDecisionEmail(selected, "removed"),
+        "Vehicle removed",
+      );
+      toast.success("Vehicle removed", {
+        description:
+          "It is off Browse and the lister's listings, and the lister was told why. Past bookings keep their record. You can restore it from the Removed tab.",
+      });
       setSelected(null);
-      setShowDeleteConfirm(false);
+      closeRemoveForm();
       setManualOcrOverride(false);
       fetchCars();
-    } else {
-      toast.error("Failed to delete vehicle", { description: error.message });
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
+  };
+
+  const handleRestoreVehicle = async () => {
+    if (!selected || !adminUser) return;
+    setActionLoading(true);
+    try {
+      const { data, error } = await supabase.rpc("admin_restore_car", {
+        p_car_id: selected.id,
+      });
+      if (error) {
+        toast.error("Vehicle was not restored", { description: error.message });
+        return;
+      }
+      showVehicleEmailWarning(
+        await sendVehicleDecisionEmail(selected, "restored"),
+        "Vehicle restored",
+      );
+      const restoredStatus = (data as { status?: string } | null)?.status;
+      toast.success("Vehicle restored", {
+        description:
+          restoredStatus === "pending"
+            ? "It is back on the lister's listings and waiting in Pending for review before it can be booked."
+            : "It is back on the lister's listings.",
+      });
+      setSelected(null);
+      fetchCars();
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   return (
@@ -689,6 +758,7 @@ export default function AdminVehicleApprovalPage() {
         tabs={[
           { value: "pending", label: "Pending & resubmissions" },
           { value: "active", label: "Active cars" },
+          { value: "removed", label: "Removed" },
         ]}
       />
 
@@ -702,12 +772,18 @@ export default function AdminVehicleApprovalPage() {
         <div className="text-center py-20">
           <Car className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
           <h3 className="text-lg font-semibold">
-            {activeTab === "pending" ? "Nothing waiting for review" : "No active cars"}
+            {activeTab === "pending"
+              ? "Nothing waiting for review"
+              : activeTab === "removed"
+                ? "No removed cars"
+                : "No active cars"}
           </h3>
           <p className="text-muted-foreground text-sm">
             {activeTab === "pending"
               ? "New listings and document resubmissions both appear here."
-              : "Waiting for new vehicle submissions."}
+              : activeTab === "removed"
+                ? "Cars removed by an admin or deleted by their lister appear here, and can be restored."
+                : "Waiting for new vehicle submissions."}
           </p>
         </div>
       ) : (
@@ -735,6 +811,7 @@ export default function AdminVehicleApprovalPage() {
                     setRejectionReason("");
                     setShowRevoke(false);
                     setRevokeReason("");
+                    closeRemoveForm();
                     setManualOcrOverride(false);
                   }}
                 >
@@ -751,7 +828,7 @@ export default function AdminVehicleApprovalPage() {
                     ₱{Number(car.price_per_day).toLocaleString()}
                   </TableCell>
                   <TableCell className="capitalize">
-                    {car.status}
+                    {car.deleted_at ? "removed" : car.status}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button size="sm" variant="ghost">
@@ -1368,7 +1445,10 @@ export default function AdminVehicleApprovalPage() {
                   {canReview && !showRevoke ? (
                     <Button
                       variant="outline"
-                      onClick={() => setShowRevoke(true)}
+                      onClick={() => {
+                        closeRemoveForm();
+                        setShowRevoke(true);
+                      }}
                       disabled={actionLoading}
                       className="gap-2 text-amber-500 hover:text-amber-500"
                     >
@@ -1391,11 +1471,76 @@ export default function AdminVehicleApprovalPage() {
                       Confirm Revoke
                     </Button>
                   ) : null}
-                  {canDelete ? (
+                  {canDelete && !showRemove ? (
                     <Button
                       variant="destructive"
-                      onClick={() => setShowDeleteConfirm(true)}
+                      onClick={() => {
+                        setShowRevoke(false);
+                        setShowRemove(true);
+                      }}
                       disabled={actionLoading}
+                      className="gap-2"
+                    >
+                      <X className="w-4 h-4" />
+                      Remove
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+              {activeTab === "active" && canDelete && showRemove && (
+                <div className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+                  <div>
+                    <p className="font-semibold text-destructive">Remove this vehicle listing</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      The car is archived, not deleted: it leaves Browse and the lister's listings, its
+                      past bookings keep their record, and it can be restored from the Removed tab. A car
+                      with a booking not yet finished, or a payout not yet received, cannot be removed.
+                      The lister is sent the reason and your note.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="vehicle-removal-reason">Reason *</Label>
+                    <select
+                      id="vehicle-removal-reason"
+                      value={removeReasonCode}
+                      onChange={(e) => setRemoveReasonCode(e.target.value as RemovalReasonCode | "")}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Choose a reason</option>
+                      {REMOVAL_REASONS.map((reason) => (
+                        <option key={reason.value} value={reason.value}>
+                          {reason.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="vehicle-removal-note">Note to the lister *</Label>
+                    <textarea
+                      id="vehicle-removal-note"
+                      rows={3}
+                      maxLength={500}
+                      value={removeNote}
+                      onChange={(e) => setRemoveNote(e.target.value)}
+                      placeholder="Say specifically what is wrong - the lister reads this."
+                      className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      At least {REMOVAL_NOTE_MIN_LENGTH} characters ({removeNote.trim().length} so far).
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <Button variant="outline" onClick={closeRemoveForm} disabled={actionLoading}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => void handleRemoveVehicle()}
+                      disabled={
+                        actionLoading ||
+                        !removeReasonCode ||
+                        removeNote.trim().length < REMOVAL_NOTE_MIN_LENGTH
+                      }
                       className="gap-2"
                     >
                       {actionLoading ? (
@@ -1403,8 +1548,50 @@ export default function AdminVehicleApprovalPage() {
                       ) : (
                         <X className="w-4 h-4" />
                       )}
-                      Delete
+                      Confirm Removal
                     </Button>
+                  </div>
+                </div>
+              )}
+              {activeTab === "removed" && selected.deleted_at && (
+                <div className="space-y-3 rounded-lg border border-border/60 bg-muted/30 p-4 text-sm">
+                  <div>
+                    <p className="font-semibold">
+                      Removed{" "}
+                      {new Date(selected.deleted_at).toLocaleString("en-PH", {
+                        timeZone: "Asia/Manila",
+                      })}{" "}
+                      (Manila)
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      {/* Before CHAPTER 95 only listers archived cars, and those
+                          rows carry no deleted_by - so an empty value is the lister. */}
+                      {selected.deleted_by && selected.deleted_by !== selected.owner_id
+                        ? "Removed by SafeDrive."
+                        : "Deleted by the lister."}
+                      {selected.deletion_reason ? ` Reason: ${selected.deletion_reason}` : ""}
+                    </p>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Restoring tells the lister. A car that was live goes back to Pending for review
+                    before it can be booked; a car whose owner's account is closed stays removed.
+                  </p>
+                  {canDelete ? (
+                    <div className="flex justify-end">
+                      <Button
+                        variant="outline"
+                        onClick={() => void handleRestoreVehicle()}
+                        disabled={actionLoading}
+                        className="gap-2"
+                      >
+                        {actionLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RotateCcw className="w-4 h-4" />
+                        )}
+                        Restore
+                      </Button>
+                    </div>
                   ) : null}
                 </div>
               )}
@@ -1413,20 +1600,6 @@ export default function AdminVehicleApprovalPage() {
         </div>,
         document.body,
       )}
-      <ConfirmDialog
-        open={showDeleteConfirm}
-        title="Permanently delete this vehicle?"
-        description={
-          selected
-            ? `Delete ${selected.car_models.car_brands.name} ${selected.car_models.name} (${selected.plate_number}) permanently? This cannot be undone.`
-            : ""
-        }
-        confirmText="Delete Vehicle"
-        destructive
-        isLoading={actionLoading}
-        onCancel={() => setShowDeleteConfirm(false)}
-        onConfirm={handleDeleteVehicle}
-      />
     </div>
   );
 }

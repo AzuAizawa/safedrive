@@ -34,6 +34,8 @@ export async function loadAdminAttentionItems(isSuperAdmin: boolean) {
       .from("cars")
       .select("id,plate_number,created_at")
       .eq("status", "pending")
+      // A removed car is not waiting for anyone (CHAPTER 95).
+      .is("deleted_at", null)
       .order("created_at", { ascending: true }),
   ]);
 

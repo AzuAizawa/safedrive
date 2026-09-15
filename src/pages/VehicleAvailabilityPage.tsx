@@ -66,6 +66,8 @@ export default function VehicleAvailabilityPage() {
         .from("cars")
         .select("*")
         .eq("owner_id", user.id)
+        // A deleted or removed car has no calendar to manage (CHAPTERS 86, 95).
+        .is("deleted_at", null)
         .order("created_at", { ascending: false }),
       supabase
         .from("vehicle_unavailability")

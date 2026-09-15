@@ -359,6 +359,8 @@ export interface Database {
           insurer_rental_use_confirmed: boolean;
           insurance_verification_status: string;
           deleted_at: string | null;
+          deleted_by: string | null;
+          deletion_reason: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -389,6 +391,8 @@ export interface Database {
           insurer_rental_use_confirmed?: boolean;
           insurance_verification_status?: string;
           deleted_at?: string | null;
+          deleted_by?: string | null;
+          deletion_reason?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -419,6 +423,8 @@ export interface Database {
           insurer_rental_use_confirmed?: boolean;
           insurance_verification_status?: string;
           deleted_at?: string | null;
+          deleted_by?: string | null;
+          deletion_reason?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1828,6 +1834,14 @@ export interface Database {
       set_account_suspended: {
         Args: { p_user_id: string; p_suspended: boolean; p_reason?: string | null };
         Returns: undefined;
+      };
+      admin_remove_car: {
+        Args: { p_car_id: string; p_reason_code: string; p_note: string };
+        Returns: Json;
+      };
+      admin_restore_car: {
+        Args: { p_car_id: string };
+        Returns: Json;
       };
       set_brand_discontinued: {
         Args: { p_brand_id: string; p_discontinued: boolean };

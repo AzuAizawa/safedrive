@@ -985,7 +985,7 @@ export default function AdminUsersPage() {
 
       toast.success("Password reset saved", {
         description:
-          "Share the temporary password with the user through your secure support process.",
+          "Share the temporary password with the user through your secure support process. They were also told in the app and by email that their password was reset.",
       });
       setShowPasswordResetInput(false);
       setResetPasswordValue("");
@@ -1032,7 +1032,7 @@ export default function AdminUsersPage() {
       toast.success("Authenticator reset", {
         description:
           (payload.cleared ?? 0) > 0
-            ? "The user will be prompted to scan a new QR code on their next sign-in."
+            ? "The user will be prompted to scan a new QR code on their next sign-in, and was told in the app and by email."
             : "This user had no authenticator enrolled.",
       });
       setShowAuthenticatorResetConfirm(false);

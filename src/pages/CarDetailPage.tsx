@@ -213,9 +213,12 @@ export default function CarDetailPage() {
       .eq("id", id)
       .single();
 
+    // A deleted or removed car keeps its row only to explain past bookings
+    // (CHAPTERS 86 and 95); to anyone opening its page it is simply gone.
     if (
       !error &&
       data &&
+      !(data as unknown as { deleted_at?: string | null }).deleted_at &&
       !(data as unknown as { profiles?: { deleted_at?: string | null } }).profiles
         ?.deleted_at
     ) {

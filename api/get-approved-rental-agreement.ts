@@ -71,11 +71,12 @@ export default async function handler(req: Request) {
 
     const { data: car, error: carError } = await supabase
       .from("cars")
-      .select("id, owner_id, status")
+      .select("id, owner_id, status, deleted_at")
       .eq("id", carId)
       .maybeSingle();
     if (carError) throw carError;
-    if (!car) return jsonResponse({ error: "Car not found" }, 404);
+    // A deleted or removed car keeps its row only for past bookings (CHAPTERS 86, 95).
+    if (!car || car.deleted_at) return jsonResponse({ error: "Car not found" }, 404);
     if (!["approved", "active"].includes(car.status ?? "")) {
       return jsonResponse({ error: "This car is not currently available for booking" }, 409);
     }

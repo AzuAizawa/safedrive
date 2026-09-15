@@ -1019,6 +1019,8 @@ export default async function handler(req: Request) {
             .update({ status: "inactive" })
             .eq("owner_id", bookingRecord.owner_id)
             .in("status", ["approved", "active"])
+            // A removed car is not a live listing; pausing it would count it.
+            .is("deleted_at", null)
             .select("id");
           const pausedCount = pausedCars?.length ?? 0;
           if (pausedCount > 0) {

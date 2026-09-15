@@ -29,7 +29,7 @@ export default function AdminDashboard() {
       setLoadError(null);
       const [profiles, vehicles, support, guests, payouts, refunds, retention, reconciliation, activity] = await Promise.all([
         supabase.from("profiles").select("id, updated_at").eq("verified_status", "pending").order("updated_at", { ascending: true }),
-        supabase.from("cars").select("id, created_at").eq("status", "pending").order("created_at", { ascending: true }),
+        supabase.from("cars").select("id, created_at").eq("status", "pending").is("deleted_at", null).order("created_at", { ascending: true }),
         loadSupportTicketsNeedingAdminReply().catch((error: unknown) => {
           console.error("Failed to load support reply queue:", error);
           return [];

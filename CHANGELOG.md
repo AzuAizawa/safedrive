@@ -3,6 +3,64 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-15 - A removed car tells its lister why, and can be restored
+
+**Reported:** an admin deleted a lister's car and the lister was never told why.
+The admin page removed the row outright: a car with any booking on record failed
+with a foreign-key error, and a car without bookings lost its photos and
+documents for good. Every other admin decision (approve, reject, revoke,
+suspend, sign-in block) already carries a reason and a notification.
+
+- **Remove, not delete.** Admin Vehicle Approval now asks for a reason (Fake or
+  invalid documents, Policy violation, The owner asked for it, Other) and a note
+  of at least 10 characters. `public.admin_remove_car` archives the car
+  (`cars.deleted_at`, `deleted_by`, `deletion_reason`), notifies the lister with
+  the reason and writes the audit row in one transaction; the lister also gets
+  an email. CHAPTER 86's guard still refuses a car with a booking not finished
+  or a payout not received.
+- **Restore.** A new **Removed** tab lists cars removed by an admin or by their
+  lister. `public.admin_restore_car` brings one back - a car that was live
+  returns to review, a car whose owner's account is closed stays removed - and
+  tells the lister. This is the "only SafeDrive support can bring the car back"
+  the lister's delete dialog already promised.
+- **Guard.** A lister can no longer restore a removed car, write a removal
+  reason, or put someone else's name on a delete. The row-delete policies on
+  `cars` are dropped: nothing in the app removes a car row any more.
+- **Gaps closed from CHAPTER 86.** A deleted or removed car's page now says
+  "Car not found", and `api/create-booking.ts` refuses it - before, a car page
+  left open could still book an archived car that was still "approved".
+- **A removed car is off the platform everywhere.** A double-check of every
+  place that reads `cars` found older code that still counted a deleted or
+  removed car:
+  - the live-listing slot limit (`trg_enforce_live_car_limit`,
+    `deactivate_cars_over_slot_limit`) kept its slot taken, and an expiring
+    plan could pause a live car to make room for it;
+  - the daily document scan (`flag_vehicles_needing_renewal`) asked the lister
+    to renew its documents;
+  - `/car-renewals` listed it and `submit_vehicle_document_update` accepted
+    files for it that no review queue showed;
+  - the landing page's featured cars, the lister's availability calendar, the
+    admin attention badge and the dashboard's pending count still showed it;
+  - the late-cancellation auto-pause touched it, and the rental-agreement API
+    still served it.
+  All now skip it. The landing page also hides cars of closed or suspended
+  accounts, as Browse already did. Re-adding the plate of your own archived car
+  now says to ask support for a restore.
+- **Sign-in resets are announced.** A super admin resetting a user's password
+  or authenticator now notifies that user in the app and by email (never with
+  the temporary password).
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 95),
+`scripts/vehicle-removal.test.mjs`, `src/pages/admin/AdminVehicleApprovalPage.tsx`,
+`api/send-vehicle-decision-email.ts`, `api/create-booking.ts`,
+`src/pages/CarDetailPage.tsx`, `api/admin-reset-password.ts`,
+`api/admin-reset-authenticator.ts`, `src/pages/admin/AdminUsersPage.tsx`,
+`src/pages/admin/AdminAuditTrailPage.tsx`, `src/types/database.ts`,
+`project_docs/RBAC_DESIGN.md`, `package.json`.
+
+**Follow-up:** paste CHAPTER 95 before deploying this code - the admin page calls
+`admin_remove_car`, which does not exist until then.
+
 ## 2026-09-15 - The car page shows the cancellation terms, and the legal text matches the rules
 
 **Before a request is sent** (the Internet Transactions Act requires return,

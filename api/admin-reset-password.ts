@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { sendUserNotificationEmail } from "../server/email.js";
 
 export const config = {
   runtime: "edge",
@@ -135,7 +136,37 @@ export default async function handler(req: Request) {
       },
     });
 
-    return jsonResponse({ success: true });
+    // The account holder is told, in the app and by email, whenever someone
+    // else changes how they sign in - the standard account-security notice, and
+    // the only way a reset they never asked for gets noticed. The password is
+    // already changed at this point, so a failed notice is logged, not returned
+    // as a failed reset. The temporary password itself is never included.
+    let noticeEmail = "failed";
+    try {
+      const title = "Your password was reset by SafeDrive";
+      const message =
+        "A SafeDrive administrator set a temporary password for your account. Sign in with the temporary password SafeDrive support gave you, then change it. If you did not ask for this, open a support case right away.";
+      await supabase.from("notifications").insert({
+        user_id: payload.targetUserId,
+        title,
+        message,
+        type: "warning",
+        link: "/support",
+      });
+      const result = await sendUserNotificationEmail(supabase, {
+        userId: payload.targetUserId,
+        title,
+        message,
+        link: "/support",
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `admin-password-reset:${payload.targetUserId}:${Date.now()}`,
+      });
+      noticeEmail = result.state;
+    } catch (noticeError) {
+      console.error("Password reset notice failed", noticeError);
+    }
+
+    return jsonResponse({ success: true, noticeEmail });
   } catch (error) {
     return jsonResponse(
       {

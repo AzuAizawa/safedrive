@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { sendUserNotificationEmail } from "../server/email.js";
 
 export const config = {
   runtime: "edge",
@@ -133,7 +134,39 @@ export default async function handler(req: Request) {
       },
     });
 
-    return jsonResponse({ success: true, cleared });
+    // Tell the account holder whenever someone else removes a sign-in factor,
+    // in the app and by email (same account-security notice as a password
+    // reset). Only when something was actually removed. The factors are already
+    // gone, so a failed notice is logged, not returned as a failed reset.
+    let noticeEmail: string | null = null;
+    if (cleared > 0) {
+      noticeEmail = "failed";
+      try {
+        const title = "Your two-step sign-in was reset by SafeDrive";
+        const message =
+          "A SafeDrive administrator removed the authenticator app from your account. You will be asked to set up a new one the next time you sign in. If you did not ask for this, open a support case right away.";
+        await supabase.from("notifications").insert({
+          user_id: payload.targetUserId,
+          title,
+          message,
+          type: "warning",
+          link: "/support",
+        });
+        const result = await sendUserNotificationEmail(supabase, {
+          userId: payload.targetUserId,
+          title,
+          message,
+          link: "/support",
+          baseOrigin: new URL(req.url).origin,
+          eventKey: `admin-mfa-reset:${payload.targetUserId}:${Date.now()}`,
+        });
+        noticeEmail = result.state;
+      } catch (noticeError) {
+        console.error("Authenticator reset notice failed", noticeError);
+      }
+    }
+
+    return jsonResponse({ success: true, cleared, noticeEmail });
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Unknown server error";

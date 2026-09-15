@@ -936,7 +936,7 @@ export default function MyVehiclesPage() {
     setPlateCheck({ status: "checking", message: "Checking plate number..." });
     const { data, error } = await supabase
       .from("cars")
-      .select("id")
+      .select("id, owner_id, deleted_at")
       .eq("plate_number", normalized)
       .maybeSingle();
 
@@ -945,11 +945,17 @@ export default function MyVehiclesPage() {
       return;
     }
 
+    // A plate stays with its car after a delete or a removal (the row explains
+    // past bookings), so re-adding your own archived car is a restore, not a
+    // new listing - say so instead of a bare "taken".
+    const ownArchived = Boolean(data?.deleted_at) && data?.owner_id === user?.id;
     setPlateCheck(
       data
         ? {
             status: "taken",
-            message: "This plate number is already registered in SafeDrive.",
+            message: ownArchived
+              ? "This plate belongs to a car you deleted or that SafeDrive removed. Open a support case to have it restored instead of adding it again."
+              : "This plate number is already registered in SafeDrive.",
           }
         : { status: "available", message: "Plate number is available." },
     );
