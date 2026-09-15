@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import { format } from "date-fns";
 import {
   AlertTriangle,
@@ -87,6 +88,10 @@ type BookingArrivalEvidence = {
 
 export default function AdminSupportTicketsPage() {
   const { user } = useAuth();
+  // `?ticket=<id>` opens one case directly - the Refund Review dialog links
+  // each case on a booking here so its check-in evidence and chat are a click away.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkTicketId = searchParams.get("ticket");
   const [tickets, setTickets] = useState<AdminTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "open" | "closed">("all");
@@ -410,6 +415,33 @@ export default function AdminSupportTicketsPage() {
       void fetchBookingEvidence(ticket.booking_id);
     }
   };
+
+  const openTicketRef = useRef(handleOpenTicket);
+  openTicketRef.current = handleOpenTicket;
+
+  useEffect(() => {
+    if (!deepLinkTicketId || loading) return;
+    const target = tickets.find((ticket) => ticket.id === deepLinkTicketId);
+    if (target) {
+      // Show the list the case belongs to, so it is not hidden by the filters.
+      setFilter("all");
+      setTagFilter("all");
+      setKindFilter(isConversationTicket(target) ? "conversation" : "support");
+      openTicketRef.current(target);
+    } else {
+      toast.error("Support case not found", {
+        description: "It may have been removed, or your account cannot view it.",
+      });
+    }
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("ticket");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [deepLinkTicketId, loading, tickets, setSearchParams]);
 
   const getMapUrl = (latitude: number, longitude: number) =>
     `https://www.google.com/maps?q=${latitude},${longitude}`;

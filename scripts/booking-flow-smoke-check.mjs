@@ -662,6 +662,10 @@ const checks = [
       "Wait for provider confirmation",
       "manualRefundStateChanged",
       "This refund changed state before it could be marked released",
+      "decideRefund",
+      "getRefundCapacity",
+      "classifyManualRefund",
+      "refund-decision:",
     ],
     absentMarkers: [
       'normalized === "paymongo"',
@@ -723,6 +727,8 @@ const checks = [
       "Renter check-in",
       "Lister check-in",
       "getMapUrl",
+      "useSearchParams",
+      'searchParams.get("ticket")',
     ],
     absentMarkers: [
       "supabase as any",
@@ -740,11 +746,17 @@ const checks = [
       "GCash/Maya reference",
       "Refund retry skipped",
       "getRefundRetryToastCopy",
+      "decideRefund",
+      "MANUAL_REFUND_KINDS",
+      "/admin/support?ticket=",
+      "Deny Refund",
+      "Release a different amount",
     ],
     absentMarkers: [
       "supabase as any",
       "no-explicit-any",
       '<option value="PayMongo">PayMongo</option>',
+      "PayMongo could not finish the refund automatically",
     ],
   },
   {

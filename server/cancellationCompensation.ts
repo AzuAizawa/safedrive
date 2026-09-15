@@ -72,7 +72,7 @@ export type CompensationResult =
   | { state: "completed"; amount: number; paymentId: string; transactionId: string }
   | { state: "pending"; amount: number; paymentId: string; reason: string }
   | { state: "already_released"; reason: string }
-  | { state: "skipped"; reason: string };
+  | { state: "skipped"; reason: string; waitingOnRefunds?: boolean };
 
 type BookingForCompensation = {
   id: string;
@@ -129,6 +129,29 @@ export async function releaseCancellationCompensation(
     return {
       state: "already_released",
       reason: "The lister's compensation for this booking was already paid.",
+    };
+  }
+
+  // Another refund on this booking is still owed - pending, or failed and
+  // waiting for a retry (for example a payment that arrived after the
+  // cancellation and could not be applied). Its money is in the ledger but its
+  // refund is not, so reading the ledger now would pay it to the lister.
+  // Releasing that refund in Financial Reviews runs this again. An unpaid
+  // lister is recoverable, an overpaid one is not.
+  const { data: openRefunds, error: openRefundsError } = await supabase
+    .from("payments")
+    .select("id")
+    .eq("booking_id", booking.id)
+    .eq("payment_type", "refund")
+    .in("status", ["pending", "failed"])
+    .limit(1);
+  if (openRefundsError) throw openRefundsError;
+  if (openRefunds?.length) {
+    return {
+      state: "skipped",
+      waitingOnRefunds: true,
+      reason:
+        "Another refund on this booking is still open. The lister's compensation is released when the last refund is settled.",
     };
   }
 
@@ -239,8 +262,8 @@ export async function releaseCancellationCompensation(
   if (!demo) {
     await supabase.from("notifications").insert({
       user_id: booking.owner_id,
-      title: "Short-notice compensation owed to you",
-      message: `The renter cancelled ${vehicle} close to pickup. ${peso(amount)} is owed to you as short-notice compensation, with no SafeDrive commission, and SafeDrive support will send it to you.`,
+      title: "Cancellation compensation owed to you",
+      message: `The booking for ${vehicle} was cancelled and its refund was settled. ${peso(amount)} is owed to you as compensation, with no SafeDrive commission, and SafeDrive support will send it to you.`,
       type: "info",
       link: "/lister-bookings",
     });
@@ -288,8 +311,8 @@ export async function releaseCancellationCompensation(
 
   await supabase.from("notifications").insert({
     user_id: booking.owner_id,
-    title: "Short-notice compensation paid",
-    message: `The renter cancelled ${vehicle} close to pickup. Your short-notice compensation of ${peso(amount)} was recorded, with no SafeDrive commission because the trip never took place. This build runs in demo payout mode, so no real transfer was sent.`,
+    title: "Cancellation compensation paid",
+    message: `The booking for ${vehicle} was cancelled and its refund was settled. Your compensation of ${peso(amount)} was recorded, with no SafeDrive commission because the trip never took place. This build runs in demo payout mode, so no real transfer was sent.`,
     type: "success",
     link: "/lister-bookings",
   });

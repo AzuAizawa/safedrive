@@ -475,18 +475,29 @@ export const sendCompensationReceiptEmail = async (
   const destination = formatPayoutDestination(recipient.profile, input.payoutMethod);
   const demo = Boolean(input.transactionId?.startsWith("sandbox_"));
 
+  // The ledger splits what is not refunded the way it was collected, so the
+  // renter's processing-fee part stays with SafeDrive. Shown, so the rows add up.
+  const processingFeeKept =
+    Math.round((input.capturedAmount - input.refundedAmount - input.amount) * 100) / 100;
+
   const rows: Array<[string, string]> = [
     ["Vehicle", vehicle],
     ["Renter paid", peso(input.capturedAmount)],
     ["Refunded to renter", `-${peso(input.refundedAmount)}`],
+    ...(processingFeeKept > 0.005
+      ? ([["Payment processing fee (kept by SafeDrive)", `-${peso(processingFeeKept)}`]] as Array<[string, string]>)
+      : []),
     ["SafeDrive commission", peso(0)],
     ["Compensation paid to you", peso(input.amount)],
     [destination ? "Sent to" : "Method", destination || input.payoutMethod],
     ["Reference", reference],
   ];
 
+  // Not only a late renter cancellation lands here: a no-show, a pickup nobody
+  // checked in for, a missed balance deadline and a claim SafeDrive reviewed
+  // and did not uphold all settle the same way.
   const intro =
-    `The renter cancelled ${vehicle} shortly before pickup. Under SafeDrive's cancellation policy, the part of their payment that was not refunded is paid to you as short-notice compensation.` +
+    `The booking for ${vehicle} was cancelled and SafeDrive settled the renter's refund. The part of the renter's payment that was not refunded is paid to you as compensation.` +
     " SafeDrive took no commission, because the trip never took place." +
     (demo
       ? " This build runs in demo payout mode, so no real transfer was sent - this email is the record of the payout."

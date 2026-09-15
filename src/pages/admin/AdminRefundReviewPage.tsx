@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Link } from "react-router";
 import { format } from "date-fns";
 import {
   CheckCircle2,
+  ExternalLink,
   Loader2,
   RefreshCw,
   RotateCcw,
@@ -11,6 +13,15 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import {
+  MANUAL_REFUND_KINDS,
+  REFUND_DECISION_REASON_MIN,
+  classifyManualRefund,
+  decideRefund,
+  getRefundCapacity,
+  roundPesos,
+  type ManualRefundKind,
+} from "@/lib/refundDecision";
 import { Button } from "@/components/ui/button";
 import AdminSectionTabs from "@/components/AdminSectionTabs";
 import BookingPagination from "@/components/BookingPagination";
@@ -33,6 +44,13 @@ type RefundPayment = {
     status: string;
     start_date: string;
     end_date: string;
+    base_price: number;
+    total_price: number;
+    pickup_time: string | null;
+    renter_arrived_at: string | null;
+    lister_arrived_at: string | null;
+    lister_handover_confirmed_at: string | null;
+    renter_handover_received_at: string | null;
     renter: { full_name: string | null; email: string };
     owner: { full_name: string | null; email: string };
     cars: {
@@ -41,6 +59,26 @@ type RefundPayment = {
     };
   };
 };
+
+// What the review dialog loads for the booking behind a refund.
+type ReviewEvidence = {
+  loading: boolean;
+  capacity: ReturnType<typeof getRefundCapacity> | null;
+  cancellation: {
+    cancelled_by_role: string;
+    reason: string | null;
+    cancelled_at: string;
+  } | null;
+  cases: Array<{
+    id: string;
+    subject: string;
+    tag: string | null;
+    status: string;
+    created_at: string;
+  }>;
+};
+
+type DecisionChoice = "recommended" | "other" | "deny";
 
 type RefundPageTab = "pending" | "released" | "statistics";
 type RefundRetryResult = {
@@ -55,6 +93,13 @@ type RefundSyncPayload = {
   error?: string;
   state?: "completed" | "failed" | "pending" | "already_completed" | "already_reconciled";
   providerStatus?: string;
+};
+
+const EMPTY_EVIDENCE: ReviewEvidence = {
+  loading: false,
+  capacity: null,
+  cancellation: null,
+  cases: [],
 };
 
 const getRefundRetryToastCopy = (result?: RefundRetryResult) => {
@@ -132,12 +177,32 @@ const getVehicleLabel = (refund: RefundPayment) =>
 const isNoRefundDue = (refund: RefundPayment) =>
   Math.abs(Number(refund.amount || 0)) < 0.005;
 
+// Only a policy/claim review row can be decided; a failed provider refund is
+// simply owed. Same rule as api/mark-manual-refund.ts.
+const getReviewKind = (refund: RefundPayment): ManualRefundKind =>
+  refund.payment_method === "manual_review"
+    ? classifyManualRefund(refund.notes)
+    : "automatic_refund_failed";
+
+const formatStamp = (value: string | null | undefined) => {
+  if (!value) return "Not recorded";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Not recorded" : format(parsed, "MMM d, yyyy h:mm a");
+};
+
+const formatPickup = (booking: RefundPayment["bookings"]) => {
+  const time = booking.pickup_time?.slice(0, 5);
+  const parsed = new Date(`${booking.start_date}T${time || "00:00"}:00`);
+  if (Number.isNaN(parsed.getTime())) return booking.start_date;
+  return time ? format(parsed, "MMM d, yyyy h:mm a") : format(parsed, "MMM d, yyyy");
+};
+
 const getRefundStatusCopy = (refund: RefundPayment) => {
   if (refund.status === "completed" && refund.payment_method === "No refund due") {
     return {
       label: "Settled",
       detail:
-        "No refund was due - the cancellation fee covered what the renter paid. The lister's compensation was released with this decision.",
+        "No refund was sent - either the cancellation fee covered what the renter paid, or a super admin decided no refund was due. Any lister compensation was released with this decision.",
       tone: "bg-green-500/10 text-green-700 dark:text-green-300",
     };
   }
@@ -171,11 +236,13 @@ const getRefundStatusCopy = (refund: RefundPayment) => {
     };
   }
 
+  // What kind of case this is - a claim to judge, a policy fee, or money that
+  // is simply owed - instead of one line that blamed PayMongo for all of them.
   if (refund.payment_method === "manual_review") {
+    const kind = MANUAL_REFUND_KINDS[classifyManualRefund(refund.notes)];
     return {
-      label: "Manual review needed",
-      detail:
-        "PayMongo could not finish the refund automatically. Admin should send the money manually using the fallback details in the linked support case.",
+      label: kind.label,
+      detail: kind.guidance,
       tone: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
     };
   }
@@ -207,10 +274,13 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
     note: "",
   });
   const [manualLoading, setManualLoading] = useState(false);
-  // What the lister will receive in the same click, shown before it is made.
-  // An estimate from the booking's payments - the release itself reads the
-  // exact figure from the ledger.
-  const [compensationEstimate, setCompensationEstimate] = useState<number | null>(null);
+  const [evidence, setEvidence] = useState<ReviewEvidence>(EMPTY_EVIDENCE);
+  const [decisionChoice, setDecisionChoice] = useState<DecisionChoice>("recommended");
+  const [otherAmount, setOtherAmount] = useState("");
+  const [decisionReason, setDecisionReason] = useState("");
+  // The refund whose evidence is loading, so a slow load for one refund can
+  // never fill in the dialog of another opened after it.
+  const evidenceForRef = useRef<string | null>(null);
 
   const fetchRefunds = async () => {
     setLoading(true);
@@ -233,6 +303,13 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
             status,
             start_date,
             end_date,
+            base_price,
+            total_price,
+            pickup_time,
+            renter_arrived_at,
+            lister_arrived_at,
+            lister_handover_confirmed_at,
+            renter_handover_received_at,
             renter:profiles!bookings_renter_id_fkey(full_name, email),
             owner:profiles!bookings_owner_id_fkey(full_name, email),
             cars(plate_number, car_models(name, car_brands(name)))
@@ -372,38 +449,138 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
       referenceNumber: "",
       note: "",
     });
-    setCompensationEstimate(null);
-    if (refund.bookings.status !== "cancelled") return;
+    setDecisionChoice("recommended");
+    setOtherAmount("");
+    setDecisionReason("");
+    setEvidence({ ...EMPTY_EVIDENCE, loading: true });
+    evidenceForRef.current = refund.id;
 
-    void supabase
-      .from("payments")
-      .select("id, amount, payment_type, status")
-      .eq("booking_id", refund.booking_id)
-      .then(({ data }) => {
-        const rows = (data ?? []) as Array<{
-          id: string;
-          amount: number;
-          payment_type: string;
-          status: string;
-        }>;
-        const captured = rows
-          .filter(
-            (row) =>
-              ["downpayment", "balance"].includes(row.payment_type) &&
-              row.status === "completed",
-          )
-          .reduce((sum, row) => sum + Number(row.amount || 0), 0);
-        const refundedAlready = rows
-          .filter((row) => row.payment_type === "refund" && row.status === "completed")
-          .reduce((sum, row) => sum + Math.abs(Number(row.amount || 0)), 0);
-        const remainder = captured - refundedAlready - Math.abs(Number(refund.amount || 0));
-        setCompensationEstimate(remainder > 0.005 ? Math.round(remainder * 100) / 100 : null);
+    // Everything an admin needs to judge the case, read in one go: what the
+    // booking collected and already refunded, who cancelled and when, and the
+    // support cases (chat, photos) behind it.
+    void Promise.all([
+      supabase
+        .from("payments")
+        .select("id, amount, payment_type, status")
+        .eq("booking_id", refund.booking_id),
+      supabase
+        .from("booking_cancellations")
+        .select("cancelled_by_role, reason, cancelled_at")
+        .eq("booking_id", refund.booking_id)
+        .maybeSingle(),
+      supabase
+        .from("support_tickets")
+        .select("id, subject, tag, status, created_at")
+        .eq("booking_id", refund.booking_id)
+        .order("created_at", { ascending: true }),
+    ]).then(([paymentsResult, cancellationResult, casesResult]) => {
+      if (evidenceForRef.current !== refund.id) return;
+      setEvidence({
+        loading: false,
+        capacity: paymentsResult.error
+          ? null
+          : getRefundCapacity(
+              (paymentsResult.data ?? []) as Array<{
+                id: string;
+                payment_type: string;
+                status: string;
+                amount: number;
+              }>,
+              refund.id,
+            ),
+        cancellation: (cancellationResult.data as ReviewEvidence["cancellation"]) ?? null,
+        cases: (casesResult.data ?? []) as ReviewEvidence["cases"],
       });
+    });
   };
 
+  const closeManualRefund = () => {
+    evidenceForRef.current = null;
+    setManualTarget(null);
+    setEvidence(EMPTY_EVIDENCE);
+  };
+
+  // The decision, worked out with the same rules the server applies.
+  const review = useMemo(() => {
+    if (!manualTarget) return null;
+    const kind = getReviewKind(manualTarget);
+    const copy = MANUAL_REFUND_KINDS[kind];
+    const recommended = roundPesos(Math.abs(Number(manualTarget.amount || 0)));
+    // Same rule as decideRefund: only a cancelled booking has somewhere for the
+    // difference to go (the lister's compensation).
+    const bookingCancelled = manualTarget.bookings.status === "cancelled";
+    const canDecide =
+      manualTarget.payment_method === "manual_review" && copy.adjustable && bookingCancelled;
+    const choice: DecisionChoice = canDecide ? decisionChoice : "recommended";
+    const requested =
+      choice === "recommended"
+        ? null
+        : choice === "deny"
+          ? 0
+          : otherAmount.trim() === ""
+            ? Number.NaN
+            : Number(otherAmount);
+    const result = evidence.capacity
+      ? decideRefund({
+          kind,
+          bookingStatus: manualTarget.bookings.status,
+          recommended,
+          requested,
+          available: evidence.capacity.available,
+          reservedByOtherRefunds: evidence.capacity.reservedByOtherRefunds,
+          reason: decisionReason,
+        })
+      : null;
+    const finalAmount =
+      result && result.ok
+        ? result.amount
+        : choice === "deny"
+          ? 0
+          : choice === "recommended"
+            ? recommended
+            : Number(otherAmount) || 0;
+    const finalIsZero = Math.round(finalAmount * 100) === 0;
+    const capacity = evidence.capacity;
+    const maxForDecision = capacity
+      ? roundPesos(Math.max(0, capacity.available - capacity.reservedByOtherRefunds))
+      : null;
+    // What this decision leaves unrefunded. The ledger reverses every refunded
+    // peso in the proportions it was collected (server/ledger.ts), so of what is
+    // left the lister gets the base-price part and the processing-fee part stays
+    // with SafeDrive - server/cancellationCompensation.ts pays it, no commission.
+    const leftover = capacity
+      ? roundPesos(Math.max(0, capacity.available - capacity.reservedByOtherRefunds - finalAmount))
+      : null;
+    const basePrice = Number(manualTarget.bookings.base_price);
+    const totalPrice = Number(manualTarget.bookings.total_price);
+    const listerRatio =
+      totalPrice > 0 && Number.isFinite(basePrice) ? Math.min(1, Math.max(0, basePrice / totalPrice)) : 1;
+    const listerShare =
+      bookingCancelled && leftover !== null ? roundPesos(leftover * listerRatio) : null;
+    return {
+      kind,
+      copy,
+      recommended,
+      bookingCancelled,
+      canDecide,
+      choice,
+      result,
+      finalAmount,
+      finalIsZero,
+      maxForDecision,
+      leftover: leftover !== null && leftover > 0.005 ? leftover : null,
+      listerShare: listerShare !== null && listerShare > 0.005 ? listerShare : null,
+      waitsOnOtherRefunds: Boolean(capacity && capacity.reservedByOtherRefunds > 0.005),
+    };
+  }, [manualTarget, decisionChoice, otherAmount, decisionReason, evidence.capacity]);
+
   const markManualRefundReleased = async () => {
-    if (!manualTarget || !session?.access_token) return;
-    if (!isNoRefundDue(manualTarget) && !manualDraft.referenceNumber.trim()) {
+    if (!manualTarget || !review || !session?.access_token) return;
+    if (review.result && !review.result.ok) {
+      toast.error("Check the decision", { description: review.result.error });
+      return;
+    }
+    if (!review.finalIsZero && !manualDraft.referenceNumber.trim()) {
       toast.error("Enter the refund reference number");
       return;
     }
@@ -421,40 +598,71 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
           refundMethod: manualDraft.refundMethod,
           referenceNumber: manualDraft.referenceNumber,
           note: manualDraft.note,
+          ...(review.choice === "recommended"
+            ? {}
+            : { amount: review.finalAmount, reason: decisionReason.trim() }),
         }),
       });
 
       const payload = (await res.json()) as {
         error?: string;
-        compensation?: { state: string; amount?: number; reason?: string };
+        decision?: "as_recommended" | "adjusted" | "denied";
+        compensation?: {
+          state: string;
+          amount?: number;
+          reason?: string;
+          waitingOnRefunds?: boolean;
+        };
       };
       if (!res.ok) {
         throw new Error(payload.error || "Failed to mark refund as released");
       }
 
+      const decisionSentence =
+        payload.decision === "denied"
+          ? "The refund was denied, and the renter and the lister were told why."
+          : payload.decision === "adjusted"
+            ? "The refund was changed from the recommended amount, and the renter and the lister were told why."
+            : null;
+
       const compensation = payload.compensation;
       if (compensation?.state === "completed") {
-        toast.success("Refund and lister compensation released", {
-          description: `The renter was refunded and the lister received ${formatCurrency(
-            compensation.amount ?? 0,
-          )} as short-notice compensation, with no commission.`,
-        });
+        toast.success(
+          payload.decision === "denied"
+            ? "Refund denied - lister compensation released"
+            : "Refund and lister compensation released",
+          {
+            description: [
+              decisionSentence,
+              `The lister received ${formatCurrency(compensation.amount ?? 0)} as short-notice compensation, with no commission.`,
+            ]
+              .filter(Boolean)
+              .join(" "),
+          },
+        );
       } else if (compensation?.state === "pending") {
-        toast.warning("Refund released - lister compensation still to send", {
-          description: `${formatCurrency(compensation.amount ?? 0)} is owed to the lister. ${
-            compensation.reason ?? ""
-          }`,
+        toast.warning("Decision recorded - lister compensation still to send", {
+          description: [
+            decisionSentence,
+            `${formatCurrency(compensation.amount ?? 0)} is owed to the lister. ${compensation.reason ?? ""}`,
+          ]
+            .filter(Boolean)
+            .join(" "),
         });
       } else if (compensation?.state === "failed") {
-        toast.warning("Refund released - lister compensation did not go through", {
+        toast.warning("Decision recorded - lister compensation did not go through", {
           description: `${compensation.reason ?? "Please try again."} Releasing this refund again retries only the lister's share.`,
         });
+      } else if (compensation?.state === "skipped" && compensation.waitingOnRefunds) {
+        toast.info("Decision recorded - lister compensation waits for the other refund", {
+          description: [decisionSentence, compensation.reason].filter(Boolean).join(" "),
+        });
       } else {
-        toast.success("Refund released", {
-          description: "The renter was notified and the audit trail was updated.",
+        toast.success(payload.decision === "denied" ? "Refund denied" : "Refund released", {
+          description: decisionSentence ?? "The renter was notified and the audit trail was updated.",
         });
       }
-      setManualTarget(null);
+      closeManualRefund();
       await fetchRefunds();
     } catch (error) {
       toast.error("Manual refund failed", {
@@ -604,12 +812,18 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                             ? "PayMongo is still processing this refund. Wait for provider confirmation before using manual fallback."
                             : isNoRefundDue(refund)
                               ? "The fee covers everything the renter paid - settle it to release the lister's compensation"
-                              : "Record a manual GCash or Maya refund release"
+                              : isManualPolicyRefund
+                                ? "Review the evidence, decide the amount and record the release"
+                                : "Record a manual GCash or Maya refund release"
                         }
                         onClick={() => openManualRefund(refund)}
                       >
                         <CheckCircle2 className="h-4 w-4" />
-                        {isNoRefundDue(refund) ? "Settle - No Refund Due" : "Mark Manual Released"}
+                        {isNoRefundDue(refund)
+                          ? "Settle - No Refund Due"
+                          : isManualPolicyRefund
+                            ? "Review & Decide"
+                            : "Mark Manual Released"}
                       </Button>
                     ) : null}
                   </div>
@@ -622,13 +836,39 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
     );
   };
 
+  const timeline =
+    manualTarget && review
+      ? ([
+          ["Pickup scheduled", formatPickup(manualTarget.bookings)],
+          ["Renter checked in", formatStamp(manualTarget.bookings.renter_arrived_at)],
+          ["Lister checked in", formatStamp(manualTarget.bookings.lister_arrived_at)],
+          ["Lister confirmed handover", formatStamp(manualTarget.bookings.lister_handover_confirmed_at)],
+          ["Renter confirmed receiving the car", formatStamp(manualTarget.bookings.renter_handover_received_at)],
+          [
+            "Cancelled",
+            evidence.cancellation
+              ? `${formatStamp(evidence.cancellation.cancelled_at)} - counted against ${
+                  evidence.cancellation.cancelled_by_role === "both"
+                    ? "both sides"
+                    : `the ${evidence.cancellation.cancelled_by_role}`
+                }${
+                  evidence.cancellation.reason ? ` (${evidence.cancellation.reason.replace(/_/g, " ")})` : ""
+                }`
+              : manualTarget.bookings.status === "cancelled"
+                ? "Cancelled (no cancellation record)"
+                : `Not cancelled (booking is ${manualTarget.bookings.status.replace(/_/g, " ")})`,
+          ],
+          ["Refund queued", formatStamp(manualTarget.created_at)],
+        ] as Array<[string, string]>)
+      : [];
+
   return (
     <div className="space-y-6 animate-fade-in">
       {!embedded ? (
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Refund Review</h1>
           <p className="mt-1 text-muted-foreground">
-            Track cancelled-booking refunds and finish manual releases when PayMongo cannot process them automatically.
+            Track cancelled-booking refunds, review the evidence behind a manual refund, and record the decision.
           </p>
         </div>
       ) : null}
@@ -686,27 +926,30 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
       ) : null}
 
       {manualTarget &&
+        review &&
         createPortal(
           <div
-            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:items-center"
             onClick={() => {
-              if (!manualLoading) setManualTarget(null);
+              if (!manualLoading) closeManualRefund();
             }}
           >
             <div
-              className="w-full max-w-2xl rounded-xl border border-border bg-card p-5 text-card-foreground shadow-2xl"
+              className="my-4 w-full max-w-2xl rounded-xl border border-border bg-card p-5 text-card-foreground shadow-2xl"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold">
-                  {isNoRefundDue(manualTarget)
-                    ? "Settle cancellation - no refund due"
-                    : "Mark manual refund as released"}
+                  {review.finalIsZero
+                    ? review.choice === "deny"
+                      ? "Deny this refund"
+                      : "Settle cancellation - no refund due"
+                    : "Review and release refund"}
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  {isNoRefundDue(manualTarget)
-                    ? "The cancellation fee covers everything the renter paid, so nothing is sent back and no reference is needed. Settling releases the lister's compensation."
-                    : "Use this after the admin sends the refund back through GCash or Maya outside SafeDrive, then record the method and reference here."}
+                  {review.finalIsZero
+                    ? "Nothing is sent back, so no reference is needed. Any compensation owed to the lister is released with this decision."
+                    : "Check what happened, decide the amount, send it through GCash or Maya outside SafeDrive, then record the method and reference here."}
                 </p>
               </div>
 
@@ -716,22 +959,18 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                   Renter: {manualTarget.bookings.renter.full_name || manualTarget.bookings.renter.email}
                 </p>
                 <p className="mt-1 text-muted-foreground">
-                  Refund amount:{" "}
+                  Lister: {manualTarget.bookings.owner.full_name || manualTarget.bookings.owner.email}
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  Recommended refund:{" "}
                   <span className="font-semibold text-foreground">
-                    {formatCurrency(manualTarget.amount)}
+                    {formatCurrency(review.recommended)}
                   </span>
                 </p>
-                {compensationEstimate !== null ? (
-                  <p className="mt-1 text-muted-foreground">
-                    Lister receives in the same click:{" "}
-                    <span className="font-semibold text-foreground">
-                      about {formatCurrency(compensationEstimate)}
-                    </span>{" "}
-                    <span className="text-xs">
-                      (short-notice compensation, no commission - exact figure read from the ledger on release)
-                    </span>
-                  </p>
-                ) : null}
+                <span className="mt-2 inline-flex rounded-full bg-amber-500/10 px-2 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                  {review.copy.label}
+                </span>
+                <p className="mt-1 text-xs text-muted-foreground">{review.copy.guidance}</p>
                 {manualTarget.notes ? (
                   <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
                     {manualTarget.notes}
@@ -739,41 +978,199 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                 ) : null}
               </div>
 
-              <div className="mt-4 grid gap-3">
-                {isNoRefundDue(manualTarget) ? null : (
-                <>
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">Refund return method</span>
-                  <select
-                    value={manualDraft.refundMethod}
-                    onChange={(event) =>
-                      setManualDraft((current) => ({
-                        ...current,
-                        refundMethod: event.target.value,
-                      }))
-                    }
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    <option value="GCash">GCash</option>
-                    <option value="Maya">Maya</option>
-                  </select>
-                </label>
+              <div className="mt-4 rounded-lg border border-border/70 p-4 text-sm">
+                <p className="font-semibold">What happened</p>
+                <dl className="mt-2 grid gap-x-4 gap-y-1.5 sm:grid-cols-[auto_1fr]">
+                  {timeline.map(([label, value]) => (
+                    <div key={label} className="contents">
+                      <dt className="text-xs text-muted-foreground">{label}</dt>
+                      <dd className="text-xs font-medium break-words">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="mt-3 border-t border-border/60 pt-3">
+                  <p className="text-xs font-medium">Cases for this booking (chat, photos, reports)</p>
+                  {evidence.loading ? (
+                    <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading...
+                    </p>
+                  ) : evidence.cases.length === 0 ? (
+                    <p className="mt-1 text-xs text-muted-foreground">No support case is linked to this booking.</p>
+                  ) : (
+                    <ul className="mt-1 space-y-1">
+                      {evidence.cases.map((supportCase) => (
+                        <li key={supportCase.id} className="flex flex-wrap items-center gap-x-2 text-xs">
+                          <Link
+                            to={`/admin/support?ticket=${supportCase.id}`}
+                            className="inline-flex items-center gap-1 font-medium text-primary underline underline-offset-2"
+                          >
+                            {supportCase.subject}
+                            <ExternalLink className="h-3 w-3" />
+                          </Link>
+                          <span className="text-muted-foreground">
+                            {supportCase.status.replace(/_/g, " ")} - opened {formatStamp(supportCase.created_at)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
 
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">Reference number</span>
-                  <input
-                    value={manualDraft.referenceNumber}
-                    onChange={(event) =>
-                      setManualDraft((current) => ({
-                        ...current,
-                        referenceNumber: event.target.value,
-                      }))
-                    }
-                    placeholder="GCash/Maya reference"
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  />
-                </label>
-                </>
+              <div className="mt-4 grid gap-3">
+                {review.canDecide ? (
+                  <fieldset className="space-y-2 rounded-lg border border-border/70 p-4 text-sm">
+                    <legend className="px-1 font-semibold">Decision</legend>
+                    {(
+                      [
+                        ["recommended", `Release as recommended (${formatCurrency(review.recommended)})`],
+                        ["other", "Release a different amount"],
+                        ["deny", "Deny - no refund (PHP 0)"],
+                      ] as Array<[DecisionChoice, string]>
+                    ).map(([value, label]) => (
+                      <label key={value} className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="refund-decision"
+                          value={value}
+                          checked={review.choice === value}
+                          onChange={() => setDecisionChoice(value)}
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                    {review.choice === "other" ? (
+                      <label className="block space-y-1">
+                        <span className="text-xs text-muted-foreground">
+                          Amount to refund
+                          {review.maxForDecision !== null
+                            ? ` (at most ${formatCurrency(review.maxForDecision)} - collected and not yet refunded${
+                                review.waitsOnOtherRefunds ? " or owed through another refund" : ""
+                              })`
+                            : ""}
+                        </span>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            min={0}
+                            max={review.maxForDecision ?? undefined}
+                            step="0.01"
+                            value={otherAmount}
+                            onChange={(event) => setOtherAmount(event.target.value)}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          />
+                          {review.maxForDecision !== null ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-10 shrink-0"
+                              onClick={() => setOtherAmount(String(review.maxForDecision))}
+                            >
+                              Full refund
+                            </Button>
+                          ) : null}
+                        </div>
+                      </label>
+                    ) : null}
+                    {review.choice !== "recommended" ? (
+                      <label className="block space-y-1">
+                        <span className="text-xs text-muted-foreground">
+                          Reason (sent to the renter and the lister) *
+                        </span>
+                        <textarea
+                          value={decisionReason}
+                          onChange={(event) => setDecisionReason(event.target.value)}
+                          rows={3}
+                          maxLength={500}
+                          placeholder="What the evidence shows - e.g. the lister checked in on time with a photo, the renter checked in 40 minutes late."
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        />
+                        <span className="text-[11px] text-muted-foreground">
+                          At least {REFUND_DECISION_REASON_MIN} characters ({decisionReason.trim().length} so far).
+                        </span>
+                      </label>
+                    ) : null}
+                    {review.result && !review.result.ok && review.choice !== "recommended" ? (
+                      <p className="text-xs text-red-600 dark:text-red-400">{review.result.error}</p>
+                    ) : null}
+                  </fieldset>
+                ) : manualTarget.payment_method === "manual_review" ? (
+                  <p className="rounded-lg border border-border/70 p-3 text-xs text-muted-foreground">
+                    {review.copy.adjustable && !review.bookingCancelled
+                      ? "Released as recommended - only a cancelled booking's refund can be changed, because on this booking nothing would receive the difference."
+                      : "Released as recommended - this is not a judgement call."}
+                  </p>
+                ) : null}
+
+                {review.result && !review.result.ok && review.choice === "recommended" ? (
+                  <p className="text-xs text-red-600 dark:text-red-400">{review.result.error}</p>
+                ) : null}
+
+                {review.bookingCancelled && review.leftover !== null ? (
+                  <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs text-muted-foreground">
+                    <p>
+                      Not refunded:{" "}
+                      <span className="font-semibold text-foreground">
+                        {formatCurrency(review.leftover)}
+                      </span>
+                    </p>
+                    {review.waitsOnOtherRefunds ? (
+                      <p className="mt-1">
+                        Another refund on this booking is still open, so the lister's compensation is released
+                        when the last refund is settled, not in this click.
+                      </p>
+                    ) : review.listerShare !== null ? (
+                      <p className="mt-1">
+                        Lister receives in the same click:{" "}
+                        <span className="font-semibold text-foreground">
+                          about {formatCurrency(review.listerShare)}
+                        </span>{" "}
+                        as compensation, no commission. The processing-fee part
+                        {review.leftover - review.listerShare > 0.005
+                          ? ` (about ${formatCurrency(roundPesos(review.leftover - review.listerShare))})`
+                          : ""}{" "}
+                        stays with SafeDrive. The exact figure is read from the ledger on release.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {review.finalIsZero ? null : (
+                  <>
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">Refund return method</span>
+                      <select
+                        value={manualDraft.refundMethod}
+                        onChange={(event) =>
+                          setManualDraft((current) => ({
+                            ...current,
+                            refundMethod: event.target.value,
+                          }))
+                        }
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value="GCash">GCash</option>
+                        <option value="Maya">Maya</option>
+                      </select>
+                    </label>
+
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">
+                        Reference number ({formatCurrency(review.finalAmount)} sent)
+                      </span>
+                      <input
+                        value={manualDraft.referenceNumber}
+                        onChange={(event) =>
+                          setManualDraft((current) => ({
+                            ...current,
+                            referenceNumber: event.target.value,
+                          }))
+                        }
+                        placeholder="GCash/Maya reference"
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      />
+                    </label>
+                  </>
                 )}
 
                 <label className="space-y-1 text-sm">
@@ -786,7 +1183,7 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                         note: event.target.value,
                       }))
                     }
-                    rows={3}
+                    rows={2}
                     placeholder="Optional note, such as who sent it or where the proof is stored"
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   />
@@ -797,7 +1194,7 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setManualTarget(null)}
+                  onClick={closeManualRefund}
                   disabled={manualLoading}
                 >
                   Cancel
@@ -805,7 +1202,11 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                 <Button
                   type="button"
                   onClick={() => void markManualRefundReleased()}
-                  disabled={manualLoading}
+                  disabled={
+                    manualLoading ||
+                    evidence.loading ||
+                    Boolean(review.result && !review.result.ok)
+                  }
                   className="gap-2"
                 >
                   {manualLoading ? (
@@ -813,7 +1214,11 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                   ) : (
                     <CheckCircle2 className="h-4 w-4" />
                   )}
-                  {isNoRefundDue(manualTarget) ? "Settle & Release Compensation" : "Mark Released"}
+                  {review.finalIsZero
+                    ? review.choice === "deny"
+                      ? "Deny Refund"
+                      : "Settle & Release Compensation"
+                    : "Mark Released"}
                 </Button>
               </div>
             </div>

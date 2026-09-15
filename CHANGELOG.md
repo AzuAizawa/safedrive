@@ -3,6 +3,62 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-15 - A manual refund review is a decision, made on the evidence
+
+Financial Reviews -> Renter refunds could only confirm the recommended amount.
+A disputed case - "no car at pickup", a renter no-show, nobody checking in -
+had no way to be decided otherwise, and the check-in times and photos lived on
+a different page with no link to it.
+
+- **Evidence in the review.** The dialog shows what happened: the scheduled
+  pickup, both check-ins, the handover confirmations, the cancellation (when,
+  counted against whom, why) and when the refund was queued, plus links to every
+  support case on the booking. `/admin/support?ticket=<id>` opens that case
+  directly, with its check-in photos, locations and chat.
+- **Three decisions.** Release as recommended (unchanged, no reason needed),
+  release a different amount, or deny (PHP 0). A change needs a reason of at
+  least 10 characters, and never more than the booking collected and has not
+  already refunded. The renter and the lister are both notified and emailed the
+  decision and the reason; the audit trail records the recommended amount, the
+  decision and the reason.
+- **Not everything is a judgement call.** A payment that could not be applied,
+  an automatic refund that failed, and a cancellation because the vehicle's
+  documents were not cleared are released only as recommended - on the page
+  and in `api/mark-manual-refund.ts`.
+- **Money follows the decision.** The ledger records the final amount, and the
+  lister's compensation on a cancelled booking is read from what is left, so a
+  lower refund means more for the lister (still no commission).
+- **Status text per case.** A pending review now says what kind of case it is
+  instead of blaming PayMongo for every one.
+- **The amount is capped, and nothing is left without a destination.**
+  - A changed amount can go up to a full refund - what the booking collected,
+    less refunds already made and refunds still owed on it - never more
+    ("Full refund" fills in that maximum).
+  - Only a cancelled booking's refund can be changed: there, what is not
+    refunded goes to the lister as compensation (the base-price part; the
+    processing-fee part stays with SafeDrive, as the ledger splits it). On any
+    other booking the difference would reach no one, so it is released as
+    recommended.
+  - Lister compensation now waits while another refund on the booking is still
+    pending or failed (for example a payment that arrived after the cancellation),
+    so money owed back to the renter is never read as the lister's. Releasing
+    the last refund releases the compensation.
+- **Emails after the decision.**
+  - The renter's refund receipt carries the decided amount.
+  - A PHP 0 settlement, which has no receipt, is now emailed as well.
+  - The lister's compensation receipt no longer says "the renter cancelled
+    shortly before pickup" - untrue for a no-show, a denied no-car claim or a
+    missed deadline - and shows the processing-fee part SafeDrive keeps, so the
+    rows add up.
+  - The lister's in-app notices use the same wording.
+
+Files also: `server/cancellationCompensation.ts`, `server/email.ts`.
+
+Files: `server/refundDecision.ts`, `src/lib/refundDecision.ts` (the same rules,
+kept identical by `scripts/refund-decision.test.mjs`),
+`api/mark-manual-refund.ts`, `src/pages/admin/AdminRefundReviewPage.tsx`,
+`src/pages/admin/AdminSupportTicketsPage.tsx`, `package.json`. No database change.
+
 ## 2026-09-15 - A payment that could not be applied can be refunded from Financial Reviews
 
 Two rare cases take the renter's money without applying it: a payment that
