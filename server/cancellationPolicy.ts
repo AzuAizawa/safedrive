@@ -171,6 +171,30 @@ export const getCancellationOutcome = (input: {
     };
   }
 
+  const charge = getFeeDayCharge(booking, outcome, capturedTotal);
+  return {
+    ...common,
+    outcome,
+    freeReason: null,
+    freeUntilMs: null,
+    feeDays: charge.feeDays,
+    feeBeforeCap: charge.feeBeforeCap,
+    fee: charge.fee,
+    renterRefund: toPesos(capturedTotal - charge.fee),
+    listerCompensation: charge.listerCompensation,
+    lateRenterPercent: null,
+  };
+};
+
+// The fee counted in rental days, for a booking on the fee-day terms. The one
+// calculation both the refund (getCancellationOutcome above) and the car page's
+// quote (getCancellationQuote below) use, so what a renter is shown before
+// booking is what they are charged.
+export const getFeeDayCharge = (
+  booking: CancellationPolicyBooking,
+  outcome: "late_cancel" | "no_show",
+  capturedTotal: number,
+) => {
   const totalDays = Number(booking.total_days);
   const totalPrice = Number(booking.total_price);
   const basePrice = Number(booking.base_price);
@@ -190,21 +214,68 @@ export const getCancellationOutcome = (input: {
   // Turo's "average cost of one day": the whole booking total over its days.
   const dailyCost = totalDays > 0 && totalPrice > 0 ? totalPrice / totalDays : 0;
   const feeBeforeCap = toPesos(dailyCost * feeDays);
-  const fee = Math.min(capturedTotal, feeBeforeCap);
+  const fee = Math.min(Math.max(0, toPesos(Number(capturedTotal) || 0)), feeBeforeCap);
   const listerShare =
     totalPrice > 0 && basePrice >= 0 && basePrice <= totalPrice ? basePrice / totalPrice : 1;
 
+  return { feeDays, feeBeforeCap, fee, listerCompensation: toPesos(fee * listerShare) };
+};
+
+export type CancellationTermsSettings = {
+  refundFullHours: number;
+  shortNoticeFreeHours: number;
+  lateCancelFeeDays: number;
+  shortTripLateCancelFeeDays: number;
+  noShowFeeDays: number;
+  shortTripNoShowFeeDays: number;
+};
+
+// What a booking requested right now would be charged, for the car page before
+// the request is sent. The settings are the live values api/create-booking.ts
+// snapshots onto the booking. Nothing has been paid yet, so the fees are the
+// full amounts; the refund caps them at what is actually paid.
+export const getCancellationQuote = (input: {
+  totalDays: number;
+  totalPrice: number;
+  basePrice: number;
+  pickupMs: number | null;
+  nowMs: number;
+  settings: CancellationTermsSettings;
+}) => {
+  const { settings } = input;
+  const booking: CancellationPolicyBooking = {
+    start_date: "",
+    pickup_time: null,
+    total_days: input.totalDays,
+    total_price: input.totalPrice,
+    base_price: input.basePrice,
+    refund_full_hours_snapshot: settings.refundFullHours,
+    short_notice_free_hours_snapshot: settings.shortNoticeFreeHours,
+    late_cancel_fee_days_snapshot: settings.lateCancelFeeDays,
+    short_trip_late_cancel_fee_days_snapshot: settings.shortTripLateCancelFeeDays,
+    no_show_fee_days_snapshot: settings.noShowFeeDays,
+    short_trip_no_show_fee_days_snapshot: settings.shortTripNoShowFeeDays,
+  };
+  const late = getFeeDayCharge(booking, "late_cancel", input.totalPrice);
+  const noShow = getFeeDayCharge(booking, "no_show", input.totalPrice);
+  const fullHours = Math.round(
+    storedNumber(settings.refundFullHours, 0, 720) ?? DEFAULT_REFUND_FULL_HOURS,
+  );
+  const graceHours =
+    storedNumber(settings.shortNoticeFreeHours, 0, 24) ?? DEFAULT_SHORT_NOTICE_FREE_HOURS;
+  const freeUntilMs = input.pickupMs === null ? null : input.pickupMs - fullHours * HOUR_MS;
   return {
-    ...common,
-    outcome,
-    freeReason: null,
-    freeUntilMs: null,
-    feeDays,
-    feeBeforeCap,
-    fee,
-    renterRefund: toPesos(capturedTotal - fee),
-    listerCompensation: toPesos(fee * listerShare),
-    lateRenterPercent: null,
+    fullHours,
+    graceHours,
+    // null until a pickup time is chosen.
+    freeUntilMs,
+    // false when the pickup is already closer than the free-cancellation window,
+    // so only the free hours after paying apply.
+    freeWindowOpenNow: freeUntilMs !== null && input.nowMs < freeUntilMs,
+    lateFeeDays: late.feeDays,
+    lateFee: late.feeBeforeCap,
+    noShowFeeDays: noShow.feeDays,
+    noShowFee: noShow.feeBeforeCap,
   };
 };
 

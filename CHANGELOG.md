@@ -3,6 +3,45 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-15 - The car page shows the cancellation terms, and the legal text matches the rules
+
+**Before a request is sent** (the Internet Transactions Act requires return,
+refund and cancellation terms to be disclosed before the transaction), the car
+page's booking panel now carries a **Cancellation policy** box after the pickup
+and drop-off times (the deadline counts back from the time chosen there) and
+before the rental agreement and the request button, worked out for the trip
+being chosen:
+
+- free cancellation until the exact time (pickup minus the full-refund window),
+  or - for a pickup already closer than that - the free hours after paying;
+  before a pickup time is picked it says "24 hours before your pickup time";
+- the late-cancellation fee and the no-show fee in pesos, with the rental days
+  they stand for ("₱500 fee (half a day of rental)"), or "no fee" when an admin
+  has set 0;
+- that fees never exceed what was paid, that a lister cancellation or a car not
+  handed over is refunded in full, and a link to the Terms that returns to the
+  booking.
+
+The amounts come from `getCancellationQuote`, which uses the same
+`getFeeDayCharge` that settles a real cancellation, over the live settings the
+booking will be snapshotted with - pinned against `getCancellationOutcome` in
+`scripts/cancellation-policy.test.mjs`. While the settings load it says so; if
+they cannot be read it gives no amounts rather than defaults dressed as real
+ones. The agreement dialog gains a section 6 on cancellations and states that
+continuing accepts the cancellation policy; its payment section now describes
+the balance deadline.
+
+**CHAPTER 94** republishes the Terms (version 4) and the Platform Agreement
+(version 3). Checking them against the code found two sentences that were
+simply wrong - trips "cannot be made more than 30 days in advance" (the limit is
+60 days; 30 is the longest trip) and a "full automatic refund" for no car at
+pickup (it has always been released by admin review) - and rules they never
+stated: the minimum notice, the balance deadline and what an unpaid balance
+does, a lister cancelling at the pickup point, the document-hold cancellation,
+and the automatic settling of a pickup only one side checked in for or that was
+never handed over. Replaced only where the clause still reads as published; a
+second run changes nothing. The Sign Up summary and Help Center say the same.
+
 ## 2026-09-15 - A trip cannot start sooner than the minimum notice
 
 Reported: on Sept 14 at 11:30 PM a renter could request a Sept 15, 12:00 AM

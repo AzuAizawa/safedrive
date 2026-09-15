@@ -14264,4 +14264,115 @@ commit;
 -- select min_booking_notice_hours from public.platform_settings where id = 'default';
 --   (expect 12)
 
+-- ============================================================================
+-- CHAPTER 94 - The Terms and Platform Agreement say what the booking rules do
+-- Apply this chapter only, staging first. Republishes two legal documents as
+-- new versions. No schema, setting or booking change.
+-- ============================================================================
+begin;
+
+-- A check of the published text against the code found sentences that were
+-- wrong, not just out of date:
+--   * "Bookings cannot be made more than 30 days in advance" - a trip can be
+--     requested up to 60 days ahead; 30 days is the longest single trip.
+--   * "No Car at Pickup ... a full automatic refund" - that refund has always
+--     gone to super-admin review before it is released.
+-- and rules the documents never mentioned:
+--   * the minimum notice before pickup (CHAPTER 93);
+--   * the balance deadline, and what an unpaid balance at it does;
+--   * a lister may cancel at the pickup point until the handover;
+--   * a booking still on a vehicle-document hold at pickup is cancelled and
+--     refunded;
+--   * a pickup where only one side checks in, or the car is never handed over,
+--     is settled automatically after both are warned.
+--
+-- Each clause is replaced only where it still reads exactly as published
+-- (live on this date: Terms version 3, Platform Agreement version 2), as a new
+-- version through the same superseded/published pair used before, so earlier
+-- versions stay in the history. A clause an admin has already rewritten is
+-- left alone, and running this chapter again changes nothing.
+do $chapter94_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key in ('terms_of_service', 'platform_agreement')
+  loop
+    next_html := doc.content_html;
+
+    if doc.document_key = 'terms_of_service' then
+      next_html := replace(next_html,
+        $t51a$<li>The earliest a trip can start is the day after the request; same-day starts are not accepted.</li>$t51a$,
+        $t51a_new$<li>The earliest a trip can start is the day after the request; same-day starts are not accepted. The pickup time must also be at least a set number of hours after the request is sent (currently shown on the vehicle page, default 12 hours).</li>$t51a_new$);
+      next_html := replace(next_html,
+        $t51c$<li>Bookings cannot be made more than 30 days in advance.</li>$t51c$,
+        $t51c_new$<li>A trip can start at most 60 days after the request is sent.</li>$t51c_new$);
+      next_html := replace(next_html,
+        $t51d$<li>The end date must be after the start date and must remain inside the same 30-day booking horizon.</li>$t51d$,
+        $t51d_new$<li>The end date must be after the start date, and a single continuous trip can last at most 30 days; a longer stay needs separate bookings.</li>$t51d_new$);
+      next_html := replace(next_html,
+        $t53$<p><strong>5.3 Final Balance:</strong> If the Renter chooses the partial reservation downpayment option (its current percentage is shown on the vehicle page before booking), the remaining balance must be settled through the Platform before the designated rental start time.</p>$t53$,
+        $t53_new$<p><strong>5.3 Final Balance:</strong> If the Renter chooses the partial reservation downpayment option (its current percentage is shown on the vehicle page before booking), the remaining balance must be settled through the Platform by its balance deadline: a set number of hours after the downpayment is confirmed (default 24 hours), but never later than the scheduled pickup time. SafeDrive sends a reminder before the deadline. If the balance is still unpaid when the deadline passes, the booking is cancelled automatically under Section 6 as if the Renter had cancelled at that moment; a deadline at the pickup time therefore counts as a no-show.</p>$t53_new$);
+      next_html := replace(next_html,
+        $t62$<p><strong>6.2 Late Renter Cancellation Fee:</strong> A paid booking cancelled after free cancellation has ended, but before the pickup time, carries a cancellation fee counted in rental days at the booking's average daily cost (the booking total divided by its number of days): by default one day for a trip longer than two days, and half a day for a trip of two days or less. The fee is the same whether the Renter paid the downpayment or the full amount, never exceeds what the Renter has paid, and the rest is refunded after SafeDrive support confirms the return method. The rental portion of the fee is paid to the Lister as compensation, with no commission taken. A booking whose remaining balance is not paid by its deadline is cancelled under this same rule. Fee values are fixed for each booking when it is made; bookings made before these fees took effect keep the terms that applied when they were made.</p>$t62$,
+        $t62_new$<p><strong>6.2 Late Renter Cancellation Fee:</strong> A paid booking cancelled after free cancellation has ended, but before the pickup time, carries a cancellation fee counted in rental days at the booking's average daily cost (the booking total divided by its number of days): by default one day for a trip longer than two days, and half a day for a trip of two days or less. The vehicle page shows the free cancellation time and the fees in pesos for the trip before a request is sent. The fee is the same whether the Renter paid the downpayment or the full amount, never exceeds what the Renter has paid, and the rest is refunded after SafeDrive support confirms the return method. The rental portion of the fee is paid to the Lister as compensation, with no commission taken. A booking whose remaining balance is unpaid at its deadline is cancelled as described in Section 5.3. Fee values are fixed for each booking when it is made; bookings made before these fees took effect keep the terms that applied when they were made.</p>$t62_new$);
+      next_html := replace(next_html,
+        $t63$<p><strong>6.3 Lister Cancellation:</strong> A lister may cancel before the trip starts. If booking money was captured, SafeDrive attempts a full provider refund and creates super-admin manual review when automation cannot confirm it.</p>$t63$,
+        $t63_new$<p><strong>6.3 Lister Cancellation and Vehicle Documents:</strong> A Lister may cancel a booking until the vehicle is handed over, including at the pickup point after arriving. If booking money was captured, SafeDrive attempts a full provider refund and creates super-admin manual review when automation cannot confirm it, and the cancellation is recorded against the Lister. If the vehicle's documents are still under review when the pickup time and its grace period have passed, the booking is cancelled automatically and anything paid is refunded in full after SafeDrive support review; the Renter's record is not affected.</p>$t63_new$);
+      next_html := replace(next_html,
+        $t64$ and the missed pickup is recorded against both participants. Admin review may use$t64$,
+        $t64_new$ and the missed pickup is recorded against both participants. The same applies when only one participant checks in and no report is filed, or when both check in but the vehicle is not handed over: after that period, and after both are warned, an absent Lister or a vehicle not handed over gives the Renter a full refund after SafeDrive support review and is recorded against the Lister (unless a previous renter's late return caused it), and an absent Renter is treated as a no-show. Admin review may use$t64_new$);
+    else
+      next_html := replace(next_html,
+        $a_adv$<li><strong>Maximum Advance Booking:</strong> Users may only book a vehicle up to a maximum of 30 days in advance. This prevents unjustified holding of funds and helps preserve vehicle availability and condition.</li>$a_adv$,
+        $a_adv_new$<li><strong>Maximum Advance Booking and Trip Length:</strong> A trip may start at most 60 days after the request, and a single continuous trip can last at most 30 days. This prevents unjustified holding of funds and helps preserve vehicle availability and condition.</li>$a_adv_new$);
+      next_html := replace(next_html,
+        $a_lead$<li><strong>Minimum Lead Time:</strong> A trip may start as early as the day after the request is made; same-day starts are not accepted. After a request,$a_lead$,
+        $a_lead_new$<li><strong>Minimum Lead Time:</strong> A trip may start as early as the day after the request is made; same-day starts are not accepted, and the pickup time must also be at least a set number of hours after the request is sent (default 12 hours). After a request,$a_lead_new$);
+      next_html := replace(next_html,
+        $a_turn$the waiting party may submit an in-app no-show report after the grace period.</li>$a_turn$,
+        $a_turn_new$the waiting party may submit an in-app no-show report after the grace period. If neither party checks in, or only one does and no report is filed, or both check in but the vehicle is not handed over, SafeDrive warns both parties and then settles the booking automatically a set number of hours after the pickup time (default 6), as described in the Terms.</li>$a_turn_new$);
+      next_html := replace(next_html,
+        $a_pay$Any remaining balance must be completed before the rental starts.</li>$a_pay$,
+        $a_pay_new$Any remaining balance must be paid by its balance deadline (default 24 hours after the downpayment, never later than the pickup time); a balance still unpaid at the deadline cancels the booking under the Cancellation Policy.</li>$a_pay_new$);
+      next_html := replace(next_html,
+        $a_cancel$A pre-trip lister cancellation always starts a full refund attempt, with super-admin review if provider confirmation is unavailable.</li>$a_cancel$,
+        $a_cancel_new$The vehicle page shows these amounts in pesos for the trip before a request is sent. A lister cancellation before the vehicle is handed over, including at the pickup point, always starts a full refund attempt, with super-admin review if provider confirmation is unavailable.</li>$a_cancel_new$);
+      next_html := replace(next_html,
+        $a_nocar$the Renter may cancel the booking through the app and receive a <em>full</em> automatic refund.$a_nocar$,
+        $a_nocar_new$the Renter may cancel the booking through the app and receive a <em>full</em> refund, released after SafeDrive support confirms the claim.$a_nocar_new$);
+    end if;
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 94'));
+    end if;
+  end loop;
+end;
+$chapter94_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select document_key, version_number,
+--        position('at most 60 days after the request' in content_html) > 0 as advance_fixed,
+--        position('30 days in advance' in content_html) = 0 as old_advance_gone
+--   from public.legal_document_versions
+--   where status = 'published' and document_key in ('terms_of_service', 'platform_agreement');
+--   (expect terms_of_service version 4 and platform_agreement version 3, both columns true)
+
 -- End of SafeDrive chaptered database master.

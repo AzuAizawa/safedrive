@@ -4,6 +4,21 @@ import {
   DEFAULT_MIN_BOOKING_NOTICE_HOURS,
   normalizeBookingNoticeHours,
 } from "@/lib/bookingNotice";
+import {
+  DEFAULT_LATE_CANCEL_FEE_DAYS,
+  DEFAULT_NO_SHOW_FEE_DAYS,
+  DEFAULT_SHORT_NOTICE_FREE_HOURS,
+  DEFAULT_SHORT_TRIP_LATE_CANCEL_FEE_DAYS,
+  DEFAULT_SHORT_TRIP_NO_SHOW_FEE_DAYS,
+} from "@/lib/cancellationPolicy";
+
+// A stored setting inside its bounds, else the published default. An empty
+// value is "not set", never 0 - 0 is a valid fee.
+const readBoundedSetting = (value: unknown, min: number, max: number, fallback: number) => {
+  if (value === null || value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+};
 
 export const DEFAULT_COMMISSION_RATE = 0.1;
 export const DEFAULT_COMMISSION_PERCENT = DEFAULT_COMMISSION_RATE * 100;
@@ -177,6 +192,15 @@ export type PlatformPricingSettings = {
   refundLateRenterPercent: number;
   // Hours a pickup must be away when the request is sent (CHAPTER 93).
   minBookingNoticeHours: number;
+  // The cancellation terms a new booking would be snapshotted with (CHAPTER 91).
+  shortNoticeFreeHours: number;
+  lateCancelFeeDays: number;
+  shortTripLateCancelFeeDays: number;
+  noShowFeeDays: number;
+  shortTripNoShowFeeDays: number;
+  // "fallback" when the settings could not be read and every value above is a
+  // default - a page quoting fees should not present those as the real ones.
+  source: "live" | "fallback";
 };
 
 export const calculateProcessingFee = (
@@ -199,17 +223,23 @@ export const fetchPlatformPricingSettings = async (): Promise<PlatformPricingSet
     refundFullHours: DEFAULT_REFUND_FULL_HOURS,
     refundLateRenterPercent: DEFAULT_REFUND_LATE_RENTER_PERCENT,
     minBookingNoticeHours: DEFAULT_MIN_BOOKING_NOTICE_HOURS,
+    shortNoticeFreeHours: DEFAULT_SHORT_NOTICE_FREE_HOURS,
+    lateCancelFeeDays: DEFAULT_LATE_CANCEL_FEE_DAYS,
+    shortTripLateCancelFeeDays: DEFAULT_SHORT_TRIP_LATE_CANCEL_FEE_DAYS,
+    noShowFeeDays: DEFAULT_NO_SHOW_FEE_DAYS,
+    shortTripNoShowFeeDays: DEFAULT_SHORT_TRIP_NO_SHOW_FEE_DAYS,
+    source: "fallback",
   };
 
   const { data, error } = await supabase
     .from("platform_settings")
     .select(
-      "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, min_booking_notice_hours",
+      "commission_rate, payment_processing_fee_rate, payment_processing_fixed_centavos, downpayment_rate, refund_full_hours, refund_late_renter_percent, min_booking_notice_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days",
     )
     .eq("id", "default")
     .maybeSingle();
 
-  if (error) {
+  if (error || !data) {
     console.error("Failed to load platform pricing settings:", error);
     return fallback;
   }
@@ -231,6 +261,24 @@ export const fetchPlatformPricingSettings = async (): Promise<PlatformPricingSet
         ? latePercent
         : DEFAULT_REFUND_LATE_RENTER_PERCENT,
     minBookingNoticeHours: normalizeBookingNoticeHours(data?.min_booking_notice_hours),
+    shortNoticeFreeHours: Math.round(
+      readBoundedSetting(data?.short_notice_free_hours, 0, 24, DEFAULT_SHORT_NOTICE_FREE_HOURS),
+    ),
+    lateCancelFeeDays: readBoundedSetting(data?.late_cancel_fee_days, 0, 30, DEFAULT_LATE_CANCEL_FEE_DAYS),
+    shortTripLateCancelFeeDays: readBoundedSetting(
+      data?.short_trip_late_cancel_fee_days,
+      0,
+      2,
+      DEFAULT_SHORT_TRIP_LATE_CANCEL_FEE_DAYS,
+    ),
+    noShowFeeDays: readBoundedSetting(data?.no_show_fee_days, 0, 30, DEFAULT_NO_SHOW_FEE_DAYS),
+    shortTripNoShowFeeDays: readBoundedSetting(
+      data?.short_trip_no_show_fee_days,
+      0,
+      2,
+      DEFAULT_SHORT_TRIP_NO_SHOW_FEE_DAYS,
+    ),
+    source: "live",
   };
 };
 

@@ -18,6 +18,8 @@ import {
   meetsBookingNotice,
 } from "@/lib/bookingNotice";
 import TimePicker from "@/components/TimePicker";
+import CancellationPolicySummary from "@/components/CancellationPolicySummary";
+import type { CancellationTermsSettings } from "@/lib/cancellationPolicy";
 import { parseTripDatesQuery } from "@/lib/tripDates";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -157,6 +159,10 @@ export default function CarDetailPage() {
   const [minBookingNoticeHours, setMinBookingNoticeHours] = useState(
     DEFAULT_MIN_BOOKING_NOTICE_HOURS,
   );
+  // The cancellation terms a request sent now would be booked under; null until
+  // the platform settings have loaded.
+  const [cancellationTerms, setCancellationTerms] = useState<CancellationTermsSettings | null>(null);
+  const [cancellationTermsLive, setCancellationTermsLive] = useState(false);
   const [bookedDates, setBookedDates] = useState<
     { start: string; end: string }[]
   >([]);
@@ -288,6 +294,15 @@ export default function CarDetailPage() {
       setProcessingFixedCentavos(settings.processingFixedCentavos);
       setDownpaymentRate(settings.downpaymentRate);
       setMinBookingNoticeHours(settings.minBookingNoticeHours);
+      setCancellationTerms({
+        refundFullHours: settings.refundFullHours,
+        shortNoticeFreeHours: settings.shortNoticeFreeHours,
+        lateCancelFeeDays: settings.lateCancelFeeDays,
+        shortTripLateCancelFeeDays: settings.shortTripLateCancelFeeDays,
+        noShowFeeDays: settings.noShowFeeDays,
+        shortTripNoShowFeeDays: settings.shortTripNoShowFeeDays,
+      });
+      setCancellationTermsLive(settings.source === "live");
     })();
   }, []);
 
@@ -648,6 +663,11 @@ export default function CarDetailPage() {
   const noPickupTimeOnDate = Boolean(pickupDateIso) && pickupTimeOptions.length === 0;
   const pickupTimeAllowed =
     !pickupTime || pickupTimeOptions.some((option) => option.value === pickupTime);
+  // The chosen pickup as a real instant, for the cancellation policy summary.
+  const chosenPickupMs =
+    pickupDateIso && pickupTime && pickupTimeAllowed
+      ? getManilaPickupMs(pickupDateIso, pickupTime)
+      : null;
   // A time chosen before the date (or before the clock moved on) that the
   // notice no longer allows is cleared, so it cannot be sent by mistake.
   useEffect(() => {
@@ -1283,6 +1303,21 @@ export default function CarDetailPage() {
                 </div>
               </div>
 
+              {/* After the times: the free-cancellation deadline counts back from
+                  the pickup time chosen just above, and the renter reads the
+                  terms before the agreement and the request button below. */}
+              {totalDays > 0 && (
+                <CancellationPolicySummary
+                  totalDays={totalDays}
+                  totalPrice={totalPrice}
+                  basePrice={basePrice}
+                  pickupMs={chosenPickupMs}
+                  settings={cancellationTerms}
+                  settingsAreLive={cancellationTermsLive}
+                  returnTo={legalReturnTo}
+                />
+              )}
+
               {profile?.role !== "lister" && (
                 <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-sm">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1477,8 +1512,10 @@ export default function CarDetailPage() {
                 <strong>3. Payment:</strong> Once the owner accepts the booking,
                 the renter may either settle the required reservation
                 downpayment or pay the full booking amount immediately through
-                the platform. Any remaining balance must be completed before the
-                rental starts.
+                the platform. Any remaining balance must be paid by its
+                deadline, which is never later than the pickup time; a balance
+                still unpaid then cancels the booking under the cancellation
+                policy.
               </p>
               <p>
                 <strong>4. Insurance & Liability:</strong> Any accidents,
@@ -1498,6 +1535,14 @@ export default function CarDetailPage() {
                 vehicle. If the Lister requires a security deposit, its amount,
                 collection, and return are arranged directly and independently
                 between the Lister and Renter, entirely outside the Platform.
+              </p>
+              <p>
+                <strong>6. Cancellations &amp; No-Shows:</strong> SafeDrive's
+                cancellation policy applies to this booking - the free
+                cancellation time and the late-cancellation and no-show fees
+                shown on the booking panel for this trip, as set out in section
+                6 of the Terms and Conditions. Fees never exceed what the renter
+                has paid.
               </p>
             </div>
 
@@ -1565,7 +1610,12 @@ export default function CarDetailPage() {
               </Link>
             </nav>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+              By continuing, you agree to this rental agreement, the lister's
+              document, and SafeDrive's cancellation policy for this trip.
+            </p>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Button
                 variant="outline"
                 className="h-11"

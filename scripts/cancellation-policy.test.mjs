@@ -469,6 +469,136 @@ test("a pickup that started but never became a trip is warned, then settled", ()
   }
 });
 
+const HEADING_94 = "-- CHAPTER 94 - The Terms and Platform Agreement say what the booking rules do";
+
+test("CHAPTER 94: the Terms and Platform Agreement are corrected and republished, once", async () => {
+  const db = await fixture92();
+  const master = await loadMaster();
+  const body = master.split(HEADING_94)[1]?.split("-- Read-only verification")[0];
+  assert.ok(body, "CHAPTER 94 exists in the master file");
+  const chapter94 = "-- chapter\n" + body.slice(body.indexOf("\n"));
+  await db.exec(chapter94);
+
+  const published = async (key) =>
+    (
+      await db.query(
+        "select version_number, content_html from public.legal_document_versions where status = 'published' and document_key = $1",
+        [key],
+      )
+    ).rows[0];
+
+  const terms = await published("terms_of_service");
+  assert.equal(terms.version_number, 4, "on top of CHAPTER 91 (v2) and CHAPTER 92 (v3)");
+  for (const phrase of [
+    "default 12 hours",
+    "A trip can start at most 60 days after the request is sent.",
+    "a single continuous trip can last at most 30 days",
+    "by its balance deadline",
+    "cancelled as described in Section 5.3",
+    "The vehicle page shows the free cancellation time and the fees in pesos",
+    "6.3 Lister Cancellation and Vehicle Documents",
+    "including at the pickup point after arriving",
+    "vehicle's documents are still under review",
+    "when only one participant checks in and no report is filed",
+    "recorded against both participants",
+  ]) {
+    assert.ok(terms.content_html.includes(phrase), `Terms: ${phrase}`);
+  }
+  for (const gone of [
+    "Bookings cannot be made more than 30 days in advance",
+    "same 30-day booking horizon",
+    "before the designated rental start time",
+    "is cancelled under this same rule",
+    "A lister may cancel before the trip starts.",
+  ]) {
+    assert.ok(!terms.content_html.includes(gone), `Terms no longer says: ${gone}`);
+  }
+
+  const agreement = await published("platform_agreement");
+  assert.equal(agreement.version_number, 3, "on top of CHAPTER 91 (v2)");
+  for (const phrase of [
+    "Maximum Advance Booking and Trip Length",
+    "at most 60 days after the request",
+    "(default 12 hours)",
+    "settles the booking automatically a set number of hours after the pickup time (default 6)",
+    "by its balance deadline",
+    "including at the pickup point",
+    "released after SafeDrive support confirms the claim",
+    "The vehicle page shows these amounts in pesos",
+  ]) {
+    assert.ok(agreement.content_html.includes(phrase), `Agreement: ${phrase}`);
+  }
+  for (const gone of ["maximum of 30 days in advance", "<em>full</em> automatic refund", "A pre-trip lister cancellation"]) {
+    assert.ok(!agreement.content_html.includes(gone), `Agreement no longer says: ${gone}`);
+  }
+
+  assert.equal((await published("privacy_policy")).version_number, 1, "privacy policy untouched");
+  await db.exec(chapter94);
+  assert.equal((await published("terms_of_service")).version_number, 4, "a second run changes nothing");
+  assert.equal((await published("platform_agreement")).version_number, 3);
+});
+
+test("the car page's quote is the fee a real cancellation charges", () => {
+  const settings = {
+    refundFullHours: 24,
+    shortNoticeFreeHours: 4,
+    lateCancelFeeDays: 1,
+    shortTripLateCancelFeeDays: 0.5,
+    noShowFeeDays: 2,
+    shortTripNoShowFeeDays: 0.75,
+  };
+  for (const policy of [server, browser]) {
+    for (const trip of [
+      { totalDays: 2, totalPrice: 2000, basePrice: 2000 },
+      { totalDays: 5, totalPrice: 5000, basePrice: 5000 },
+      { totalDays: 3, totalPrice: 3150, basePrice: 3000 },
+    ]) {
+      const quote = policy.getCancellationQuote({ ...trip, pickupMs: PICKUP, nowMs: PICKUP - 72 * HOUR, settings });
+      const booking = feeDayBooking({
+        total_days: trip.totalDays,
+        total_price: trip.totalPrice,
+        base_price: trip.basePrice,
+      });
+      const late = policy.getCancellationOutcome({
+        booking,
+        capturedTotal: trip.totalPrice,
+        firstPaymentAtMs: PICKUP - 72 * HOUR,
+        nowMs: PICKUP - 10 * HOUR,
+        event: "cancel",
+      });
+      const noShow = policy.getCancellationOutcome({
+        booking,
+        capturedTotal: trip.totalPrice,
+        firstPaymentAtMs: PICKUP - 72 * HOUR,
+        nowMs: PICKUP,
+        event: "no_show",
+      });
+      assert.equal(quote.lateFee, late.fee, `late fee, ${trip.totalDays} days`);
+      assert.equal(quote.noShowFee, noShow.fee, `no-show fee, ${trip.totalDays} days`);
+      assert.equal(quote.lateFeeDays, late.feeDays);
+      assert.equal(quote.noShowFeeDays, noShow.feeDays);
+    }
+
+    const early = policy.getCancellationQuote({ totalDays: 2, totalPrice: 2000, basePrice: 2000, pickupMs: PICKUP, nowMs: PICKUP - 72 * HOUR, settings });
+    assert.equal(early.freeUntilMs, PICKUP - 24 * HOUR);
+    assert.equal(early.freeWindowOpenNow, true);
+
+    const close = policy.getCancellationQuote({ totalDays: 2, totalPrice: 2000, basePrice: 2000, pickupMs: PICKUP, nowMs: PICKUP - 3 * HOUR, settings });
+    assert.equal(close.freeWindowOpenNow, false, "only the free hours after paying remain");
+    assert.equal(close.graceHours, 4);
+
+    const noTimeYet = policy.getCancellationQuote({ totalDays: 2, totalPrice: 2000, basePrice: 2000, pickupMs: null, nowMs: PICKUP, settings });
+    assert.equal(noTimeYet.freeUntilMs, null);
+    assert.equal(noTimeYet.lateFee, 500);
+
+    const noFees = policy.getCancellationQuote({
+      totalDays: 5, totalPrice: 5000, basePrice: 5000, pickupMs: PICKUP, nowMs: PICKUP - 72 * HOUR,
+      settings: { ...settings, lateCancelFeeDays: 0, noShowFeeDays: 0 },
+    });
+    assert.deepEqual([noFees.lateFee, noFees.noShowFee], [0, 0], "an admin value of 0 is quoted as no fee");
+  }
+});
+
 test("the server plan reads what was paid, and when, off the booking's own payments", () => {
   const booking = {
     id: "booking",
