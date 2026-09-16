@@ -6,6 +6,7 @@
 // case (a renter cancelling 16h before pickup), and against the edges that
 // would pay someone the wrong amount.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { summarizeCompensationFromEntries } from "../server/cancellationCompensation.ts";
@@ -78,6 +79,18 @@ test("a payout already recorded against the booking is subtracted, so nothing is
   ];
   const summary = summarizeCompensationFromEntries(alreadyPaid);
   assert.equal(summary.totalCentavos, 0);
+});
+
+test("compensation is not marked released when the lister saved no payout destination", async () => {
+  const source = await readFile(new URL("../server/cancellationCompensation.ts", import.meta.url), "utf8");
+  // The same three fields the ordinary payout path requires.
+  assert.match(source, /payout_method, payout_account_name, payout_account_number/);
+  assert.match(source, /!owner\?\.payout_account_number/);
+  assert.match(source, /Add your payout details to receive your compensation/);
+  // The guard runs before demo mode can complete the payout row.
+  const guardAt = source.indexOf("!owner?.payout_account_number");
+  const demoCompletionAt = source.indexOf("sandbox_compensation_");
+  assert.ok(guardAt > 0 && guardAt < demoCompletionAt, "the guard must come before the demo release");
 });
 
 test("a booking whose ledger is empty owes nothing through this path", () => {

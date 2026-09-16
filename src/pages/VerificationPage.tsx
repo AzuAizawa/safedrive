@@ -537,13 +537,19 @@ export default function VerificationPage() {
 
   const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [isEditingPayout, setIsEditingPayout] = useState(false);
+  // Empty, never a guess. This used to fall back to "GCash", so every payout
+  // form opened with a destination already chosen for the person - which is how
+  // an account ended up with a method and no account name or number (CHAPTER 99).
   const normalizeSupportedPayoutMethod = (value?: string | null) =>
-    isSupportedPayoutMethod(value) ? value : "GCash";
+    isSupportedPayoutMethod(value) ? value : "";
   const getSupportedPayoutMethodLabel = (value?: string | null) =>
     getPayoutMethodRule(value)?.label ?? "Update required";
 
+  // Empty until the person picks one. It used to default to "GCash", so an
+  // account could end up with a payout method and no account name or number at
+  // all - which is what let a lister list a car with nowhere to be paid.
   const [payoutMethod, setPayoutMethod] = useState(
-    normalizeSupportedPayoutMethod(profile?.payout_method),
+    isSupportedPayoutMethod(profile?.payout_method) ? profile.payout_method : "",
   );
   const [payoutAccountName, setPayoutAccountName] = useState(profile?.payout_account_name || "");
   const [payoutAccountNumber, setPayoutAccountNumber] = useState(profile?.payout_account_number || "");
@@ -557,7 +563,10 @@ export default function VerificationPage() {
     payoutAccountNumber,
   );
   const canSavePayoutDetails =
-    Boolean(payoutAccountName.trim()) && payoutAccountNumberError === null;
+    Boolean(payoutMethod) &&
+    Boolean(payoutAccountName.trim()) &&
+    Boolean(payoutAccountNumber.trim()) &&
+    payoutAccountNumberError === null;
   const hasStructuredAddress =
     typeof profile?.address === "string" && profile.address.includes(",");
   const isPrivilegedAccount =
@@ -1007,9 +1016,11 @@ export default function VerificationPage() {
     setIsSavingPayout(true);
     try {
       const { error } = await supabase.from("profiles").update({
-        payout_method: payoutMethod,
-        payout_account_name: payoutAccountName,
-        payout_account_number: payoutAccountNumber,
+        // Never an empty string: profiles_payout_method_check allows null or a
+        // supported destination, and the column means "not set" as null.
+        payout_method: payoutMethod || null,
+        payout_account_name: payoutAccountName.trim() || null,
+        payout_account_number: payoutAccountNumber.trim() || null,
       }).eq("id", user.id);
       
       if (error) throw error;
@@ -1516,6 +1527,7 @@ export default function VerificationPage() {
                     onChange={(e) => setPayoutMethod(normalizeSupportedPayoutMethod(e.target.value))}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   >
+                    <option value="">Select destination</option>
                     {PAYOUT_METHOD_RULES.map((rule) => (
                       <option key={rule.value} value={rule.value}>
                         {rule.label}
@@ -2003,6 +2015,25 @@ export default function VerificationPage() {
       return;
     }
 
+    // All three, or none. This section is optional - a renter verifies here too
+    // and never needs a payout destination - but half of one is not a
+    // destination, and a method on its own is what used to be saved (a listing
+    // with nowhere to be paid). Listing a vehicle asks for it properly, and
+    // CHAPTER 99 enforces it.
+    const payoutStarted = Boolean(
+      payoutMethod || payoutAccountName.trim() || payoutAccountNumber.trim(),
+    );
+    const payoutComplete = Boolean(
+      payoutMethod && payoutAccountName.trim() && payoutAccountNumber.trim(),
+    );
+    if (payoutStarted && !payoutComplete) {
+      toast.error("Payout details incomplete", {
+        description:
+          "A destination needs all three: GCash or Maya, the account name, and the account number. Leave all three blank to skip for now - you will be asked before you can list a vehicle.",
+      });
+      return;
+    }
+
     if (payoutAccountNumber && payoutAccountNumberError) {
       toast.error("Check your payout account number", {
         description: payoutAccountNumberError,
@@ -2127,9 +2158,9 @@ export default function VerificationPage() {
           national_id: null,
           secondary_id_type: secondaryIdType,
           secondary_phone: formData.secondary_phone || null,
-          payout_method: payoutMethod,
-          payout_account_name: payoutAccountName || null,
-          payout_account_number: payoutAccountNumber || null,
+          payout_method: payoutMethod || null,
+          payout_account_name: payoutAccountName.trim() || null,
+          payout_account_number: payoutAccountNumber.trim() || null,
           verified_status: "pending",
           // KYC selfies stay in private storage and are never reused as public avatars.
           avatar_url: profile?.avatar_url?.includes("/user-verification/")
@@ -2586,7 +2617,7 @@ export default function VerificationPage() {
           <CardHeader>
             <CardTitle>Lister Payout Preference</CardTitle>
             <CardDescription>
-              If you plan to use lister mode, tell SafeDrive where you prefer rental payouts to go. This records your preferred destination for review and payout handling.
+              If you plan to use lister mode, tell SafeDrive where you prefer rental payouts to go. Optional here - a renter never needs it - but a vehicle cannot be listed until all three are saved: the destination, the account name and the account number.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-3">
@@ -2595,9 +2626,14 @@ export default function VerificationPage() {
               <select
                 id="payout_method"
                 value={payoutMethod}
-                onChange={(e) => setPayoutMethod(normalizeSupportedPayoutMethod(e.target.value))}
+                onChange={(e) =>
+                  setPayoutMethod(
+                    isSupportedPayoutMethod(e.target.value) ? e.target.value : "",
+                  )
+                }
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
+                <option value="">Select destination</option>
                 {PAYOUT_METHOD_RULES.map((rule) => (
                   <option key={rule.value} value={rule.value}>
                     {rule.label}
@@ -3038,6 +3074,7 @@ export default function VerificationPage() {
                     onChange={(e) => setPayoutMethod(normalizeSupportedPayoutMethod(e.target.value))}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
+                    <option value="">Select destination</option>
                     {PAYOUT_METHOD_RULES.map((rule) => (
                       <option key={rule.value} value={rule.value}>
                         {rule.label}

@@ -2363,7 +2363,9 @@ export default function ListerBookingsPage() {
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Completed payouts</p>
                 <p className="mt-1 text-2xl font-bold">{completedPayouts.length}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Payout records already sent to your saved destination.
+                  {hasPayoutSetup
+                    ? "Payout records already sent to your saved destination."
+                    : "Payout records SafeDrive has recorded. Add your payout details so they can be sent."}
                 </p>
               </div>
             </div>
@@ -2417,31 +2419,17 @@ export default function ListerBookingsPage() {
                       key={payment.id}
                       className="rounded-lg border border-border/60 p-3"
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1">
-                          <p className="font-medium">
-                            {booking
-                              ? `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name}`
-                              : "Rental payout"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {payment.payment_method || profile?.payout_method || "Payout destination"} | {humanizePayoutStatus(payment.status)}
-                          </p>
-                          {payment.transaction_id ? (
-                            <p className="text-xs text-muted-foreground">
-                              Reference: {payment.transaction_id}
-                            </p>
-                          ) : null}
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(payment.created_at), "MMM d, yyyy h:mm a")}
-                          </p>
-                          {payment.notes ? (
-                            <p className="text-xs text-muted-foreground">
-                              Note: {payment.notes}
-                            </p>
-                          ) : null}
-                        </div>
-                        <div className="text-right">
+                      {/* The vehicle and the amount sit on one line; everything
+                          else runs full width underneath. A long reference
+                          (sandbox_compensation_...) used to squeeze the right
+                          column and push the download button out of line. */}
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="min-w-0 flex-1 font-medium">
+                          {booking
+                            ? `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name}`
+                            : "Rental payout"}
+                        </p>
+                        <div className="shrink-0 text-right">
                           <p className="font-semibold">
                             PHP {Number(payment.amount).toLocaleString()}
                           </p>
@@ -2450,17 +2438,37 @@ export default function ListerBookingsPage() {
                               Plate: {booking.cars.plate_number}
                             </p>
                           ) : null}
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="mt-2 h-8 px-2 text-xs"
-                            onClick={() => downloadPayoutReceipt(payment, booking)}
-                          >
-                            <Download className="mr-1 h-3.5 w-3.5" />
-                            Download proof
-                          </Button>
                         </div>
+                      </div>
+                      <div className="mt-2 space-y-1">
+                        <p className="text-xs text-muted-foreground">
+                          {payment.payment_method || profile?.payout_method || "Payout destination"} | {humanizePayoutStatus(payment.status)}
+                        </p>
+                        {payment.transaction_id ? (
+                          <p className="break-all text-xs text-muted-foreground">
+                            Reference: {payment.transaction_id}
+                          </p>
+                        ) : null}
+                        <p className="text-xs text-muted-foreground">
+                          {format(new Date(payment.created_at), "MMM d, yyyy h:mm a")}
+                        </p>
+                        {payment.notes ? (
+                          <p className="text-xs text-muted-foreground">
+                            Note: {payment.notes}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 flex justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-3 text-xs"
+                          onClick={() => downloadPayoutReceipt(payment, booking)}
+                        >
+                          <Download className="mr-1 h-3.5 w-3.5" />
+                          Download proof
+                        </Button>
                       </div>
                     </div>
                   );

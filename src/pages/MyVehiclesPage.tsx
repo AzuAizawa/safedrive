@@ -866,11 +866,21 @@ export default function MyVehiclesPage() {
   const canAddMore = vehicles.length < maxSlots;
   const isVerifiedLister = profile?.verified_status === "verified";
   const slotsRemaining = Math.max(maxSlots - vehicles.length, 0);
+  // A new listing needs somewhere to send its rental payouts. Cars already
+  // listed keep working - only adding another one waits for this (CHAPTER 99,
+  // which enforces the same rule in the database).
+  const hasPayoutDestination = Boolean(
+    profile?.payout_method &&
+      profile?.payout_account_name &&
+      profile?.payout_account_number,
+  );
   const listingBlockedReason = !isVerifiedLister
     ? "Finish account verification first. Only verified users can submit vehicles for admin approval."
-    : !canAddMore
-      ? `Your current plan already uses all ${maxSlots} available listing slots.`
-      : null;
+    : !hasPayoutDestination
+      ? "Add your GCash or Maya payout details before adding another vehicle. That is where SafeDrive sends the rental payments for it."
+      : !canAddMore
+        ? `Your current plan already uses all ${maxSlots} available listing slots.`
+        : null;
   // Fixed order for a lister's own list (no filter/sort controls - this page is
   // for adding cars and tracking their approval, not browsing): live listings
   // first, then pending review, then rejected/inactive; newest first in each.
@@ -969,6 +979,16 @@ export default function MyVehiclesPage() {
       toast.error("Vehicle listing unavailable", {
         description:
           "Finish your identity verification first, then return here to submit your car for admin review.",
+      });
+      return;
+    }
+
+    // The database refuses this too (CHAPTER 99); asked here so the lister is
+    // told what to do instead of meeting a raw constraint error.
+    if (!hasPayoutDestination) {
+      toast.error("Add your payout details first", {
+        description:
+          "A new vehicle needs a GCash or Maya destination for its rental payments. Your cars already listed are not affected.",
       });
       return;
     }
@@ -1535,10 +1555,17 @@ export default function MyVehiclesPage() {
             )}
           </div>
         </div>
-        {isVerifiedLister && canAddMore && !showForm && (
+        {isVerifiedLister && hasPayoutDestination && canAddMore && !showForm && (
           <Button onClick={() => setShowForm(true)} className="gap-2">
             <Plus className="w-4 h-4" /> Add Vehicle
           </Button>
+        )}
+        {isVerifiedLister && !hasPayoutDestination && !showForm && (
+          <Link to="/verify">
+            <Button variant="outline" className="gap-2 border-primary/40 text-primary">
+              Add Payout Details
+            </Button>
+          </Link>
         )}
         {!isVerifiedLister && !showForm && (
           <Link to="/verify">
@@ -1575,13 +1602,31 @@ export default function MyVehiclesPage() {
             </span>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <div className={`rounded-lg border px-3 py-3 text-sm ${isVerifiedLister ? "border-emerald-500/20 bg-emerald-500/5" : "border-amber-500/20 bg-amber-500/5"}`}>
               <p className="font-medium">Identity verification</p>
               <p className="mt-1 text-muted-foreground">
                 {isVerifiedLister
                   ? "Verified. You can submit vehicles for admin approval."
                   : "Still locked. Complete your /verify flow first so admin can approve your lister profile."}
+              </p>
+            </div>
+
+            <div className={`rounded-lg border px-3 py-3 text-sm ${hasPayoutDestination ? "border-emerald-500/20 bg-emerald-500/5" : "border-amber-500/20 bg-amber-500/5"}`}>
+              <p className="font-medium">Payout destination</p>
+              <p className="mt-1 text-muted-foreground">
+                {hasPayoutDestination ? (
+                  `Saved: ${profile?.payout_method}. Rental payments for your cars go here.`
+                ) : (
+                  <>
+                    Not saved yet. Your listed cars stay up, but another vehicle needs a
+                    destination for its rental payments.{" "}
+                    <Link to="/verify" className="text-primary underline underline-offset-2">
+                      Add payout details
+                    </Link>
+                    .
+                  </>
+                )}
               </p>
             </div>
 

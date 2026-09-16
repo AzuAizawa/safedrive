@@ -199,7 +199,7 @@ export async function releaseCancellationCompensation(
 
   const { data: owner } = await supabase
     .from("profiles")
-    .select("payout_method")
+    .select("payout_method, payout_account_name, payout_account_number")
     .eq("id", booking.owner_id)
     .maybeSingle();
 
@@ -257,6 +257,44 @@ export async function releaseCancellationCompensation(
       partyUserId: booking.owner_id,
       memo: "Platform commission waived: the booking was cancelled before any trip took place",
     });
+  }
+
+  // The same rule the ordinary payout path applies (server/payoutAutomation.ts:
+  // "Lister payout details are incomplete"): with no destination saved there is
+  // nowhere to send this. The record stays pending - the money is still owed -
+  // instead of demo mode marking it "Released" to a destination that does not
+  // exist, which is what the lister's Payout History then claimed.
+  if (
+    !owner?.payout_method ||
+    !owner?.payout_account_name ||
+    !owner?.payout_account_number
+  ) {
+    await supabase.from("notifications").insert({
+      user_id: booking.owner_id,
+      title: "Add your payout details to receive your compensation",
+      message: `${peso(amount)} is owed to you for ${vehicle}, but no payout destination is saved on your account. Add your GCash or Maya details so SafeDrive can send it.`,
+      type: "warning",
+      link: "/lister-bookings",
+    });
+    await supabase.from("audit_log").insert({
+      user_id: input.actorId,
+      action: "cancellation_compensation_owed",
+      entity_type: "booking",
+      entity_id: booking.id,
+      details: {
+        amount,
+        payment_id: paymentId,
+        commission_waived_centavos: summary.deferredFeeCentavos,
+        mode: "payout_details_incomplete",
+      },
+    });
+    return {
+      state: "pending",
+      amount,
+      paymentId,
+      reason:
+        "The lister has not saved a payout destination. The compensation is recorded and waits until they add their GCash or Maya details.",
+    };
   }
 
   if (!demo) {

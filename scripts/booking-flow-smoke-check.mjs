@@ -721,6 +721,28 @@ const checks = [
     ],
   },
   {
+    // CHAPTER 99: a new listing needs somewhere to be paid. The database is the
+    // real guard; these two screens must keep asking for it first, so the
+    // lister is told what to do instead of meeting a raw constraint error.
+    file: "src/pages/MyVehiclesPage.tsx",
+    markers: [
+      "hasPayoutDestination",
+      "Add Payout Details",
+      "Payout destination",
+      "Add your payout details first",
+    ],
+  },
+  {
+    file: "src/pages/VerificationPage.tsx",
+    markers: [
+      "Select destination",
+      "Payout details incomplete",
+      "canSavePayoutDetails",
+      // Optional for a renter: all three or none, never "required" here.
+      "payoutStarted && !payoutComplete",
+    ],
+  },
+  {
     file: "src/pages/admin/AdminSupportTicketsPage.tsx",
     markers: [
       "Linked booking arrival timeline",

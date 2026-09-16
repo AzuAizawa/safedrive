@@ -15866,4 +15866,91 @@ commit;
 --        'v4 updated';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 99 - A new listing needs a payout destination
+-- ============================================================================
+-- A lister could submit a vehicle with no payout destination saved. Nothing
+-- asked for one: the Add Vehicle form checked verification and listing slots,
+-- and the cars insert policy checks only that the owner is inserting their own
+-- row. The onboarding text said "add or review your payout details", which is
+-- advice, not a rule. The result was a lister with cars, bookings and money
+-- owed, and nowhere to send it.
+--
+-- This refuses a NEW listing while the destination is incomplete. Deliberately
+-- INSERT only:
+--   * cars already listed keep working - they stay live, bookable and payable;
+--   * editing, pausing or renewing an existing car is untouched;
+--   * the lister completes their details when they add the next vehicle.
+--
+-- The server (service role) is exempt the same way every other chapter exempts
+-- it, so imports and support fixes are not blocked.
+begin;
+
+create or replace function public.enforce_listing_payout_destination()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $listing_payout_destination$
+declare
+  v_method text;
+  v_name text;
+  v_number text;
+begin
+  if public.is_trusted_server_context() then
+    return new;
+  end if;
+
+  select payout_method, payout_account_name, payout_account_number
+    into v_method, v_name, v_number
+  from public.profiles
+  where id = new.owner_id;
+
+  -- All three, or it is not somewhere money can be sent.
+  if coalesce(btrim(v_method), '') = ''
+     or coalesce(btrim(v_name), '') = ''
+     or coalesce(btrim(v_number), '') = '' then
+    raise exception
+      'Add your GCash or Maya payout details before listing a vehicle. Your vehicles already listed are not affected.'
+      using errcode = 'check_violation';
+  end if;
+
+  return new;
+end;
+$listing_payout_destination$;
+
+drop trigger if exists require_payout_destination_for_new_car on public.cars;
+create trigger require_payout_destination_for_new_car
+before insert on public.cars
+for each row execute function public.enforce_listing_payout_destination();
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'trigger installed' as check_name,
+--        (select count(*)::text from pg_trigger
+--          where tgname = 'require_payout_destination_for_new_car'
+--            and not tgisinternal) as result,
+--        '1' as expected
+-- union all
+-- select 'insert only',
+--        (select case when tgtype & 4 = 4 and tgtype & 16 = 0 then 'insert only' else 'also fires on update' end
+--           from pg_trigger where tgname = 'require_payout_destination_for_new_car' and not tgisinternal),
+--        'insert only'
+-- union all
+-- select 'existing listings untouched',
+--        (select count(*)::text from public.cars where deleted_at is null),
+--        'same count as before this chapter'
+-- union all
+-- select 'listers who must complete payout before their next car',
+--        (select count(distinct c.owner_id)::text
+--           from public.cars c
+--           join public.profiles p on p.id = c.owner_id
+--          where c.deleted_at is null
+--            and (coalesce(btrim(p.payout_method), '') = ''
+--                 or coalesce(btrim(p.payout_account_name), '') = ''
+--                 or coalesce(btrim(p.payout_account_number), '') = '')),
+--        'informational';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

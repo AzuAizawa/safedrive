@@ -3,6 +3,59 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-16 - A new listing needs a payout destination (CHAPTER 99)
+
+A lister could list a car with no payout destination saved, then take bookings
+and be owed money with nowhere to send it. Nothing enforced the rule the
+onboarding text implied: Add Vehicle checked verification and listing slots, the
+cars insert policy checks only that the owner inserts their own row, and admin
+approval never looked at payout details.
+
+- **Where it leaked.** The verification form's payout dropdown defaulted to
+  "GCash" while Account Name and Number were optional, and the submit wrote
+  `payout_account_name/number` as null. So an account ended up with a method and
+  no account at all - which is exactly what the live data showed.
+- **Verification form.** The destination starts empty ("Select destination")
+  everywhere, instead of every payout form opening on "GCash". The section stays
+  optional - a renter verifies on the same page and never needs a payout
+  destination - but it is now all three or none: a method with no account name
+  or number can no longer be saved, which was the exact shape behind the live
+  case.
+- **Add Vehicle.** Blocked while the destination is incomplete, with the reason
+  and a link on the Listing readiness card, plus a guard in the submit handler.
+- **CHAPTER 99** enforces it in the database (`BEFORE INSERT` on `public.cars`).
+  Deliberately insert-only: cars already listed stay live, bookable and payable,
+  and editing, pausing or removing them is untouched. The lister completes their
+  details when they add their next vehicle. The service role is exempt.
+
+Files: `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` (CHAPTER 99),
+`src/pages/VerificationPage.tsx`, `src/pages/MyVehiclesPage.tsx`,
+`scripts/listing-payout-destination.test.mjs`, `package.json`.
+Apply CHAPTER 99, then run its read-only verification.
+
+## 2026-09-16 - A payout is never "released" to a destination that was never saved
+
+Reported from the lister's Bookings -> Overview: "No payout destination saved
+yet", and beside it a completed payout of PHP 1,425.
+
+- **The record was right, the wording was not.** The money is genuinely owed -
+  it was a cancellation compensation. But `releaseCancellationCompensation`
+  never checked the payout destination, so in demo mode it marked the payout
+  completed and Payout History said it was "sent to your saved destination".
+  The ordinary payout path has always refused this case ("Lister payout details
+  are incomplete", `server/payoutAutomation.ts`). Compensation now applies the
+  same rule: the payout row stays pending, the lister is told to add their
+  GCash or Maya details, and the audit row records why.
+- **The counter no longer claims a destination** it does not have.
+- **Layout.** A long provider reference squeezed the right-hand column of a
+  payout record and pushed "Download proof" out of line. The vehicle and amount
+  now share one row, the details run full width, and the button sits on its own
+  row.
+
+Files: `server/cancellationCompensation.ts`, `src/pages/ListerBookingsPage.tsx`,
+`scripts/cancellation-compensation.test.mjs`. No database change. The one
+existing PHP 1,425 record predates this and still reads as released.
+
 ## 2026-09-15 - A manual refund review is a decision, made on the evidence
 
 Financial Reviews -> Renter refunds could only confirm the recommended amount.

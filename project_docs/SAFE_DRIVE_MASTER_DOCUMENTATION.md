@@ -1306,7 +1306,7 @@ This appendix is the code-facing reference requested by the team. Its scope is e
 | User | `/cars/:id` | `CarDetailPage`; vehicle detail, inquiry, booking, and price preview |
 | User | `/my-bookings` | `MyBookingsPage`; renter booking lifecycle and actions |
 | User | `/verify` | `VerificationPage`; identity/KYC submission |
-| User | `/my-vehicles` | `MyVehiclesPage`; listing submission and material-edit reapproval |
+| User | `/my-vehicles` | `MyVehiclesPage`; listing submission and material-edit reapproval. A NEW listing needs identity verification, a free listing slot, and a complete payout destination (method + account name + number) - the last one enforced in the database by CHAPTER 99 (`BEFORE INSERT` on `public.cars`), so cars already listed are untouched |
 | User | `/lister-bookings` | `ListerBookingsPage`; owner booking decisions and trip state |
 | User | `/notifications` | `NotificationsPage`; personal notifications |
 | User | `/car-renewals` | `ListerCarRenewalPage`; expiring document renewal |
