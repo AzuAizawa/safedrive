@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { loadAdminAttentionItems, type AdminAttentionItem } from "@/lib/adminAttention";
+import { countAttentionByNavPath } from "@/lib/adminAttentionCounts";
 import { getQueueTiming } from "@/lib/queueAge";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -88,6 +89,12 @@ export default function AdminLayout() {
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const notificationPanelRef = useRef<HTMLDivElement>(null);
+  // Which tabs have work waiting, from the list the bell already loaded. It is
+  // refreshed on the same 60-second cycle, so a dot clears when its queue does.
+  const pendingByNavPath = useMemo(
+    () => countAttentionByNavPath(attentionItems),
+    [attentionItems],
+  );
 
   const handleSignOut = async () => {
     await recordSecurityEvent(
@@ -273,7 +280,19 @@ export default function AdminLayout() {
               <item.icon
                 className={`w-4 h-4 ${navItems.indexOf(item) === 0 ? "" : "opacity-80"}`}
               />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {pendingByNavPath[item.to] ? (
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full bg-amber-500"
+                  role="status"
+                  aria-label={`${item.label}: ${pendingByNavPath[item.to]} waiting for review`}
+                  title={
+                    pendingByNavPath[item.to] === 1
+                      ? "1 item is waiting for review"
+                      : `${pendingByNavPath[item.to]} items are waiting for review`
+                  }
+                />
+              ) : null}
             </NavLink>
           ))}
 

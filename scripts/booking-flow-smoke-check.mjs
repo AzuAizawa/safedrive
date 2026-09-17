@@ -721,6 +721,17 @@ const checks = [
     ],
   },
   {
+    // A tab with work waiting carries a dot, so an admin does not have to open
+    // every tab to find out. It counts the list the bell already loaded.
+    file: "src/components/AdminLayout.tsx",
+    markers: [
+      "countAttentionByNavPath",
+      "pendingByNavPath",
+      "waiting for review",
+      "bg-amber-500",
+    ],
+  },
+  {
     // CHAPTER 99: a new listing needs somewhere to be paid. The database is the
     // real guard; these two screens must keep asking for it first, so the
     // lister is told what to do instead of meeting a raw constraint error.

@@ -42,6 +42,7 @@ import {
   getQueueSeverity,
   getQueueTiming,
 } from "../src/lib/queueAge.ts";
+import { countAttentionByNavPath } from "../src/lib/adminAttentionCounts.ts";
 import {
   formatRichTextForDisplay,
   normalizeRichTextInput,
@@ -374,5 +375,46 @@ test("a rental fee is not held hostage by a case about the car", () => {
   assert.equal(
     payoutReleaseState(booking({ status: "fully_paid", dispute_status: "open" })),
     "not_ready",
+  );
+});
+
+// The admin sidebar shows a dot on a tab that has work waiting in it. The dot
+// is grouped from the same list the notification bell loads, keyed by the path
+// each item links to, so the two can never disagree.
+test("each admin tab is counted by the path its waiting items link to", () => {
+  const counts = countAttentionByNavPath([
+    { link: "/admin/users?profile=a1" },
+    { link: "/admin/users?profile=a2" },
+    { link: "/admin/vehicle-approval?vehicle=c1" },
+    { link: "/admin/support?ticket=t1" },
+    // Refunds and payouts live behind one tab, so they add up to one dot.
+    { link: "/admin/financial-reviews?view=refunds" },
+    { link: "/admin/financial-reviews?view=payouts" },
+    { link: "/admin/retention-requests" },
+    { link: "/admin/reconciliation" },
+  ]);
+
+  assert.deepEqual(counts, {
+    "/admin/users": 2,
+    "/admin/vehicle-approval": 1,
+    "/admin/support": 1,
+    "/admin/financial-reviews": 2,
+    "/admin/retention-requests": 1,
+    "/admin/reconciliation": 1,
+  });
+});
+
+test("a queue that empties leaves no dot behind", () => {
+  // Absent, not zero: the sidebar reads a missing key as "nothing waiting", so
+  // clearing the last item in a queue removes its dot on the next refresh.
+  const counts = countAttentionByNavPath([{ link: "/admin/support?ticket=t1" }]);
+  assert.equal(counts["/admin/guest-inquiries"], undefined);
+  assert.deepEqual(countAttentionByNavPath([]), {});
+});
+
+test("the dashboard never carries a dot, because it already shows every queue", () => {
+  assert.deepEqual(
+    countAttentionByNavPath([{ link: "/admin" }, { link: "/admin?panel=queues" }]),
+    {},
   );
 });

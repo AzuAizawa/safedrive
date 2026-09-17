@@ -11,6 +11,10 @@ export type AdminAttentionItem = {
   link: string;
 };
 
+// The per-tab counts the admin sidebar draws its dots from live in
+// ./adminAttentionCounts, which stays free of this module's Supabase client so
+// the arithmetic can be tested on its own.
+
 const requireSuccess = <T extends { error: { message: string } | null }>(result: T) => {
   if (result.error) throw result.error;
   return result;

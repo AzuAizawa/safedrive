@@ -3,6 +3,32 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-17 - An admin tab with work waiting says so
+
+Reported: the admin sidebar gave no sign of where work was waiting, so finding a
+pending verification, a vehicle awaiting approval or a refund to review meant
+opening each tab in turn.
+
+- A small amber dot now sits on any sidebar tab with items waiting, and clears
+  itself when that queue empties.
+- It costs no extra queries. `loadAdminAttentionItems()` already ran every 60
+  seconds for the notification bell; `countAttentionByNavPath()` groups that same
+  list by the nav path each item links to, so the dot and the bell can never
+  disagree.
+- Covered tabs: Users (pending verification), Vehicle Approval, Support Tickets,
+  User Inquiries, Financial Reviews (refunds and payouts, pending or failed),
+  Privacy Requests, Reconciliation. The Dashboard is deliberately excluded - it
+  shows every queue, so a dot there would always be lit.
+- A tab an admin cannot open never appears, and the rows behind it are refused by
+  RLS, so the dot cannot leak the existence of work they may not see.
+- The count is in the tooltip and the aria-label rather than the sidebar, which
+  stays quiet; the bell keeps the running total.
+
+Files: `src/lib/adminAttentionCounts.ts` (new - kept free of the Supabase client
+so the counting is tested on its own), `src/lib/adminAttention.ts`,
+`src/components/AdminLayout.tsx`, `scripts/process-logic.test.mjs`,
+`scripts/booking-flow-smoke-check.mjs`. No database change.
+
 ## 2026-09-16 - A new listing needs a payout destination (CHAPTER 99)
 
 A lister could list a car with no payout destination saved, then take bookings
