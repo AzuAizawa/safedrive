@@ -721,6 +721,27 @@ const checks = [
     ],
   },
   {
+    // The bookkeeper's copy: a complete range, not the page on screen, and the
+    // export itself is audited.
+    file: "src/pages/admin/AdminFinancialLedgerPage.tsx",
+    markers: [
+      "Export CSV",
+      "buildLedgerExportRows",
+      "money_records_exported",
+      "manilaDayStart",
+      "EXPORT_PAGE_SIZE",
+    ],
+  },
+  {
+    file: "src/pages/admin/AdminEarningsPage.tsx",
+    markers: [
+      "Export CSV",
+      "buildEarningsExportRows",
+      "earnings_exported",
+      "EXPORT_PAGE_SIZE",
+    ],
+  },
+  {
     // A tab with work waiting carries a dot, so an admin does not have to open
     // every tab to find out. It counts the list the bell already loaded.
     file: "src/components/AdminLayout.tsx",

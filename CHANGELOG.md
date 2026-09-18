@@ -3,6 +3,33 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-18 - Money records can be handed to a bookkeeper
+
+SafeDrive does not file taxes and does not issue BIR-accredited receipts - the
+PDF receipts say so. What it owes an accountant is the underlying record, and
+there was no way to get it out: not one export existed anywhere in the admin.
+
+- **Money Records** exports every ledger line for a chosen date range: date in
+  Manila time, event, booking, account code and name, debit and credit in pesos,
+  memo, provider reference, status, and - for a correction - which record it
+  reverses and why. One line per entry, each carrying its journal's context, so
+  the file can be filtered and pivoted.
+- **Earnings** exports the monthly summary for a chosen range, with a total line.
+  It reports SafeDrive's own income (commission and subscriptions), deliberately
+  not the gross value of bookings, most of which is money held for listers.
+- **Complete, not just what is on screen.** Both exports page through every row
+  in the range rather than reusing the capped view, so a file can never be
+  quietly short. Excel opens them correctly (UTF-8 BOM, quoted memos, centavos
+  rendered as pesos with both decimals).
+- Each export writes an audit entry naming the admin and the range, because
+  exporting money records is itself an action worth recording.
+
+Files: `src/lib/csvExport.ts` (new), `src/lib/ledgerExportRows.ts` (new - both
+kept free of the Supabase client so the shaping is tested on its own),
+`src/pages/admin/AdminFinancialLedgerPage.tsx`,
+`src/pages/admin/AdminEarningsPage.tsx`, `scripts/process-logic.test.mjs`,
+`scripts/booking-flow-smoke-check.mjs`. No database change.
+
 ## 2026-09-17 - An admin tab with work waiting says so
 
 Reported: the admin sidebar gave no sign of where work was waiting, so finding a

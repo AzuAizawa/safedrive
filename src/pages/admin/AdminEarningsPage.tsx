@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Coins, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Coins, Download, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import { buildCsv, csvFileName, downloadCsv } from "@/lib/csvExport";
+import { buildEarningsExportRows, EARNINGS_EXPORT_HEADERS } from "@/lib/ledgerExportRows";
 import { supabase } from "@/lib/supabase";
 
 // Revenue accounts in the double-entry ledger. Commission is recognised when
@@ -53,7 +58,34 @@ type SubscriptionRow = { amount_centavos: number | null; paid_at: string | null 
 
 type MonthBucket = { key: string; label: string; commission: number; subscription: number };
 
+// A Manila calendar day: the day an admin picks means midnight to midnight in
+// Manila, which is how the books are kept.
+const manilaDayStart = (day: string) => `${day}T00:00:00+08:00`;
+const manilaDayEnd = (day: string) => `${day}T23:59:59.999+08:00`;
+const todayInManila = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
+const firstOfManilaYear = () => `${todayInManila().slice(0, 4)}-01-01`;
+const manilaMonthKey = (value: string) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" })
+    .format(parsed)
+    .slice(0, 7);
+};
+const monthLabelFromKey = (key: string) => {
+  const [year, month] = key.split("-");
+  return `${MONTH_LABELS[Number(month) - 1] ?? month} ${year}`;
+};
+
+// Every query is capped, so the export walks its range in pages instead of
+// reusing the page view - a short file would be read as a low month.
+const EXPORT_PAGE_SIZE = 1000;
+
 export default function AdminEarningsPage() {
+  const { user } = useAuth();
+  const [exportFrom, setExportFrom] = useState(firstOfManilaYear);
+  const [exportTo, setExportTo] = useState(todayInManila);
+  const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState<LedgerEntryRow[]>([]);
   const [journals, setJournals] = useState<JournalRow[]>([]);
@@ -133,6 +165,131 @@ export default function AdminEarningsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // SafeDrive's own income for a chosen period: commission and subscriptions,
+  // read from the ledger. Deliberately not the gross value of bookings - most
+  // of that is money held for listers, not revenue.
+  const exportEarnings = async () => {
+    if (!exportFrom || !exportTo) {
+      toast.error("Choose both dates", {
+        description: "The export covers a start and an end date.",
+      });
+      return;
+    }
+    if (exportFrom > exportTo) {
+      toast.error("Check the dates", {
+        description: "The start date must come before the end date.",
+      });
+      return;
+    }
+
+    setExporting(true);
+    try {
+      // Journals carry the date; revenue entries hang off them. Both are walked
+      // in pages so a long period cannot be cut short.
+      const rangeJournals: Array<{ id: string; effective_at: string }> = [];
+      for (let offset = 0; ; offset += EXPORT_PAGE_SIZE) {
+        const { data, error } = await supabase
+          .from("ledger_journals")
+          .select("id, effective_at")
+          .gte("effective_at", manilaDayStart(exportFrom))
+          .lte("effective_at", manilaDayEnd(exportTo))
+          .order("effective_at", { ascending: true })
+          .range(offset, offset + EXPORT_PAGE_SIZE - 1);
+        if (error) throw error;
+        const rows = (data ?? []) as Array<{ id: string; effective_at: string }>;
+        rangeJournals.push(...rows);
+        if (rows.length < EXPORT_PAGE_SIZE) break;
+      }
+
+      const monthByJournal = new Map<string, string>();
+      for (const journal of rangeJournals) {
+        const key = manilaMonthKey(journal.effective_at);
+        if (key) monthByJournal.set(journal.id, key);
+      }
+
+      const buckets = new Map<string, { commission: number; subscription: number }>();
+      const addTo = (key: string, field: "commission" | "subscription", centavos: number) => {
+        const bucket = buckets.get(key) ?? { commission: 0, subscription: 0 };
+        bucket[field] += centavos;
+        buckets.set(key, bucket);
+      };
+
+      if (rangeJournals.length) {
+        const ids = rangeJournals.map((journal) => journal.id);
+        for (let index = 0; index < ids.length; index += 200) {
+          const { data, error } = await supabase
+            .from("ledger_entries")
+            .select("journal_id, account_code, credit_centavos, debit_centavos")
+            .in("account_code", [COMMISSION_ACCOUNT, SUBSCRIPTION_ACCOUNT])
+            .in("journal_id", ids.slice(index, index + 200));
+          if (error) throw error;
+          for (const entry of (data ?? []) as LedgerEntryRow[]) {
+            // Revenue accounts are credit-balance, so a reversal subtracts.
+            const amount =
+              Number(entry.credit_centavos || 0) - Number(entry.debit_centavos || 0);
+            const key = monthByJournal.get(entry.journal_id);
+            if (!key || amount === 0) continue;
+            addTo(
+              key,
+              entry.account_code === SUBSCRIPTION_ACCOUNT ? "subscription" : "commission",
+              amount,
+            );
+          }
+        }
+      }
+
+      const monthKeys = Array.from(buckets.keys()).sort();
+      if (!monthKeys.length) {
+        toast.info("No earnings in that range", {
+          description: "No commission or subscription was recorded between those dates.",
+        });
+        return;
+      }
+
+      downloadCsv(
+        csvFileName("earnings", exportFrom, exportTo),
+        buildCsv(
+          EARNINGS_EXPORT_HEADERS,
+          buildEarningsExportRows(
+            monthKeys.map((key) => ({
+              label: monthLabelFromKey(key),
+              commission: buckets.get(key)?.commission ?? 0,
+              subscription: buckets.get(key)?.subscription ?? 0,
+            })),
+          ),
+        ),
+      );
+
+      const { error: auditError } = await supabase.from("audit_log").insert({
+        user_id: user?.id ?? null,
+        action: "earnings_exported",
+        entity_type: "ledger_journals",
+        entity_id: `${exportFrom}_${exportTo}`,
+        details: {
+          admin_email: user?.email,
+          from: exportFrom,
+          to: exportTo,
+          months: monthKeys.length,
+        },
+      });
+      if (auditError) {
+        console.warn("Earnings export was not audited:", auditError.message);
+      }
+
+      toast.success("Earnings exported", {
+        description: `${monthKeys.length} month${
+          monthKeys.length === 1 ? "" : "s"
+        } for ${exportFrom} to ${exportTo}.`,
+      });
+    } catch (error) {
+      toast.error("Export failed", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const summary = useMemo(() => {
     const journalDate = new Map(journals.map((journal) => [journal.id, journal.effective_at]));
@@ -321,6 +478,52 @@ export default function AdminEarningsPage() {
           <RefreshCw className="h-4 w-4" />
           Refresh
         </Button>
+      </div>
+
+      {/* For the accountant: the monthly summary for a chosen period, walked in
+          full rather than taken from the capped view above. */}
+      <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-end">
+        <div className="space-y-1">
+          <Label htmlFor="earnings-export-from">Export from</Label>
+          <Input
+            id="earnings-export-from"
+            type="date"
+            value={exportFrom}
+            max={exportTo || undefined}
+            onChange={(event) => setExportFrom(event.target.value)}
+            className="w-full sm:w-44"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="earnings-export-to">to</Label>
+          <Input
+            id="earnings-export-to"
+            type="date"
+            value={exportTo}
+            min={exportFrom || undefined}
+            onChange={(event) => setExportTo(event.target.value)}
+            className="w-full sm:w-44"
+          />
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-2"
+          disabled={exporting}
+          onClick={() => void exportEarnings()}
+        >
+          {exporting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+          Export CSV
+        </Button>
+        <p className="text-xs text-muted-foreground sm:max-w-sm">
+          Commission and subscriptions per month, in pesos - SafeDrive's own
+          income, not the gross value of bookings. Dates follow the Manila
+          calendar.
+        </p>
       </div>
 
       {truncated && (

@@ -44,6 +44,18 @@ import {
 } from "../src/lib/queueAge.ts";
 import { countAttentionByNavPath } from "../src/lib/adminAttentionCounts.ts";
 import {
+  buildCsv,
+  centavosToPesoCell,
+  csvFileName,
+  toCsvCell,
+} from "../src/lib/csvExport.ts";
+import {
+  buildEarningsExportRows,
+  buildLedgerExportRows,
+  EARNINGS_EXPORT_HEADERS,
+  LEDGER_EXPORT_HEADERS,
+} from "../src/lib/ledgerExportRows.ts";
+import {
   formatRichTextForDisplay,
   normalizeRichTextInput,
   richTextHasVisibleContent,
@@ -417,4 +429,110 @@ test("the dashboard never carries a dot, because it already shows every queue", 
     countAttentionByNavPath([{ link: "/admin" }, { link: "/admin?panel=queues" }]),
     {},
   );
+});
+
+// SafeDrive does not file taxes; it owes the bookkeeper the underlying record.
+// A file that splits a memo across columns, or rounds centavos away, is worse
+// than no file, so the shaping is pinned here.
+test("a cell that carries a comma, a quote or a newline survives the file", () => {
+  assert.equal(toCsvCell("Reverse lister payable"), "Reverse lister payable");
+  assert.equal(
+    toCsvCell("Reverse lister payable, per review"),
+    '"Reverse lister payable, per review"',
+  );
+  assert.equal(toCsvCell('He said "no refund"'), '"He said ""no refund"""');
+  assert.equal(toCsvCell("line one\nline two"), '"line one\nline two"');
+  // Edge whitespace is quoted too, or a spreadsheet trims it silently.
+  assert.equal(toCsvCell(" 1010"), '" 1010"');
+  assert.equal(toCsvCell(null), "");
+  assert.equal(toCsvCell(undefined), "");
+  assert.equal(toCsvCell(0), "0");
+});
+
+test("centavos become pesos with both decimals, never a rounded peso", () => {
+  assert.equal(centavosToPesoCell(123456), "1234.56");
+  assert.equal(centavosToPesoCell(5), "0.05");
+  assert.equal(centavosToPesoCell(100000), "1000.00");
+  assert.equal(centavosToPesoCell(null), "0.00");
+  assert.equal(centavosToPesoCell("799600"), "7996.00");
+});
+
+test("the file names the period it covers", () => {
+  assert.equal(
+    csvFileName("ledger", "2026-09-01", "2026-09-30"),
+    "safedrive-ledger-2026-09-01_2026-09-30.csv",
+  );
+});
+
+test("rows are joined with CRLF and a header line", () => {
+  assert.equal(
+    buildCsv(["Month", "Total (PHP)"], [["September 2026", "7996.00"]]),
+    "Month,Total (PHP)\r\nSeptember 2026,7996.00",
+  );
+});
+
+test("every ledger line carries the booking and event it belongs to", () => {
+  const journals = [
+    {
+      id: "j1",
+      effective_at: "2026-09-15T12:19:13.000Z",
+      event_type: "renter_payment_collected",
+      event_key: "payment:downpayment:cs_test_1",
+      booking_id: "b1",
+      provider_reference: "cs_test_1",
+      status: "finalized",
+      reversal_of: null,
+      correction_reason: null,
+    },
+  ];
+  const entries = [
+    { journal_id: "j1", account_code: "1010", debit_centavos: 200000, credit_centavos: 0, memo: "Funds confirmed" },
+    { journal_id: "j1", account_code: "2010", debit_centavos: 0, credit_centavos: 180000, memo: "Lister payable" },
+  ];
+
+  const rows = buildLedgerExportRows(journals, entries, { "1010": "Cash", "2010": "Lister payable" });
+  assert.equal(rows.length, 2, "one line per entry");
+  assert.equal(rows[0].length, LEDGER_EXPORT_HEADERS.length, "every line fills the header");
+  // 8:19 PM in Manila, not the UTC stamp: the books are kept in Manila time.
+  assert.equal(rows[0][0], "2026-09-15 20:19");
+  assert.equal(rows[0][1], "renter payment collected");
+  assert.equal(rows[0][2], "b1", "the booking is on the line, not only on a group header");
+  assert.deepEqual(rows[0].slice(3, 8), ["1010", "Cash", "2000.00", "0.00", "Funds confirmed"]);
+  assert.deepEqual(rows[1].slice(3, 8), ["2010", "Lister payable", "0.00", "1800.00", "Lister payable"]);
+  // Both lines repeat the journal's context, so the file can be filtered.
+  assert.equal(rows[1][2], "b1");
+});
+
+test("a record with no lines still appears, rather than vanishing from the file", () => {
+  const rows = buildLedgerExportRows(
+    [
+      {
+        id: "j2",
+        effective_at: "2026-09-16T01:00:00.000Z",
+        event_type: "lister_payout_completed",
+        event_key: "payout:sandbox_1",
+        booking_id: null,
+        provider_reference: null,
+        status: "draft",
+        reversal_of: "j1",
+        correction_reason: "Wrong amount released",
+      },
+    ],
+    [],
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0][7], "(no lines recorded)");
+  assert.equal(rows[0][10], "j1", "a correction names the record it reverses");
+  assert.equal(rows[0][11], "Wrong amount released");
+});
+
+test("the earnings summary ends with a total line", () => {
+  const rows = buildEarningsExportRows([
+    { label: "August 2026", commission: 100000, subscription: 49900 },
+    { label: "September 2026", commission: 250000, subscription: 0 },
+  ]);
+  assert.equal(rows.length, 3, "two months plus the total");
+  assert.equal(rows[0].length, EARNINGS_EXPORT_HEADERS.length);
+  assert.deepEqual(rows[0], ["August 2026", "1000.00", "499.00", "1499.00"]);
+  assert.deepEqual(rows[2], ["Total", "3500.00", "499.00", "3999.00"]);
 });

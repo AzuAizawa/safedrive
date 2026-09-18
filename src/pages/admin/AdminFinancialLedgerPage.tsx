@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpenCheck, Loader2, RefreshCw, RotateCcw, Scale } from "lucide-react";
+import { BookOpenCheck, Download, Loader2, RefreshCw, RotateCcw, Scale } from "lucide-react";
 import { toast } from "sonner";
 
 import BookingPagination from "@/components/BookingPagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import { buildCsv, csvFileName, downloadCsv } from "@/lib/csvExport";
+import { buildLedgerExportRows, LEDGER_EXPORT_HEADERS } from "@/lib/ledgerExportRows";
 import { pageRange, serverPageInfo } from "@/lib/pagination";
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/types/database";
@@ -38,7 +41,24 @@ const PLAIN_EVENT_LABELS: Record<string, string> = {
 const describeEvent = (eventType: string) =>
   PLAIN_EVENT_LABELS[eventType] ?? eventType.replace(/_/g, " ");
 
+// A Manila calendar day, which is how the books are kept: the day the admin
+// picks means midnight to midnight in Manila, not in the browser's zone.
+const manilaDayStart = (day: string) => `${day}T00:00:00+08:00`;
+const manilaDayEnd = (day: string) => `${day}T23:59:59.999+08:00`;
+const todayInManila = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
+const firstOfThisManilaMonth = () => `${todayInManila().slice(0, 7)}-01`;
+
+// PostgREST caps a single response; the export walks the range in pages so a
+// file can never be quietly short.
+const EXPORT_PAGE_SIZE = 1000;
+const ENTRY_LOOKUP_CHUNK = 200;
+
 export default function AdminFinancialLedgerPage() {
+  const { user } = useAuth();
+  const [exportFrom, setExportFrom] = useState(firstOfThisManilaMonth);
+  const [exportTo, setExportTo] = useState(todayInManila);
+  const [exporting, setExporting] = useState(false);
   const [journals, setJournals] = useState<Journal[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -132,6 +152,103 @@ export default function AdminFinancialLedgerPage() {
     [entries],
   );
 
+  // SafeDrive does not file taxes; this is the record a bookkeeper builds the
+  // books from. It fetches the whole range rather than reusing the page on
+  // screen, so the file matches the period it is named after.
+  const exportRange = async () => {
+    if (!exportFrom || !exportTo) {
+      toast.error("Choose both dates", {
+        description: "The export covers a start and an end date.",
+      });
+      return;
+    }
+    if (exportFrom > exportTo) {
+      toast.error("Check the dates", {
+        description: "The start date must come before the end date.",
+      });
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const rangeJournals: Journal[] = [];
+      for (let offset = 0; ; offset += EXPORT_PAGE_SIZE) {
+        const { data, error } = await supabase
+          .from("ledger_journals")
+          .select("*")
+          .gte("effective_at", manilaDayStart(exportFrom))
+          .lte("effective_at", manilaDayEnd(exportTo))
+          .order("effective_at", { ascending: true })
+          .range(offset, offset + EXPORT_PAGE_SIZE - 1);
+        if (error) throw error;
+        const rows = data ?? [];
+        rangeJournals.push(...rows);
+        if (rows.length < EXPORT_PAGE_SIZE) break;
+      }
+
+      if (!rangeJournals.length) {
+        toast.info("No money records in that range", {
+          description: "Nothing was recorded between those dates.",
+        });
+        return;
+      }
+
+      const rangeEntries: Entry[] = [];
+      for (let index = 0; index < rangeJournals.length; index += ENTRY_LOOKUP_CHUNK) {
+        const ids = rangeJournals
+          .slice(index, index + ENTRY_LOOKUP_CHUNK)
+          .map((journal) => journal.id);
+        const { data, error } = await supabase
+          .from("ledger_entries")
+          .select("*")
+          .in("journal_id", ids);
+        if (error) throw error;
+        rangeEntries.push(...(data ?? []));
+      }
+
+      downloadCsv(
+        csvFileName("ledger", exportFrom, exportTo),
+        buildCsv(
+          LEDGER_EXPORT_HEADERS,
+          buildLedgerExportRows(rangeJournals, rangeEntries, accountMap),
+        ),
+      );
+
+      // Taking a copy of the money records out of SafeDrive is itself an action
+      // worth recording, so a later reader knows who holds a copy of what.
+      const { error: auditError } = await supabase.from("audit_log").insert({
+        user_id: user?.id ?? null,
+        action: "money_records_exported",
+        entity_type: "ledger_journals",
+        entity_id: `${exportFrom}_${exportTo}`,
+        details: {
+          admin_email: user?.email,
+          from: exportFrom,
+          to: exportTo,
+          records: rangeJournals.length,
+          lines: rangeEntries.length,
+        },
+      });
+      if (auditError) {
+        console.warn("Money records export was not audited:", auditError.message);
+      }
+
+      toast.success("Money records exported", {
+        description: `${rangeJournals.length.toLocaleString()} record${
+          rangeJournals.length === 1 ? "" : "s"
+        } and ${rangeEntries.length.toLocaleString()} line${
+          rangeEntries.length === 1 ? "" : "s"
+        } for ${exportFrom} to ${exportTo}.`,
+      });
+    } catch (error) {
+      toast.error("Export failed", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const beginCorrection = (journal: Journal) => {
     setCorrectingJournalId(journal.id);
     setCorrectionReason("");
@@ -211,6 +328,51 @@ export default function AdminFinancialLedgerPage() {
             Refresh
           </Button>
         </div>
+      </div>
+
+      {/* For the bookkeeper: the whole range, not just the page on screen. */}
+      <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-end">
+        <div className="space-y-1">
+          <Label htmlFor="ledger-export-from">Export from</Label>
+          <Input
+            id="ledger-export-from"
+            type="date"
+            value={exportFrom}
+            max={exportTo || undefined}
+            onChange={(event) => setExportFrom(event.target.value)}
+            className="w-full sm:w-44"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ledger-export-to">to</Label>
+          <Input
+            id="ledger-export-to"
+            type="date"
+            value={exportTo}
+            min={exportFrom || undefined}
+            onChange={(event) => setExportTo(event.target.value)}
+            className="w-full sm:w-44"
+          />
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-2"
+          disabled={exporting}
+          onClick={() => void exportRange()}
+        >
+          {exporting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+          Export CSV
+        </Button>
+        <p className="text-xs text-muted-foreground sm:max-w-sm">
+          Every line in the range, in pesos, for your accountant. Dates follow the
+          Manila calendar. This is a SafeDrive record, not a BIR invoice or
+          official receipt.
+        </p>
       </div>
 
       {showAdvanced && (
