@@ -820,12 +820,18 @@ const checks = [
       "/admin/support?ticket=",
       "Deny Refund",
       "Release a different amount",
+      // The dialog is capped to the viewport and scrolls inside itself.
+      "max-h-[calc(100vh-2rem)]",
+      "min-h-0 flex-1 overflow-y-auto",
     ],
     absentMarkers: [
       "supabase as any",
       "no-explicit-any",
       '<option value="PayMongo">PayMongo</option>',
       "PayMongo could not finish the refund automatically",
+      // Centring a panel taller than its container puts the top out of reach
+      // at any scroll position - that was the bug, not the length.
+      "sm:items-center",
     ],
   },
   {

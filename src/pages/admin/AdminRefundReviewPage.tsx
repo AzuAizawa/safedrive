@@ -928,17 +928,22 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
       {manualTarget &&
         review &&
         createPortal(
+          /* The panel is capped to the viewport and scrolls inside itself. It
+             used to be centred with the backdrop scrolling instead: once the
+             evidence made the dialog taller than the screen, the top overflowed
+             above the scroll container and could not be reached at all. */
           <div
-            className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:items-center"
+            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
             onClick={() => {
               if (!manualLoading) closeManualRefund();
             }}
           >
             <div
-              className="my-4 w-full max-w-2xl rounded-xl border border-border bg-card p-5 text-card-foreground shadow-2xl"
+              className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col rounded-xl border border-border bg-card text-card-foreground shadow-2xl"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="space-y-1">
+              {/* Fixed: the title stays in view however long the evidence runs. */}
+              <div className="shrink-0 space-y-1 border-b border-border/60 px-5 py-4">
                 <h2 className="text-lg font-semibold">
                   {review.finalIsZero
                     ? review.choice === "deny"
@@ -953,7 +958,9 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                 </p>
               </div>
 
-              <div className="mt-4 rounded-lg border border-border/70 bg-muted/30 p-4 text-sm">
+              {/* The one scrolling region: everything the admin reads and fills in. */}
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-sm">
                 <p className="font-semibold">{getVehicleLabel(manualTarget)}</p>
                 <p className="mt-1 text-muted-foreground">
                   Renter: {manualTarget.bookings.renter.full_name || manualTarget.bookings.renter.email}
@@ -1189,8 +1196,10 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                   />
                 </label>
               </div>
+              </div>
 
-              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              {/* Fixed: Cancel and the decision stay reachable without scrolling. */}
+              <div className="shrink-0 flex flex-col-reverse gap-2 border-t border-border/60 px-5 py-4 sm:flex-row sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"

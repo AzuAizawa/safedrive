@@ -3,6 +3,27 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-18 - The refund review dialog stays reachable, however long the evidence
+
+Reported with a screenshot: the top of the Refund Review dialog could not be
+seen even with the scrollbar already at the top.
+
+It was not only length. The dialog was centred (`sm:items-center`) while the
+backdrop did the scrolling, and a flex item taller than its container overflows
+*above* the top of that container - unreachable by scrolling, at any width. The
+evidence timeline made it taller than the viewport, so the title and the case
+links were simply gone.
+
+- The panel is now capped to the viewport (`max-h-[calc(100vh-2rem)]`) and
+  scrolls inside itself, in three parts: a fixed header, one scrolling body, and
+  a fixed footer.
+- Cancel and the decision button no longer move: they stay on screen whatever
+  the timeline holds, so a long case cannot hide the action.
+- A smoke check now refuses the centred variant, so the same bug cannot return.
+
+Files: `src/pages/admin/AdminRefundReviewPage.tsx`,
+`scripts/booking-flow-smoke-check.mjs`. No database change.
+
 ## 2026-09-18 - "We could not ask" is not "the provider disagrees"
 
 A reconciliation run on the live build raised 11 critical issues. Nine were the
