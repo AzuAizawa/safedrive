@@ -58,7 +58,9 @@ const allNavItems: AdminNavItem[] = [
   { to: "/admin/admins", label: "Admin Accounts", icon: UserCheck, superAdminOnly: true },
   { to: "/admin/platform-settings", label: "Platform Settings", icon: Settings2, superAdminOnly: true },
   { to: "/admin/announcements", label: "Announcements", icon: Megaphone, superAdminOnly: true },
-  { to: "/admin/earnings", label: "Earnings", icon: Coins, superAdminOnly: true },
+  // Income and the findings that explain it live on one page on purpose: split
+  // across two, the same records would be counted twice and could disagree.
+  { to: "/admin/earnings", label: "Earnings & Insights", icon: Coins, superAdminOnly: true },
   { to: "/admin/financial-reviews", label: "Financial Reviews", icon: CreditCard, superAdminOnly: true },
   // Matches the page's own heading. The page was renamed to "Money Records"
   // to get the accounting vocabulary out of the admin's way; this label was

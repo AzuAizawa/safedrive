@@ -733,12 +733,18 @@ const checks = [
     ],
   },
   {
+    // Income and the findings that explain it sit on one page, counted from the
+    // same records - two pages would count them twice and could disagree.
     file: "src/pages/admin/AdminEarningsPage.tsx",
     markers: [
       "Export CSV",
       "buildEarningsExportRows",
       "earnings_exported",
       "EXPORT_PAGE_SIZE",
+      "Earnings &amp; Insights",
+      "summarizeCancellations",
+      "summarizeRefundKinds",
+      "summarizeQueueHealth",
     ],
   },
   {

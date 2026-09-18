@@ -3,6 +3,35 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-18 - Earnings & Insights: the findings, not just the figures
+
+The page already interpreted its data - busiest month and weekday, most booked
+car types, areas with listed cars but no bookings - but it was called
+"Earnings", so the reading was that SafeDrive reports money and nothing else.
+A separate Insights page was considered and rejected: the monthly income would
+have been computed in two places from the same ledger accounts, and two pages
+showing "income" are two pages that can disagree.
+
+- **Renamed** to "Earnings & Insights", in the sidebar and on the page.
+- **Why bookings were cancelled** - who cancelled, for what reason, and how many
+  were late cancellations. A lister who accepts and then backs out is a
+  moderation question, and nothing surfaced it before.
+- **What refunds were for** - grouped by the same kinds the Refund Review dialog
+  shows (`classifyManualRefund`), so a month of "Claim: no car at pickup" reads
+  differently from a month of "Cancellation fee". A completed PayMongo refund is
+  its own slice rather than being mislabelled as a failed automatic one.
+- **Work still waiting** - each queue with its oldest wait, read from the same
+  `loadAdminAttentionItems()` the notification bell and the sidebar dots use, so
+  the three can never disagree. A count alone hides the shape: five items waiting
+  an hour is a busy day, one waiting nine days is a person who was forgotten.
+- No new collection and no tracking: every figure is counted from records the
+  platform already keeps for the transaction itself.
+
+Files: `src/lib/insightsSummary.ts` (new - kept free of the Supabase client so
+the counting is tested on its own), `src/pages/admin/AdminEarningsPage.tsx`,
+`src/components/AdminLayout.tsx`, `scripts/process-logic.test.mjs`,
+`scripts/booking-flow-smoke-check.mjs`. No database change.
+
 ## 2026-09-18 - Money records can be handed to a bookkeeper
 
 SafeDrive does not file taxes and does not issue BIR-accredited receipts - the

@@ -56,6 +56,11 @@ import {
   LEDGER_EXPORT_HEADERS,
 } from "../src/lib/ledgerExportRows.ts";
 import {
+  summarizeCancellations,
+  summarizeQueueHealth,
+  summarizeRefundKinds,
+} from "../src/lib/insightsSummary.ts";
+import {
   formatRichTextForDisplay,
   normalizeRichTextInput,
   richTextHasVisibleContent,
@@ -524,6 +529,93 @@ test("a record with no lines still appears, rather than vanishing from the file"
   assert.equal(rows[0][7], "(no lines recorded)");
   assert.equal(rows[0][10], "j1", "a correction names the record it reverses");
   assert.equal(rows[0][11], "Wrong amount released");
+});
+
+// The Insights sections read records SafeDrive already keeps. Nothing is
+// tracked or collected for them, so the only thing that can be wrong is the
+// counting - pinned here.
+test("cancellations are counted by who cancelled and why", () => {
+  const summary = summarizeCancellations([
+    { cancelled_by_role: "renter", reason: "change_of_plans", was_late: true },
+    { cancelled_by_role: "renter", reason: "change_of_plans", was_late: false },
+    { cancelled_by_role: "lister", reason: "vehicle_unavailable", was_late: false },
+    { cancelled_by_role: "both", reason: null, was_late: false },
+  ]);
+
+  assert.equal(summary.total, 4);
+  assert.equal(summary.late, 1, "a late cancellation is the one that costs someone a trip");
+  assert.deepEqual(summary.byRole[0], {
+    key: "renter",
+    label: "Cancelled by the renter",
+    count: 2,
+  });
+  // A lister backing out is a moderation question, so it must stay visible.
+  assert.ok(summary.byRole.some((row) => row.key === "lister" && row.count === 1));
+  assert.deepEqual(summary.byReason[0], {
+    key: "change_of_plans",
+    label: "Change of plans",
+    count: 2,
+  });
+  assert.ok(
+    summary.byReason.some((row) => row.label === "Not given"),
+    "a cancellation with no reason is still counted, not dropped",
+  );
+});
+
+test("refunds are grouped by the same kinds the review dialog shows", () => {
+  const summary = summarizeRefundKinds([
+    {
+      payment_method: "manual_review",
+      notes: "Renter reported no vehicle at pickup (lister did not deliver). Recommend a full refund pending admin confirmation of the claim.",
+    },
+    {
+      payment_method: "manual_review",
+      notes: "Manual refund review required. Policy recommendation: refund PHP 1,000 of PHP 2,000 captured (short-notice cancellation). Admin confirms or adjusts.",
+    },
+    {
+      payment_method: "GCash",
+      notes: "Manual refund review required. Policy recommendation: refund PHP 1,000 of PHP 2,000 captured (short-notice cancellation). Released by super admin.",
+    },
+    // A provider refund carries no review note, so it gets its own slice
+    // instead of being mislabelled as a failed automatic refund.
+    { payment_method: "PayMongo", notes: null },
+  ]);
+
+  assert.equal(summary.total, 4);
+  assert.deepEqual(summary.slices[0], {
+    key: "cancellation_policy",
+    label: "Cancellation fee",
+    count: 2,
+  });
+  assert.ok(summary.slices.some((slice) => slice.key === "no_car_claim" && slice.count === 1));
+  assert.ok(
+    summary.slices.some((slice) => slice.key === "provider_refund" && slice.count === 1),
+  );
+  assert.ok(
+    !summary.slices.some((slice) => slice.key === "automatic_refund_failed"),
+    "a completed PayMongo refund is not a failed one",
+  );
+});
+
+test("queue health reports the oldest wait, not just the count", () => {
+  const rows = summarizeQueueHealth([
+    { kind: "support", createdAt: "2026-09-16T02:00:00.000Z" },
+    { kind: "support", createdAt: "2026-09-10T02:00:00.000Z" },
+    { kind: "vehicle", createdAt: "2026-09-17T02:00:00.000Z" },
+    { kind: "refund", createdAt: "2026-09-01T02:00:00.000Z" },
+    { kind: "support", createdAt: "not a date" },
+  ]);
+
+  // Oldest first: the queue that has been waiting longest leads.
+  assert.deepEqual(
+    rows.map((row) => row.key),
+    ["refund", "support", "vehicle"],
+  );
+  const support = rows.find((row) => row.key === "support");
+  assert.equal(support.count, 2, "an unreadable timestamp is skipped, not counted");
+  assert.equal(support.oldestCreatedAt, "2026-09-10T02:00:00.000Z");
+  assert.equal(support.label, "Support needing a reply");
+  assert.deepEqual(summarizeQueueHealth([]), []);
 });
 
 test("the earnings summary ends with a total line", () => {

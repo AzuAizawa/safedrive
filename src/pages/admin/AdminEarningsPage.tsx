@@ -6,8 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
+import { loadAdminAttentionItems, type AdminAttentionItem } from "@/lib/adminAttention";
 import { buildCsv, csvFileName, downloadCsv } from "@/lib/csvExport";
+import {
+  summarizeCancellations,
+  summarizeQueueHealth,
+  summarizeRefundKinds,
+  type CancellationRow,
+  type RefundRow,
+} from "@/lib/insightsSummary";
 import { buildEarningsExportRows, EARNINGS_EXPORT_HEADERS } from "@/lib/ledgerExportRows";
+import { formatElapsed } from "@/lib/queueAge";
 import { supabase } from "@/lib/supabase";
 
 // Revenue accounts in the double-entry ledger. Commission is recognised when
@@ -92,12 +101,32 @@ export default function AdminEarningsPage() {
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [cars, setCars] = useState<CarRow[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRow[]>([]);
+  const [cancellations, setCancellations] = useState<CancellationRow[]>([]);
+  const [refunds, setRefunds] = useState<RefundRow[]>([]);
+  const [queueItems, setQueueItems] = useState<AdminAttentionItem[]>([]);
   const [truncated, setTruncated] = useState(false);
+
+  // The three Insights sections: counted from records already kept, never from
+  // tracking. Each one answers a question the money figures cannot.
+  const cancellationSummary = useMemo(
+    () => summarizeCancellations(cancellations),
+    [cancellations],
+  );
+  const refundSummary = useMemo(() => summarizeRefundKinds(refunds), [refunds]);
+  const queueHealth = useMemo(() => summarizeQueueHealth(queueItems), [queueItems]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [entryResult, journalResult, bookingResult, carResult, subscriptionResult] =
-      await Promise.all([
+    const [
+      entryResult,
+      journalResult,
+      bookingResult,
+      carResult,
+      subscriptionResult,
+      cancellationResult,
+      refundResult,
+      attentionItems,
+    ] = await Promise.all([
         supabase
           .from("ledger_entries")
           .select("journal_id, account_code, credit_centavos, debit_centavos")
@@ -127,6 +156,20 @@ export default function AdminEarningsPage() {
           .select("amount_centavos, paid_at")
           .not("amount_centavos", "is", null)
           .limit(ROW_LIMIT),
+        // Why bookings ended early, and what refunds were actually for. Both
+        // are records SafeDrive already keeps - nothing new is collected.
+        supabase
+          .from("booking_cancellations")
+          .select("cancelled_by_role, reason, was_late")
+          .limit(ROW_LIMIT),
+        supabase
+          .from("payments")
+          .select("notes, payment_method")
+          .eq("payment_type", "refund")
+          .limit(ROW_LIMIT),
+        // The same queue list the notification bell and the sidebar dots read,
+        // so the three can never tell the admin different things.
+        loadAdminAttentionItems(true).catch(() => []),
       ]);
 
     const error =
@@ -134,7 +177,9 @@ export default function AdminEarningsPage() {
       journalResult.error ||
       bookingResult.error ||
       carResult.error ||
-      subscriptionResult.error;
+      subscriptionResult.error ||
+      cancellationResult.error ||
+      refundResult.error;
     if (error) {
       toast.error("Earnings could not be loaded", { description: error.message });
       setLoading(false);
@@ -147,17 +192,25 @@ export default function AdminEarningsPage() {
     const carRows = (carResult.data ?? []) as CarRow[];
     const subscriptionRows = (subscriptionResult.data ?? []) as SubscriptionRow[];
 
+    const cancellationRows = (cancellationResult.data ?? []) as CancellationRow[];
+    const refundRows = (refundResult.data ?? []) as RefundRow[];
+
     setEntries(entryRows);
     setJournals(journalRows);
     setBookings(bookingRows);
     setCars(carRows);
     setSubscriptions(subscriptionRows);
+    setCancellations(cancellationRows);
+    setRefunds(refundRows);
+    setQueueItems(attentionItems);
     setTruncated(
       entryRows.length >= ROW_LIMIT ||
         journalRows.length >= ROW_LIMIT ||
         bookingRows.length >= ROW_LIMIT ||
         carRows.length >= ROW_LIMIT ||
-        subscriptionRows.length >= ROW_LIMIT,
+        subscriptionRows.length >= ROW_LIMIT ||
+        cancellationRows.length >= ROW_LIMIT ||
+        refundRows.length >= ROW_LIMIT,
     );
     setLoading(false);
   }, []);
@@ -466,12 +519,13 @@ export default function AdminEarningsPage() {
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold">
-            <Coins className="h-7 w-7" /> Earnings
+            <Coins className="h-7 w-7" /> Earnings &amp; Insights
           </h1>
           <p className="mt-1 text-muted-foreground">
-            What SafeDrive earned, and when the platform is busiest. Every total
-            below is counted twice - once from the ledger, once from the
-            original records - and flagged if the two disagree.
+            What SafeDrive earned, when the platform is busiest, and what the
+            records say about cancellations, refunds and work still waiting.
+            Every total below is counted twice - once from the ledger, once from
+            the original records - and flagged if the two disagree.
           </p>
         </div>
         <Button variant="outline" className="gap-2" onClick={() => void load()}>
@@ -740,6 +794,135 @@ export default function AdminEarningsPage() {
             </div>
           </section>
 
+          {/* The findings the money figures cannot answer: who walks away from a
+              booking, what refunds were really for, and what is waiting. */}
+          <section className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border bg-card p-5">
+              <h2 className="font-semibold">Why bookings were cancelled</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {cancellationSummary.total} cancellation
+                {cancellationSummary.total === 1 ? "" : "s"} on record
+                {cancellationSummary.late > 0
+                  ? `, ${cancellationSummary.late} of them late enough to charge a fee`
+                  : ""}
+                . A lister who accepts and then backs out costs a renter their
+                trip - that is a moderation question, not a statistic.
+              </p>
+              {cancellationSummary.total === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No cancellations recorded yet.
+                </p>
+              ) : (
+                <>
+                  <div className="mt-4 space-y-2">
+                    {cancellationSummary.byRole.map((row) => (
+                      <div key={row.key} className="flex items-center gap-3">
+                        <span className="w-44 shrink-0 text-sm">{row.label}</span>
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary/70"
+                            style={{
+                              width: `${(row.count / cancellationSummary.byRole[0].count) * 100}%`,
+                            }}
+                          />
+                        </div>
+                        <span className="w-10 shrink-0 text-right text-sm font-medium">
+                          {row.count}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 border-t border-border/40 pt-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Reasons given
+                    </p>
+                    <ul className="mt-2 space-y-1 text-sm">
+                      {cancellationSummary.byReason.slice(0, 5).map((row) => (
+                        <li key={row.key} className="flex justify-between gap-3">
+                          <span className="min-w-0 truncate">{row.label}</span>
+                          <span className="shrink-0 font-medium">{row.count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="rounded-xl border bg-card p-5">
+              <h2 className="font-semibold">What refunds were for</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {refundSummary.total} refund record
+                {refundSummary.total === 1 ? "" : "s"}, grouped the same way the
+                Refund Review screen groups them. A run of "Claim: no car at
+                pickup" means something different from a run of "Cancellation
+                fee".
+              </p>
+              {refundSummary.total === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  No refunds recorded yet.
+                </p>
+              ) : (
+                <div className="mt-4 space-y-2">
+                  {refundSummary.slices.map((slice) => (
+                    <div key={slice.key} className="flex items-center gap-3">
+                      <span className="w-44 shrink-0 text-sm">{slice.label}</span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-amber-500/70"
+                          style={{
+                            width: `${(slice.count / refundSummary.slices[0].count) * 100}%`,
+                          }}
+                        />
+                      </div>
+                      <span className="w-10 shrink-0 text-right text-sm font-medium">
+                        {slice.count}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-xl border bg-card p-5">
+            <h2 className="font-semibold">Work still waiting</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The same queues the notification bell and the sidebar dots read, so
+              the three always agree. A count alone hides the shape: five items
+              waiting an hour is a busy day, one waiting nine days is a person
+              who was forgotten.
+            </p>
+            {queueHealth.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                Nothing is waiting for review right now.
+              </p>
+            ) : (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-muted-foreground">
+                      <th className="py-2">Queue</th>
+                      <th className="text-right">Waiting</th>
+                      <th className="text-right">Oldest</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {queueHealth.map((row) => (
+                      <tr key={row.key} className="border-b border-border/40">
+                        <td className="py-2">{row.label}</td>
+                        <td className="text-right">{row.count}</td>
+                        <td className="text-right font-medium">
+                          {formatElapsed(row.oldestCreatedAt)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
           <section className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
             <h2 className="font-semibold text-foreground">How these numbers are counted</h2>
             <ul className="mt-2 space-y-1.5">
@@ -769,6 +952,29 @@ export default function AdminEarningsPage() {
                 <strong className="text-foreground">Car types and areas</strong> -
                 also from completed bookings. The area is the region chosen on the
                 listing. A car with no area set is grouped under "Not set".
+              </li>
+              <li>
+                <strong className="text-foreground">Cancellations</strong> - from the
+                cancellation record written when a booking is called off, counted by
+                the side it was charged against. "Late" means it fell inside the
+                window where the policy charges a fee.
+              </li>
+              <li>
+                <strong className="text-foreground">Refund kinds</strong> - read from
+                each refund's own review note, using the same classification the
+                Refund Review screen shows. A refund PayMongo handled automatically
+                carries no review note, so it is counted on its own line.
+              </li>
+              <li>
+                <strong className="text-foreground">Work still waiting</strong> - the
+                open queues themselves, not a separate tally: the same list the
+                notification bell and the sidebar dots read. "Oldest" is how long the
+                longest-waiting item in that queue has been there.
+              </li>
+              <li>
+                <strong className="text-foreground">None of this is tracking</strong> -
+                every figure above is counted from records SafeDrive already keeps to
+                run a booking. Nothing observes how a person uses the app.
               </li>
             </ul>
             <p className="mt-3">
