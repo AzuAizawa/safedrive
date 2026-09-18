@@ -3,6 +3,32 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-18 - Insights names a refund reason it cannot know
+
+Checking the new "What refunds were for" section against live data showed five
+of six refunds landing in the catch-all, where they read as "Manual review" -
+which implies a judgement call someone could go back and check. They were not
+that. They were refunds whose reason no longer exists in the record.
+
+- A released refund with no recognisable cause is now shown as **"Released,
+  reason not recorded"**. Naming the gap is honest; filing it under manual
+  review was not.
+- An automatic refund for a booking the lister called off gets its own slice,
+  **"Lister cancelled the booking"**, read from the note it already carries.
+- The tests use note shapes taken from live rows, so the classification is
+  pinned against what the database actually holds rather than an ideal.
+
+**Known gap, deliberately left for now:** the cause sits in the release path.
+`api/mark-manual-refund.ts` replaces a refund's note with "Refund released by
+super admin through GCash", discarding the only record of what the refund was
+for - so after release a no-car claim and a cancellation fee look identical.
+Writing the release line in front of the original note instead of over it is a
+small change, kept out of this one to leave the money path untouched. The
+classification for that shape is already tested, so it stays a one-line change.
+
+Files: `src/lib/insightsSummary.ts`, `scripts/process-logic.test.mjs`.
+No database change.
+
 ## 2026-09-18 - Earnings & Insights: the findings, not just the figures
 
 The page already interpreted its data - busiest month and weekday, most booked

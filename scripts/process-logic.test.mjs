@@ -597,6 +597,52 @@ test("refunds are grouped by the same kinds the review dialog shows", () => {
   );
 });
 
+// The note shapes below are taken from live refund rows, not invented: the
+// classification has to survive what the database actually holds.
+test("refund rows that carry no reason are named as such, not filed as a review", () => {
+  const summary = summarizeRefundKinds([
+    // Released before the release note kept the original context behind it.
+    { payment_method: "GCash", notes: "Refund released by super admin through GCash." },
+    { payment_method: "GCash", notes: "Refund released by super admin through GCash." },
+    { payment_method: "No refund due", notes: "Settled by super admin: refund denied after review." },
+    // An automatic refund for a booking the lister called off.
+    {
+      payment_method: "demo",
+      notes: "Demo refund - no PayMongo transfer. Source transaction IDs: cs_403ced58e49dd25ce4eefac3; SafeDrive refund for Ford Ranger (ASX 1232). Lister cancelled the accepted paid booking.",
+    },
+  ]);
+
+  assert.deepEqual(summary.slices[0], {
+    key: "reason_not_recorded",
+    label: "Released, reason not recorded",
+    count: 3,
+  });
+  assert.ok(
+    summary.slices.some((slice) => slice.key === "lister_cancelled" && slice.count === 1),
+  );
+  assert.ok(
+    !summary.slices.some((slice) => slice.key === "other"),
+    "a lost reason is never dressed up as a manual review",
+  );
+});
+
+test("when a note carries both the release line and the original context, the context wins", () => {
+  // Today the release path overwrites the note, so this shape does not occur
+  // yet. Pinned now so that preserving the context later is a one-line change
+  // in the API with the classification already proved.
+  const summary = summarizeRefundKinds([
+    {
+      payment_method: "GCash",
+      notes: "Refund released by super admin through GCash. | Manual refund review required. Policy recommendation: refund PHP 7,996 of PHP 15,992 captured (short-notice cancellation). Admin confirms or adjusts.",
+    },
+  ]);
+  assert.deepEqual(summary.slices[0], {
+    key: "cancellation_policy",
+    label: "Cancellation fee",
+    count: 1,
+  });
+});
+
 test("queue health reports the oldest wait, not just the count", () => {
   const rows = summarizeQueueHealth([
     { kind: "support", createdAt: "2026-09-16T02:00:00.000Z" },

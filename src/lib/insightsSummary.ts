@@ -64,6 +64,14 @@ export type RefundRow = {
 };
 
 const PROVIDER_SLICE = { key: "provider_refund", label: "Automatic PayMongo refund" };
+const LISTER_CANCELLED_SLICE = {
+  key: "lister_cancelled",
+  label: "Lister cancelled the booking",
+};
+// A refund released before the release note kept its original context behind it
+// (api/mark-manual-refund.ts). Saying so is honest; filing it under "Manual
+// review" would suggest a judgement call nobody can check any more.
+const UNRECORDED_SLICE = { key: "reason_not_recorded", label: "Released, reason not recorded" };
 
 /**
  * What refunds were actually for, using the same classification the Refund
@@ -76,15 +84,28 @@ export const summarizeRefundKinds = (rows: RefundRow[]) => {
 
   for (const row of rows) {
     const method = row.payment_method?.toLowerCase() ?? "";
+    const text = (row.notes ?? "").toLowerCase();
     // A provider refund carries no review note to classify, so it is its own
     // slice rather than being mislabelled as a failed automatic refund.
     const slice =
       method === "paymongo"
         ? PROVIDER_SLICE
-        : (() => {
-            const kind = classifyManualRefund(row.notes);
-            return { key: kind, label: MANUAL_REFUND_KINDS[kind].label };
-          })();
+        : // An automatic refund for a booking the lister called off: the note
+          // names the cause even though no review was needed.
+          text.includes("lister cancelled")
+          ? LISTER_CANCELLED_SLICE
+          : (() => {
+              const kind = classifyManualRefund(row.notes);
+              // "other" here means the note carries no recognisable cause -
+              // for a released refund that is a lost reason, not a judgement.
+              if (kind === "other") {
+                return text.includes("released by super admin") ||
+                  text.includes("settled by super admin")
+                  ? UNRECORDED_SLICE
+                  : { key: kind, label: MANUAL_REFUND_KINDS[kind].label };
+              }
+              return { key: kind, label: MANUAL_REFUND_KINDS[kind].label };
+            })();
 
     const current = kinds.get(slice.key);
     if (current) current.count += 1;
