@@ -655,6 +655,17 @@ const checks = [
     ],
   },
   {
+    // A refund held for review opens a support case. Every path that opens one
+    // must also tell the renter, or the case is silence: SafeDrive may still
+    // need to ask where to send the money.
+    file: "server/cancellationRefundPlan.ts",
+    markers: ["Your refund is with SafeDrive support", 'link: "/support"'],
+  },
+  {
+    file: "api/booking-incident-action.ts",
+    markers: ["Your refund is with SafeDrive support", "user_id: b.renter_id"],
+  },
+  {
     file: "api/mark-manual-refund.ts",
     markers: [
       "GCash/Maya return method",
@@ -666,6 +677,11 @@ const checks = [
       "getRefundCapacity",
       "classifyManualRefund",
       "refund-decision:",
+      // The decided amount goes back through the original payment first; a
+      // manual transfer is only reached after SafeDrive says it cannot.
+      "releaseDecidedRefundToSource",
+      "needsManualTransfer",
+      "returnedToSource",
     ],
     absentMarkers: [
       'normalized === "paymongo"',

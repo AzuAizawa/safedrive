@@ -376,6 +376,17 @@ const createManualRefundReview = async (
       sender_id: userId,
       message: note,
     });
+
+    // A case with no notice behind it is silence to the renter. SafeDrive may
+    // still need the account to send the refund to, and they cannot answer a
+    // question in a case they were never told about.
+    await supabase.from("notifications").insert({
+      user_id: userId,
+      title: "Your refund is with SafeDrive support",
+      message: `The refund for ${getVehicleLabel(booking)} is being reviewed by SafeDrive. A support case is open for it - watch there for any question, and reply if support asks where to send the money.`,
+      type: "info",
+      link: "/support",
+    });
   }
 
   return refundPaymentId;

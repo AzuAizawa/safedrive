@@ -5,6 +5,7 @@ import {
   releaseCancellationCompensation,
   type CompensationResult,
 } from "../server/cancellationCompensation.js";
+import { releaseDecidedRefundToSource } from "../server/refundAutomation.js";
 import {
   classifyManualRefund,
   decideRefund,
@@ -27,6 +28,10 @@ type ManualRefundPayload = {
   // made. A different amount, or 0 to deny, needs `reason`.
   amount?: number | string | null;
   reason?: string | null;
+  // Set only after SafeDrive has said the provider cannot carry this refund.
+  // Without it the release goes back to the account the renter paid from, so
+  // nobody has to choose a destination SafeDrive was never given.
+  manualTransfer?: boolean;
 };
 
 type RefundPaymentRecord = {
@@ -251,7 +256,11 @@ export default async function handler(req: Request) {
     // stranded. Settling it is still the super admin's click: that click
     // releases the compensation.
     const noRefundDue = Math.round(finalAmount * 100) === 0;
-    if (!noRefundDue && (!refundMethod || !referenceNumber)) {
+    // A manual transfer needs a destination; a provider refund does not, because
+    // it goes back through the original payment. So these are required only once
+    // SafeDrive has answered that the provider cannot carry this one.
+    const manualTransfer = payload.manualTransfer === true;
+    if (!noRefundDue && manualTransfer && (!refundMethod || !referenceNumber)) {
       return jsonResponse(
         {
           error:
@@ -278,45 +287,101 @@ export default async function handler(req: Request) {
       .filter(Boolean)
       .join(" ");
 
-    let releaseRefundQuery = supabase
-      .from("payments")
-      .update({
-        status: "completed",
-        amount: noRefundDue ? 0 : -Math.abs(finalAmount),
-        payment_method: noRefundDue ? "No refund due" : refundMethod,
-        // No transfer means no reference, and reconciliation only expects a
-        // ledger journal for a completed refund that carries one.
-        transaction_id: noRefundDue ? null : referenceNumber,
-        notes,
-      })
-      .eq("id", refundPayment.id)
-      .eq("payment_type", "refund")
-      .eq("status", refundPayment.status)
-      // The amount decided on is the amount this row still held when the
-      // review was opened - a row changed in between is refused below.
-      .eq("amount", refundPayment.amount);
+    // Back to the account the money came from, wherever the provider can carry
+    // it. PayMongo refunds against the original payment, so the destination is
+    // the one the renter actually paid from - SafeDrive never has to ask for a
+    // wallet number, and the admin never has to choose one. The automatic path
+    // could not do this for a policy decision because it only ever refunds a
+    // whole captured payment; this sends the decided amount instead.
+    let providerRefundId: string | null = null;
+    let providerPending = false;
+    let providerMethodLabel: string | null = null;
 
-    releaseRefundQuery = refundPayment.payment_method
-      ? releaseRefundQuery.eq("payment_method", refundPayment.payment_method)
-      : releaseRefundQuery.is("payment_method", null);
+    if (!noRefundDue && !manualTransfer && refundPayment.payment_method === "manual_review") {
+      const attempt = await releaseDecidedRefundToSource({
+        supabase,
+        bookingId: refundPayment.booking_id,
+        refundPaymentId: refundPayment.id,
+        amount: finalAmount,
+        actorId: user.id,
+        note: decisionLine ?? note ?? null,
+      });
 
-    releaseRefundQuery = refundPayment.transaction_id
-      ? releaseRefundQuery.eq("transaction_id", refundPayment.transaction_id)
-      : releaseRefundQuery.is("transaction_id", null);
+      // Someone released this refund first. Offering a manual transfer here
+      // would invite a second, real payment for money that may already be on
+      // its way, so this one only sends the admin back to look.
+      if (attempt.state === "stale") {
+        return jsonResponse(
+          {
+            error: `${attempt.reason} Refresh Financial Reviews and check this refund before doing anything else.`,
+          },
+          409,
+        );
+      }
 
-    const { data: manualRefundStateChanged, error: updateError } =
-      await releaseRefundQuery.select("id").maybeSingle();
+      if (attempt.state === "unavailable" || attempt.state === "failed") {
+        // Nothing was changed. The admin is told why, and only then are the
+        // manual fields asked for - so a manual transfer is always a decision
+        // someone made, never the default.
+        return jsonResponse(
+          {
+            error: `${attempt.reason} Send the refund manually, then record the method and reference here.`,
+            needsManualTransfer: true,
+            reason: attempt.reason,
+          },
+          409,
+        );
+      }
 
-    if (updateError) throw updateError;
+      providerRefundId = attempt.refundId;
+      providerPending = attempt.state === "pending";
+      providerMethodLabel = attempt.method;
+    }
 
-    if (!manualRefundStateChanged) {
-      return jsonResponse(
-        {
-          error:
-            "This refund changed state before it could be marked released. Please refresh and try again.",
-        },
-        409,
-      );
+    // A provider refund has already rewritten this row - status, amount,
+    // reference and note - under its own guard, so the manual update below runs
+    // only for a PHP 0 settlement or a transfer the admin sent themselves.
+    if (!providerRefundId) {
+      let releaseRefundQuery = supabase
+        .from("payments")
+        .update({
+          status: "completed",
+          amount: noRefundDue ? 0 : -Math.abs(finalAmount),
+          payment_method: noRefundDue ? "No refund due" : refundMethod,
+          // No transfer means no reference, and reconciliation only expects a
+          // ledger journal for a completed refund that carries one.
+          transaction_id: noRefundDue ? null : referenceNumber,
+          notes,
+        })
+        .eq("id", refundPayment.id)
+        .eq("payment_type", "refund")
+        .eq("status", refundPayment.status)
+        // The amount decided on is the amount this row still held when the
+        // review was opened - a row changed in between is refused below.
+        .eq("amount", refundPayment.amount);
+
+      releaseRefundQuery = refundPayment.payment_method
+        ? releaseRefundQuery.eq("payment_method", refundPayment.payment_method)
+        : releaseRefundQuery.is("payment_method", null);
+
+      releaseRefundQuery = refundPayment.transaction_id
+        ? releaseRefundQuery.eq("transaction_id", refundPayment.transaction_id)
+        : releaseRefundQuery.is("transaction_id", null);
+
+      const { data: manualRefundStateChanged, error: updateError } =
+        await releaseRefundQuery.select("id").maybeSingle();
+
+      if (updateError) throw updateError;
+
+      if (!manualRefundStateChanged) {
+        return jsonResponse(
+          {
+            error:
+              "This refund changed state before it could be marked released. Please refresh and try again.",
+          },
+          409,
+        );
+      }
     }
 
     // This is the terminal path for EVERY manual-review refund - short-notice
@@ -331,7 +396,10 @@ export default async function handler(req: Request) {
     // reconciliation looks for, and posting is idempotent on that key - so a
     // retry after a transient failure cannot double-post. It posts the amount
     // actually decided, so the lister's compensation below is what is left.
-    if (!noRefundDue && referenceNumber) {
+    // Only for a transfer the admin sent themselves: a provider refund posts
+    // its own journal when PayMongo confirms it, and a pending one has not
+    // moved money yet, so posting here would book a refund twice.
+    if (!providerRefundId && !noRefundDue && referenceNumber) {
       await postCompletedRefundToLedger(supabase, {
         bookingId: refundPayment.booking_id,
         amount: finalAmount,
@@ -340,11 +408,15 @@ export default async function handler(req: Request) {
       });
     }
 
-    await supabase
-      .from("support_tickets")
-      .update({ status: "closed" })
-      .eq("booking_id", refundPayment.booking_id)
-      .eq("tag", "manual_refund");
+    // A refund still travelling through PayMongo is not finished, so its case
+    // stays open until the provider confirms it (Sync PayMongo Status).
+    if (!providerPending) {
+      await supabase
+        .from("support_tickets")
+        .update({ status: "closed" })
+        .eq("booking_id", refundPayment.booking_id)
+        .eq("tag", "manual_refund");
+    }
 
     const vehicle = getVehicleLabel(refundPayment);
     const baseOrigin = new URL(req.url).origin;
@@ -360,15 +432,32 @@ export default async function handler(req: Request) {
             message: `No refund was due for ${vehicle} under the cancellation policy - the fee covered what was paid.`,
             type: "info",
           }
-      : {
-          title: "Refund Released",
-          message: `Your SafeDrive refund of ${peso(finalAmount)} for ${vehicle} was marked released through ${refundMethod}. Reference: ${referenceNumber}.${
-            changedByDecision
-              ? ` SafeDrive reviewed the case and changed it from the recommended ${peso(recommendedAmount)}. Reason: ${decision.reason}`
-              : ""
-          }`,
-          type: "success",
-        };
+      : providerPending
+        ? {
+            // Nothing to ask the renter for: it is going back where it came from.
+            title: "Refund On The Way",
+            message: `Your SafeDrive refund of ${peso(finalAmount)} for ${vehicle} is on its way back to the payment method you used at checkout. Reference: ${providerRefundId}.${
+              changedByDecision
+                ? ` SafeDrive reviewed the case and changed it from the recommended ${peso(recommendedAmount)}. Reason: ${decision.reason}`
+                : ""
+            }`,
+            type: "info",
+          }
+        : {
+            title: "Refund Released",
+            message: providerRefundId
+              ? `Your SafeDrive refund of ${peso(finalAmount)} for ${vehicle} was returned to the payment method you used at checkout. Reference: ${providerRefundId}.${
+                  changedByDecision
+                    ? ` SafeDrive reviewed the case and changed it from the recommended ${peso(recommendedAmount)}. Reason: ${decision.reason}`
+                    : ""
+                }`
+              : `Your SafeDrive refund of ${peso(finalAmount)} for ${vehicle} was marked released through ${refundMethod}. Reference: ${referenceNumber}.${
+                  changedByDecision
+                    ? ` SafeDrive reviewed the case and changed it from the recommended ${peso(recommendedAmount)}. Reason: ${decision.reason}`
+                    : ""
+                }`,
+            type: "success",
+          };
 
     await supabase.from("notifications").insert({
       user_id: refundPayment.bookings.renter_id,
@@ -422,16 +511,20 @@ export default async function handler(req: Request) {
       }).catch((emailError) => console.warn("Refund settlement email was not delivered", emailError));
     }
 
-    if (!noRefundDue && refundMethod && referenceNumber) {
+    // A receipt is proof the money went back, so it waits for the provider to
+    // confirm. A pending refund gets the notice above instead.
+    const receiptReference = providerRefundId ?? referenceNumber;
+    const receiptMethod = providerMethodLabel ?? refundMethod;
+    if (!noRefundDue && !providerPending && receiptMethod && receiptReference) {
       const receipt = await sendRefundReceiptEmail(supabase, {
         bookingId: refundPayment.booking_id,
         amount: finalAmount,
-        refundId: referenceNumber,
-        refundMethod,
+        refundId: receiptReference,
+        refundMethod: receiptMethod,
         baseOrigin,
       });
       if (receipt.state !== "sent" && receipt.state !== "not_configured") {
-        console.warn("Manual refund receipt email was not delivered", {
+        console.warn("Refund receipt email was not delivered", {
           state: receipt.state,
           bookingId: refundPayment.booking_id,
         });
@@ -450,10 +543,18 @@ export default async function handler(req: Request) {
         decision_reason: decision.reason,
         review_kind: kind,
         review_kind_label: MANUAL_REFUND_KINDS[kind].label,
-        refund_method: refundMethod,
-        reference_number: referenceNumber,
+        refund_method: providerMethodLabel ?? refundMethod,
+        reference_number: providerRefundId ?? referenceNumber,
         booking_id: refundPayment.booking_id,
-        mode: noRefundDue ? "no_refund_due" : "manual",
+        // Which road the money took, so a later reader can tell a refund that
+        // went back to its source from one an admin sent by hand.
+        mode: noRefundDue
+          ? "no_refund_due"
+          : providerRefundId
+            ? providerPending
+              ? "provider_pending"
+              : "provider_returned_to_source"
+            : "manual",
       },
     });
 
@@ -484,11 +585,17 @@ export default async function handler(req: Request) {
 
     return jsonResponse({
       success: true,
-      state: "completed",
+      // A provider refund that PayMongo has not confirmed yet is not finished:
+      // the row stays pending and "Sync PayMongo Status" closes it out.
+      state: providerPending ? "pending" : "completed",
       paymentId: refundPayment.id,
-      transactionId: referenceNumber,
+      transactionId: providerRefundId ?? referenceNumber,
       amount: finalAmount,
       decision: decision.decision,
+      // True when the money went back through the original payment, so the UI
+      // can say where it landed instead of naming a method someone chose.
+      returnedToSource: Boolean(providerRefundId),
+      method: providerMethodLabel ?? refundMethod,
       compensation,
     });
   } catch (error) {

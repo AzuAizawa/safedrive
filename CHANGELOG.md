@@ -3,6 +3,79 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-18 - A decided refund goes back where the money came from
+
+Releasing a reviewed refund asked the admin to pick GCash or Maya and type a
+reference. That asked for something SafeDrive does not have: the provider never
+hands over the payer's wallet number, so the destination could only come from
+asking the renter. And the money should go back where it came from anyway.
+
+The reason it could not was narrow. The automatic path refunds a **whole**
+captured payment, so a policy decision - half of a short-notice cancellation -
+had no road through it and fell to a manual transfer. PayMongo can refund part
+of a payment, and it knows the source.
+
+- `releaseDecidedRefundToSource()` sends the **decided** amount against the
+  original payment, so it lands in the account the renter paid from. No method
+  to choose, no reference to type.
+- It reuses `buildRefundGroups`, so every guard on the automatic path guards
+  this one: a released payout, a completed booking whose commission was
+  recognised, a provider refund already pending, and sources already refunded.
+- It **updates the review's own refund row** rather than creating a second one,
+  under a guard on the state the row was read in.
+- It takes the provider path only when **one** original payment covers the whole
+  decided amount: a row holds one provider reference, and a refund split across
+  two could not be traced back.
+- A pending provider refund stays pending - the case stays open, no receipt is
+  sent, no ledger journal is posted, and compensation waits. "Sync PayMongo
+  Status" closes it out, exactly as it does for an automatic refund.
+- Manual transfer is still there, but only after SafeDrive answers that the
+  provider cannot carry this one - and it says why. Nothing is changed when it
+  refuses, so a manual transfer is always a decision someone made.
+- **Losing the race is its own answer.** If another release changed the refund
+  first, that is reported as `stale` and never offered a manual transfer -
+  otherwise an admin could be told to send real money for a refund that was
+  already released. In live mode the provider refund may exist by then, so its
+  reference is written to the audit trail (`orphaned_refund`) instead of being
+  lost, and the admin is sent back to check.
+
+In demo mode this records the movement without calling PayMongo, as the
+automatic path does. The real return to a renter's GCash can only be proved with
+live keys.
+
+Files: `server/refundAutomation.ts`, `api/mark-manual-refund.ts`,
+`src/pages/admin/AdminRefundReviewPage.tsx`,
+`scripts/booking-flow-smoke-check.mjs`. No database change.
+
+## 2026-09-18 - A refund held for review tells the renter it is open
+
+Every path that sends a refund to manual review already opened a support case
+on the booking - and not one of them told the renter. The case sat in the admin
+queue while the renter saw only "waiting for admin refund review" on their
+booking, with no reason to open Support at all.
+
+That matters most in the case SafeDrive cannot finish alone. When the provider
+cannot return the money to its source, support has to ask the renter where to
+send it - and they cannot answer a question in a case they were never told
+about.
+
+- All five paths that open a `manual_refund` case now notify the renter, with a
+  link to Support: the cancellation refund plan, the booking action copy, the
+  incident queue, a payment captured after the booking moved on, and a paid
+  extension that could not be applied.
+- The wording says plainly what to do: watch the case, and reply if support asks
+  where to send the money.
+- A smoke check keeps the notice attached to the paths that open the case.
+
+No first message is written into the ticket: `ticket_messages.sender_id` is NOT
+NULL, so the server would have to borrow a real person's name to speak. The
+notification carries the renter to the case instead, and the admin - who can
+open a case and write in it - starts the conversation.
+
+Files: `server/cancellationRefundPlan.ts`, `api/booking-action.ts`,
+`api/booking-incident-action.ts`, `api/webhooks/paymongo.ts`,
+`scripts/booking-flow-smoke-check.mjs`. No database change.
+
 ## 2026-09-18 - The refund review dialog stays reachable, however long the evidence
 
 Reported with a screenshot: the top of the Refund Review dialog could not be

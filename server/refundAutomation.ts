@@ -387,6 +387,244 @@ const buildRefundGroups = (
   return { groups: [...groups.values()], blocker: null as string | null };
 };
 
+export type DecidedRefundResult =
+  | { state: "completed"; refundId: string; method: string }
+  | { state: "pending"; refundId: string; method: string }
+  // The provider cannot carry this one; a manual transfer is the way out.
+  | { state: "unavailable"; reason: string }
+  // Someone else changed this refund first. A manual transfer here would send
+  // real money for a refund that may already have been released, so this is
+  // kept apart from `unavailable` and never offers one.
+  | { state: "stale"; reason: string }
+  | { state: "failed"; reason: string };
+
+/**
+ * Send an amount a super admin decided on back to the account it came from.
+ *
+ * The automatic path only ever refunds a whole captured payment, so a policy
+ * decision - half of a short-notice cancellation, say - could not use it and
+ * fell to a manual GCash transfer. That asked the admin to pick a destination
+ * SafeDrive does not know: the provider never hands over the payer's wallet
+ * number. PayMongo can refund part of a payment, and it knows where the money
+ * came from, so the decided amount goes back through the original payment.
+ *
+ * It reuses `buildRefundGroups`, so every blocker that protects the automatic
+ * path protects this one: a released payout, a completed booking whose
+ * commission was recognised, a provider refund already pending, and sources
+ * that were already refunded.
+ *
+ * It updates the refund row the review was opened on rather than creating a
+ * second one, and takes the provider path only when one original payment can
+ * cover the whole decided amount - one row holds one provider reference, and a
+ * refund split across two of them could not be traced back.
+ */
+export const releaseDecidedRefundToSource = async ({
+  supabase,
+  bookingId,
+  refundPaymentId,
+  amount,
+  actorId,
+  note,
+}: {
+  supabase: ServiceRoleSupabaseClient;
+  bookingId: string;
+  refundPaymentId: string;
+  amount: number;
+  actorId?: string | null;
+  note?: string | null;
+}): Promise<DecidedRefundResult> => {
+  const secretKey = getPayMongoSecretKey();
+  if (!secretKey) {
+    return { state: "unavailable", reason: "PayMongo refund environment is not configured." };
+  }
+  if (!(amount > 0)) {
+    return { state: "unavailable", reason: "There is nothing to send back." };
+  }
+
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select(
+      `
+      id,
+      status,
+      renter_id,
+      owner_id,
+      owner_completed,
+      renter_completed,
+      renter_arrived_at,
+      lister_arrived_at,
+      cars(plate_number, car_models(name, car_brands(name))),
+      payments(*)
+    `,
+    )
+    .eq("id", bookingId)
+    .single();
+  if (bookingError || !booking) {
+    return { state: "unavailable", reason: "Booking not found for refund processing." };
+  }
+
+  const refundBooking = booking as unknown as BookingForRefund;
+  const { groups, blocker } = buildRefundGroups(refundBooking, [
+    "downpayment",
+    "balance",
+    "extension",
+  ]);
+  if (blocker) return { state: "unavailable", reason: blocker };
+  if (!groups.length) {
+    return {
+      state: "unavailable",
+      reason: "No refundable PayMongo payment records were found for this booking.",
+    };
+  }
+
+  // Largest first, so a decision is carried by one payment wherever possible.
+  const candidate = [...groups].sort((left, right) => right.amount - left.amount)[0];
+  if (candidate.amount + 0.005 < amount) {
+    return {
+      state: "unavailable",
+      reason:
+        "The decided amount is larger than any single original payment, so it cannot be traced back to one provider refund. Send it manually and record the reference.",
+    };
+  }
+
+  let resolvedPaymentId = candidate.paymentId;
+  if (!resolvedPaymentId && candidate.checkoutSessionId) {
+    try {
+      resolvedPaymentId = await retrieveCheckoutPaymentId(secretKey, candidate.checkoutSessionId);
+    } catch (error) {
+      return {
+        state: "unavailable",
+        reason:
+          error instanceof Error
+            ? `The original PayMongo payment could not be looked up: ${error.message}`
+            : "The original PayMongo payment could not be looked up.",
+      };
+    }
+  }
+  if (!resolvedPaymentId) {
+    return {
+      state: "unavailable",
+      reason: "SafeDrive could not resolve the original PayMongo payment ID for this booking.",
+    };
+  }
+
+  const notes = limitPayMongoNotes(
+    [
+      `Source transaction IDs: ${candidate.sourceTransactionIds.join(", ")};`,
+      `SafeDrive refund for ${getVehicleLabel(refundBooking)}.`,
+      note ?? null,
+      `PayMongo payment: ${resolvedPaymentId}.`,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+
+  // Demo mode records the movement without calling PayMongo, exactly as the
+  // automatic path does - the destination is still the original payment.
+  const demo = isDemoMoneyMovementEnabled(secretKey);
+  let refundId: string;
+  let appStatus: string;
+  if (demo) {
+    refundId = `sandbox_refund_${bookingId.slice(0, 8)}_${Date.now()}`;
+    appStatus = "completed";
+  } else {
+    try {
+      const refund = await createRefund(secretKey, {
+        paymentId: resolvedPaymentId,
+        amountInCentavos: Math.round(amount * 100),
+        reason: "requested_by_customer",
+        notes,
+      });
+      refundId = refund.data?.id ?? "";
+      appStatus = getAppRefundStatus(refund.data?.attributes?.status ?? "pending");
+      if (!refundId) {
+        return { state: "failed", reason: "PayMongo accepted the refund but returned no reference." };
+      }
+      if (appStatus === "failed") {
+        return { state: "failed", reason: "PayMongo reported the refund as failed." };
+      }
+    } catch (error) {
+      return {
+        state: "failed",
+        reason: error instanceof Error ? error.message : "Unknown PayMongo refund error",
+      };
+    }
+  }
+
+  const method = demo ? "Demo refund (no real transfer)" : "PayMongo";
+  // The review row becomes the provider refund: guarded on the state it was
+  // read in, so a row someone else already released cannot be overwritten.
+  const { data: updated, error: updateError } = await supabase
+    .from("payments")
+    .update({
+      status: appStatus,
+      amount: -Math.abs(amount),
+      payment_method: demo ? "demo" : "PayMongo",
+      transaction_id: refundId,
+      notes: limitPayMongoNotes(
+        `Returned to the original payment method. ${notes}`,
+      ),
+    })
+    .eq("id", refundPaymentId)
+    .eq("status", "pending")
+    .eq("payment_method", "manual_review")
+    .select("id")
+    .maybeSingle();
+  if (updateError) {
+    return { state: "failed", reason: updateError.message };
+  }
+  if (!updated) {
+    // In live mode the provider refund has already been created by this point,
+    // so the money is on its way even though the row could not be stamped with
+    // its reference. Record it before returning, or it would be lost entirely.
+    await insertAudit(supabase, actorId, "booking_refund_requested_auto", refundBooking, {
+      reason: "requested_by_customer",
+      mode: demo ? "demo" : "provider",
+      decided_amount: amount,
+      refund_ids: [refundId],
+      refund_payment_ids: [refundPaymentId],
+      source_payment_id: resolvedPaymentId,
+      orphaned_refund: true,
+      detail:
+        "The refund row changed state before this provider refund could be recorded on it.",
+    });
+    return {
+      state: "stale",
+      reason: `This refund changed state before it could be recorded${demo ? "" : `, and PayMongo refund ${refundId} may already be on its way`}.`,
+    };
+  }
+
+  if (appStatus === "completed") {
+    await postCompletedRefundToLedger(supabase, {
+      bookingId,
+      amount,
+      refundId,
+      actorId,
+    });
+  }
+
+  await insertAudit(
+    supabase,
+    actorId,
+    appStatus === "completed"
+      ? "booking_refund_completed_auto"
+      : "booking_refund_requested_auto",
+    refundBooking,
+    {
+      reason: "requested_by_customer",
+      mode: demo ? "demo" : "provider",
+      decided_amount: amount,
+      refund_ids: [refundId],
+      refund_payment_ids: [refundPaymentId],
+      source_payment_id: resolvedPaymentId,
+    },
+  );
+
+  return appStatus === "completed"
+    ? { state: "completed", refundId, method }
+    : { state: "pending", refundId, method };
+};
+
 export const processAutomaticRefundForBooking = async ({
   supabase,
   bookingId,

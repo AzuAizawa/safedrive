@@ -238,6 +238,17 @@ const queueManualRefundReview = async (
       })),
     );
   }
+
+  // The admins were told; the renter was not. Their refund is held for review
+  // and SafeDrive may still need to ask them where to send it.
+  await supabase.from("notifications").insert({
+    user_id: b.renter_id,
+    title: "Your refund is with SafeDrive support",
+    message: `The refund for ${label(b)} is being reviewed by SafeDrive. A support case is open for it - watch there for any question, and reply if support asks where to send the money.`,
+    type: "info",
+    link: "/support",
+  });
+
   return refundPaymentId;
 };
 

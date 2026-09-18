@@ -274,6 +274,11 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
     note: "",
   });
   const [manualLoading, setManualLoading] = useState(false);
+  // Set only when SafeDrive answers that the provider cannot carry this refund.
+  // Until then the release goes back to the account the renter paid from, so
+  // there is no destination for anyone to choose.
+  const [manualTransferRequired, setManualTransferRequired] = useState(false);
+  const [providerBlockedReason, setProviderBlockedReason] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<ReviewEvidence>(EMPTY_EVIDENCE);
   const [decisionChoice, setDecisionChoice] = useState<DecisionChoice>("recommended");
   const [otherAmount, setOtherAmount] = useState("");
@@ -452,6 +457,10 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
     setDecisionChoice("recommended");
     setOtherAmount("");
     setDecisionReason("");
+    // Each review starts on the provider path; the manual fields appear only if
+    // SafeDrive answers that this particular refund cannot take it.
+    setManualTransferRequired(false);
+    setProviderBlockedReason(null);
     setEvidence({ ...EMPTY_EVIDENCE, loading: true });
     evidenceForRef.current = refund.id;
 
@@ -580,7 +589,12 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
       toast.error("Check the decision", { description: review.result.error });
       return;
     }
-    if (!review.finalIsZero && !manualDraft.referenceNumber.trim()) {
+    // Only a transfer the admin sends themselves needs a reference.
+    if (
+      !review.finalIsZero &&
+      manualTransferRequired &&
+      !manualDraft.referenceNumber.trim()
+    ) {
       toast.error("Enter the refund reference number");
       return;
     }
@@ -595,9 +609,16 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
         },
         body: JSON.stringify({
           paymentId: manualTarget.id,
-          refundMethod: manualDraft.refundMethod,
-          referenceNumber: manualDraft.referenceNumber,
           note: manualDraft.note,
+          // Sent only once SafeDrive has said the provider cannot carry it;
+          // otherwise the refund goes back through the original payment.
+          ...(manualTransferRequired
+            ? {
+                manualTransfer: true,
+                refundMethod: manualDraft.refundMethod,
+                referenceNumber: manualDraft.referenceNumber,
+              }
+            : {}),
           ...(review.choice === "recommended"
             ? {}
             : { amount: review.finalAmount, reason: decisionReason.trim() }),
@@ -606,7 +627,12 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
 
       const payload = (await res.json()) as {
         error?: string;
+        state?: "completed" | "pending";
         decision?: "as_recommended" | "adjusted" | "denied";
+        returnedToSource?: boolean;
+        method?: string | null;
+        needsManualTransfer?: boolean;
+        reason?: string;
         compensation?: {
           state: string;
           amount?: number;
@@ -614,8 +640,31 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
           waitingOnRefunds?: boolean;
         };
       };
+
+      // The provider could not carry this one. Nothing was changed, so the
+      // admin is asked for a destination only now, and told why.
+      if (!res.ok && payload.needsManualTransfer) {
+        setManualTransferRequired(true);
+        setProviderBlockedReason(payload.reason ?? null);
+        toast.warning("Send this refund manually", {
+          description:
+            payload.reason ??
+            "SafeDrive could not return this refund through the original payment.",
+        });
+        return;
+      }
+
       if (!res.ok) {
         throw new Error(payload.error || "Failed to mark refund as released");
+      }
+
+      if (payload.state === "pending") {
+        toast.success("Refund sent back to the original payment method", {
+          description: `${formatCurrency(review.finalAmount)} is on its way to the account the renter paid from. It stays pending here until PayMongo confirms it - use Sync PayMongo Status.`,
+        });
+        closeManualRefund();
+        await fetchRefunds();
+        return;
       }
 
       const decisionSentence =
@@ -954,7 +1003,9 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                 <p className="text-sm text-muted-foreground">
                   {review.finalIsZero
                     ? "Nothing is sent back, so no reference is needed. Any compensation owed to the lister is released with this decision."
-                    : "Check what happened, decide the amount, send it through GCash or Maya outside SafeDrive, then record the method and reference here."}
+                    : manualTransferRequired
+                      ? "PayMongo could not carry this one. Send it through GCash or Maya outside SafeDrive, then record the method and reference here."
+                      : "Check what happened and decide the amount. SafeDrive returns it through the original payment, so it lands back in the account the renter paid from."}
                 </p>
               </div>
 
@@ -1142,8 +1193,27 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                   </div>
                 ) : null}
 
-                {review.finalIsZero ? null : (
+                {review.finalIsZero ? null : !manualTransferRequired ? (
+                  /* No destination to choose: the refund goes back through the
+                     original payment, which is the only place SafeDrive knows
+                     the money came from. */
+                  <p className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      Returns to the payment method used at checkout.
+                    </span>{" "}
+                    SafeDrive asks PayMongo to refund the original payment, so there is
+                    nothing to enter - the renter gets it back where they paid from. If
+                    PayMongo cannot carry it, SafeDrive says so and asks for the transfer
+                    details then.
+                  </p>
+                ) : (
                   <>
+                    {providerBlockedReason ? (
+                      <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+                        {providerBlockedReason} Send it yourself, then record the method and
+                        reference below.
+                      </p>
+                    ) : null}
                     <label className="space-y-1 text-sm">
                       <span className="font-medium">Refund return method</span>
                       <select
@@ -1227,7 +1297,9 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                     ? review.choice === "deny"
                       ? "Deny Refund"
                       : "Settle & Release Compensation"
-                    : "Mark Released"}
+                    : manualTransferRequired
+                      ? "Mark Released"
+                      : "Release to Original Method"}
                 </Button>
               </div>
             </div>

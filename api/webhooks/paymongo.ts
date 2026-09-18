@@ -464,6 +464,17 @@ const recordUnclaimableCapture = async (
           booking_id: input.bookingId,
           status: "open",
         });
+
+        // Money left their account for a booking that had already moved on.
+        // Without this they would see a charge, no booking, and no explanation.
+        await supabase.from("notifications").insert({
+          user_id: booking.renter_id,
+          title: "A payment is being refunded to you",
+          message:
+            "A payment arrived after your booking had already changed, so it was not applied. SafeDrive is refunding it - a support case is open, and support will ask there if they need anything from you.",
+          type: "info",
+          link: "/support",
+        });
       }
     }
 
@@ -1352,6 +1363,18 @@ export default async function handler(req: Request) {
           status: "open",
         });
         if (reviewTicketError) console.error("Could not queue paid extension for refund review", reviewTicketError);
+
+        // They paid for days they did not get. Without a notice the charge is
+        // simply unexplained, and they cannot answer support's questions in a
+        // case they were never told about.
+        await supabase.from("notifications").insert({
+          user_id: booking.renter_id,
+          title: "Your extension payment is being refunded",
+          message:
+            "Your payment went through, but the extra days could not be added to the booking, so SafeDrive is refunding it. A support case is open - watch there for any question, and reply if support asks where to send the money.",
+          type: "info",
+          link: "/support",
+        });
 
         // The refund row is what makes this releasable from Financial Reviews
         // (see queueUnappliedPaymentRefund). The payment is already recorded, so

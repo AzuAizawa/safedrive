@@ -198,6 +198,18 @@ export const createManualRefundReview = async (
       .single();
 
     if (ticketError) throw ticketError;
+
+    // The ticket existed but nothing told the renter it was open, so a refund
+    // held for review looked like silence. SafeDrive may still need something
+    // from them - the account to send it to, when the provider cannot return it
+    // to source - and they cannot answer a case they never saw.
+    await supabase.from("notifications").insert({
+      user_id: userId,
+      title: "Your refund is with SafeDrive support",
+      message: `The refund for ${getVehicleLabel(booking)} is being reviewed by SafeDrive. A support case is open for it - watch there for any question, and reply if support asks where to send the money.`,
+      type: "info",
+      link: "/support",
+    });
   }
 
   return refundPaymentId ?? null;

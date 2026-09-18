@@ -149,6 +149,90 @@ test("both sides are emailed what they received, in words that fit every kind of
   assert.match(release, /else if \(noRefundDue\)[\s\S]*?sendUserNotificationEmail/);
 });
 
+// Where the money goes is not a choice an admin should have to make: the
+// provider knows the account it came from, and SafeDrive does not. These pin
+// the order - provider first, manual only after SafeDrive says it cannot.
+test("a decided refund is sent back through the original payment before anything is asked", async () => {
+  const [handler, automation] = await Promise.all([
+    readFile(new URL("../api/mark-manual-refund.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/refundAutomation.ts", import.meta.url), "utf8"),
+  ]);
+
+  // The provider attempt runs before the manual update, and the manual fields
+  // are required only once the caller has been told to send it themselves.
+  assert.ok(
+    handler.indexOf("releaseDecidedRefundToSource") <
+      handler.indexOf("let releaseRefundQuery"),
+    "the provider path is tried before the row is marked released by hand",
+  );
+  assert.match(handler, /manualTransfer && \(!refundMethod \|\| !referenceNumber\)/);
+  assert.match(handler, /needsManualTransfer: true/);
+
+  // The same guards as the automatic path, and the review's own row is reused.
+  assert.match(automation, /buildRefundGroups\(refundBooking, \[/);
+  assert.match(automation, /\.eq\("id", refundPaymentId\)/);
+  assert.match(automation, /\.eq\("payment_method", "manual_review"\)/);
+
+  // Read only the decided-release function: the automatic path legitimately
+  // creates rows, this one must update the review's own row instead, or a
+  // booking would carry two refunds for one decision.
+  const decidedRelease = automation.slice(
+    automation.indexOf("export const releaseDecidedRefundToSource"),
+    automation.indexOf("export const processAutomaticRefundForBooking"),
+  );
+  assert.ok(decidedRelease.length > 500, "the decided-release function was found");
+  assert.ok(
+    !decidedRelease.includes("createRefundRecord("),
+    "the decided release must not create a second refund row",
+  );
+  assert.ok(
+    decidedRelease.includes('.from("payments")') && decidedRelease.includes(".update("),
+    "it updates the row the review was opened on",
+  );
+});
+
+test("a refund someone else released first is never offered a manual transfer", async () => {
+  const [handler, automation] = await Promise.all([
+    readFile(new URL("../api/mark-manual-refund.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/refundAutomation.ts", import.meta.url), "utf8"),
+  ]);
+
+  // Losing the race is its own answer. Treating it as "the provider cannot
+  // carry this" would invite a real GCash transfer for money that may already
+  // be on its way back to the renter.
+  assert.match(automation, /state: "stale"/);
+  const staleBranch = handler.slice(
+    handler.indexOf('attempt.state === "stale"'),
+    handler.indexOf('attempt.state === "unavailable"'),
+  );
+  assert.ok(staleBranch.length > 50, "the stale branch is handled on its own");
+  assert.ok(
+    !staleBranch.includes("needsManualTransfer"),
+    "a stale refund must not ask for a manual transfer",
+  );
+  assert.match(staleBranch, /Refresh Financial Reviews/);
+
+  // In live mode the provider refund may already exist, so it is recorded
+  // rather than lost when the row cannot be stamped with its reference.
+  assert.match(automation, /orphaned_refund: true/);
+});
+
+test("a provider refund still travelling is not treated as money already returned", async () => {
+  const handler = await readFile(
+    new URL("../api/mark-manual-refund.ts", import.meta.url),
+    "utf8",
+  );
+
+  // No ledger journal for a refund the provider has not confirmed, and none at
+  // all when the provider carried it - that journal is posted at the source.
+  assert.match(handler, /!providerRefundId && !noRefundDue && referenceNumber/);
+  // The case stays open, and the receipt waits for confirmation.
+  assert.match(handler, /if \(!providerPending\) \{/);
+  assert.match(handler, /!noRefundDue && !providerPending && receiptMethod && receiptReference/);
+  // The renter is told it is on its way rather than returned.
+  assert.match(handler, /Refund On The Way/);
+});
+
 test("lister compensation waits while another refund on the booking is still open", async () => {
   const source = await readFile(new URL("../server/cancellationCompensation.ts", import.meta.url), "utf8");
   assert.match(source, /waitingOnRefunds: true/);
