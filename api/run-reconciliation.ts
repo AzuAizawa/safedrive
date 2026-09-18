@@ -114,13 +114,30 @@ export default async function handler(req: Request) {
     const providerCheckoutGroups = allProviderCheckoutGroups.slice(0, 100);
     let providerPaymentRecordsChecked = 0;
     let providerPaymentListTruncated = false;
+    // How many checkouts could not be asked about at all. Reported in the
+    // summary so a run that reached almost nothing cannot read as a clean one.
+    let providerChecksUnavailable = 0;
     if (paymongoKey) {
       const authorization = `Basic ${btoa(`${paymongoKey}:`)}`;
       for (let index = 0; index < providerCheckoutGroups.length; index += 10) {
         await Promise.all(providerCheckoutGroups.slice(index, index + 10).map(async (group) => {
-          const providerResponse = await fetch(`https://api.paymongo.com/v1/checkout_sessions/${encodeURIComponent(group.transactionId)}`, { headers: { Accept: "application/json", Authorization: authorization } });
+          // "We could not ask" is not "the provider disagrees". A failed or
+          // unreachable lookup used to be filed as a CRITICAL mismatch, so a
+          // sandbox checkout that PayMongo has never heard of - or one dropped
+          // request - read exactly like money that had gone missing. On this
+          // build every sandbox_ transaction produces that, which buried the
+          // two findings that were real under nine that were not.
+          let providerResponse: Response;
+          try {
+            providerResponse = await fetch(`https://api.paymongo.com/v1/checkout_sessions/${encodeURIComponent(group.transactionId)}`, { headers: { Accept: "application/json", Authorization: authorization } });
+          } catch (providerError) {
+            providerChecksUnavailable += 1;
+            issues.push({ booking_id: group.bookingId, issue_type: "provider_check_unavailable", severity: "warning", provider_reference: group.transactionId, local_reference: providerError instanceof Error ? providerError.message : "request failed", local_amount_centavos: group.localAmountCentavos });
+            return;
+          }
           if (!providerResponse.ok) {
-            issues.push({ booking_id: group.bookingId, issue_type: "local_completed_but_provider_not_confirmed", severity: "critical", provider_reference: group.transactionId, local_reference: group.payments.map((payment) => payment.id).join(","), local_amount_centavos: group.localAmountCentavos });
+            providerChecksUnavailable += 1;
+            issues.push({ booking_id: group.bookingId, issue_type: "provider_check_unavailable", severity: "warning", provider_reference: group.transactionId, local_reference: `HTTP ${providerResponse.status} · ${group.payments.map((payment) => payment.id).join(",")}`, local_amount_centavos: group.localAmountCentavos });
           } else {
             const provider = await providerResponse.json();
             const attrs = provider?.data?.attributes;
@@ -176,7 +193,7 @@ export default async function handler(req: Request) {
       if (itemError) throw itemError;
     }
     const criticalCount = issues.filter((issue) => issue.severity === "critical").length;
-    const { error: completionError } = await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString(), summary: { issues: issues.length, critical: criticalCount, records_checked: { payments: payments.length, journals: journals.length, subscriptions: subscriptionsResult.data?.length ?? 0 }, provider_checks_enabled: Boolean(paymongoKey), provider_checkout_groups_checked: paymongoKey ? providerCheckoutGroups.length : 0, provider_payment_records_checked: providerPaymentRecordsChecked, provider_checks_truncated: Boolean(paymongoKey && (allProviderCheckoutGroups.length > providerCheckoutGroups.length || providerPaymentListTruncated)) } }).eq("id", run.id);
+    const { error: completionError } = await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString(), summary: { issues: issues.length, critical: criticalCount, records_checked: { payments: payments.length, journals: journals.length, subscriptions: subscriptionsResult.data?.length ?? 0 }, provider_checks_enabled: Boolean(paymongoKey), provider_checkout_groups_checked: paymongoKey ? providerCheckoutGroups.length : 0, provider_payment_records_checked: providerPaymentRecordsChecked, provider_checks_unavailable: providerChecksUnavailable, provider_checks_truncated: Boolean(paymongoKey && (allProviderCheckoutGroups.length > providerCheckoutGroups.length || providerPaymentListTruncated)) } }).eq("id", run.id);
     if (completionError) throw completionError;
     if (criticalCount > 0) {
       const { data: superAdmins } = await supabase.from("profiles").select("id").eq("role", "super_admin").is("deleted_at", null);

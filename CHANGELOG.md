@@ -3,6 +3,35 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-18 - "We could not ask" is not "the provider disagrees"
+
+A reconciliation run on the live build raised 11 critical issues. Nine were the
+same type - `local_completed_but_provider_not_confirmed` - and the run's own
+summary showed why: 13 checkouts asked about, **0** provider records read, and
+the provider payment list returning HTTP 500. Nothing was wrong with the money;
+PayMongo had simply not answered, and on this build it never will for a
+`sandbox_` checkout it has never heard of.
+
+Filing that as critical buried the two findings that were real (a completed
+payment with no ledger journal, and a refund pending too long) under nine that
+were not.
+
+- A lookup that fails, times out or throws is now **`provider_check_unavailable`,
+  severity warning**, carrying the HTTP status or error so the cause is visible.
+- **Critical is reserved for a provider that answered and disagreed** - a status
+  that is not paid, or an amount that does not match.
+- A thrown request no longer fails the whole run: it is caught per checkout, so
+  one dropped connection cannot abandon the other checks.
+- The run summary reports `provider_checks_unavailable`, so a run that reached
+  almost nothing cannot be read as a clean one.
+
+Existing issues already recorded keep their original type; the next run
+classifies them correctly. On the current data this turns 11 criticals into 2.
+
+Files: `api/run-reconciliation.ts`, `scripts/reconciliation-logic.test.mjs`.
+No database change - `reconciliation_items.issue_type` is free text and the new
+severity is already allowed.
+
 ## 2026-09-18 - One period drives Earnings & Insights
 
 Reported from the page itself: the three totals answered "all time", the date
