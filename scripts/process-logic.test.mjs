@@ -61,6 +61,13 @@ import {
   summarizeRefundKinds,
 } from "../src/lib/insightsSummary.ts";
 import {
+  describeRange,
+  isDayWithinRange,
+  isWithinRange,
+  manilaMonthOf,
+  periodRange,
+} from "../src/lib/earningsPeriod.ts";
+import {
   formatRichTextForDisplay,
   normalizeRichTextInput,
   richTextHasVisibleContent,
@@ -529,6 +536,77 @@ test("a record with no lines still appears, rather than vanishing from the file"
   assert.equal(rows[0][7], "(no lines recorded)");
   assert.equal(rows[0][10], "j1", "a correction names the record it reverses");
   assert.equal(rows[0][11], "Wrong amount released");
+});
+
+// One range drives the whole Earnings & Insights page - totals, chart and
+// export - so the date arithmetic behind it is pinned here. Manila calendar
+// throughout, because that is how the books are kept.
+test("the page opens on the year so far, which always has something in it", () => {
+  // The first of a month: month-to-date would be a single day and read as
+  // broken, which is exactly why the default is the year.
+  const firstOfMonth = new Date("2026-09-01T02:00:00.000Z");
+  assert.deepEqual(periodRange("year", { from: "", to: "" }, firstOfMonth), {
+    from: "2026-01-01",
+    to: "2026-09-01",
+  });
+  assert.deepEqual(periodRange("month", { from: "", to: "" }, firstOfMonth), {
+    from: "2026-09-01",
+    to: "2026-09-01",
+  });
+});
+
+test("a named period ends today, and all-time still has two ends", () => {
+  const now = new Date("2026-09-18T12:00:00.000Z");
+  assert.deepEqual(periodRange("month", { from: "", to: "" }, now), {
+    from: "2026-09-01",
+    to: "2026-09-18",
+  });
+  const all = periodRange("all", { from: "", to: "" }, now);
+  assert.equal(all.to, "2026-09-18");
+  assert.ok(all.from < "2015-01-01", "all-time reaches back past any real record");
+});
+
+test("a half-filled custom range does not silently widen to everything", () => {
+  const now = new Date("2026-09-18T12:00:00.000Z");
+  // Only a start given: the end is today, not open-ended.
+  assert.deepEqual(periodRange("custom", { from: "2026-03-01", to: "" }, now), {
+    from: "2026-03-01",
+    to: "2026-09-18",
+  });
+  // Only an end given: the start reaches back, so nothing is hidden.
+  const openStart = periodRange("custom", { from: "", to: "2026-03-31" }, now);
+  assert.equal(openStart.to, "2026-03-31");
+  assert.ok(openStart.from < "2015-01-01");
+});
+
+test("a timestamp is placed by its Manila day, not the browser's", () => {
+  const range = { from: "2026-09-01", to: "2026-09-30" };
+  // 2026-08-31 20:00 UTC is already 1 September in Manila, so it counts.
+  assert.equal(isWithinRange("2026-08-31T20:00:00.000Z", range), true);
+  // 2026-09-30 17:00 UTC is 1 October in Manila, so it does not.
+  assert.equal(isWithinRange("2026-09-30T17:00:00.000Z", range), false);
+  assert.equal(isWithinRange(null, range), false);
+  assert.equal(isWithinRange("not a date", range), false);
+  assert.equal(manilaMonthOf("2026-08-31T20:00:00.000Z"), "2026-09");
+});
+
+test("a date-only column is compared as the calendar day it already is", () => {
+  const range = { from: "2026-09-01", to: "2026-09-30" };
+  // A rental start date is a day, not an instant - re-reading it as UTC
+  // midnight would push 1 September out of a September range.
+  assert.equal(isDayWithinRange("2026-09-01", range), true);
+  assert.equal(isDayWithinRange("2026-09-30", range), true);
+  assert.equal(isDayWithinRange("2026-10-01", range), false);
+  assert.equal(isDayWithinRange(null, range), false);
+});
+
+test("the range is described in words under the figures", () => {
+  assert.equal(describeRange("all", { from: "2000-01-01", to: "2026-09-18" }), "All time, every record on file");
+  assert.match(describeRange("year", { from: "2026-01-01", to: "2026-09-18" }), /This year so far/);
+  assert.equal(
+    describeRange("custom", { from: "2026-03-01", to: "2026-03-31" }),
+    "2026-03-01 to 2026-03-31",
+  );
 });
 
 // The Insights sections read records SafeDrive already keeps. Nothing is

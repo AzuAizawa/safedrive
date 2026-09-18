@@ -745,6 +745,15 @@ const checks = [
       "summarizeCancellations",
       "summarizeRefundKinds",
       "summarizeQueueHealth",
+      // One period drives the totals, the chart and the export together.
+      "periodRange",
+      "describeRange",
+      "isDayWithinRange",
+      "PERIOD_LABELS",
+    ],
+    absentMarkers: [
+      // The chart used to drop older months without saying so.
+      ".slice(-12)",
     ],
   },
   {

@@ -3,6 +3,38 @@
 Running log of intentional changes. Newest first. Each entry: what changed, why,
 which files, and any follow-up (migration to apply, doc to re-check).
 
+## 2026-09-18 - One period drives Earnings & Insights
+
+Reported from the page itself: the three totals answered "all time", the date
+pickers above them only steered the CSV download, and a month's bar showed a
+single total - so "how much did September earn, split between bookings and
+subscriptions?" could not be answered on screen. The chart also kept only the
+last twelve months with activity and dropped older ones without saying so,
+which would have quietly hidden earnings once a year of records existed.
+
+- **A period control** - This month, This year, All time, Custom - now drives
+  the whole page: the three totals, the busiest-period and demand sections, the
+  monthly chart and the export. They can no longer describe different spans.
+- **The default is This year.** Month-to-date is nearly empty on the first of a
+  month and reads as broken; all-time keeps growing and stops answering "how are
+  we doing now". Year-to-date always has something in it, fits the chart, and
+  matches the annual cycle the books are filed on.
+- **The totals say what they are counting**, instead of leaving "all time" to be
+  assumed. Both sides of each cross-check are filtered the same way, so a
+  narrowed period cannot report a false mismatch.
+- **Each month's bar carries its split in figures** - commission and
+  subscriptions - not only in colour.
+- **No silent truncation.** The chart shows every month in the chosen period;
+  narrowing is now something the admin does deliberately.
+
+Ranges are Manila calendar days throughout, so a booking at 8am Manila on the
+last day of a period is not pushed out by the browser's own zone.
+
+Files: `src/lib/earningsPeriod.ts` (new - kept free of the Supabase client so
+the date arithmetic is tested on its own), `src/pages/admin/AdminEarningsPage.tsx`,
+`scripts/process-logic.test.mjs`, `scripts/booking-flow-smoke-check.mjs`.
+No database change.
+
 ## 2026-09-18 - Insights names a refund reason it cannot know
 
 Checking the new "What refunds were for" section against live data showed five

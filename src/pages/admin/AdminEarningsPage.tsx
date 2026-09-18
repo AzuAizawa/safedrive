@@ -9,6 +9,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { loadAdminAttentionItems, type AdminAttentionItem } from "@/lib/adminAttention";
 import { buildCsv, csvFileName, downloadCsv } from "@/lib/csvExport";
 import {
+  describeRange,
+  isDayWithinRange,
+  isWithinRange,
+  periodRange,
+  PERIOD_LABELS,
+  type EarningsPeriod,
+} from "@/lib/earningsPeriod";
+import {
   summarizeCancellations,
   summarizeQueueHealth,
   summarizeRefundKinds,
@@ -92,9 +100,21 @@ const EXPORT_PAGE_SIZE = 1000;
 
 export default function AdminEarningsPage() {
   const { user } = useAuth();
-  const [exportFrom, setExportFrom] = useState(firstOfManilaYear);
-  const [exportTo, setExportTo] = useState(todayInManila);
+  // One period drives the whole page: the three totals, the chart and the
+  // export. They used to disagree - the totals counted every record ever while
+  // the dates above them only steered the download, so "Total earned" answered
+  // a question nobody had asked.
+  const [period, setPeriod] = useState<EarningsPeriod>("year");
+  const [customFrom, setCustomFrom] = useState(firstOfManilaYear);
+  const [customTo, setCustomTo] = useState(todayInManila);
   const [exporting, setExporting] = useState(false);
+
+  const range = useMemo(
+    () => periodRange(period, { from: customFrom, to: customTo }),
+    [period, customFrom, customTo],
+  );
+  const exportFrom = range.from;
+  const exportTo = range.to;
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState<LedgerEntryRow[]>([]);
   const [journals, setJournals] = useState<JournalRow[]>([]);
@@ -346,13 +366,26 @@ export default function AdminEarningsPage() {
 
   const summary = useMemo(() => {
     const journalDate = new Map(journals.map((journal) => [journal.id, journal.effective_at]));
+    // Everything below counts only what falls inside the chosen period, and
+    // both counts - ledger and source records - are filtered the same way, or
+    // the cross-check would report a mismatch that is really just two
+    // different spans of time.
+    const inRange = (entry: LedgerEntryRow) =>
+      isWithinRange(journalDate.get(entry.journal_id), range);
+    const entriesInRange = entries.filter(inRange);
+    const bookingsInRange = bookings.filter((booking) =>
+      isDayWithinRange(booking.start_date, range),
+    );
+    const subscriptionsInRange = subscriptions.filter((row) =>
+      isWithinRange(row.paid_at, range),
+    );
 
     // Revenue accounts are credit-balance: a credit adds revenue, a debit
     // (a correction or reversal) takes it back. Netting the two is what
     // makes a reversed journal disappear from the total instead of being
     // counted twice.
     const net = (accountCode: string) =>
-      entries
+      entriesInRange
         .filter((entry) => entry.account_code === accountCode)
         .reduce(
           (total, entry) =>
@@ -366,11 +399,11 @@ export default function AdminEarningsPage() {
     // Independent second count, from the source tables rather than the
     // ledger. Two separate paths agreeing is the proof that a figure is
     // right - not the fact that one of them was printed confidently.
-    const bookingCommissionCentavos = bookings.reduce(
+    const bookingCommissionCentavos = bookingsInRange.reduce(
       (total, booking) => total + Math.round(Number(booking.commission || 0) * 100),
       0,
     );
-    const subscriptionPaidCentavos = subscriptions.reduce(
+    const subscriptionPaidCentavos = subscriptionsInRange.reduce(
       (total, row) => total + Number(row.amount_centavos || 0),
       0,
     );
@@ -388,7 +421,7 @@ export default function AdminEarningsPage() {
       monthMap.set(key, bucket);
     };
 
-    entries.forEach((entry) => {
+    entriesInRange.forEach((entry) => {
       const amount = Number(entry.credit_centavos || 0) - Number(entry.debit_centavos || 0);
       if (amount === 0) return;
       addToMonth(
@@ -398,16 +431,19 @@ export default function AdminEarningsPage() {
       );
     });
 
-    const months = Array.from(monthMap.values())
-      .sort((a, b) => a.key.localeCompare(b.key))
-      .slice(-12);
+    // Every month inside the period, not a silent "last 12". Once more than a
+    // year of records exists, the period control is what narrows the chart -
+    // dropping the older bars without saying so hid earnings that happened.
+    const months = Array.from(monthMap.values()).sort((a, b) =>
+      a.key.localeCompare(b.key),
+    );
 
     // Busiest periods are counted from completed bookings by the date the
     // rental starts - that is the season question ("when are we busy?"),
     // not the date someone happened to click Book.
     const monthCounts = new Array(12).fill(0) as number[];
     const dayCounts = new Array(7).fill(0) as number[];
-    bookings.forEach((booking) => {
+    bookingsInRange.forEach((booking) => {
       const date = new Date(booking.start_date);
       if (Number.isNaN(date.getTime())) return;
       monthCounts[date.getMonth()] += 1;
@@ -422,15 +458,15 @@ export default function AdminEarningsPage() {
       totalCentavos: commissionCentavos + subscriptionCentavos,
       bookingCommissionCentavos,
       subscriptionPaidCentavos,
-      completedBookings: bookings.length,
-      paidSubscriptions: subscriptions.length,
+      completedBookings: bookingsInRange.length,
+      paidSubscriptions: subscriptionsInRange.length,
       months,
       peakMonth: monthCounts[peakMonthIndex] > 0 ? MONTH_LABELS[peakMonthIndex] : null,
       peakMonthCount: monthCounts[peakMonthIndex] ?? 0,
       peakDay: dayCounts[peakDayIndex] > 0 ? DAY_LABELS[peakDayIndex] : null,
       peakDayCount: dayCounts[peakDayIndex] ?? 0,
     };
-  }, [entries, journals, bookings, subscriptions]);
+  }, [entries, journals, bookings, subscriptions, range]);
 
   // What renters are actually booking, and where. Both read columns that
   // already exist - car_models.body_type from the admin catalog, and the
@@ -443,7 +479,14 @@ export default function AdminEarningsPage() {
     const byType = new Map<string, number>();
     const byRegion = new Map<string, number>();
 
-    bookings.forEach((booking) => {
+    // Bookings follow the period; listed cars do not - a car is listed now or
+    // it is not, so "cars listed vs bookings" compares today's fleet against
+    // the period's trips.
+    const bookingsInRange = bookings.filter((booking) =>
+      isDayWithinRange(booking.start_date, range),
+    );
+
+    bookingsInRange.forEach((booking) => {
       const type = booking.cars?.car_models?.body_type?.trim() || "Not set";
       byType.set(type, (byType.get(type) ?? 0) + 1);
       const region = regionOf(
@@ -481,7 +524,7 @@ export default function AdminEarningsPage() {
         .sort((a, b) => b.booked - a.booked || b.listed - a.listed),
       totalListed: cars.length,
     };
-  }, [bookings, cars]);
+  }, [bookings, cars, range]);
 
   const chartMax = Math.max(
     1,
@@ -537,47 +580,68 @@ export default function AdminEarningsPage() {
       {/* For the accountant: the monthly summary for a chosen period, walked in
           full rather than taken from the capped view above. */}
       <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-end">
-        <div className="space-y-1">
-          <Label htmlFor="earnings-export-from">Export from</Label>
-          <Input
-            id="earnings-export-from"
-            type="date"
-            value={exportFrom}
-            max={exportTo || undefined}
-            onChange={(event) => setExportFrom(event.target.value)}
-            className="w-full sm:w-44"
-          />
+        <div className="flex flex-wrap items-center gap-2">
+          {(["month", "year", "all", "custom"] as EarningsPeriod[]).map((option) => (
+            <Button
+              key={option}
+              type="button"
+              size="sm"
+              variant={period === option ? "default" : "outline"}
+              onClick={() => setPeriod(option)}
+            >
+              {PERIOD_LABELS[option]}
+            </Button>
+          ))}
         </div>
-        <div className="space-y-1">
-          <Label htmlFor="earnings-export-to">to</Label>
-          <Input
-            id="earnings-export-to"
-            type="date"
-            value={exportTo}
-            min={exportFrom || undefined}
-            onChange={(event) => setExportTo(event.target.value)}
-            className="w-full sm:w-44"
-          />
+
+        {period === "custom" && (
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="earnings-from">From</Label>
+              <Input
+                id="earnings-from"
+                type="date"
+                value={customFrom}
+                max={customTo || undefined}
+                onChange={(event) => setCustomFrom(event.target.value)}
+                className="w-full sm:w-44"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="earnings-to">To</Label>
+              <Input
+                id="earnings-to"
+                type="date"
+                value={customTo}
+                min={customFrom || undefined}
+                onChange={(event) => setCustomTo(event.target.value)}
+                className="w-full sm:w-44"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={exporting}
+            onClick={() => void exportEarnings()}
+          >
+            {exporting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Export CSV
+          </Button>
+          <p className="text-xs text-muted-foreground sm:max-w-md">
+            Everything on this page - the totals, the chart and the export -
+            covers <strong className="text-foreground">{describeRange(period, range)}</strong>,
+            on the Manila calendar. The export adds the month-by-month split.
+          </p>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          className="gap-2"
-          disabled={exporting}
-          onClick={() => void exportEarnings()}
-        >
-          {exporting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4" />
-          )}
-          Export CSV
-        </Button>
-        <p className="text-xs text-muted-foreground sm:max-w-sm">
-          Commission and subscriptions per month, in pesos - SafeDrive's own
-          income, not the gross value of bookings. Dates follow the Manila
-          calendar.
-        </p>
       </div>
 
       {truncated && (
@@ -636,15 +700,19 @@ export default function AdminEarningsPage() {
                 {peso(summary.commissionCentavos)} commission +{" "}
                 {peso(summary.subscriptionCentavos)} subscriptions
               </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {describeRange(period, range)}
+              </p>
             </div>
           </div>
 
           <section className="rounded-xl border bg-card p-5">
             <h2 className="font-semibold">Earnings by month</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Last {summary.months.length} month
-              {summary.months.length === 1 ? "" : "s"} with activity. Taller bar =
-              more earned.
+              {summary.months.length} month
+              {summary.months.length === 1 ? "" : "s"} with activity in{" "}
+              {describeRange(period, range).toLowerCase()}. Each bar shows what
+              that month earned, split into commission and subscriptions.
             </p>
             {summary.months.length === 0 ? (
               <p className="py-10 text-center text-sm text-muted-foreground">
@@ -679,6 +747,14 @@ export default function AdminEarningsPage() {
                           )}
                         </div>
                         <span className="text-[10px] text-muted-foreground">{month.label}</span>
+                        {/* The split in figures, not only in colour: the bar
+                            showed which was bigger, never by how much. */}
+                        <span className="text-[10px] leading-tight text-primary/80">
+                          {peso(month.commission)}
+                        </span>
+                        <span className="text-[10px] leading-tight text-amber-600 dark:text-amber-400">
+                          {peso(month.subscription)}
+                        </span>
                       </div>
                     );
                   })}
