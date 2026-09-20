@@ -159,18 +159,13 @@ export default function SignUpPage() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder="you@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   disabled={isLoading}
                   className="h-10 disabled:opacity-60"
                 />
-                {acceptedDomainsLabel ? (
-                  <p className="text-xs text-muted-foreground">
-                    Accepted: {acceptedDomainsLabel}.
-                  </p>
-                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
