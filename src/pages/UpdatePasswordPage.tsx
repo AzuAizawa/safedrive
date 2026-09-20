@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Eye, EyeOff, Loader2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { usePlatformContactEmail } from "@/lib/platformSettings";
+import { finalizeSingleSession } from "@/lib/singleSession";
 
 const getErrorMessage = (error: unknown, fallback = "Please try again.") =>
   error instanceof Error ? error.message : fallback;
@@ -99,6 +100,23 @@ export default function UpdatePasswordPage() {
           setErrorProfile(getErrorMessage(error, "This password reset link is invalid, expired, or already used."));
           setIsCheckingAccess(false);
           return;
+        }
+
+        // CHAPTER 57 says the newest login wins, and a session opened from a
+        // recovery link is the newest thing there is - but it was the only
+        // one that could never say so. finalizeSingleSession() ran on the
+        // login pages alone, so the recovery session never claimed
+        // active_session_token, and the single-session guard read that as
+        // "superseded" and signed it out mid-reset: an older device that was
+        // still signed in evicted the person trying to recover the account,
+        // burning the one-use link on the way out. Reported by a tester who
+        // opened the link on their phone while their laptop was signed in.
+        //
+        // Deliberately inside the recovery-link branch only. Someone already
+        // signed in who simply opens this page is not starting a new session
+        // and must not have their other devices thrown out for it.
+        if (activeUser) {
+          await finalizeSingleSession(activeUser.id);
         }
       }
 
@@ -206,10 +224,22 @@ export default function UpdatePasswordPage() {
             <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-2 border border-red-500/20">
               <ShieldAlert className="w-8 h-8 text-red-500" />
             </div>
-            <CardTitle className="text-xl text-red-500">Access Denied</CardTitle>
+            {/* Not "Access Denied". A reset link is single-use, so the
+                ordinary way to arrive here is opening one that was already
+                used or has expired - nothing the person did wrong, and
+                nothing they were refused. The old wording read like an
+                accusation and said nothing about what to do next. */}
+            <CardTitle className="text-xl text-red-500">
+              This link is no longer valid
+            </CardTitle>
             <CardDescription className="text-muted-foreground mt-2">{errorProfile}</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground text-center">
+              A reset link can only be opened once. Ask for a new one from the
+              sign-in page and open that one on the device you want to change
+              your password on.
+            </p>
             <Button className="w-full" variant="outline" onClick={() => navigate("/login")}>
               Return to Login
             </Button>
