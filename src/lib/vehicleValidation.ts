@@ -191,15 +191,18 @@ export const validateNewListing = (input: NewListingInput): ListingFieldError[] 
   check("cr_file", input.hasCr ? null : "Upload the Certificate of Registration (CR).");
   check("ctpl_file", input.hasCtpl ? null : "Upload the CTPL insurance.");
   check("ctpl_expiry", expiryError(input.ctplExpiry, input.today, "CTPL"));
-  // Optional cover, but half of it cannot be reviewed: a policy with no expiry,
-  // or an expiry with no policy.
-  if (input.hasComprehensive && !input.comprehensiveExpiry) {
-    check("comprehensive_insurance_expiry", "Enter the policy's expiry date, or remove the policy.");
-  } else if (!input.hasComprehensive && input.comprehensiveExpiry) {
-    check("comprehensive_insurance_file", "Upload the policy, or clear its expiry date.");
-  } else if (input.comprehensiveExpiry && input.comprehensiveExpiry < input.today) {
-    check("comprehensive_insurance_expiry", "That date has passed - the policy must still be valid.");
-  }
+  // Required since CHAPTER 103. CTPL is the statutory minimum for road use and
+  // covers none of what a rental risks - the vehicle, the renter, or damage to
+  // property - so a vehicle offered for rent needs cover that reaches them.
+  // Told here rather than at review, so nobody uploads seven documents before
+  // learning the eighth was never going to be optional.
+  check(
+    "comprehensive_insurance_file",
+    input.hasComprehensive
+      ? null
+      : "Upload comprehensive insurance. CTPL alone does not cover a rented vehicle.",
+  );
+  check("comprehensive_insurance_expiry", expiryError(input.comprehensiveExpiry, input.today, "comprehensive insurance"));
   check(
     "insurer_rental_use_confirmed",
     input.rentalUseConfirmed ? null : "Confirm you disclosed rental use to your insurer.",

@@ -2177,7 +2177,7 @@ export default function MyVehiclesPage() {
                   expiryRequired
                 />
                 <DocumentField
-                  label="Comprehensive insurance (optional)"
+                  label="Comprehensive insurance *"
                   fieldId="listing-comprehensive_insurance_file"
                   expiryFieldId="listing-comprehensive_insurance_expiry"
                   fileError={listingError("comprehensive_insurance_file")}
@@ -2188,10 +2188,11 @@ export default function MyVehiclesPage() {
                   allowedTypes={ALLOWED_IMAGE_TYPES}
                   validationLabel="comprehensive insurance document"
                   accept="image/jpeg,image/png,image/webp"
-                  expiryLabel="Expiry date shown on the policy"
+                  expiryLabel="Expiry date shown on the policy *"
                   expiryValue={form.comprehensive_insurance_expiry}
                   onExpiry={(value) => setForm({ ...form, comprehensive_insurance_expiry: value })}
-                  note="Optional, but a missing or expired policy creates an admin warning."
+                  expiryRequired
+                  note="Required. CTPL is the legal minimum for road use and does not cover the vehicle, the renter, or damage to property - the cover must extend to rental (rent-a-car) use. Vehicles listed before this requirement are not affected."
                 />
                 <div id="listing-insurer_rental_use_confirmed" className="space-y-1 sm:col-span-2">
                   <label

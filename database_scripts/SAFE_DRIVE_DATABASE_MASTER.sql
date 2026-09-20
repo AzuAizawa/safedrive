@@ -16427,4 +16427,166 @@ commit;
 --        'informational - they keep working either way';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 103 - Comprehensive insurance is required again, for new listings
+-- ============================================================================
+-- This reverses one decision of CHAPTER 78, and says so plainly because the
+-- rule has now moved twice and whoever reads this next deserves the reasoning
+-- rather than a third silent reversal.
+--
+-- CHAPTER 70 required comprehensive insurance. CHAPTER 78 made it optional
+-- ("owner's decision"), on the understanding that CTPL - the legal minimum -
+-- was enough. It is not, for this platform. CTPL covers third-party death and
+-- bodily injury only: not the vehicle, not the renter, not property damage.
+-- Every one of those is a risk this business creates by handing a stranger
+-- somebody else's car. An ordinary private-car policy also commonly excludes
+-- use "for hire or reward", which is precisely what a rental is - so what the
+-- listing needs is comprehensive cover that extends to rental use.
+--
+-- CHAPTER 78 also removed the rental-use verification that existed to qualify
+-- the comprehensive document. It is NOT restored here. The policy itself is
+-- uploaded, stored and re-readable, and every approval and rejection is
+-- already written to audit_log with the reviewer's identity - so a reviewer
+-- who approves a policy that excludes rental use leaves a record that can be
+-- re-examined against the document. A second checkbox saying "I looked" adds
+-- no evidence the document does not already carry, and a box that is ticked
+-- out of habit manufactures diligence rather than recording it.
+--
+-- Grandfathered explicitly, not by accident. Vehicles already on the platform
+-- keep their listing whatever they carry: comprehensive_insurance_required is
+-- true by default and set false for every row that exists when this chapter
+-- runs. The requirement therefore never reaches back, not even at renewal -
+-- chasing it would take working cars off the platform the day this applied.
+-- The exemption is a visible column rather than a date buried in a function,
+-- so anyone can ask which vehicles are exempt and get an answer.
+begin;
+
+alter table public.cars
+  add column if not exists comprehensive_insurance_required boolean not null default true;
+
+-- Every vehicle that exists right now predates the requirement.
+update public.cars set comprehensive_insurance_required = false;
+
+comment on column public.cars.comprehensive_insurance_required is
+  'Whether this vehicle must carry approved comprehensive insurance to stay listed (CHAPTER 103). False on vehicles listed before the requirement; true for everything submitted afterwards.';
+
+create or replace function public.vehicle_compliance_summary(
+  p_car_id uuid, p_start timestamptz default now(), p_end timestamptz default now()
+) returns jsonb language plpgsql stable security definer set search_path = public as $vc$
+declare
+  c public.cars%rowtype; k text; keys text[]; r record;
+  covered_until timestamptz; limit_at timestamptz := 'infinity';
+  reasons text[] := '{}'; s timestamptz := coalesce(p_start,now());
+  e timestamptz := coalesce(p_end,p_start,now());
+begin
+  select * into c from public.cars where id=p_car_id;
+  if not found or e<s then
+    return jsonb_build_object('eligible',false,'valid_until',null,'reasons',array['invalid_vehicle_or_dates']);
+  end if;
+  keys := array['or','cr','ctpl','dti','mayors_permit','bir'];
+  -- CHAPTER 103. Required for vehicles listed from that chapter onward; the
+  -- ones already here when it ran are exempt and stay exempt.
+  if c.comprehensive_insurance_required then
+    keys := array_append(keys,'comprehensive_insurance');
+  end if;
+  foreach k in array keys loop
+    covered_until:=null;
+    for r in
+      select coalesce(d.valid_from,'-infinity'::timestamptz) as a,
+        least(coalesce(d.valid_until,'infinity'::timestamptz),coalesce(d.superseded_at,'infinity'::timestamptz)) as z
+      from public.car_documents d
+      where d.car_id=p_car_id and d.compliance_status='approved'
+        and (d.document_type=k or (k in ('or','cr') and d.document_type='orcr'))
+        and (k not in ('or','ctpl','dti','mayors_permit','comprehensive_insurance') or d.valid_until is not null)
+      order by coalesce(d.valid_from,'-infinity'::timestamptz),coalesce(d.valid_until,'infinity'::timestamptz)
+    loop
+      if r.z<s then continue; end if;
+      if covered_until is null then
+        if r.a>s then exit; end if;
+        covered_until:=r.z;
+      elsif r.a<=covered_until + interval '1 millisecond' then
+        covered_until:=greatest(covered_until,r.z);
+      else exit; end if;
+    end loop;
+    if covered_until is null or covered_until<e then reasons:=array_append(reasons,k||'_coverage_required'); end if;
+    limit_at:=least(limit_at,coalesce(covered_until,s-interval '1 millisecond'));
+  end loop;
+  return jsonb_build_object('eligible',cardinality(reasons)=0,
+    'valid_until',case when limit_at='infinity'::timestamptz then null else limit_at end,'reasons',reasons);
+end;
+$vc$;
+revoke all on function public.vehicle_compliance_summary(uuid,timestamptz,timestamptz) from public;
+grant execute on function public.vehicle_compliance_summary(uuid,timestamptz,timestamptz) to anon,authenticated,service_role;
+
+-- The rule has to be published, or a rejection cannot be defended. Replaced
+-- only where the clause still reads exactly as published, as a new version,
+-- so running this again changes nothing. The age-limit clause beside it is
+-- deliberately left alone: SafeDrive still does not impose one, and that
+-- sentence is still true.
+do $chapter103_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published' and document_key = 'platform_agreement'
+  loop
+    next_html := replace(doc.content_html,
+      $acc$<li><strong>Accepted Vehicles:</strong> Only models and body types present in the admin-approved catalogue may be submitted. Approval also requires current ownership/registration evidence, roadworthiness, insurance declarations, images, and a vehicle-specific rental agreement.</li>$acc$,
+      $acc_new$<li><strong>Accepted Vehicles:</strong> Only models and body types present in the admin-approved catalogue may be submitted. Approval also requires current ownership/registration evidence, roadworthiness, a current CTPL policy, images, and a vehicle-specific rental agreement.</li>
+<li><strong>Comprehensive insurance:</strong> A vehicle submitted for listing must carry comprehensive motor insurance that is current and whose cover extends to rental (rent-a-car) use. CTPL alone is the statutory minimum for road use and does not cover the vehicle itself, the renter, or damage to property, so it is not sufficient for a vehicle offered for rent. The policy is submitted with its expiry date and reviewed like any other required document, and the listing stops accepting new bookings when that cover lapses. Vehicles already listed before this requirement took effect keep their listing. SafeDrive records and reviews what is submitted and does not represent that any particular policy will pay a particular claim.</li>$acc_new$);
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 103'));
+    end if;
+  end loop;
+end;
+$chapter103_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'grandfather column' as check_name,
+--        (select count(*)::text from information_schema.columns
+--          where table_schema = 'public' and table_name = 'cars'
+--            and column_name = 'comprehensive_insurance_required') as result,
+--        '1' as expected
+-- union all
+-- select 'every vehicle that already existed is exempt',
+--        (select count(*)::text from public.cars where comprehensive_insurance_required),
+--        '0'
+-- union all
+-- select 'listings that were eligible are still eligible',
+--        (select count(*)::text from public.cars
+--          where deleted_at is null and status = 'approved'
+--            and not (public.vehicle_compliance_summary(id)->>'eligible')::boolean),
+--        '0'
+-- union all
+-- select 'published platform agreement',
+--        (select 'v' || version_number || case
+--                  when position('Comprehensive insurance:' in content_html) > 0 then ' updated' else ' NOT updated' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'platform_agreement'),
+--        'v5 updated'
+-- union all
+-- select 'the age clause is deliberately untouched',
+--        (select case when position('No unimplemented age promise' in content_html) > 0 then 'still there' else 'gone' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'platform_agreement'),
+--        'still there';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.
