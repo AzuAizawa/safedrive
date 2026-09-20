@@ -567,6 +567,17 @@ export default function VerificationPage() {
     Boolean(payoutAccountName.trim()) &&
     Boolean(payoutAccountNumber.trim()) &&
     payoutAccountNumberError === null;
+  // A lister setting up a destination for the first time is not changing
+  // anything, so the warning below would be noise. It is only shown when there
+  // is an existing destination and the form actually moves it somewhere else.
+  const [showPayoutChangeConfirm, setShowPayoutChangeConfirm] = useState(false);
+  const hasExistingPayoutDetails = Boolean(
+    profile?.payout_method || profile?.payout_account_name || profile?.payout_account_number,
+  );
+  const payoutDetailsChanged =
+    (profile?.payout_method || "") !== payoutMethod ||
+    (profile?.payout_account_name || "") !== payoutAccountName.trim() ||
+    (profile?.payout_account_number || "") !== payoutAccountNumber.trim();
   const hasStructuredAddress =
     typeof profile?.address === "string" && profile.address.includes(",");
   const isPrivilegedAccount =
@@ -1004,6 +1015,21 @@ export default function VerificationPage() {
     setIsEditingProfile(true);
   };
 
+  // Both Save buttons (the inline card and the settings modal) go through here
+  // so the warning cannot be reached from one path and skipped on the other.
+  const requestPayoutDetailsUpdate = () => {
+    if (!user) return;
+    if (payoutAccountNumberError) {
+      toast.error("Check the account number", { description: payoutAccountNumberError });
+      return;
+    }
+    if (hasExistingPayoutDetails && payoutDetailsChanged) {
+      setShowPayoutChangeConfirm(true);
+      return;
+    }
+    void handleUpdatePayoutDetails();
+  };
+
   const handleUpdatePayoutDetails = async () => {
     if (!user) return;
     // Checked here as well as on the button: the database constraint rejects
@@ -1026,6 +1052,7 @@ export default function VerificationPage() {
       if (error) throw error;
       toast.success("Payout details updated successfully!");
       await refreshProfile();
+      setShowPayoutChangeConfirm(false);
       setShowPayoutModal(false);
     } catch (err) {
       toast.error("Failed to update payout details", { description: getErrorMessage(err) });
@@ -1496,7 +1523,7 @@ export default function VerificationPage() {
                 </Button>
               ) : (
                 <div className="flex items-center gap-2">
-                  <Button type="button" size="sm" disabled={isSavingPayout || !canSavePayoutDetails} onClick={handleUpdatePayoutDetails}>
+                  <Button type="button" size="sm" disabled={isSavingPayout || !canSavePayoutDetails} onClick={requestPayoutDetailsUpdate}>
                     {isSavingPayout ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
                     Save
                   </Button>
@@ -3120,12 +3147,80 @@ export default function VerificationPage() {
                 <Button 
                    className="w-full"
                    disabled={isSavingPayout || !canSavePayoutDetails}
-                   onClick={handleUpdatePayoutDetails}
+                   onClick={requestPayoutDetailsUpdate}
                 >
                    {isSavingPayout ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                    Save Payout Info
                 </Button>
              </CardContent>
+          </Card>
+        </div>,
+        document.body,
+      )}
+
+      {/* A payout destination is read fresh from the profile at the moment the
+          transfer is sent (server/payoutAutomation.ts), so a change made today
+          catches every payout that has not gone out yet - ongoing bookings
+          included. The lister is told that before it happens, not after.
+          Sits above the payout modal (z-[100]) because it is opened from it. */}
+      {showPayoutChangeConfirm &&
+        createPortal(
+        <div
+          className="fixed inset-0 z-[110] flex items-start sm:items-center justify-center overflow-y-auto bg-black/80 backdrop-blur-sm p-4 py-6 animate-fade-in"
+          onClick={() => {
+            if (!isSavingPayout) setShowPayoutChangeConfirm(false);
+          }}
+        >
+          <Card
+            className="max-w-sm w-full shadow-2xl animate-scale-in border-0"
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+          >
+            <CardHeader className="pt-6">
+              <CardTitle>Change payout destination?</CardTitle>
+              <CardDescription>
+                Read this before you save.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-foreground">
+                Any payout that has not been released yet - including the ones for your
+                ongoing and current bookings - will be sent to this new account instead.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Payouts that were already released keep the account they were sent to.
+                Those will not change.
+              </p>
+              <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  New destination
+                </p>
+                <p className="text-sm font-semibold break-words">
+                  {getSupportedPayoutMethodLabel(payoutMethod)}
+                </p>
+                <p className="text-sm break-words">{payoutAccountName.trim()}</p>
+                <p className="text-sm break-all">{payoutAccountNumber.trim()}</p>
+              </div>
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  type="button"
+                  disabled={isSavingPayout}
+                  onClick={() => setShowPayoutChangeConfirm(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={isSavingPayout || !canSavePayoutDetails}
+                  onClick={handleUpdatePayoutDetails}
+                >
+                  {isSavingPayout ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                  Save new destination
+                </Button>
+              </div>
+            </CardContent>
           </Card>
         </div>,
         document.body,

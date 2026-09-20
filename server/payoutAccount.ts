@@ -75,3 +75,13 @@ export const isValidPayoutAccountNumber = (
   method: string | null | undefined,
   value: string | null | undefined,
 ) => getPayoutAccountNumberError(method, value) === null;
+
+// Show only the last 4 characters of a payout account number. Since CHAPTER
+// 100 this is not only what a receipt prints - it is what gets STORED on the
+// payout row, so the mask has one definition rather than one per caller.
+export const maskPayoutAccount = (value: string | null | undefined) => {
+  const trimmed = (value ?? "").replace(/\s+/g, "");
+  if (!trimmed) return null;
+  if (trimmed.length <= 4) return trimmed;
+  return `${"*".repeat(trimmed.length - 4)}${trimmed.slice(-4)}`;
+};

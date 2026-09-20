@@ -891,6 +891,11 @@ export interface Database {
           status: string;
           transaction_id: string | null;
           payment_method: string | null;
+          // The destination as it stood when this payout row was created
+          // (CHAPTER 100). Null on rows written before it, and on every
+          // payment type that is not a payout.
+          payout_account_name: string | null;
+          payout_account_masked: string | null;
           notes: string | null;
           created_at: string;
           updated_at: string;
@@ -903,6 +908,8 @@ export interface Database {
           status?: string;
           transaction_id?: string | null;
           payment_method?: string | null;
+          payout_account_name?: string | null;
+          payout_account_masked?: string | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -915,6 +922,8 @@ export interface Database {
           status?: string;
           transaction_id?: string | null;
           payment_method?: string | null;
+          payout_account_name?: string | null;
+          payout_account_masked?: string | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;

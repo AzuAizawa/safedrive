@@ -1,6 +1,7 @@
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { postSimpleBalancedJournal } from "./ledger.js";
 import { isDemoMoneyMovementEnabled } from "./paymongoMode.js";
+import { maskPayoutAccount } from "./payoutAccount.js";
 import { sendCompensationReceiptEmail } from "./email.js";
 
 /**
@@ -224,6 +225,13 @@ export async function releaseCancellationCompensation(
         payment_type: "payout",
         status: "pending",
         payment_method: (owner?.payout_method as string | null) || "Unspecified",
+        // Captured with the method for the same reason the released payout
+        // captures it (CHAPTER 100): the profile can change before anyone
+        // opens this receipt. Masked - the full number stays in profiles.
+        payout_account_name: (owner?.payout_account_name as string | null) ?? null,
+        payout_account_masked: maskPayoutAccount(
+          owner?.payout_account_number as string | null,
+        ),
         notes: demo
           ? "Short-notice compensation queued (demo mode). No PayMongo transfer is requested."
           : "Short-notice compensation owed to the lister. Live mode sends no automatic transfer - send it manually and record the release.",

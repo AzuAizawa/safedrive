@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { postSimpleBalancedJournal } from "./ledger.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { sendAdminAlertEmail, sendPayoutReceiptEmail } from "./email.js";
-import { getPayoutAccountNumberError } from "./payoutAccount.js";
+import { getPayoutAccountNumberError, maskPayoutAccount } from "./payoutAccount.js";
 import { isPayMongoTestKey } from "./paymongoMode.js";
 
 type PaymentRecord = {
@@ -141,15 +141,6 @@ const getAuthToken = (secretKey: string) =>
 
 const safeString = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
-
-// Mask everything but the last 4 characters so notifications never expose a
-// full payout account number.
-const maskPayoutAccount = (value: string | null | undefined) => {
-  const trimmed = (value ?? "").replace(/\s+/g, "");
-  if (!trimmed) return null;
-  if (trimmed.length <= 4) return trimmed;
-  return `${"*".repeat(trimmed.length - 4)}${trimmed.slice(-4)}`;
-};
 
 const describePayoutDestination = (owner: BookingForPayout["owner"]) => {
   const masked = maskPayoutAccount(owner.payout_account_number);
@@ -373,6 +364,12 @@ const createPendingPayoutRecord = async (
       payment_type: "payout",
       status: "pending",
       payment_method: booking.owner.payout_method || "Unspecified",
+      // The destination is captured here, with the method, because the profile
+      // it comes from is free to change before anyone opens this receipt
+      // (CHAPTER 100). The number is stored masked - the receipt never shows
+      // more, and the full number stays in profiles alone.
+      payout_account_name: booking.owner.payout_account_name,
+      payout_account_masked: maskPayoutAccount(booking.owner.payout_account_number),
       notes: statusNote,
     })
     .select("*")

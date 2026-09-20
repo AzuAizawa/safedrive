@@ -1924,8 +1924,16 @@ export default function ListerBookingsPage() {
           ["Booking", bookingLabel],
           ["Booking ID", booking?.id || payment.booking_id || "Not recorded"],
           ["Destination", payment.payment_method || profile?.payout_method || "Saved payout destination"],
-          ["Account name", profile?.payout_account_name || "Not available"],
-          ["Account number", maskPayoutAccount(profile?.payout_account_number ?? null)],
+          // The account this payout was actually sent to, captured on the row
+          // when it was created (CHAPTER 100). Editing payout details later
+          // cannot rewrite it. Payouts released before that chapter carry no
+          // snapshot, so those - and only those - still fall back to the
+          // current profile, which is all that was ever recorded for them.
+          ["Account name", payment.payout_account_name || profile?.payout_account_name || "Not available"],
+          [
+            "Account number",
+            payment.payout_account_masked || maskPayoutAccount(profile?.payout_account_number ?? null),
+          ],
           ["Provider reference", payment.transaction_id || "Not provided"],
           ["Notes", payment.notes || "None"],
         ],

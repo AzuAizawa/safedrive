@@ -15953,4 +15953,97 @@ commit;
 --        'informational';
 --   (every result matches expected)
 
+
+-- ============================================================================
+-- CHAPTER 100 - A released payout keeps the account it was sent to
+-- ============================================================================
+-- A payout destination lives in one place only: the lister's profile. The
+-- transfer reads it fresh at the moment it is sent (server/payoutAutomation.ts
+-- loads owner:profiles when the payout runs), which is correct - money that has
+-- not gone out yet should follow the account the lister has today.
+--
+-- The receipt read the same live profile, and that was wrong. A payout released
+-- in August to GCash 0993xxxx208 printed "Maya" the moment the lister changed
+-- their details in September, on the receipt for a transfer that had already
+-- happened. The record of where money actually went rewrote itself every time
+-- the lister edited a form.
+--
+-- The method was already captured on the payment row at release time; the
+-- account name and number were not. This adds them, so a payout row carries the
+-- destination as it stood when that payout was created:
+--   * payout_account_name   - the account name at release time;
+--   * payout_account_masked - the MASKED number, never the full one. The
+--     receipt only ever shows a mask, so the full number stays in exactly one
+--     place (profiles) instead of being copied across another table.
+--
+-- Rows written before this chapter stay NULL. Their true destination was never
+-- recorded and cannot be recovered, so the receipt falls back to the profile
+-- for those, exactly as before - no worse, and no invented history.
+--
+-- The SELECT policy is tightened in the same breath, and it has to be. Payout
+-- rows were readable by the booking's RENTER as well as its lister, because
+-- "Participants see payments" (Chapter 1) matches on booking_id with no regard
+-- for payment_type. Storing the lister's account on that row would have handed
+-- the renter a masked account number belonging to someone else. Payout rows now
+-- belong to the lister and admins only - which also stops a renter from seeing
+-- what the lister earned, something no renter page ever asked for or displayed.
+-- Every other payment type is untouched: the renter still sees their own
+-- downpayment, balance, extension, deposit and refund rows exactly as before.
+begin;
+
+alter table public.payments
+  add column if not exists payout_account_name text,
+  add column if not exists payout_account_masked text;
+
+comment on column public.payments.payout_account_name is
+  'Lister account name as it stood when this payout row was created. NULL on rows written before CHAPTER 100.';
+comment on column public.payments.payout_account_masked is
+  'Masked lister account number as it stood when this payout row was created. Never the full number.';
+
+drop policy if exists "Participants see payments" on public.payments;
+create policy "Participants see payments" on public.payments
+for select using (
+  exists (
+    select 1
+    from public.bookings b
+    where b.id = payments.booking_id
+      and (
+        b.owner_id = auth.uid()
+        -- A payout is the lister's money leaving the platform. The renter's
+        -- side of the booking ends at what the renter paid and was refunded.
+        or (b.renter_id = auth.uid() and payments.payment_type <> 'payout')
+      )
+  )
+  or public.is_admin()
+);
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'snapshot columns' as check_name,
+--        (select count(*)::text from information_schema.columns
+--          where table_schema = 'public' and table_name = 'payments'
+--            and column_name in ('payout_account_name', 'payout_account_masked')) as result,
+--        '2' as expected
+-- union all
+-- select 'full number is not copied',
+--        (select count(*)::text from information_schema.columns
+--          where table_schema = 'public' and table_name = 'payments'
+--            and column_name = 'payout_account_number'),
+--        '0'
+-- union all
+-- select 'members cannot write payments',
+--        (select count(*)::text from information_schema.role_table_grants
+--          where table_schema = 'public' and table_name = 'payments'
+--            and grantee in ('authenticated', 'anon')
+--            and privilege_type in ('INSERT', 'UPDATE', 'DELETE')),
+--        '0'   -- the leftover "Admins can insert payments" policy is moot:
+--              -- Chapter 17 revoked the table privilege it would need.
+-- union all
+-- select 'older payout rows left as they were',
+--        (select count(*)::text from public.payments
+--          where payment_type = 'payout' and payout_account_masked is null),
+--        'the payout rows that existed before this chapter';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.
