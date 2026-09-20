@@ -34,6 +34,22 @@ export const isAllowedSignupEmail = (email: string, domains: string[]) => {
   );
 };
 
+/**
+ * Whether the address is finished enough to be judged.
+ *
+ * A form that starts objecting at "kurt@" while the person is still typing is
+ * worse than one that waits: the complaint is always true for a moment, so it
+ * stops meaning anything. Only a whole-looking address gets an opinion.
+ */
+export const looksLikeCompleteEmail = (email: string) => {
+  const address = email.trim();
+  const at = address.indexOf("@");
+  if (at <= 0) return false;
+  const domain = address.slice(at + 1);
+  const dot = domain.indexOf(".");
+  return dot > 0 && dot < domain.length - 1;
+};
+
 export const fetchSignupEmailDomains = async (): Promise<string[]> => {
   try {
     const { data, error } = await supabase.rpc("signup_email_domains");

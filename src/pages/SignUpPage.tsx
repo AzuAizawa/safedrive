@@ -20,6 +20,7 @@ import {
   describeSignupEmailDomains,
   fetchSignupEmailDomains,
   isAllowedSignupEmail,
+  looksLikeCompleteEmail,
 } from "@/lib/signupEmailDomains";
 import TurnstileWidget, { captchaConfigured } from "@/components/TurnstileWidget";
 
@@ -31,6 +32,12 @@ export default function SignUpPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
+  // Raised when the person leaves the email field, not when they submit.
+  // The old order made them earn the rejection: type the address, satisfy
+  // four password rules, read and accept the Terms, and only then be told
+  // the address was never going to work. Reported by a tester who did
+  // exactly that.
+  const [emailDomainError, setEmailDomainError] = useState<string | null>(null);
   // Which providers registration takes (CHAPTER 102). Read before sign-in so
   // the form can say no early, instead of after a confirmation email. The
   // database trigger is what actually enforces it; an empty list here just
@@ -70,6 +77,22 @@ export default function SignUpPage() {
     [allowedDomains],
   );
 
+  // One message, built from the live list, used by the field and by submit.
+  const rejectedDomainMessage = (value: string) => {
+    const domain = value.trim().toLowerCase().split("@")[1] ?? "";
+    return acceptedDomainsLabel
+      ? `${domain} is not accepted. SafeDrive accepts ${acceptedDomainsLabel}.`
+      : `${domain} is not accepted for registration.`;
+  };
+
+  const checkEmailDomain = (value: string) => {
+    if (!looksLikeCompleteEmail(value) || isAllowedSignupEmail(value, allowedDomains)) {
+      setEmailDomainError(null);
+      return;
+    }
+    setEmailDomainError(rejectedDomainMessage(value));
+  };
+
   const { signUp } = useAuth();
   const navigate = useNavigate();
   const contactEmail = usePlatformContactEmail();
@@ -81,10 +104,9 @@ export default function SignUpPage() {
       return;
     }
     if (email.trim() && !isAllowedSignupEmail(email, allowedDomains)) {
+      setEmailDomainError(rejectedDomainMessage(email));
       toast.error("Use an email address from a supported provider", {
-        description: acceptedDomainsLabel
-          ? `SafeDrive accepts ${acceptedDomainsLabel}.`
-          : "That email provider is not accepted for registration.",
+        description: rejectedDomainMessage(email),
       });
       return;
     }
@@ -161,11 +183,22 @@ export default function SignUpPage() {
                   type="email"
                   placeholder="you@gmail.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    // Typing is how someone fixes it, so the complaint goes
+                    // away the moment they start rather than sitting there
+                    // red while they correct it.
+                    if (emailDomainError) setEmailDomainError(null);
+                  }}
+                  onBlur={(e) => checkEmailDomain(e.target.value)}
                   required
                   disabled={isLoading}
-                  className="h-10 disabled:opacity-60"
+                  aria-invalid={emailDomainError !== null}
+                  className={`h-10 disabled:opacity-60${emailDomainError ? " border-red-500 focus-visible:ring-red-500" : ""}`}
                 />
+                {emailDomainError ? (
+                  <p className="text-xs text-red-500">{emailDomainError}</p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
