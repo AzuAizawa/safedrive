@@ -29,6 +29,9 @@ import {
 const isEmailShaped = (value: string) =>
   /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
 
+// The accepted signup domains are edited one per line (CHAPTER 102).
+const NEWLINE = "\n";
+
 type SettingsRow = {
   commission_rate: number;
   downpayment_rate: number;
@@ -327,6 +330,12 @@ export default function AdminPlatformSettingsPage() {
   const [contactEmail, setContactEmail] = useState(DEFAULT_CONTACT_EMAIL);
   const [contactDraft, setContactDraft] = useState(DEFAULT_CONTACT_EMAIL);
   const [savingContact, setSavingContact] = useState(false);
+  // CHAPTER 102. Kept as the raw text the super admin is editing so a
+  // half-typed line never rewrites itself under the cursor; it is split and
+  // tidied by the database when saved.
+  const [signupDomains, setSignupDomains] = useState<string[]>([]);
+  const [signupDomainsDraft, setSignupDomainsDraft] = useState("");
+  const [savingSignupDomains, setSavingSignupDomains] = useState(false);
 
   const [etaUser, setEtaUser] = useState(DEFAULT_USER_VERIFICATION_ETA);
   const [etaUserDraft, setEtaUserDraft] = useState(DEFAULT_USER_VERIFICATION_ETA);
@@ -338,7 +347,16 @@ export default function AdminPlatformSettingsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [settingsRes, pendingRes, scheduledRes, countRes, historyRes, contactRes, etaRes] = await Promise.all([
+    const [
+      settingsRes,
+      pendingRes,
+      scheduledRes,
+      countRes,
+      historyRes,
+      contactRes,
+      etaRes,
+      signupDomainsRes,
+    ] = await Promise.all([
       supabase
         .from("platform_settings")
         .select(
@@ -371,7 +389,16 @@ export default function AdminPlatformSettingsPage() {
         .limit(6),
       supabase.rpc("get_platform_contact_email"),
       supabase.rpc("get_verification_eta_messages"),
+      supabase.rpc("signup_email_domains"),
     ]);
+
+    const loadedDomains = Array.isArray(signupDomainsRes.data)
+      ? (signupDomainsRes.data as unknown[]).filter(
+          (entry): entry is string => typeof entry === "string",
+        )
+      : [];
+    setSignupDomains(loadedDomains);
+    setSignupDomainsDraft(loadedDomains.join(NEWLINE));
 
     const loadedContact =
       typeof contactRes.data === "string" && isEmailShaped(contactRes.data)
@@ -578,6 +605,40 @@ export default function AdminPlatformSettingsPage() {
       });
     } finally {
       setSavingContact(false);
+    }
+  };
+
+  const handleSaveSignupDomains = async () => {
+    const next = signupDomainsDraft
+      .split(/[\s,]+/)
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean);
+    if (next.length === 0) {
+      toast.error("Keep at least one domain", {
+        description: "An empty list would leave registration with no rule at all.",
+      });
+      return;
+    }
+    setSavingSignupDomains(true);
+    try {
+      const { data, error } = await supabase.rpc("set_signup_email_domains", {
+        p_domains: next,
+      });
+      if (error) throw error;
+      const saved = Array.isArray(data)
+        ? (data as unknown[]).filter((entry): entry is string => typeof entry === "string")
+        : next;
+      setSignupDomains(saved);
+      setSignupDomainsDraft(saved.join(NEWLINE));
+      toast.success("Accepted signup domains updated.", {
+        description: "It applies to the next registration - accounts that already exist are not affected.",
+      });
+    } catch (err) {
+      toast.error("Could not update the accepted domains", {
+        description: err instanceof Error ? err.message : "Please try again.",
+      });
+    } finally {
+      setSavingSignupDomains(false);
     }
   };
 
@@ -930,6 +991,64 @@ export default function AdminPlatformSettingsPage() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Live: {contactEmail}
+                  {!isSuperAdmin && " · only a super admin can change this."}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5 text-primary" />
+                Accepted signup email domains
+              </CardTitle>
+              <CardDescription>
+                Registration only accepts these providers. Like the contact
+                address this is an operational setting, not a money or policy
+                value, so a single super admin can change it directly - no
+                proposal or vote. It applies to the next registration only:
+                accounts that already exist keep working whatever their domain.
+                Identity is still proven by KYC, never by the email provider.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-sm">One domain per line</Label>
+                <textarea
+                  className="min-h-40 w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 font-mono text-sm disabled:opacity-60"
+                  value={signupDomainsDraft}
+                  onChange={(e) => setSignupDomainsDraft(e.target.value)}
+                  disabled={!isSuperAdmin || savingSignupDomains}
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-mono">gmail.com</span> matches that
+                  domain exactly.{" "}
+                  <span className="font-mono">.edu.ph</span> starts with a dot
+                  and matches every domain ending there, so one line covers
+                  every Philippine school.
+                </p>
+                {isSuperAdmin ? (
+                  <Button
+                    onClick={handleSaveSignupDomains}
+                    disabled={
+                      savingSignupDomains ||
+                      signupDomainsDraft.trim() === signupDomains.join(NEWLINE)
+                    }
+                    className="gap-2"
+                  >
+                    {savingSignupDomains ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Mail className="h-4 w-4" />
+                    )}
+                    Save domains
+                  </Button>
+                ) : null}
+                <p className="text-xs text-muted-foreground">
+                  Live: {signupDomains.length}{" "}
+                  {signupDomains.length === 1 ? "domain" : "domains"}
                   {!isSuperAdmin && " · only a super admin can change this."}
                 </p>
               </div>

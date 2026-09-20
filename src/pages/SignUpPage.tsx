@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,11 @@ import {
 import { Car, Eye, EyeOff, Loader2, CheckCircle2, Circle, X } from "lucide-react";
 import { toast } from "sonner";
 import { usePlatformContactEmail } from "@/lib/platformSettings";
+import {
+  describeSignupEmailDomains,
+  fetchSignupEmailDomains,
+  isAllowedSignupEmail,
+} from "@/lib/signupEmailDomains";
 import TurnstileWidget, { captchaConfigured } from "@/components/TurnstileWidget";
 
 export default function SignUpPage() {
@@ -26,6 +31,11 @@ export default function SignUpPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
+  // Which providers registration takes (CHAPTER 102). Read before sign-in so
+  // the form can say no early, instead of after a confirmation email. The
+  // database trigger is what actually enforces it; an empty list here just
+  // means the form has nothing to check against yet.
+  const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
   const [termsScrolled, setTermsScrolled] = useState(false);
   const [termsModalChecked, setTermsModalChecked] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -45,6 +55,21 @@ export default function SignUpPage() {
       regex: /[!@#$%^&*(),.?":{}|<>]/,
     },
   ];
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSignupEmailDomains().then((domains) => {
+      if (!cancelled) setAllowedDomains(domains);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const acceptedDomainsLabel = useMemo(
+    () => describeSignupEmailDomains(allowedDomains),
+    [allowedDomains],
+  );
+
   const { signUp } = useAuth();
   const navigate = useNavigate();
   const contactEmail = usePlatformContactEmail();
@@ -53,6 +78,14 @@ export default function SignUpPage() {
     e.preventDefault();
     if (!termsAccepted) {
       toast.error("You must agree to the Terms and Conditions to proceed");
+      return;
+    }
+    if (email.trim() && !isAllowedSignupEmail(email, allowedDomains)) {
+      toast.error("Use an email address from a supported provider", {
+        description: acceptedDomainsLabel
+          ? `SafeDrive accepts ${acceptedDomainsLabel}.`
+          : "That email provider is not accepted for registration.",
+      });
       return;
     }
     if (password !== confirmPassword) {
@@ -133,6 +166,11 @@ export default function SignUpPage() {
                   disabled={isLoading}
                   className="h-10 disabled:opacity-60"
                 />
+                {acceptedDomainsLabel ? (
+                  <p className="text-xs text-muted-foreground">
+                    Accepted: {acceptedDomainsLabel}.
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>

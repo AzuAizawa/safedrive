@@ -16181,4 +16181,250 @@ commit;
 --   (every result matches expected)
 
 
+-- ============================================================================
+-- CHAPTER 102 - Registration accepts real mailboxes, from a list you control
+-- ============================================================================
+-- Signup checked the password and the captcha and nothing about the address.
+-- Any domain was a domain: a tester registered with one they had made
+-- themselves that afternoon and the account went through.
+--
+-- Not quite a hole - Supabase still had to DELIVER the confirmation email, so
+-- an address that cannot receive mail already failed. What was missing is a
+-- judgement about WHOSE mailbox it is. A catch-all on a domain bought an hour
+-- ago receives mail perfectly well.
+--
+-- What this does NOT do is decide who is trustworthy. KYC does that: licence,
+-- ID, selfie and an admin's approval, without which an account cannot book or
+-- list anything. This only moves the cheapest rejection earlier, to the
+-- registration form, instead of spending a document review on it.
+--
+-- The list is a setting, not a constant, and that is the point. A hard-coded
+-- allowlist would be one deploy away from turning a panelist with a school
+-- address away during a defence. A super admin edits this from Platform
+-- Settings and it takes effect on the next signup.
+--
+-- Two kinds of entry:
+--   * 'gmail.com'  - matches that domain exactly;
+--   * '.edu.ph'    - matches any domain ending there, so every Philippine
+--                    school is covered without listing them one by one.
+--
+-- Seeded with the mainstream consumer providers plus .edu.ph and .gov.ph.
+-- Deliberately short: a list nobody can add to is the failure mode this
+-- chapter exists to avoid, and adding is one field away.
+--
+-- Enforced BEFORE INSERT on public.profiles rather than on auth.users, because
+-- a trigger on auth.users cannot tell a public signup from an account an admin
+-- creates through the service role - both arrive through GoTrue with no
+-- PostgREST claims - and would block api/admin-create.ts and the live
+-- role-matrix script along with the strangers. Without a profile row an
+-- account can do nothing at all, since every policy and page keys off it, so
+-- this is the real gate and not decoration over the form check.
+--
+-- The address judged is the one in auth.users, never the one the browser put
+-- in the insert. The client writes its own profile row, so the submitted email
+-- is a claim; the authenticated address is a fact.
+begin;
+
+alter table public.platform_settings
+  add column if not exists signup_email_domains text[] not null default array[
+    'gmail.com', 'googlemail.com',
+    'yahoo.com', 'yahoo.com.ph',
+    'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+    'icloud.com', 'me.com',
+    'aol.com', 'proton.me', 'protonmail.com',
+    '.edu.ph', '.gov.ph'
+  ]::text[];
+
+comment on column public.platform_settings.signup_email_domains is
+  'Email domains registration accepts. A leading dot means any domain ending there (.edu.ph); anything else is an exact match. Edited by a super admin from Platform Settings (CHAPTER 102).';
+
+-- Readable before sign-in, on purpose: the registration form has no session
+-- yet and has to be able to say which addresses it will take. The list is a
+-- rule, not a secret - anyone could learn it by trying two addresses.
+create or replace function public.signup_email_domains()
+returns text[]
+language sql
+stable
+security definer
+set search_path = public
+as $signup_domains$
+  select coalesce(
+    (select signup_email_domains from public.platform_settings where id = 'default'),
+    array[]::text[]
+  );
+$signup_domains$;
+
+revoke all on function public.signup_email_domains() from public;
+grant execute on function public.signup_email_domains() to anon, authenticated;
+
+create or replace function public.is_allowed_signup_email(p_email text)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $allowed_email$
+declare
+  v_domain text;
+  v_allowed text[];
+  v_entry text;
+begin
+  v_domain := lower(btrim(coalesce(p_email, '')));
+  if position('@' in v_domain) = 0 then
+    return false;
+  end if;
+  v_domain := split_part(v_domain, '@', 2);
+  if v_domain = '' then
+    return false;
+  end if;
+
+  v_allowed := public.signup_email_domains();
+  -- An empty list means no rule is configured, never refuse everyone. A
+  -- setting cleared by accident must not lock the front door of the platform.
+  if v_allowed is null or array_length(v_allowed, 1) is null then
+    return true;
+  end if;
+
+  foreach v_entry in array v_allowed loop
+    v_entry := lower(btrim(coalesce(v_entry, '')));
+    continue when v_entry = '';
+    if left(v_entry, 1) = '.' then
+      -- '.edu.ph' covers up.edu.ph and edu.ph alike.
+      if v_domain = substr(v_entry, 2) or v_domain like ('%' || v_entry) then
+        return true;
+      end if;
+    elsif v_domain = v_entry then
+      return true;
+    end if;
+  end loop;
+
+  return false;
+end;
+$allowed_email$;
+
+revoke all on function public.is_allowed_signup_email(text) from public;
+grant execute on function public.is_allowed_signup_email(text) to anon, authenticated;
+
+create or replace function public.set_signup_email_domains(p_domains text[])
+returns text[]
+language plpgsql
+security definer
+set search_path = public
+as $set_signup_domains$
+declare
+  v_clean text[] := array[]::text[];
+  v_entry text;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can change the accepted signup email domains';
+  end if;
+  if p_domains is null then
+    raise exception 'Provide at least one domain';
+  end if;
+
+  foreach v_entry in array p_domains loop
+    v_entry := lower(btrim(coalesce(v_entry, '')));
+    continue when v_entry = '';
+    -- No spaces, no '@', and something either side of a dot. A typo saved
+    -- here is a domain that silently never matches anyone.
+    if v_entry ~ '[[:space:]@]' or v_entry !~ '^\.?[a-z0-9-]+(\.[a-z0-9-]+)+$' then
+      raise exception 'Not a valid domain: %. Use gmail.com for one domain, or .edu.ph for every domain ending there.', v_entry;
+    end if;
+    if not (v_clean @> array[v_entry]) then
+      v_clean := v_clean || v_entry;
+    end if;
+  end loop;
+
+  if array_length(v_clean, 1) is null then
+    raise exception 'Provide at least one domain';
+  end if;
+
+  update public.platform_settings
+    set signup_email_domains = v_clean, updated_at = now()
+    where id = 'default';
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'signup_email_domains_updated', 'platform_settings', 'default',
+      jsonb_build_object('domains', to_jsonb(v_clean), 'count', array_length(v_clean, 1)));
+
+  return v_clean;
+end;
+$set_signup_domains$;
+
+revoke all on function public.set_signup_email_domains(text[]) from public, anon;
+grant execute on function public.set_signup_email_domains(text[]) to authenticated;
+
+create or replace function public.enforce_signup_email_domain()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $signup_domain_gate$
+declare
+  v_email text;
+begin
+  -- Admin-created accounts and server imports are not strangers at a form.
+  if public.is_trusted_server_context() then
+    return new;
+  end if;
+
+  select lower(u.email) into v_email from auth.users u where u.id = new.id;
+  -- No authenticated address to judge: not this chapter's business.
+  if v_email is null or v_email = '' then
+    return new;
+  end if;
+
+  if not public.is_allowed_signup_email(v_email) then
+    raise exception
+      'SafeDrive does not accept registrations from %. Use a Gmail, Yahoo, Outlook or iCloud address, or a Philippine school or government address.',
+      split_part(v_email, '@', 2)
+      using errcode = 'check_violation';
+  end if;
+
+  return new;
+end;
+$signup_domain_gate$;
+
+drop trigger if exists require_allowed_signup_email on public.profiles;
+create trigger require_allowed_signup_email
+before insert on public.profiles
+for each row execute function public.enforce_signup_email_domain();
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'setting exists' as check_name,
+--        (select array_length(signup_email_domains, 1)::text
+--           from public.platform_settings where id = 'default') as result,
+--        '15' as expected
+-- union all
+-- select 'gmail is accepted',
+--        (select public.is_allowed_signup_email('someone@gmail.com')::text),
+--        'true'
+-- union all
+-- select 'a school address is accepted',
+--        (select public.is_allowed_signup_email('student@up.edu.ph')::text),
+--        'true'
+-- union all
+-- select 'an invented domain is not',
+--        (select public.is_allowed_signup_email('hello@hellostevekel.com')::text),
+--        'false'
+-- union all
+-- select 'trigger installed, insert only',
+--        (select case when tgtype & 4 = 4 and tgtype & 16 = 0 then 'insert only' else 'also fires on update' end
+--           from pg_trigger where tgname = 'require_allowed_signup_email' and not tgisinternal),
+--        'insert only'
+-- union all
+-- select 'accounts that already exist are untouched',
+--        (select count(*)::text from public.profiles where deleted_at is null),
+--        'same count as before this chapter'
+-- union all
+-- select 'existing accounts the new rule would not have accepted',
+--        (select count(*)::text from public.profiles p
+--           join auth.users u on u.id = p.id
+--          where p.deleted_at is null
+--            and not public.is_allowed_signup_email(u.email)),
+--        'informational - they keep working either way';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

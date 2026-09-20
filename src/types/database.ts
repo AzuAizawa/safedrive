@@ -2035,6 +2035,16 @@ export interface Database {
         Args: { p_email: string };
         Returns: string;
       };
+      // CHAPTER 102. The reader is granted to anon as well: the registration
+      // form has no session yet and still has to say what it accepts.
+      signup_email_domains: {
+        Args: Record<string, never>;
+        Returns: string[];
+      };
+      set_signup_email_domains: {
+        Args: { p_domains: string[] };
+        Returns: string[];
+      };
       publish_legal_document_version: {
         Args: { p_document_key: string; p_content_html: string };
         Returns: Database["public"]["Tables"]["legal_document_versions"]["Row"];
