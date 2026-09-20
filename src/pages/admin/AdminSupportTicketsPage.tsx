@@ -125,6 +125,38 @@ export default function AdminSupportTicketsPage() {
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const replyAttachmentInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Used by both ways a message reaches a person: support replying on an open
+  // ticket, and support opening one. The endpoint works out which of the two
+  // it is from the ticket's own earliest message. The message and the bell are
+  // already saved by the time this runs, so a missing or broken email service
+  // is reported and never blocks support from working.
+  const emailSupportTicketMessage = useCallback(
+    async (ticketId: string, messageId: string | undefined, { posted }: { posted: string }) => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token || !messageId) return;
+      try {
+        const response = await fetch("/api/send-support-ticket-reply-email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ ticketId, messageId }),
+        });
+        const body = (await response.json().catch(() => ({}))) as { deliveryState?: string };
+        if (body.deliveryState === "not_configured") {
+          toast.warning(`${posted}, but email is not configured yet.`);
+        } else if (!response.ok || body.deliveryState !== "sent") {
+          toast.warning(`${posted}, but the email notification was not delivered.`);
+        }
+      } catch (emailError) {
+        console.warn("Support ticket email request failed", emailError);
+        toast.warning(`${posted}, but the email notification could not be sent.`);
+      }
+    },
+    [],
+  );
+
   const logSupportAdminAction = useCallback(
     async (
       action: string,
@@ -607,28 +639,9 @@ export default function AdminSupportTicketsPage() {
       has_attachment: Boolean(replyAttachment),
     });
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token && createdMessage?.id) {
-      try {
-        const response = await fetch("/api/send-support-ticket-reply-email", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ ticketId: activeTicket.id, messageId: createdMessage.id }),
-        });
-        const body = (await response.json().catch(() => ({}))) as { deliveryState?: string };
-        if (body.deliveryState === "not_configured") {
-          toast.warning("Reply posted, but email is not configured yet.");
-        } else if (!response.ok || body.deliveryState !== "sent") {
-          toast.warning("Reply posted, but the email notification was not delivered.");
-        }
-      } catch (emailError) {
-        console.warn("Support ticket reply email request failed", emailError);
-        toast.warning("Reply posted, but the email notification could not be sent.");
-      }
-    }
+    await emailSupportTicketMessage(activeTicket.id, createdMessage?.id, {
+      posted: "Reply posted",
+    });
 
     await fetchMessages(activeTicket.id);
     clearReplyAttachment();
@@ -726,13 +739,15 @@ export default function AdminSupportTicketsPage() {
       return;
     }
 
-    const { error: messageError } = await supabase
+    const { data: createdMessage, error: messageError } = await supabase
       .from("ticket_messages")
       .insert({
         ticket_id: ticket.id,
         sender_id: user.id,
         message: normalizeRichTextInput(createMessage),
-      });
+      })
+      .select("id")
+      .single();
 
     if (messageError) {
       toast.error("Ticket created, but the first message failed", {
@@ -749,6 +764,12 @@ export default function AdminSupportTicketsPage() {
       await logSupportAdminAction("admin_created_support_ticket", ticket, {
         created_for_user_id: createUserId,
         first_message_present: true,
+      });
+      // The one message a person has no reason to be expecting is the one
+      // support starts. A reply already emails; opening a ticket used to
+      // reach the bell only, so it waited until they happened to sign in.
+      await emailSupportTicketMessage(ticket.id, createdMessage?.id, {
+        posted: "Ticket created",
       });
       toast.success("Ticket created for selected user.");
     }

@@ -72,14 +72,30 @@ export default async function handler(req: Request) {
     }
     if (ticketError || !ticket) return respond({ error: "Support ticket not found" }, 404);
 
+    // A ticket support opened itself has no reply to be the answer to, and
+    // "Support replied" would be the first thing the person reads about a
+    // conversation they never started. Decided from the ticket's own earliest
+    // message rather than a flag from the browser, so the wording cannot be
+    // set to something the ticket does not actually show.
+    const { data: firstMessage } = await supabase
+      .from("ticket_messages")
+      .select("id")
+      .eq("ticket_id", ticketId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    const opensTheTicket = firstMessage?.id === message.id;
+
     const reply = message.message.trim();
     const result = await sendUserNotificationEmail(supabase, {
       userId: ticket.user_id,
-      title: `Support replied: ${ticket.subject}`,
+      title: opensTheTicket
+        ? `SafeDrive Support opened a ticket: ${ticket.subject}`
+        : `Support replied: ${ticket.subject}`,
       message: reply || "SafeDrive Support added an attachment to your ticket.",
       link: "/support",
       baseOrigin: new URL(req.url).origin,
-      eventKey: `support-ticket-reply:${ticket.id}:${message.id}`,
+      eventKey: `${opensTheTicket ? "support-ticket-opened" : "support-ticket-reply"}:${ticket.id}:${message.id}`,
     });
 
     await supabase.from("audit_log").insert({

@@ -1612,6 +1612,10 @@ export interface Database {
           recipient_count: number;
           created_by: string;
           created_at: string;
+          // CHAPTER 101. Null on a bell-only announcement, which is the
+          // default - emailing is asked for per announcement.
+          emailed_at: string | null;
+          email_sent_count: number | null;
         };
         Insert: Record<string, never>;
         Update: Record<string, never>;

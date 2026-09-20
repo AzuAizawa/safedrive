@@ -18,6 +18,8 @@ type SentAnnouncement = {
   audience: Audience;
   recipient_count: number;
   created_at: string;
+  emailed_at: string | null;
+  email_sent_count: number | null;
 };
 
 const TITLE_MAX = 120;
@@ -60,6 +62,10 @@ export default function AdminAnnouncementsPage() {
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [audience, setAudience] = useState<Audience>("all");
+  // Off unless the super admin asks for it. Most announcements do not belong
+  // in anyone's inbox, and an email cannot be taken back the way a bell
+  // notification can be deleted.
+  const [alsoEmail, setAlsoEmail] = useState(false);
   const [sending, setSending] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [history, setHistory] = useState<SentAnnouncement[]>([]);
@@ -69,7 +75,7 @@ export default function AdminAnnouncementsPage() {
     setLoading(true);
     const { data, error } = await supabase
       .from("platform_announcements")
-      .select("id, title, message, audience, recipient_count, created_at")
+      .select("id, title, message, audience, recipient_count, created_at, emailed_at, email_sent_count")
       .order("created_at", { ascending: false })
       .limit(20);
     if (error) {
@@ -101,14 +107,56 @@ export default function AdminAnnouncementsPage() {
         p_audience: audience,
       });
       if (error) throw error;
-      const count = Number(data ?? 0);
+      // CHAPTER 101 returns the new announcement's id with the count. The id
+      // is what asks for the emails - re-reading the newest row instead would
+      // email the wrong text if two super admins posted in the same moment.
+      const result = (data ?? {}) as { id?: string; recipients?: number };
+      const count = Number(result.recipients ?? 0);
       toast.success(
         count === 1
           ? "Sent to 1 account."
           : `Sent to ${count.toLocaleString()} accounts.`,
       );
+
+      // The bell notifications are already delivered at this point. Email is
+      // reported separately and on purpose: a mail provider that is down or
+      // unconfigured must not look like a failed announcement.
+      if (alsoEmail && result.id) {
+        const { data: { session } } = await supabase.auth.getSession();
+        try {
+          const response = await fetch("/api/send-announcement-emails", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session?.access_token ?? ""}`,
+            },
+            body: JSON.stringify({ announcementId: result.id }),
+          });
+          const body = (await response.json().catch(() => ({}))) as {
+            deliveryState?: string;
+            sent?: number;
+            recipients?: number;
+          };
+          if (body.deliveryState === "sent") {
+            toast.success(`Emailed ${Number(body.sent ?? 0).toLocaleString()} of them too.`);
+          } else if (body.deliveryState === "not_configured") {
+            toast.warning("Announcement sent, but email is not configured yet.");
+          } else if (body.deliveryState === "partial") {
+            toast.warning(
+              `Announcement sent. Only ${Number(body.sent ?? 0).toLocaleString()} of ${Number(body.recipients ?? 0).toLocaleString()} emails went out.`,
+            );
+          } else {
+            toast.warning("Announcement sent, but the emails were not delivered.");
+          }
+        } catch (emailError) {
+          console.warn("Announcement email request failed", emailError);
+          toast.warning("Announcement sent, but the emails could not be sent.");
+        }
+      }
+
       setTitle("");
       setMessage("");
+      setAlsoEmail(false);
       await load();
     } catch (err) {
       toast.error("Could not send the announcement", {
@@ -198,6 +246,27 @@ export default function AdminAnnouncementsPage() {
             </div>
           </div>
 
+          <div className="space-y-2">
+            <Label className="text-sm">Also send by email</Label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-muted/50">
+              <input
+                type="checkbox"
+                checked={alsoEmail}
+                onChange={(e) => setAlsoEmail(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+              />
+              <span className="text-xs text-muted-foreground">
+                <span className="block text-sm font-medium text-foreground">
+                  Email everyone who receives this
+                </span>
+                Leave this off for routine notices - the bell is enough. Turn it
+                on for something people must not miss, such as updated Terms,
+                where it matters that SafeDrive reached them and can show it.
+                An email cannot be recalled.
+              </span>
+            </label>
+          </div>
+
           <Button
             onClick={() => setConfirmOpen(true)}
             disabled={!canSend || sending}
@@ -249,6 +318,9 @@ export default function AdminAnnouncementsPage() {
                     {audienceLabel(item.audience)} ·{" "}
                     {item.recipient_count.toLocaleString()}{" "}
                     {item.recipient_count === 1 ? "account" : "accounts"}
+                    {item.emailed_at
+                      ? ` · emailed ${Number(item.email_sent_count ?? 0).toLocaleString()}`
+                      : " · bell only"}
                   </p>
                 </div>
               ))}
@@ -260,7 +332,9 @@ export default function AdminAnnouncementsPage() {
       <ConfirmDialog
         open={confirmOpen}
         title="Send this announcement?"
-        description={`"${cleanTitle}" goes to ${audienceLabel(audience).toLowerCase()} right now. It appears in their notification bell immediately and cannot be recalled.`}
+        description={`"${cleanTitle}" goes to ${audienceLabel(audience).toLowerCase()} right now. It appears in their notification bell immediately and cannot be recalled.${
+          alsoEmail ? " It is also emailed to every one of them." : ""
+        }`}
         confirmText="Send it"
         isLoading={sending}
         onConfirm={() => void handleSend()}

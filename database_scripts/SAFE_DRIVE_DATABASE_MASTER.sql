@@ -16046,4 +16046,139 @@ commit;
 --        'the payout rows that existed before this chapter';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 101 - An announcement can also reach the inbox, when it is asked to
+-- ============================================================================
+-- Announcements went to the notification bell and nowhere else. That is right
+-- for most of them - planned downtime does not belong in anyone's inbox. It is
+-- wrong for the one case the page itself names as the reason to announce
+-- anything: updated Terms. A person who has not signed in since the change was
+-- never told, and SafeDrive has nothing showing it tried.
+--
+-- The email is opt-in per announcement, ticked by the super admin who writes
+-- it, so a routine notice stays a bell notice. Two things change here.
+--
+-- First, the function returns the new announcement's id alongside the
+-- recipient count. The browser needs the id to ask for the emails, and the
+-- alternative - re-reading the newest row afterwards - would send the wrong
+-- text if two super admins ever posted in the same moment. The return type
+-- changes from integer to jsonb, so the function is dropped and recreated;
+-- its only caller is the Announcements page, updated in the same commit.
+--
+-- Second, the outcome of that send is recorded on the announcement itself:
+--   * emailed_at       - when emails were attempted. NULL means no email was
+--                        ever asked for, which is the normal case;
+--   * email_sent_count - how many actually went out. 0 with emailed_at set
+--                        means it was asked for and nothing got through.
+-- Kept because "were the users emailed about the new Terms, and how many?" is
+-- a question asked months later, by which time nobody remembers.
+--
+-- The emails themselves are sent by api/send-announcement-emails.ts under the
+-- service role, one per recipient through the same helper every other
+-- notification email uses - so an unreachable mail provider can never take the
+-- bell notification down with it.
+begin;
+
+alter table public.platform_announcements
+  add column if not exists email_sent_count integer,
+  add column if not exists emailed_at timestamptz;
+
+comment on column public.platform_announcements.emailed_at is
+  'When email delivery was attempted for this announcement. NULL means it was a bell-only announcement.';
+comment on column public.platform_announcements.email_sent_count is
+  'How many announcement emails were accepted by the mail provider. NULL until delivery is attempted.';
+
+drop function if exists public.send_platform_announcement(text, text, text);
+
+create function public.send_platform_announcement(
+  p_title text, p_message text, p_audience text
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $announce$
+declare
+  clean_title text := btrim(coalesce(p_title, ''));
+  clean_message text := btrim(coalesce(p_message, ''));
+  new_id uuid;
+  sent integer := 0;
+begin
+  if not public.is_super_admin() then
+    raise exception 'Only a super admin can send an announcement';
+  end if;
+  if char_length(clean_title) = 0 or char_length(clean_title) > 120 then
+    raise exception 'Title must be 1-120 characters';
+  end if;
+  if char_length(clean_message) = 0 or char_length(clean_message) > 2000 then
+    raise exception 'Message must be 1-2000 characters';
+  end if;
+  if p_audience not in ('all', 'listers', 'renters') then
+    raise exception 'Audience must be all, listers or renters';
+  end if;
+
+  insert into public.platform_announcements (title, message, audience, created_by)
+    values (clean_title, clean_message, p_audience, auth.uid())
+    returning id into new_id;
+
+  with recipients as (
+    select p.id
+    from public.profiles p
+    where p.deleted_at is null
+      and p.role = 'user'
+      and (
+        p_audience = 'all'
+        or (p_audience = 'listers'
+            and exists (select 1 from public.cars c where c.owner_id = p.id))
+        or (p_audience = 'renters'
+            and not exists (select 1 from public.cars c where c.owner_id = p.id))
+      )
+  ), inserted as (
+    insert into public.notifications (user_id, title, message, type, link)
+    select r.id, clean_title, clean_message, 'announcement', '/notifications'
+    from recipients r
+    returning 1
+  )
+  select count(*) into sent from inserted;
+
+  update public.platform_announcements
+    set recipient_count = sent where id = new_id;
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (auth.uid(), 'platform_announcement_sent', 'platform_announcements',
+      new_id::text,
+      jsonb_build_object('audience', p_audience, 'recipients', sent, 'title', clean_title));
+
+  return jsonb_build_object('id', new_id, 'recipients', sent);
+end;
+$announce$;
+
+grant execute on function public.send_platform_announcement(text, text, text) to authenticated;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'function returns jsonb' as check_name,
+--        (select pg_get_function_result(oid) from pg_proc
+--          where proname = 'send_platform_announcement'
+--            and pronamespace = 'public'::regnamespace) as result,
+--        'jsonb' as expected
+-- union all
+-- select 'only one such function',
+--        (select count(*)::text from pg_proc
+--          where proname = 'send_platform_announcement'
+--            and pronamespace = 'public'::regnamespace),
+--        '1'
+-- union all
+-- select 'delivery columns',
+--        (select count(*)::text from information_schema.columns
+--          where table_schema = 'public' and table_name = 'platform_announcements'
+--            and column_name in ('emailed_at', 'email_sent_count')),
+--        '2'
+-- union all
+-- select 'announcements sent before this chapter stay bell-only',
+--        (select count(*)::text from public.platform_announcements where emailed_at is null),
+--        'every announcement that existed before this chapter';
+--   (every result matches expected)
+
+
 -- End of SafeDrive chaptered database master.
