@@ -436,3 +436,26 @@ export const verificationWaitHours = (submittedAt: string | null, now: number = 
   if (!Number.isFinite(startedMs)) return null;
   return Math.max(0, (now - startedMs) / 3_600_000);
 };
+
+// CHAPTER 105. The same idea for the vehicle queue. A separate setting from
+// the identity one because the two reviews are different work: a vehicle
+// review reads seven documents against their expiry dates.
+export const DEFAULT_VEHICLE_REVIEW_TARGET_HOURS = 24;
+
+export const fetchVehicleReviewTargetHours = async (): Promise<number> => {
+  const { data, error } = await supabase
+    .from("platform_settings")
+    .select("vehicle_review_target_hours")
+    .eq("id", "default")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load vehicle review target:", error);
+    return DEFAULT_VEHICLE_REVIEW_TARGET_HOURS;
+  }
+
+  const hours = Number(data?.vehicle_review_target_hours);
+  return Number.isFinite(hours) && hours >= 1 && hours <= 720
+    ? Math.round(hours)
+    : DEFAULT_VEHICLE_REVIEW_TARGET_HOURS;
+};

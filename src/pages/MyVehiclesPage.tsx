@@ -53,6 +53,7 @@ import {
   fetchPlatformCommissionRate,
   formatCommissionPercent,
   useVerificationEtaMessages,
+  describeWaitingSince,
 } from "@/lib/platformSettings";
 import type { CarBrand, CarModel } from "@/types/database";
 import {
@@ -169,6 +170,8 @@ const FUEL_CATEGORY_OPTIONS = {
 
 interface VehicleRow {
   id: string;
+  // CHAPTER 105. When this vehicle last entered pending review.
+  review_submitted_at: string | null;
   plate_number: string;
   mileage: number | null;
   price_per_day: number;
@@ -2446,6 +2449,14 @@ export default function MyVehiclesPage() {
                           <span>
                             In admin review. {vehicleVerificationEta} You&apos;ll
                             get a notification once it&apos;s decided.
+                            {/* CHAPTER 105. Someone waiting past the estimate
+                                learns more from the actual wait than from
+                                silence, and it is their own vehicle. */}
+                            {describeWaitingSince(v.review_submitted_at) ? (
+                              <span className="mt-1 block font-medium">
+                                Submitted {describeWaitingSince(v.review_submitted_at)} ago.
+                              </span>
+                            ) : null}
                           </span>
                         </p>
                       )}

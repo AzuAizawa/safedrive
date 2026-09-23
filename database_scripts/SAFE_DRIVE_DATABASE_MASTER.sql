@@ -16704,4 +16704,112 @@ commit;
 --        'informational';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 105 - A vehicle waiting for review shows how long it has waited
+-- ============================================================================
+-- The same gap CHAPTER 104 closed for identity review, on the other queue.
+-- A lister is told "most vehicle reviews finish within 24 hours" when they
+-- submit, from its own live setting - and then nobody, on either side, could
+-- see whether that was holding. cars.created_at is when the vehicle was first
+-- listed, which after one rejection and a resubmission is months away from the
+-- review actually waiting.
+--
+--   cars.review_submitted_at - stamped by a trigger every time a car ENTERS
+--     'pending'. A resubmitted vehicle starts a fresh wait instead of carrying
+--     its first attempt's, and an unrelated edit while pending does not reset
+--     it. Kept after the decision, so how long a review took stays answerable.
+--
+--   platform_settings.vehicle_review_target_hours - when that wait reads as
+--     late. A separate column from the identity target on purpose: the ETA
+--     messages for the two queues are already separate, and a vehicle review
+--     reads seven documents against their expiry dates while an identity review
+--     compares faces and names. Same default of 24, so nothing changes in
+--     behaviour until someone decides it should.
+--
+-- Cars already pending are backfilled from updated_at, the same proxy CHAPTER
+-- 104 used and with the same caveat: exact where the last write was the
+-- submission, understated where something touched the row afterwards.
+--
+-- Unlike CHAPTER 104 this is shown to the lister too, not only to admins.
+-- Someone waiting past the published estimate learns more from "submitted 3
+-- days ago" than from silence, and it is their own vehicle.
+begin;
+
+alter table public.cars
+  add column if not exists review_submitted_at timestamptz;
+
+comment on column public.cars.review_submitted_at is
+  'When this vehicle last entered status = pending, i.e. when the submission now under review arrived (CHAPTER 105). Not cleared by the decision.';
+
+alter table public.platform_settings
+  add column if not exists vehicle_review_target_hours integer not null default 24;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_vehicle_review_target_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_vehicle_review_target_hours_check
+  check (vehicle_review_target_hours >= 1 and vehicle_review_target_hours <= 720);
+
+comment on column public.platform_settings.vehicle_review_target_hours is
+  'Hours after submission at which a pending vehicle review is shown as overdue. Separate from the identity target because the two queues are different work.';
+
+create or replace function public.stamp_car_review_submitted_at()
+returns trigger
+language plpgsql
+set search_path = public
+as $stamp_car_review$
+begin
+  -- Only the transition INTO pending, so an edit to a car that is already
+  -- waiting cannot quietly restart its clock.
+  if new.status = 'pending'
+     and (tg_op = 'INSERT' or old.status is distinct from 'pending') then
+    new.review_submitted_at := now();
+  end if;
+  return new;
+end;
+$stamp_car_review$;
+
+drop trigger if exists stamp_car_review_submitted_at on public.cars;
+create trigger stamp_car_review_submitted_at
+before insert or update of status on public.cars
+for each row execute function public.stamp_car_review_submitted_at();
+
+update public.cars
+   set review_submitted_at = coalesce(updated_at, created_at)
+ where status = 'pending'
+   and review_submitted_at is null;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'submission column' as check_name,
+--        (select count(*)::text from information_schema.columns
+--          where table_schema = 'public' and table_name = 'cars'
+--            and column_name = 'review_submitted_at') as result,
+--        '1' as expected
+-- union all
+-- select 'vehicle target setting',
+--        (select vehicle_review_target_hours::text
+--           from public.platform_settings where id = 'default'),
+--        '24'
+-- union all
+-- select 'the two targets are separate columns',
+--        (select count(*)::text from information_schema.columns
+--          where table_schema = 'public' and table_name = 'platform_settings'
+--            and column_name in ('verification_review_target_hours', 'vehicle_review_target_hours')),
+--        '2'
+-- union all
+-- select 'no pending vehicle left without a submission time',
+--        (select count(*)::text from public.cars
+--          where status = 'pending' and review_submitted_at is null),
+--        '0'
+-- union all
+-- select 'vehicles waiting, and the longest wait in hours',
+--        (select coalesce(count(*)::text || ' waiting, longest ' ||
+--                  max(round(extract(epoch from (now() - review_submitted_at)) / 3600))::text || 'h',
+--                '0 waiting')
+--           from public.cars where status = 'pending' and deleted_at is null),
+--        'informational';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

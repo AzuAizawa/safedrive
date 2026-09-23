@@ -365,6 +365,8 @@ export interface Database {
           contact_number: string | null;
           transmission: string | null;
           status: string;
+          // CHAPTER 105. When this vehicle last entered pending review.
+          review_submitted_at: string | null;
           rejection_reason: string | null;
           last_verified_at: string | null;
           registration_expiry: string | null;
@@ -1498,6 +1500,8 @@ export interface Database {
           commission_rate: number;
           // CHAPTER 104. Hours before a pending identity review reads as late.
           verification_review_target_hours: number;
+          // CHAPTER 105. The same for a vehicle review, which is different work.
+          vehicle_review_target_hours: number;
           ledger_activated_at: string | null;
           payment_processing_fee_rate: number;
           payment_processing_fixed_centavos: number;

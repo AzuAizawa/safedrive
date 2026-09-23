@@ -23,6 +23,12 @@ import { Card } from "@/components/ui/card";
 import BookingPagination from "@/components/BookingPagination";
 import { usePagedItems } from "@/lib/usePagedItems";
 import {
+  DEFAULT_VEHICLE_REVIEW_TARGET_HOURS,
+  describeWaitingSince,
+  fetchVehicleReviewTargetHours,
+  verificationWaitHours,
+} from "@/lib/platformSettings";
+import {
   Table,
   TableBody,
   TableCell,
@@ -61,6 +67,8 @@ interface PendingCar {
   deletion_reason: string | null;
   contact_number: string | null;
   created_at: string;
+  // CHAPTER 105. When this vehicle last entered pending review.
+  review_submitted_at: string | null;
   registration_expiry: string | null;
   ctpl_expiry: string | null;
   comprehensive_insurance_expiry: string | null;
@@ -203,6 +211,10 @@ export default function AdminVehicleApprovalPage() {
   const [removeNote, setRemoveNote] = useState("");
   const [revokeReason, setRevokeReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+  // CHAPTER 105. The hour count after which a pending review reads as late.
+  const [reviewTargetHours, setReviewTargetHours] = useState(
+    DEFAULT_VEHICLE_REVIEW_TARGET_HOURS,
+  );
   const [ocrRunKey, setOcrRunKey] = useState(0);
   const [ocrStatus, setOcrStatus] = useState<
     "idle" | "running" | "done" | "error"
@@ -281,7 +293,20 @@ export default function AdminVehicleApprovalPage() {
     };
   }, [selected]);
 
-  const carPages = usePagedItems(cars, activeTab);
+  // CHAPTER 105. Longest wait first, so the queue reads as a queue. Anything
+  // not waiting keeps the ordering the tab query already applied.
+  const orderedCars = [...cars].sort((left, right) => {
+    const leftWait =
+      left.status === "pending" ? verificationWaitHours(left.review_submitted_at) : null;
+    const rightWait =
+      right.status === "pending" ? verificationWaitHours(right.review_submitted_at) : null;
+    if (leftWait !== null && rightWait !== null) return rightWait - leftWait;
+    if (leftWait !== null) return -1;
+    if (rightWait !== null) return 1;
+    return 0;
+  });
+
+  const carPages = usePagedItems(orderedCars, activeTab);
 
   const displayPii = (rawValue: string | null, decryptedValue: string | null) => {
     if (piiLoading) return "Decrypting...";
@@ -360,6 +385,10 @@ export default function AdminVehicleApprovalPage() {
   useEffect(() => {
     fetchCars();
   }, [activeTab, fetchCars]);
+
+  useEffect(() => {
+    void fetchVehicleReviewTargetHours().then(setReviewTargetHours);
+  }, []);
 
   const getUrl = useCallback((bucket: string, path: string) => {
     // backwards compat: if path is already a full URL (old entries stored full URL), return directly
@@ -797,6 +826,7 @@ export default function AdminVehicleApprovalPage() {
                 <TableHead>Plate</TableHead>
                 <TableHead>Price/Day</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Waiting</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -829,6 +859,36 @@ export default function AdminVehicleApprovalPage() {
                   </TableCell>
                   <TableCell className="capitalize">
                     {car.deleted_at ? "removed" : car.status}
+                  </TableCell>
+                  {/* CHAPTER 105. How long this submission has waited, so the
+                      queue can be read as a queue rather than a list. Red past
+                      the target the same settings row publishes to the lister. */}
+                  <TableCell>
+                    {(() => {
+                      const waiting =
+                        car.status === "pending"
+                          ? describeWaitingSince(car.review_submitted_at)
+                          : null;
+                      if (!waiting) return <span className="text-muted-foreground">—</span>;
+                      const hours = verificationWaitHours(car.review_submitted_at) ?? 0;
+                      const overdue = hours > reviewTargetHours;
+                      return (
+                        <span
+                          className={
+                            overdue
+                              ? "font-semibold text-red-600 dark:text-red-400"
+                              : "text-foreground"
+                          }
+                          title={
+                            overdue
+                              ? `Past the ${reviewTargetHours}-hour review target`
+                              : `Review target: ${reviewTargetHours} hours`
+                          }
+                        >
+                          {waiting}
+                        </span>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button size="sm" variant="ghost">
