@@ -393,3 +393,46 @@ export const formatCommissionPercent = (rate: number) => {
   const rounded = Number.isInteger(percent) ? percent.toFixed(0) : percent.toFixed(1);
   return `${rounded}%`;
 };
+
+// CHAPTER 104. How long an identity review may sit before an admin should see
+// it as late. Defaulted to 24 to match the ETA sentence shown to the person
+// waiting - an internal alarm that disagrees with the public promise is worse
+// than no alarm.
+export const DEFAULT_VERIFICATION_REVIEW_TARGET_HOURS = 24;
+
+export const fetchVerificationReviewTargetHours = async (): Promise<number> => {
+  const { data, error } = await supabase
+    .from("platform_settings")
+    .select("verification_review_target_hours")
+    .eq("id", "default")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load verification review target:", error);
+    return DEFAULT_VERIFICATION_REVIEW_TARGET_HOURS;
+  }
+
+  const hours = Number(data?.verification_review_target_hours);
+  return Number.isFinite(hours) && hours >= 1 && hours <= 720
+    ? Math.round(hours)
+    : DEFAULT_VERIFICATION_REVIEW_TARGET_HOURS;
+};
+
+/** "4 hours" / "2 days" - the wait as a person would say it. */
+export const describeWaitingSince = (submittedAt: string | null, now: number = Date.now()) => {
+  if (!submittedAt) return null;
+  const startedMs = new Date(submittedAt).getTime();
+  if (!Number.isFinite(startedMs)) return null;
+  const hours = Math.max(0, Math.floor((now - startedMs) / 3_600_000));
+  if (hours < 1) return "under an hour";
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"}`;
+};
+
+export const verificationWaitHours = (submittedAt: string | null, now: number = Date.now()) => {
+  if (!submittedAt) return null;
+  const startedMs = new Date(submittedAt).getTime();
+  if (!Number.isFinite(startedMs)) return null;
+  return Math.max(0, (now - startedMs) / 3_600_000);
+};

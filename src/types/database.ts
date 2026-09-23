@@ -28,6 +28,8 @@ export interface Database {
           national_id: string | null;
           secondary_id_type: string | null;
           verified_status: string;
+          // CHAPTER 104. When this profile last entered pending review.
+          verification_submitted_at: string | null;
           role: string;
           is_lister: boolean;
           suspended_at: string | null;
@@ -1494,6 +1496,8 @@ export interface Database {
         Row: {
           id: string;
           commission_rate: number;
+          // CHAPTER 104. Hours before a pending identity review reads as late.
+          verification_review_target_hours: number;
           ledger_activated_at: string | null;
           payment_processing_fee_rate: number;
           payment_processing_fixed_centavos: number;

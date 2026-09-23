@@ -23,6 +23,10 @@ import {
 import {
   DEFAULT_DORMANT_ACCOUNT_DAYS,
   fetchDormantAccountDays,
+  fetchVerificationReviewTargetHours,
+  DEFAULT_VERIFICATION_REVIEW_TARGET_HOURS,
+  describeWaitingSince,
+  verificationWaitHours,
 } from "@/lib/platformSettings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -155,10 +159,15 @@ export default function AdminUsersPage() {
   const [dormantThresholdDays, setDormantThresholdDays] = useState(
     DEFAULT_DORMANT_ACCOUNT_DAYS,
   );
+  // CHAPTER 104. The hour count after which a pending review reads as late.
+  const [reviewTargetHours, setReviewTargetHours] = useState(
+    DEFAULT_VERIFICATION_REVIEW_TARGET_HOURS,
+  );
 
   useEffect(() => {
     fetchUsers();
     void fetchDormantAccountDays().then(setDormantThresholdDays);
+    void fetchVerificationReviewTargetHours().then(setReviewTargetHours);
   }, []);
 
   useEffect(() => {
@@ -293,7 +302,27 @@ export default function AdminUsersPage() {
       u.email.toLowerCase().includes(search.toLowerCase());
     return matchesFilter && matchesSearch;
   });
-  const userPages = usePagedItems(filteredUsers, `${filter}|${search}`);
+
+  // CHAPTER 104. Whoever has waited longest is reviewed first. Before this the
+  // list was ordered by when the account was created, so the person who
+  // submitted this morning could sit above one who submitted last week.
+  // Everyone not waiting keeps the previous newest-account-first ordering.
+  const orderedUsers = [...filteredUsers].sort((left, right) => {
+    const leftWait =
+      left.verified_status === "pending"
+        ? verificationWaitHours(left.verification_submitted_at)
+        : null;
+    const rightWait =
+      right.verified_status === "pending"
+        ? verificationWaitHours(right.verification_submitted_at)
+        : null;
+    if (leftWait !== null && rightWait !== null) return rightWait - leftWait;
+    if (leftWait !== null) return -1;
+    if (rightWait !== null) return 1;
+    return 0;
+  });
+
+  const userPages = usePagedItems(orderedUsers, `${filter}|${search}`);
 
   const getImageUrl = (path: string, _cacheKey?: string | null) =>
     verificationImageUrls[path] ?? "";
@@ -1235,8 +1264,40 @@ export default function AdminUsersPage() {
                             u.verified_status.slice(1)}
                       </span>
                     </TableCell>
+                    {/* CHAPTER 104. For anyone actually waiting, the useful
+                        number is how long they have been waiting - not when
+                        they made the account, which is what stood here and told
+                        a reviewer nothing about the queue. Red once the wait
+                        passes the target the same settings row publishes to
+                        the person waiting. */}
                     <TableCell>
-                      {format(new Date(u.created_at), "MMM d, yyyy")}
+                      {(() => {
+                        const waiting =
+                          u.verified_status === "pending"
+                            ? describeWaitingSince(u.verification_submitted_at)
+                            : null;
+                        if (!waiting) {
+                          return format(new Date(u.created_at), "MMM d, yyyy");
+                        }
+                        const hours = verificationWaitHours(u.verification_submitted_at) ?? 0;
+                        const overdue = hours > reviewTargetHours;
+                        return (
+                          <span
+                            className={
+                              overdue
+                                ? "font-semibold text-red-600 dark:text-red-400"
+                                : "text-foreground"
+                            }
+                            title={
+                              overdue
+                                ? `Past the ${reviewTargetHours}-hour review target`
+                                : `Review target: ${reviewTargetHours} hours`
+                            }
+                          >
+                            Waiting {waiting}
+                          </span>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       {(() => {

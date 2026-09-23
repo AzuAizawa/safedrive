@@ -16589,4 +16589,119 @@ commit;
 --        'still there';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 104 - A review that is late is visible as late
+-- ============================================================================
+-- SafeDrive tells someone waiting for identity review that "most identity
+-- reviews finish within 24 hours" - a live setting, shown on /verification
+-- while their status is pending. Nothing on the admin side could tell whether
+-- that promise was being kept. The users list showed profiles.created_at, which
+-- is when the ACCOUNT was made, not when the documents were submitted, so a
+-- person who submitted an hour ago and a person who submitted last week looked
+-- identical and sorted the same way. Raised by a tester who simply asked how
+-- long the review takes.
+--
+-- Two columns close it.
+--
+--   profiles.verification_submitted_at - stamped by a trigger every time a
+--     profile ENTERS 'pending', so a resubmission restarts the clock rather
+--     than inheriting the first attempt's wait. updated_at could not do this:
+--     it moves for any edit, including the admin's own decision.
+--
+--   platform_settings.verification_review_target_hours - when a wait counts as
+--     late. Defaulted to 24 to match the sentence already shown to the person
+--     waiting: an internal alarm that disagrees with the public promise is
+--     worse than no alarm. A single super admin can change it, like the other
+--     operational settings, because being wrong costs a correction rather than
+--     money.
+--
+-- Existing pending profiles are backfilled from updated_at. That is a proxy and
+-- is marked as one here: for a profile whose last edit WAS the submission it is
+-- exact, and for one edited afterwards it understates the wait. Better than
+-- leaving them null and showing nothing at all for the people already queued.
+--
+-- Deliberately not cleared on approval or rejection. It records when the
+-- submission that is being decided arrived, which is what makes "this took
+-- three days" answerable afterwards, not only while it is still waiting.
+begin;
+
+alter table public.profiles
+  add column if not exists verification_submitted_at timestamptz;
+
+comment on column public.profiles.verification_submitted_at is
+  'When this profile last entered verified_status = pending, i.e. when the documents now under review were submitted (CHAPTER 104). Not cleared by the decision.';
+
+alter table public.platform_settings
+  add column if not exists verification_review_target_hours integer not null default 24;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_verification_review_target_hours_check;
+alter table public.platform_settings
+  add constraint platform_settings_verification_review_target_hours_check
+  check (verification_review_target_hours >= 1 and verification_review_target_hours <= 720);
+
+comment on column public.platform_settings.verification_review_target_hours is
+  'Hours after submission at which an identity review is shown as overdue to admins. Defaults to 24 to match the ETA message shown to the person waiting.';
+
+create or replace function public.stamp_verification_submitted_at()
+returns trigger
+language plpgsql
+set search_path = public
+as $stamp_verification$
+begin
+  -- Only the transition INTO pending. A profile that is already pending and is
+  -- edited for some other reason keeps its original submission time, so the
+  -- wait cannot be reset by an unrelated update.
+  if new.verified_status = 'pending'
+     and (tg_op = 'INSERT' or old.verified_status is distinct from 'pending') then
+    new.verification_submitted_at := now();
+  end if;
+  return new;
+end;
+$stamp_verification$;
+
+drop trigger if exists stamp_verification_submitted_at on public.profiles;
+create trigger stamp_verification_submitted_at
+before insert or update of verified_status on public.profiles
+for each row execute function public.stamp_verification_submitted_at();
+
+-- The people already in the queue when this runs. updated_at is the closest
+-- thing to a submission time that exists for them; see the note above.
+update public.profiles
+   set verification_submitted_at = coalesce(updated_at, created_at)
+ where verified_status = 'pending'
+   and verification_submitted_at is null;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'submission column' as check_name,
+--        (select count(*)::text from information_schema.columns
+--          where table_schema = 'public' and table_name = 'profiles'
+--            and column_name = 'verification_submitted_at') as result,
+--        '1' as expected
+-- union all
+-- select 'target setting',
+--        (select verification_review_target_hours::text
+--           from public.platform_settings where id = 'default'),
+--        '24'
+-- union all
+-- select 'trigger fires on insert and update',
+--        (select case when tgtype & 4 = 4 and tgtype & 16 = 16 then 'insert and update' else 'wrong timing' end
+--           from pg_trigger where tgname = 'stamp_verification_submitted_at' and not tgisinternal),
+--        'insert and update'
+-- union all
+-- select 'no pending profile left without a submission time',
+--        (select count(*)::text from public.profiles
+--          where verified_status = 'pending' and verification_submitted_at is null),
+--        '0'
+-- union all
+-- select 'people currently waiting, and the longest wait in hours',
+--        (select coalesce(count(*)::text || ' waiting, longest ' ||
+--                  max(round(extract(epoch from (now() - verification_submitted_at)) / 3600))::text || 'h',
+--                '0 waiting')
+--           from public.profiles where verified_status = 'pending'),
+--        'informational';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.
