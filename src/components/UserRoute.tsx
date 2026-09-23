@@ -29,15 +29,18 @@ export default function UserRoute() {
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle>Profile Setup Needed</CardTitle>
+            <CardTitle>We could not open your account</CardTitle>
           </CardHeader>
+          {/* Written for the person looking at it, not for us. This screen used
+              to tell a renter to open Chapter 16 of the master SQL file and
+              inspect RLS grants - a developer instruction shown to whoever
+              happened to hit it. The diagnostic detail stays for support, but
+              it no longer reads like a database console. */}
           <CardContent className="space-y-4 text-sm text-muted-foreground">
             <p>
-              Your login worked, but SafeDrive could not load your database
-              profile. Use Chapter 16 of
-              `database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql` to diagnose the
-              live grants and profile RLS, then apply only the reviewed repair
-              chapter that matches the result.
+              You are signed in, but we could not load your account details.
+              Signing out and back in usually fixes this. If it keeps happening,
+              send SafeDrive support the line below.
             </p>
             <p className="break-words text-xs">{profileError}</p>
             <Button

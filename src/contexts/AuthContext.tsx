@@ -135,7 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!completed) {
         setProfile(null);
         setProfileError(
-          "Profile loading timed out. Confirm the matching public.profiles row exists and can be read by this authenticated user.",
+          "Loading your account timed out. Check your connection and try again.",
         );
       }
     }, PROFILE_LOAD_TIMEOUT_MS);
@@ -167,6 +167,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!insertError && newProfile) {
             setProfile(newProfile);
             return;
+          }
+
+          // 23505 means the row is already there, so the select that returned
+          // nothing was not "no profile" - it was "not visible from here".
+          // The profiles policy is auth.uid() = id, and a request whose token
+          // has stopped being accepted carries no uid, so it matches nothing
+          // while the row itself is untouched. Reported from a phone whose
+          // session had just been superseded by a newer login on a laptop
+          // (CHAPTER 57): it showed a duplicate-key error instead of saying
+          // the session had ended. AuthConfirmPage already recovered this way;
+          // this path did not.
+          const duplicateProfile =
+            insertError?.code === "23505" ||
+            /duplicate key value/i.test(insertError?.message ?? "");
+
+          if (duplicateProfile) {
+            const { data: existingProfile } = await supabase
+              .from("profiles")
+              .select("*")
+              .eq("id", userId)
+              .maybeSingle();
+
+            if (existingProfile) {
+              setProfile(existingProfile);
+              return;
+            }
+
+            // Still invisible with the row provably there: this is a session
+            // that is no longer accepted, not a profile that needs setting up.
+            // End it locally and let the login page explain, the same way a
+            // superseded session does.
+            clearAllAuthPending();
+            clearLocalSessionToken();
+            sessionStorage.setItem(
+              SESSION_TIMEOUT_NOTICE_KEY,
+              JSON.stringify({ portal: "user", reason: "superseded" }),
+            );
+            await supabase.auth.signOut({ scope: "local" });
+            setProfile(null);
+            setUser(null);
+            setSession(null);
+            throw new Error(
+              "Your session has ended. Sign in again - this account may have been signed in on another device.",
+            );
           }
 
           throw insertError;
