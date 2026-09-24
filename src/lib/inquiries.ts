@@ -30,9 +30,12 @@ export const validateInquiryForm = (input: {
   message: string;
 }): { field: InquiryField; message: string }[] => {
   const errors: { field: InquiryField; message: string }[] = [];
-  if (input.name.trim().length < 2) errors.push({ field: "name", message: "Enter your name." });
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) {
-    errors.push({ field: "email", message: "Enter a valid email address." });
+  // Name and email are optional (IT review): an inquiry is a question about
+  // the website, asked before any account exists. A typed email must still
+  // work, since the reply goes there.
+  const email = input.email.trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.push({ field: "email", message: "Enter a valid email address, or leave it blank." });
   }
   if (input.topics.filter(Boolean).length === 0) {
     errors.push({ field: "topic", message: "Select an inquiry topic first." });

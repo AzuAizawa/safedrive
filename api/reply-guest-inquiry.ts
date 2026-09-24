@@ -177,22 +177,26 @@ export default async function handler(req: Request) {
       .select("id")
       .maybeSingle();
 
-    const resendResult = await sendGuestInquiryReplyEmail({
-      to: inquiry.email,
-      name: inquiry.name,
-      subject: inquiry.subject,
-      reply,
-      inquiryId: inquiry.id,
-      messageId: threadMessage?.id,
-      baseOrigin: new URL(req.url).origin,
-      linked: Boolean(inquiry.submitted_by_user_id),
-    });
-    let deliveryProvider = "resend";
+    // A visitor who gave no email (CHAPTER 107) reads the reply in the thread
+    // their browser keeps - there is nothing to mail.
+    const resendResult = inquiry.email
+      ? await sendGuestInquiryReplyEmail({
+          to: inquiry.email,
+          name: inquiry.name,
+          subject: inquiry.subject,
+          reply,
+          inquiryId: inquiry.id,
+          messageId: threadMessage?.id,
+          baseOrigin: new URL(req.url).origin,
+          linked: Boolean(inquiry.submitted_by_user_id),
+        })
+      : null;
+    let deliveryProvider = resendResult ? "resend" : "thread_only";
 
     // Gmail remains a migration fallback only while Resend is absent. Do not
     // retry through a second provider after an attempted Resend request: a
     // network failure can have delivered the first message already.
-    if (resendResult.state === "not_configured") {
+    if (resendResult?.state === "not_configured") {
       const emailWebhook = process.env.GMAIL_GUEST_INQUIRY_WEBHOOK_URL;
       const emailWebhookSecret = process.env.GMAIL_WEBHOOK_SHARED_SECRET;
       if (!emailWebhook || !emailWebhookSecret) {
@@ -209,7 +213,7 @@ export default async function handler(req: Request) {
           secret: emailWebhookSecret,
           to: inquiry.email,
           subject: `SafeDrive response ${inquiryReference(inquiry.id)}: ${inquiry.subject}`,
-          body: `Hello ${inquiry.name},\n\nReference: ${inquiryReference(inquiry.id)}\n\n${reply}\n\nSafeDrive Support`,
+          body: `Hello ${inquiry.name || "there"},\n\nReference: ${inquiryReference(inquiry.id)}\n\n${reply}\n\nSafeDrive Support`,
           idempotencyKey: `guest-inquiry-reply:${inquiry.id}`,
         }),
       });
@@ -237,7 +241,7 @@ export default async function handler(req: Request) {
         );
       }
       deliveryProvider = "gmail_webhook";
-    } else if (resendResult.state !== "sent") {
+    } else if (resendResult && resendResult.state !== "sent") {
       return jsonResponse(
         { error: resendResult.reason || "Resend could not deliver the guest inquiry reply", code: "resend_delivery_failed" },
         502,

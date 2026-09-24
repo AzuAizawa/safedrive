@@ -1259,8 +1259,8 @@ export interface Database {
       guest_inquiries: {
         Row: {
           id: string;
-          name: string;
-          email: string;
+          name: string | null;
+          email: string | null;
           phone: string | null;
           subject: string;
           topics: string[];
@@ -1272,6 +1272,7 @@ export interface Database {
           resolved_at: string | null;
           assigned_admin_id: string | null;
           submitted_by_user_id: string | null;
+          guest_token_hash: string | null;
           request_fingerprint: string;
           source: string;
           created_at: string;
@@ -1279,8 +1280,8 @@ export interface Database {
         };
         Insert: {
           id?: string;
-          name: string;
-          email: string;
+          name?: string | null;
+          email?: string | null;
           phone?: string | null;
           subject: string;
           topics?: string[];
@@ -1292,6 +1293,7 @@ export interface Database {
           resolved_at?: string | null;
           assigned_admin_id?: string | null;
           submitted_by_user_id?: string | null;
+          guest_token_hash?: string | null;
           request_fingerprint: string;
           source?: string;
           created_at?: string;
@@ -1299,8 +1301,8 @@ export interface Database {
         };
         Update: {
           id?: string;
-          name?: string;
-          email?: string;
+          name?: string | null;
+          email?: string | null;
           phone?: string | null;
           subject?: string;
           topics?: string[];
@@ -1312,6 +1314,7 @@ export interface Database {
           resolved_at?: string | null;
           assigned_admin_id?: string | null;
           submitted_by_user_id?: string | null;
+          guest_token_hash?: string | null;
           request_fingerprint?: string;
           source?: string;
           created_at?: string;

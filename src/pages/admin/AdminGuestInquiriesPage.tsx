@@ -154,7 +154,7 @@ export default function AdminGuestInquiriesPage() {
       });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error || "Reply could not be delivered");
-      toast.success("Reply sent by email");
+      toast.success(selected.email ? "Reply sent by email" : "Reply added to the visitor's thread");
       const inquiryId = selected.id;
       setSelected(null);
       setReply("");
@@ -194,7 +194,7 @@ export default function AdminGuestInquiriesPage() {
           <h1 className="text-3xl font-bold tracking-tight">User Inquiries</h1>
           <p className="mt-1 text-muted-foreground">
             Questions from the public contact form. An account holder&apos;s inquiry is a threaded conversation; a
-            guest with no account gets a single email reply. Replying no longer closes an inquiry &mdash; use
+            guest with no account gets it by email, or - if they left the email blank - reads it in the browser they asked from. Replying no longer closes an inquiry &mdash; use
             &ldquo;Mark resolved&rdquo; when the question is answered.
           </p>
         </div>
@@ -245,7 +245,7 @@ export default function AdminGuestInquiriesPage() {
                         }`}
                       >
                         <UserCheck className="h-3 w-3" />
-                        {hasAccount ? "Account holder - threaded" : "Guest - email only"}
+                        {hasAccount ? "Account holder - threaded" : inquiry.email ? "Guest - email" : "Guest - browser only"}
                       </span>
                     </div>
                     {inquiry.topics?.length > 0 && (
@@ -256,7 +256,16 @@ export default function AdminGuestInquiriesPage() {
                       </div>
                     )}
                     <p className="mt-2 text-sm text-muted-foreground">
-                      {inquiry.name} · <a className="underline" href={`mailto:${inquiry.email}`}>{inquiry.email}</a>{inquiry.phone ? ` · ${inquiry.phone}` : ""}
+                      {inquiry.name || "Guest (no name given)"}
+                      {inquiry.email ? (
+                        <>
+                          {" · "}
+                          <a className="underline" href={`mailto:${inquiry.email}`}>{inquiry.email}</a>
+                        </>
+                      ) : (
+                        " · no email"
+                      )}
+                      {inquiry.phone ? ` · ${inquiry.phone}` : ""}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                       <span className="text-muted-foreground">Received {format(new Date(inquiry.created_at), "MMM d, yyyy h:mm a")}</span>
@@ -318,7 +327,7 @@ export default function AdminGuestInquiriesPage() {
                             >
                               <p className="whitespace-pre-wrap">{message.message}</p>
                               <p className={`mt-1 text-[10px] ${fromAdmin ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-                                {fromAdmin ? "SafeDrive" : inquiry.name} · {format(new Date(message.created_at), "MMM d, h:mm a")}
+                                {fromAdmin ? "SafeDrive" : inquiry.name || "Guest"} · {format(new Date(message.created_at), "MMM d, h:mm a")}
                               </p>
                             </div>
                           </div>
@@ -341,14 +350,16 @@ export default function AdminGuestInquiriesPage() {
               <MessageSquare className="mt-1 h-5 w-5 text-primary" />
               <div>
                 <h2 className="text-lg font-semibold">
-                  Reply to {selected.name}{" "}
+                  Reply to {selected.name || "Guest"}{" "}
                   <span className="font-mono text-sm font-normal text-muted-foreground">
                     {getInquiryReference(selected.id)}
                   </span>
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Emailed to {selected.email}
-                  {selected.submitted_by_user_id ? " and added to their in-app inquiry thread" : ""}. This does not
+                  {selected.email
+                    ? `Emailed to ${selected.email}${selected.submitted_by_user_id ? " and added to their in-app inquiry thread" : ""}`
+                    : "No email given - they read this under the Inquiry button in the browser they asked from"}
+                  . This does not
                   close the inquiry &mdash; use &ldquo;Mark resolved&rdquo; when the question is answered.
                 </p>
               </div>

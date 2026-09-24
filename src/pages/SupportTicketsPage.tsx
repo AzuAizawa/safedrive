@@ -950,9 +950,11 @@ export default function SupportTicketsPage() {
                     <span className="rounded bg-blue-500/10 px-2 py-0.5 font-semibold text-blue-600 dark:text-blue-400">
                       Inquiry
                     </span>
-                    <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">
-                      Replies also go to {activeInquiry.email}
-                    </span>
+                    {activeInquiry.email ? (
+                      <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">
+                        Replies also go to {activeInquiry.email}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
                 {isInquiryClosed(activeInquiry) && (

@@ -11,6 +11,7 @@ import FieldError from "@/components/FieldError";
 import { focusField, INVALID_CONTROL_CLASSES } from "@/lib/formErrors";
 import { validateInquiryForm, type InquiryField } from "@/lib/inquiries";
 import { GUEST_INQUIRY_TOPICS } from "@/lib/guestInquiryTopics";
+import { guestInquiryToken, rememberGuestInquiry } from "@/lib/guestInquiryStore";
 import { useAuth } from "@/contexts/AuthContext";
 
 const initialForm = {
@@ -33,6 +34,9 @@ export default function GuestInquiryPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submittedReference, setSubmittedReference] = useState<string | null>(null);
+  // Kept by this browser (CHAPTER 107): the reply shows under the Inquiry button.
+  const [submittedKept, setSubmittedKept] = useState(false);
+  const [submittedWithEmail, setSubmittedWithEmail] = useState(false);
   // Missing fields show in red from the first submit on, and clear as they are filled.
   const [attempted, setAttempted] = useState(false);
 
@@ -90,6 +94,7 @@ export default function GuestInquiryPage() {
         error?: string;
         id?: string | null;
         linked?: boolean;
+        guestToken?: string | null;
       };
       if (!response.ok) throw new Error(payload.error || "Unable to submit inquiry");
       const reference = payload.id ? getInquiryReference(payload.id) : null;
@@ -101,6 +106,11 @@ export default function GuestInquiryPage() {
         navigate(`/support?inquiryId=${payload.id}`);
         return;
       }
+      if (payload.id && payload.guestToken) {
+        rememberGuestInquiry({ id: payload.id, token: payload.guestToken });
+      }
+      setSubmittedKept(Boolean(payload.id && guestInquiryToken(payload.id)));
+      setSubmittedWithEmail(Boolean(form.email.trim()));
       setSubmittedReference(reference);
       setAttempted(false);
       setSubmitted(true);
@@ -131,7 +141,7 @@ export default function GuestInquiryPage() {
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 {user
                   ? "You're signed in - your inquiry shows in Support & Chats with your tickets, so you can read replies and follow up there. Replies also come by email."
-                  : "You do not need an account to ask about SafeDrive; the reply comes to your email."}{" "}
+                  : "You do not need an account to ask about SafeDrive, and name and email are optional. The reply shows under the Inquiry button on any SafeDrive page in this browser - add an email to get it there too."}{" "}
                 Do not include passwords, one-time codes, government ID numbers, or payment credentials.
               </p>
             </div>
@@ -145,7 +155,11 @@ export default function GuestInquiryPage() {
                 <p className="mt-1 font-mono text-sm font-semibold">{submittedReference}</p>
               ) : null}
               <p className="mt-2 text-sm text-muted-foreground">
-                SafeDrive support will review it and respond using the email address you supplied.
+                {submittedKept
+                  ? `SafeDrive's reply will show under the Inquiry button on any SafeDrive page, in this browser${
+                      submittedWithEmail ? ", and in your email" : ""
+                    }.`
+                  : "SafeDrive support will review it and respond using the email address you supplied."}
               </p>
               <Button className="mt-5" variant="outline" onClick={() => setSubmitted(false)}>
                 Ask another question
@@ -155,13 +169,12 @@ export default function GuestInquiryPage() {
             <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
               <div className="grid gap-5 sm:grid-cols-2">
                 <label className="space-y-2">
-                  <Label htmlFor="guest-name">Name *</Label>
-                  <Input id="guest-name" value={form.name} onChange={(event) => setField("name", event.target.value)} maxLength={120} required aria-invalid={Boolean(fieldError("name"))} />
-                  <FieldError message={fieldError("name")} />
+                  <Label htmlFor="guest-name">Name (optional)</Label>
+                  <Input id="guest-name" value={form.name} onChange={(event) => setField("name", event.target.value)} maxLength={120} />
                 </label>
                 <label className="space-y-2">
-                  <Label htmlFor="guest-email">Email *</Label>
-                  <Input id="guest-email" type="email" value={form.email} onChange={(event) => setField("email", event.target.value)} maxLength={320} required aria-invalid={Boolean(fieldError("email"))} />
+                  <Label htmlFor="guest-email">Email (optional)</Label>
+                  <Input id="guest-email" type="email" value={form.email} onChange={(event) => setField("email", event.target.value)} maxLength={320} aria-invalid={Boolean(fieldError("email"))} />
                   <FieldError message={fieldError("email")} />
                 </label>
               </div>

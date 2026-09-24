@@ -7,10 +7,19 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { isInquiryClosed } from "@/lib/inquiries";
 import { supabase } from "@/lib/supabase";
-import type { GuestInquiry, GuestInquiryMessage } from "@/types/database";
+import { fetchGuestInquiries, type GuestInquirySummary } from "@/lib/guestInquiryStore";
+import type { GuestInquiry } from "@/types/database";
+
+type ThreadMessage = GuestInquirySummary["messages"][number];
+
+// How often a visitor without an account re-checks for a reply. They have no
+// session, so the live channel (RLS by account) cannot reach them.
+const GUEST_POLL_MS = 20_000;
 
 type InquiryThreadProps = {
-  inquiry: GuestInquiry;
+  inquiry: Pick<GuestInquiry, "id" | "status">;
+  /** Set for an inquiry this browser sent without an account (CHAPTER 107). */
+  guestToken?: string | null;
   /** Called after a follow-up is sent, so the caller can refresh the inquiry's status. */
   onFollowUpSent?: () => void | Promise<void>;
   className?: string;
@@ -19,30 +28,40 @@ type InquiryThreadProps = {
 // One inquiry's conversation with SafeDrive: its messages, live, and a
 // follow-up box while it is open. The Inquiry widget and Support & Chats both
 // show this, so the two can never tell a different story.
-export default function InquiryThread({ inquiry, onFollowUpSent, className = "" }: InquiryThreadProps) {
+export default function InquiryThread({ inquiry, guestToken = null, onFollowUpSent, className = "" }: InquiryThreadProps) {
   const { session } = useAuth();
   const channelSuffix = useId();
-  const [messages, setMessages] = useState<GuestInquiryMessage[]>([]);
+  const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const closed = isInquiryClosed(inquiry);
 
   const fetchMessages = useCallback(async () => {
+    if (guestToken) {
+      const [thread] = await fetchGuestInquiries([{ id: inquiry.id, token: guestToken }]);
+      if (thread) setMessages(thread.messages);
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .from("guest_inquiry_messages")
       .select("*")
       .eq("inquiry_id", inquiry.id)
       .order("created_at", { ascending: true });
-    if (!error) setMessages((data ?? []) as GuestInquiryMessage[]);
+    if (!error) setMessages((data ?? []) as ThreadMessage[]);
     setLoading(false);
-  }, [inquiry.id]);
+  }, [inquiry.id, guestToken]);
 
   useEffect(() => {
     setLoading(true);
     setMessages([]);
     setDraft("");
     void fetchMessages();
+    if (guestToken) {
+      const timer = window.setInterval(() => void fetchMessages(), GUEST_POLL_MS);
+      return () => window.clearInterval(timer);
+    }
     const channel = supabase
       .channel(`inquiry-thread-${inquiry.id}-${channelSuffix}`)
       .on(
@@ -59,19 +78,19 @@ export default function InquiryThread({ inquiry, onFollowUpSent, className = "" 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [inquiry.id, channelSuffix, fetchMessages]);
+  }, [inquiry.id, channelSuffix, fetchMessages, guestToken]);
 
   const sendFollowUp = async () => {
-    if (!draft.trim() || !session?.access_token || sending) return;
+    if (!draft.trim() || (!session?.access_token && !guestToken) || sending) return;
     setSending(true);
     try {
       const res = await fetch("/api/inquiry-followup", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+          ...(guestToken ? {} : { Authorization: `Bearer ${session!.access_token}` }),
         },
-        body: JSON.stringify({ inquiryId: inquiry.id, message: draft.trim() }),
+        body: JSON.stringify({ inquiryId: inquiry.id, message: draft.trim(), ...(guestToken ? { guestToken } : {}) }),
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(payload.error || "Follow-up was not sent");

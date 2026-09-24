@@ -16812,4 +16812,85 @@ commit;
 --        'informational';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 107 - A visitor can ask without giving a name or email
+-- ============================================================================
+-- IT review: an inquiry is a question about the website, asked before anyone
+-- has an account, so it should not demand a name, email, or mobile number.
+-- Mobile was already optional; this makes name and email optional too.
+--
+-- Without an email there is nowhere to mail the reply, so the visitor's
+-- browser keeps the conversation instead - the way site chat widgets work.
+-- The API hands the browser a random secret once and stores only its SHA-256
+-- here. Whoever holds the secret can read that one inquiry's thread and follow
+-- up on it; the reference number alone is never enough.
+--
+-- An email, when given, still gets the reply as before.
+--
+-- The existing CHECKs (name 2-120, email 5-320) stay: a NULL passes a CHECK,
+-- so they keep guarding the values that are given.
+--
+-- notify_admins_of_guest_inquiry built its message as new.name || ..., which
+-- is NULL for a nameless inquiry - and notifications.message is NOT NULL, so
+-- the insert that fired it would fail. It names such a visitor "A guest".
+begin;
+
+alter table public.guest_inquiries
+  alter column name drop not null,
+  alter column email drop not null;
+
+alter table public.guest_inquiries
+  add column if not exists guest_token_hash text;
+
+comment on column public.guest_inquiries.guest_token_hash is
+  'SHA-256 (hex) of the secret held by the browser that sent this inquiry without an account (CHAPTER 107). Lets that browser read the thread and follow up. NULL for account holders.';
+
+create or replace function public.notify_admins_of_guest_inquiry()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.notifications (user_id, title, message, type, link)
+  select
+    id,
+    'Guest inquiry needs a reply',
+    coalesce(nullif(btrim(new.name), ''), 'A guest') || ' asked about ' || new.subject || '. Open Guest Inquiries to review it.',
+    'support',
+    '/admin/guest-inquiries?inquiry=' || new.id::text
+  from public.profiles
+  where role in ('admin', 'super_admin')
+    and deleted_at is null;
+
+  return new;
+end;
+$$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'name optional' as check,
+--        (select is_nullable from information_schema.columns
+--          where table_schema = 'public' and table_name = 'guest_inquiries' and column_name = 'name') as result,
+--        'YES' as expected
+-- union all
+-- select 'email optional',
+--        (select is_nullable from information_schema.columns
+--          where table_schema = 'public' and table_name = 'guest_inquiries' and column_name = 'email'),
+--        'YES'
+-- union all
+-- select 'browser secret column',
+--        (select case when col_description('public.guest_inquiries'::regclass, attnum) like '%CHAPTER 107%'
+--                     then 'present' else 'MISSING' end
+--           from pg_attribute
+--          where attrelid = 'public.guest_inquiries'::regclass and attname = 'guest_token_hash'),
+--        'present'
+-- union all
+-- select 'nameless visitor is named in the admin alert',
+--        (select case when prosrc like '%A guest%' then 'updated' else 'NOT updated' end
+--           from pg_proc where proname = 'notify_admins_of_guest_inquiry'),
+--        'updated';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

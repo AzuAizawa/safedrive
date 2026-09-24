@@ -182,7 +182,8 @@ test("an edit names every problem at once, and an empty price is an error, not a
 test("an inquiry says what is missing instead of disabling Submit", () => {
   assert.deepEqual(
     validateInquiryForm({ name: "", email: "nope", topics: [""], message: "short" }).map((e) => e.field),
-    ["name", "email", "topic", "message"],
+    // Name is optional (CHAPTER 107); a typed email must still be valid.
+    ["email", "topic", "message"],
   );
   assert.equal(
     validateInquiryForm({ name: "Ana", email: "ana@example.com", topics: [""], message: "How do I list a car?" })[0].message,

@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { getClientIp } from "../server/ipBlock.js";
 import { sendInquiryReceivedEmail } from "../server/email.js";
+import { createGuestInquiryToken, hashGuestInquiryToken } from "../server/guestInquiryToken.js";
 
 export const config = {
   runtime: "edge",
@@ -115,7 +116,10 @@ export default async function handler(req: Request) {
       return jsonResponse({ success: true });
     }
 
-    const name = normalizeSingleLine(payload.name, 120);
+    // Name and email are optional (CHAPTER 107): a one-letter name is dropped
+    // rather than refused, and a typed email must still be usable.
+    const typedName = normalizeSingleLine(payload.name, 120);
+    const name = typedName.length >= 2 ? typedName : "";
     const email = normalizeSingleLine(payload.email, 320).toLowerCase();
     const phone = normalizeSingleLine(payload.phone, 40);
     const topics = Array.isArray(payload.topics)
@@ -125,9 +129,9 @@ export default async function handler(req: Request) {
     const subject = topics.join(", ").slice(0, 160);
     const message = normalizeMessage(payload.message);
 
-    if (name.length < 2 || topics.length < 1 || message.length < 5 || !isValidEmail(email)) {
+    if (topics.length < 1 || message.length < 5 || (email && !isValidEmail(email))) {
       return jsonResponse(
-        { error: "Enter a valid name and email, select at least one topic, and write a message of at least 5 characters" },
+        { error: "Select at least one topic, write a message of at least 5 characters, and check the email if you gave one" },
         400,
       );
     }
@@ -153,6 +157,11 @@ export default async function handler(req: Request) {
       : `anonymous-${crypto.randomUUID()}`;
 
     if (!serviceRoleKey) {
+      // This fallback predates CHAPTER 107 and still needs both. Without the
+      // service role there is also no way to hand the browser its thread.
+      if (!name || !email) {
+        return jsonResponse({ error: "Enter your name and email to send an inquiry" }, 400);
+      }
       const { error } = await supabase.rpc("submit_guest_inquiry", {
         p_name: name,
         p_email: email,
@@ -168,6 +177,7 @@ export default async function handler(req: Request) {
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
+    // Without an email the fingerprint limit is the one that holds.
     const [{ count: fingerprintCount, error: fingerprintError }, { count: emailCount, error: emailError }] =
       await Promise.all([
         supabase
@@ -175,11 +185,13 @@ export default async function handler(req: Request) {
           .select("id", { count: "exact", head: true })
           .eq("request_fingerprint", fingerprint)
           .gte("created_at", fifteenMinutesAgo),
-        supabase
-          .from("guest_inquiries")
-          .select("id", { count: "exact", head: true })
-          .eq("email", email)
-          .gte("created_at", oneHourAgo),
+        email
+          ? supabase
+              .from("guest_inquiries")
+              .select("id", { count: "exact", head: true })
+              .eq("email", email)
+              .gte("created_at", oneHourAgo)
+          : Promise.resolve({ count: 0, error: null }),
       ]);
 
     if (fingerprintError || emailError) {
@@ -192,9 +204,12 @@ export default async function handler(req: Request) {
       );
     }
 
+    // No account: the browser that asked keeps the thread, by a secret it
+    // alone holds. Only the hash is stored.
+    const guestToken = submittedByUserId ? null : createGuestInquiryToken();
     const inquiryRecord = {
-      name,
-      email,
+      name: name || null,
+      email: email || null,
       phone: phone || null,
       subject,
       topics,
@@ -202,6 +217,7 @@ export default async function handler(req: Request) {
       request_fingerprint: fingerprint,
       source: "public_contact",
       ...(submittedByUserId ? { submitted_by_user_id: submittedByUserId } : {}),
+      ...(guestToken ? { guest_token_hash: await hashGuestInquiryToken(guestToken) } : {}),
     };
     let inserted: { id: string } | null = null;
     let { data, error } = await supabase.from("guest_inquiries").insert(inquiryRecord).select("id").single();
@@ -240,10 +256,10 @@ export default async function handler(req: Request) {
     // Acknowledge with the reference number. Best-effort: the inquiry is saved,
     // so a mail hiccup must not turn a received question into an error. The
     // rate limits above also bound how often this can email one address.
-    if (inserted?.id) {
+    if (inserted?.id && email) {
       const receipt = await sendInquiryReceivedEmail({
         to: email,
-        name,
+        name: name || null,
         subject,
         inquiryId: inserted.id,
         linked: Boolean(submittedByUserId),
@@ -254,7 +270,10 @@ export default async function handler(req: Request) {
       }
     }
 
-    return jsonResponse({ success: true, id: inserted?.id ?? null, linked: Boolean(submittedByUserId) }, 201);
+    return jsonResponse(
+      { success: true, id: inserted?.id ?? null, linked: Boolean(submittedByUserId), guestToken },
+      201,
+    );
   } catch (error) {
     console.error("Guest inquiry creation failed", error);
     return jsonResponse({ error: "Unable to submit your inquiry right now" }, 500);

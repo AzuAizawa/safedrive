@@ -22,6 +22,12 @@ import type { GuestInquiry } from "@/types/database";
 import InquiryThread from "@/components/InquiryThread";
 import { getInquiryReference } from "@/lib/bookingReference";
 import {
+  fetchGuestInquiries,
+  guestInquiryToken,
+  readGuestInquiryKeys,
+  rememberGuestInquiry,
+} from "@/lib/guestInquiryStore";
+import {
   getInquiryStatusClasses,
   getInquiryStatusLabel,
   validateInquiryForm,
@@ -41,6 +47,8 @@ const emptyForm = {
 
 type WidgetView = "list" | "thread" | "form";
 
+type InquiryListItem = Pick<GuestInquiry, "id" | "subject" | "topics" | "status" | "created_at" | "updated_at">;
+
 /**
  * The one floating inquiry entry point site-wide. It used to be a
  * write-only "submit and forget" form, with a separate /inquiries page (under
@@ -50,6 +58,9 @@ type WidgetView = "list" | "thread" | "form";
  * visitor who opens it sees their past inquiries first (with a reply-pending
  * badge), can open any thread to read and follow up, or start a new one -
  * /inquiries no longer exists.
+ *
+ * A visitor without an account gets the same list and threads (CHAPTER 107):
+ * name and email are optional, so this browser keeps their inquiries instead.
  */
 export default function InquiryWidget() {
   const { pathname } = useLocation();
@@ -62,7 +73,7 @@ export default function InquiryWidget() {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
-  const [inquiries, setInquiries] = useState<GuestInquiry[]>([]);
+  const [inquiries, setInquiries] = useState<InquiryListItem[]>([]);
   const [inquiriesLoading, setInquiriesLoading] = useState(false);
   const [openInquiryId, setOpenInquiryId] = useState<string | null>(null);
   const [submittedReference, setSubmittedReference] = useState<string | null>(null);
@@ -71,10 +82,17 @@ export default function InquiryWidget() {
 
   const hidden = pathname.startsWith("/admin") || pathname === "/contact";
 
-  const fetchInquiries = useCallback(async (): Promise<GuestInquiry[]> => {
+  const fetchInquiries = useCallback(async (): Promise<InquiryListItem[]> => {
     if (!user?.id) {
-      setInquiries([]);
-      return [];
+      if (readGuestInquiryKeys().length === 0) {
+        setInquiries([]);
+        return [];
+      }
+      setInquiriesLoading(true);
+      const list = await fetchGuestInquiries().catch(() => []);
+      setInquiries(list);
+      setInquiriesLoading(false);
+      return list;
     }
     setInquiriesLoading(true);
     const { data, error } = await supabase
@@ -109,10 +127,6 @@ export default function InquiryWidget() {
   useEffect(() => {
     if (!open) return;
     setSubmitted(false);
-    if (!user?.id) {
-      setView("form");
-      return;
-    }
     let cancelled = false;
     void (async () => {
       const list = await fetchInquiries();
@@ -205,17 +219,24 @@ export default function InquiryWidget() {
         error?: string;
         id?: string;
         linked?: boolean;
+        guestToken?: string | null;
       };
       if (!response.ok) throw new Error(payload.error || "Unable to submit inquiry");
+      if (payload.id && payload.guestToken) {
+        rememberGuestInquiry({ id: payload.id, token: payload.guestToken });
+      }
+      const kept = Boolean(payload.id && payload.guestToken && guestInquiryToken(payload.id));
       setForm((current) => ({ ...emptyForm, name: current.name, email: current.email, phone: current.phone }));
       setInquiryAttempted(false);
       const reference = payload.id ? getInquiryReference(payload.id) : null;
       toast.success(reference ? `Inquiry ${reference} submitted` : "Inquiry submitted", {
         description: payload.linked
           ? "SafeDrive replies here, in Support & Chats, and by email."
-          : "SafeDrive will reply to your email. Keep this number if you contact us about it.",
+          : kept
+            ? `SafeDrive's reply will show here under Inquiry, in this browser${form.email.trim() ? ", and by email" : ""}.`
+            : "SafeDrive will reply to your email. Keep this number if you contact us about it.",
       });
-      if (payload.linked && payload.id) {
+      if ((payload.linked || kept) && payload.id) {
         await fetchInquiries();
         openThread(payload.id);
       } else {
@@ -266,10 +287,14 @@ export default function InquiryWidget() {
                   {view === "list"
                     ? "Questions you asked SafeDrive and the replies."
                     : view === "thread"
-                      ? `${openInquiry ? `${getInquiryReference(openInquiry.id)} · ` : ""}Follow up here or in Support & Chats - SafeDrive replies to this thread and by email.`
+                      ? `${openInquiry ? `${getInquiryReference(openInquiry.id)} · ` : ""}${
+                          user
+                            ? "Follow up here or in Support & Chats - SafeDrive replies to this thread and by email."
+                            : "SafeDrive's reply shows here, in this browser. Follow up below."
+                        }`
                       : user
                         ? "Your question gets a reference number and shows in Support & Chats with your tickets. Replies also come by email."
-                        : "Your question gets a reference number, and SafeDrive replies to your email."}
+                        : "No account needed, and name and email are optional. The reply shows here, in this browser - add an email to get it there too."}
                 </p>
               </div>
               <Button type="button" size="icon" variant="ghost" aria-label="Close inquiry form" onClick={close}>
@@ -323,6 +348,7 @@ export default function InquiryWidget() {
                 openInquiry ? (
                   <InquiryThread
                     inquiry={openInquiry}
+                    guestToken={user ? null : guestInquiryToken(openInquiry.id)}
                     onFollowUpSent={async () => {
                       await fetchInquiries();
                     }}
@@ -354,9 +380,8 @@ export default function InquiryWidget() {
                   )}
                   <div className="grid grid-cols-2 gap-3">
                     <label className="space-y-1.5">
-                      <Label htmlFor="inquiry-name">Name *</Label>
-                      <Input id="inquiry-name" maxLength={120} required aria-invalid={Boolean(inquiryError("name"))} value={form.name} onChange={(event) => update("name", event.target.value)} />
-                      <FieldError message={inquiryError("name")} />
+                      <Label htmlFor="inquiry-name">Name <span className="text-muted-foreground">(optional)</span></Label>
+                      <Input id="inquiry-name" maxLength={120} value={form.name} onChange={(event) => update("name", event.target.value)} />
                     </label>
                     <label className="space-y-1.5">
                       <Label htmlFor="inquiry-phone">Phone <span className="text-muted-foreground">(optional)</span></Label>
@@ -364,8 +389,8 @@ export default function InquiryWidget() {
                     </label>
                   </div>
                   <label className="block space-y-1.5">
-                    <Label htmlFor="inquiry-email">Email *</Label>
-                    <Input id="inquiry-email" type="email" maxLength={320} required aria-invalid={Boolean(inquiryError("email"))} value={form.email} onChange={(event) => update("email", event.target.value)} />
+                    <Label htmlFor="inquiry-email">Email <span className="text-muted-foreground">(optional)</span></Label>
+                    <Input id="inquiry-email" type="email" maxLength={320} aria-invalid={Boolean(inquiryError("email"))} value={form.email} onChange={(event) => update("email", event.target.value)} />
                     <FieldError message={inquiryError("email")} />
                   </label>
                   <label className="block space-y-1.5">

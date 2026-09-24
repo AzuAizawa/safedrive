@@ -207,7 +207,7 @@ Opening the reply box silently claims the inquiry (`open → in_progress`, assig
 The admin page is **User Inquiries** (table `guest_inquiries` + thread `guest_inquiry_messages`). It is the questions channel, distinct from **Support Tickets** which carry a reference and signal "an issue to resolve".
 
 - **Signed-in submitter:** the inquiry is linked (`submitted_by_user_id`) and becomes a threaded conversation. They see it in the floating `InquiryWidget` (the same bottom-right "Inquiry" button used to submit it - there is no separate page), read replies in-app, and post follow-ups (`api/inquiry-followup.ts`, which re-opens the inquiry in the admin queue). An admin reply (`action: reply`) adds a thread message + emails them + sets `in_progress`; it does **not** close the inquiry. An admin marks it resolved separately (`action: resolve`).
-- **Guest (no account):** no token, no link, no in-app thread - a single email reply, then the admin marks it resolved. This is the fallback for a true visitor.
+- **Guest (no account):** name, email and phone are all optional (IT review; CHAPTER 107) - an inquiry is a question about the website, asked before any account exists. `api/create-guest-inquiry.ts` hands the browser a random secret once and stores only its SHA-256 (`guest_inquiries.guest_token_hash`). The `InquiryWidget` keeps `{id, secret}` in `localStorage` and reads the thread through `api/guest-inquiry-thread.ts`, so the reply shows under the Inquiry button in that browser, and the guest can follow up (`api/inquiry-followup.ts` with `guestToken`, capped at 5 per 15 minutes). If an email was given, the reply is also emailed as before; if not, `api/reply-guest-inquiry.ts` skips the email and the reply lives only in the thread. Clearing site data or switching devices loses a browser-only thread.
 
 Inquiries do not carry a reference number - that is a Support Ticket signal.
 
@@ -1361,7 +1361,8 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/create-booking-extension-checkout.ts` | POST; renter | Create hosted checkout for an approved extension |
 | `api/create-checkout.ts` | POST; renter | Create hosted downpayment/full checkout from server-calculated records |
 | `api/create-guest-inquiry.ts` | POST; public (optional bearer), rate/duplicate guarded | Validate fields/topics and enqueue an inquiry; a bearer token links it to the account and seeds the first thread message |
-| `api/inquiry-followup.ts` | POST; the inquiry's own account holder | Add a follow-up message to a non-resolved inquiry, re-open it in the queue, notify admins |
+| `api/inquiry-followup.ts` | POST; the inquiry's own account holder, or a guest's browser secret | Add a follow-up message to a non-resolved inquiry, re-open it in the queue, notify admins |
+| `api/guest-inquiry-thread.ts` | POST; public, per-inquiry browser secret | Return the inquiries (and their threads) a browser sent without an account, only against the secret it was handed |
 | `api/create-subscription-checkout.ts` | POST; user | Create hosted subscription checkout |
 | `api/data-request.ts` | GET/POST; user | List own privacy requests or submit a new request and notify super-admins |
 | `api/expire-booking-deadlines.ts` | GET/POST; cron secret | Expire ignored owner/payment deadlines without browser dependence |
@@ -1378,7 +1379,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/process-refund.ts` | POST; super-admin | Retry one or a controlled batch of refund automation |
 | `api/purge-deleted-notifications.ts` | GET/POST; cron secret | Daily: permanently remove notifications the recipient deleted more than the retention window ago (via `purge_deleted_notifications()`, which reads its window from `retention_policy_rules` category `deleted_notification`, default 30 days). Until then a deleted notification only carries `notifications.deleted_at` and can be restored; there is no DELETE policy on the table, so no browser session can destroy a row |
 | `api/record-security-event.ts` | POST; authenticated or allow-listed login event | Sanitize and record security-relevant activity without secrets |
-| `api/reply-guest-inquiry.ts` | POST; admin/super-admin | `action: reply` adds a thread message + emails (Resend, Gmail fallback), sets `in_progress`, notifies a linked account; `action: resolve` closes the inquiry |
+| `api/reply-guest-inquiry.ts` | POST; admin/super-admin | `action: reply` adds a thread message + emails (Resend, Gmail fallback; skipped when the guest gave no email), sets `in_progress`, notifies a linked account; `action: resolve` closes the inquiry |
 | `api/reset-my-authenticator.ts` | POST; authenticated | Clear the caller's own enrolled authenticator (self-service after an email-code sign-in) so the login flow can offer a fresh QR |
 | `api/run-reconciliation.ts` | POST; super-admin | Compare local payments/journals with PayMongo and save findings |
 | `api/sync-paymongo-refund.ts` | POST; super-admin | Read an existing PayMongo refund state and reconcile only the matching local refund, ledger, and audit record; never creates a new refund |
