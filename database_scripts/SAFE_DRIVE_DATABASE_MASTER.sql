@@ -16813,6 +16813,144 @@ commit;
 --   (every result matches expected)
 
 -- ============================================================================
+-- CHAPTER 106 - The terms say what happens when someone wants a different date
+-- ============================================================================
+-- Nothing in any published document mentioned rescheduling. Searched all three:
+-- no occurrence in the Terms of Service, the Platform Agreement, or the Privacy
+-- Policy. So the platform had a position on it - a renter who asks is told no -
+-- with nothing written down behind that answer.
+--
+-- That is the same shape as the vehicle-age rule this project already refused
+-- to leave unwritten: a policy held only in the heads of the people applying it
+-- cannot be defended when someone asks where it says so, and is not applied the
+-- same way twice.
+--
+-- The distinction the clause draws is the one that matters, and it is not a
+-- legal claim:
+--
+--   Refund and cancellation are a REMEDY. They exist because a booking can
+--   fail - the vehicle is not handed over, something goes wrong on the
+--   platform's or the lister's side - and when it does, the renter must have
+--   something to fall back on. That is what the cancellation section is for,
+--   and it is why an undelivered vehicle already refunds in full automatically.
+--
+--   Rescheduling is a CONVENIENCE. Nothing failed; the renter's circumstances
+--   changed. Whether to offer it is a commercial decision each business makes,
+--   and SafeDrive has chosen not to offer it in this version.
+--
+-- Stated that way the clause needs no statute behind it, which matters: this
+-- project has no Philippine counsel review yet, and a document that asserted a
+-- legal requirement it could not cite would be worse than one that simply says
+-- what the platform does.
+--
+-- What the clause must NOT do is read as "no changes are possible", because two
+-- changes already are: a trip can be extended, and it can be returned early.
+-- Both are named so the renter is pointed at what exists rather than only told
+-- what does not.
+--
+-- Added to the two documents that carry the cancellation terms - the Terms of
+-- Service as 6.5 for renters, and the Platform Agreement's fees-and-
+-- cancellations list for listers. Replaced only where each section still ends
+-- exactly as published, as a new version, so running this again changes
+-- nothing.
+begin;
+
+do $chapter106_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+  tos_anchor constant text := '<h2>7. Insurance and Liability</h2>';
+  pa_anchor constant text := '<h2>5. Vehicle Listing Standards</h2>';
+  tos_clause constant text :=
+    '<p><strong>6.5 Changing the Dates of a Booking:</strong> A booking cannot be moved to different dates. '
+    'Two changes are available instead: an <em>extension</em>, if you need the vehicle for longer, and an '
+    '<em>early return</em>, if you finish sooner - each has its own request and approval process described '
+    'in your booking. To start on a different date, cancel the booking under the policy above and make a new '
+    'one; the cancellation terms that apply are the ones in this section, unchanged. SafeDrive does not '
+    'offer rescheduling in this version. Cancellation and refund exist because a booking can fail and you '
+    'need something to fall back on; changing the dates of a booking that has not failed is a convenience, '
+    'and whether to offer it is our decision as the platform.</p>';
+  pa_clause constant text :=
+    '<li><strong>No Rescheduling:</strong> A booking cannot be moved to different dates. A renter may request '
+    'an extension of the end date, or an early return, each through its own process. A change of start date '
+    'is made by cancelling under the terms above and booking again, and the cancellation terms are applied '
+    'unchanged. This is a platform decision rather than a legal requirement: cancellation and refund are a '
+    'remedy for a booking that fails, while rescheduling a booking that has not failed is a convenience '
+    'SafeDrive does not offer in this version.</li>';
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key in ('terms_of_service', 'platform_agreement')
+  loop
+    next_html := doc.content_html;
+
+    if doc.document_key = 'terms_of_service' then
+      if position('6.5 Changing the Dates' in next_html) = 0 then
+        next_html := replace(next_html, tos_anchor, tos_clause || tos_anchor);
+      end if;
+    else
+      if position('No Rescheduling:' in next_html) = 0 then
+        next_html := replace(next_html, '</ul>' || pa_anchor, pa_clause || '</ul>' || pa_anchor);
+      end if;
+    end if;
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 106'));
+    end if;
+  end loop;
+end;
+$chapter106_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'terms of service' as check_name,
+--        (select 'v' || version_number || case
+--                  when position('6.5 Changing the Dates' in content_html) > 0 then ' updated' else ' NOT updated' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'terms_of_service') as result,
+--        'v6 updated' as expected
+-- union all
+-- select 'platform agreement',
+--        (select 'v' || version_number || case
+--                  when position('No Rescheduling:' in content_html) > 0 then ' updated' else ' NOT updated' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'platform_agreement'),
+--        'v6 updated'
+-- union all
+-- select 'extension and early return are still named, not only the refusal',
+--        (select case when position('extension' in content_html) > 0
+--                      and position('early return' in content_html) > 0
+--                 then 'both named' else 'MISSING' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'terms_of_service'),
+--        'both named'
+-- union all
+-- select 'older versions are kept, not edited',
+--        (select count(*)::text from public.legal_document_versions
+--          where status = 'superseded' and document_key in ('terms_of_service', 'platform_agreement')),
+--        'every previous version of both documents'
+-- union all
+-- select 'exactly one published version per document',
+--        (select count(*)::text from public.legal_document_versions
+--          where status = 'published' and document_key in ('terms_of_service', 'platform_agreement')),
+--        '2';
+--   (every result matches expected)
+
+-- ============================================================================
 -- CHAPTER 107 - A visitor can ask without giving a name or email
 -- ============================================================================
 -- IT review: an inquiry is a question about the website, asked before anyone
@@ -17202,6 +17340,127 @@ commit;
 --        (select count(*)::text from public.legal_document_versions
 --          where status = 'published' and document_key = 'privacy_policy'),
 --        '1';
+--   (every result matches expected)
+
+-- ============================================================================
+-- CHAPTER 111 - The lister's agreement says "no rescheduling" too, and the host is named
+-- ============================================================================
+-- Two published documents said something that was no longer true.
+--
+-- 1. Platform Agreement - no rescheduling.
+--    CHAPTER 106 added "6.5 Changing the Dates of a Booking" to the Terms of
+--    Service and meant to add the same rule to the Platform Agreement as a
+--    "No Rescheduling" item at the end of section 4. It looked for
+--    '</ul><h2>5. Vehicle Listing Standards</h2>' with nothing in between; the
+--    live document has a line break and a blank line there, so the text was
+--    never found, nothing was replaced, and nothing said so. The Terms told
+--    renters a booking cannot be moved while the listers' agreement was
+--    silent. This adds the same item, found with a pattern that allows any
+--    whitespace. The wording is CHAPTER 106's, unchanged.
+--
+-- 2. Privacy Policy - the host.
+--    Section 5 still read "Hosting is not yet selected. This notice and the
+--    vendor register must be updated before production deployment." SafeDrive
+--    is deployed on Vercel, and every request - uploads of identity documents
+--    included - passes through it. The line is replaced by one naming Vercel.
+--    This runs after CHAPTER 110, which inserts its own vendor item in front
+--    of that same line; if 110 has not been applied, this chapter stops.
+--
+-- Each document is published as a new version only when its text changed, so
+-- running this again changes nothing.
+begin;
+
+do $chapter111_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+  pa_clause constant text :=
+    '<li><strong>No Rescheduling:</strong> A booking cannot be moved to different dates. A renter may request '
+    'an extension of the end date, or an early return, each through its own process. A change of start date '
+    'is made by cancelling under the terms above and booking again, and the cancellation terms are applied '
+    'unchanged. This is a platform decision rather than a legal requirement: cancellation and refund are a '
+    'remedy for a booking that fails, while rescheduling a booking that has not failed is a convenience '
+    'SafeDrive does not offer in this version.</li>';
+  host_old constant text :=
+    '<li><strong>Selected application host:</strong> Hosting is not yet selected. This notice and the vendor '
+    'register must be updated before production deployment.</li>';
+  host_new constant text :=
+    '<li><strong>Vercel:</strong> Application hosting and server functions. Every request to SafeDrive, '
+    'including uploaded identity and vehicle documents, passes through Vercel''s infrastructure on its way '
+    'to Supabase.</li>';
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key in ('platform_agreement', 'privacy_policy')
+  loop
+    next_html := doc.content_html;
+
+    if doc.document_key = 'platform_agreement' then
+      if position('No Rescheduling:' in next_html) = 0 then
+        -- The end of section 4's list: the </ul> right before section 5.
+        next_html := regexp_replace(
+          next_html,
+          '</ul>(\s*<h2>5\. Vehicle Listing Standards</h2>)',
+          pa_clause || E'\n' || '</ul>\1'
+        );
+        if next_html = doc.content_html then
+          raise exception 'CHAPTER 111: section 5 of the Platform Agreement was not found; nothing was changed';
+        end if;
+      end if;
+    else
+      if position('Walter Writes' in next_html) = 0 then
+        raise exception 'CHAPTER 111: apply CHAPTER 110 first; nothing was changed';
+      end if;
+      if position(host_old in next_html) > 0 then
+        next_html := replace(next_html, host_old, host_new);
+      elsif position('<strong>Vercel:</strong>' in next_html) = 0 then
+        raise exception 'CHAPTER 111: the hosting line of the Privacy Policy was not found; nothing was changed';
+      end if;
+    end if;
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 111'));
+    end if;
+  end loop;
+end;
+$chapter111_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'platform agreement' as check_name,
+--        (select 'v' || version_number || case
+--                  when position('No Rescheduling:' in content_html) > 0
+--                   and position('Document Authenticity:' in content_html) > 0 then ' both' else ' MISSING' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'platform_agreement') as result,
+--        'v7 both' as expected
+-- union all
+-- select 'privacy policy',
+--        (select 'v' || version_number || case
+--                  when position('<strong>Vercel:</strong>' in content_html) > 0
+--                   and position('Hosting is not yet selected' in content_html) = 0 then ' vercel' else ' NOT updated' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'privacy_policy'),
+--        'v4 vercel'
+-- union all
+-- select 'one published version each',
+--        (select count(*)::text from public.legal_document_versions
+--          where status = 'published' and document_key in ('platform_agreement', 'privacy_policy')),
+--        '2';
 --   (every result matches expected)
 
 -- End of SafeDrive chaptered database master.
