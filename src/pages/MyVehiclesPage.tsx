@@ -11,6 +11,7 @@ import {
 } from "@/lib/contentProvenance";
 import { getCurrentSubscription } from "@/lib/subscriptions";
 import { uploadFile } from "@/lib/uploadUtils";
+import { queueImageChecks } from "@/lib/imageAuthenticity";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1117,6 +1118,10 @@ export default function MyVehiclesPage() {
         );
       }
 
+      // AI-image check for every photo and document just filed, run by the
+      // server (CHAPTER 108). The lister never sees the result.
+      queueImageChecks({ scope: "car", carId: carData.id });
+
       toast.success("Vehicle submitted for approval!", {
         id: toastId,
         description: vehicleVerificationEta,
@@ -1229,6 +1234,10 @@ export default function MyVehiclesPage() {
             is_primary: i === 0,
           });
         }
+      }
+
+      if (editCarImages.length > 0 || editRentalAgreement) {
+        queueImageChecks({ scope: "car", carId: editVehicle.id });
       }
 
       toast.loading("Updating details...", { id: toastId });

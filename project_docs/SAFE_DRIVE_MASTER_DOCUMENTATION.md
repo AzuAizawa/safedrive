@@ -288,6 +288,16 @@ The admin's `/admin/users` licence panel has two outcomes for a pending resubmis
 
 Vehicle maintenance and blackout dates are stored separately from bookings. The lister manages them on a **month calendar** (`/vehicle-availability`): dates with a booking show red and are not selectable, already-blocked dates show amber, and the lister taps a free range to block it. No reason or category is collected - an unavailable date is simply unavailable. A blackout cannot conflict with an active booking. Booking creation checks both bookings and blackouts.
 
+### 6.1 AI-image check on uploads (CHAPTER 108)
+
+Panel requirement: "Add API to detect AI images and edited images." Every identity photo (`verification_images`), vehicle photo (`car_images`) and vehicle document (`car_documents`) is sent by the server to the **Walter Writes image detector** (`api/image-authenticity.ts`, `server/imageAuthenticity.ts`). It answers `real`, `fake` (fully AI-generated) or `inpainting` (a real photo with AI-edited regions) with a probability for each; the result is kept in `image_authenticity_checks`.
+
+- **When:** right after upload (KYC submit, licence update, new listing, listing edit, document resubmission) the uploader's page asks the server to check what was filed - fire and forget, and the uploader gets no score back. Opening a user or listing only reads stored results and spends nothing. Files never checked - anything uploaded before CHAPTER 108, or not reached at upload (the trial allows 5 calls a minute; a request checks at most 4) - are checked when the reviewer presses **Run AI check**, and the screen keeps asking every 15 s while files wait on the limit.
+- **Who sees it:** only admins with `users.verify` (identity) or `vehicles.review` (vehicles), as an "AI image check" summary and a badge under each file with the three probabilities. Nobody but the service role writes the table, so an uploader cannot forge a clean score; the older browser-written `ai_suspicion_score` columns are not used for this.
+- **A guide, never a decision.** Nothing is approved or rejected by it. It can miss a fake and flag a real photo; ordinary editing such as retyped text can pass.
+- **When it cannot run** the badge says why and the review goes on: PDF or non-image (never sent, no credit spent), over 10 MB, rate-limited (retried on its own), trial expired / out of credits / key invalid / detector down (retried only by **Check again**, which also never re-spends a credit on a file that has a verdict). Replacing `WALTER_API_KEY` in Vercel and pressing Check again is all a renewed subscription needs.
+- **Cost:** 6-17 credits an image by resolution. Trial: 2,000 credits for 5 days; paid plans from $49/month.
+
 ## 7. Vehicle-Specific Rental Agreement
 
 The lister uploads the agreement governing use of that particular vehicle, in addition to SafeDrive’s platform terms. Every upload creates a numbered version with a storage path and SHA-256 content hash. Only one version can be approved for a vehicle at a time.
@@ -582,6 +592,7 @@ Do not run Chapters 1 or 2 merely to obtain Chapter 14. Chapter 1 contains histo
 - `GMAIL_GUEST_INQUIRY_WEBHOOK_URL`
 - `GMAIL_RETURN_REMINDER_WEBHOOK_URL`
 - `PAYMONGO_WEBHOOK_TOLERANCE_SECONDS=300` (default signature replay tolerance)
+- `WALTER_API_KEY` (optional; the AI-image check, §6.1 - without it every file reads "Not checked")
 
 ### Demo money-movement mode
 
@@ -1362,6 +1373,7 @@ All authenticated endpoints validate a Supabase bearer token on the server. Role
 | `api/create-checkout.ts` | POST; renter | Create hosted downpayment/full checkout from server-calculated records |
 | `api/create-guest-inquiry.ts` | POST; public (optional bearer), rate/duplicate guarded | Validate fields/topics and enqueue an inquiry; a bearer token links it to the account and seeds the first thread message |
 | `api/inquiry-followup.ts` | POST; the inquiry's own account holder, or a guest's browser secret | Add a follow-up message to a non-resolved inquiry, re-open it in the queue, notify admins |
+| `api/image-authenticity.ts` | POST; the uploader (own identity photos or own vehicle, gets only `{ ok }`) or a reviewer with `users.verify` / `vehicles.review` (gets every check) | Run the Walter Writes AI-image check on a subject's files that are not checked yet (4 per request) and return the verdicts - see §6.1 |
 | `api/guest-inquiry-thread.ts` | POST; public, per-inquiry browser secret | Return the inquiries (and their threads) a browser sent without an account, only against the secret it was handed |
 | `api/create-subscription-checkout.ts` | POST; user | Create hosted subscription checkout |
 | `api/data-request.ts` | GET/POST; user | List own privacy requests or submit a new request and notify super-admins |

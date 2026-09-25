@@ -1,4 +1,9 @@
 import VehicleCompliancePanel from "@/components/VehicleCompliancePanel";
+import {
+  ImageAuthenticityBadge,
+  ImageAuthenticitySummary,
+  useImageAuthenticity,
+} from "@/components/ImageAuthenticity";
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router";
@@ -93,6 +98,7 @@ interface PendingCar {
     ai_suspicion_score: number | null;
     ai_detector_name: string | null;
     ai_detector_version: string | null;
+    superseded_at?: string | null;
     review_flag: string;
     review_reason: string | null;
     created_at: string;
@@ -203,6 +209,8 @@ export default function AdminVehicleApprovalPage() {
   const [documentUrls, setDocumentUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<PendingCar | null>(null);
+  // The AI-image check for every photo and document of the open listing (CHAPTER 108).
+  const authenticity = useImageAuthenticity(selected ? { scope: "car", carId: selected.id } : null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [showReject, setShowReject] = useState(false);
   const [showRevoke, setShowRevoke] = useState(false);
@@ -1008,30 +1016,43 @@ export default function AdminVehicleApprovalPage() {
                 )}
               </div>
 
+              <ImageAuthenticitySummary
+                state={authenticity}
+                paths={[
+                  ...selected.car_images.map((img) => img.storage_path),
+                  ...selected.car_documents
+                    .filter((doc) => !doc.superseded_at)
+                    .map((doc) => doc.storage_path),
+                ]}
+              />
+
               {/* Car Images */}
               {selected.car_images.length > 0 && (
                 <div>
                   <h4 className="font-semibold mb-2">Car Images</h4>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {selected.car_images.map((img) => (
-                      <a
-                        key={img.id}
-                        href={getUrl("vehicle-documents", img.storage_path)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <img
-                          src={getUrl("vehicle-documents", img.storage_path)}
-                          alt="Car"
-                          className="w-full h-24 object-cover rounded-lg border hover:ring-2 hover:ring-primary cursor-pointer"
-                        />
-                      </a>
+                      <div key={img.id} className="space-y-1">
+                        <a
+                          href={getUrl("vehicle-documents", img.storage_path)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block"
+                        >
+                          <img
+                            src={getUrl("vehicle-documents", img.storage_path)}
+                            alt="Car"
+                            className="w-full h-24 object-cover rounded-lg border hover:ring-2 hover:ring-primary cursor-pointer"
+                          />
+                        </a>
+                        <ImageAuthenticityBadge state={authenticity} path={img.storage_path} />
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              <VehicleCompliancePanel key={selected.id} carId={selected.id} admin />
+              <VehicleCompliancePanel key={selected.id} carId={selected.id} admin authenticity={authenticity} />
               <div className={`rounded-lg border p-4 ${selected.registration_expiry && selected.ctpl_expiry && selected.insurer_rental_use_confirmed ? "border-green-500/30 bg-green-500/5" : "border-red-500/30 bg-red-500/5"}`}>
                 <h4 className="font-semibold">Registration & insurance review</h4>
                 <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
@@ -1109,6 +1130,7 @@ export default function AdminVehicleApprovalPage() {
                             />
                           )}
                         </a>
+                        <ImageAuthenticityBadge state={authenticity} path={doc.storage_path} className="mt-1 max-w-48" />
                         <p className="mt-1 max-w-48 text-[11px] text-muted-foreground leading-snug">
                           {doc.provenance_summary ||
                             "No provenance scan summary is stored for this document."}
@@ -1167,6 +1189,7 @@ export default function AdminVehicleApprovalPage() {
                             </span>
                           </div>
                         </a>
+                        <ImageAuthenticityBadge state={authenticity} path={doc.storage_path} className="mt-1 max-w-48" />
                         <p className="mt-1 max-w-48 text-[11px] text-muted-foreground leading-snug">
                           {doc.provenance_summary ||
                             "No provenance scan summary is stored for this document."}

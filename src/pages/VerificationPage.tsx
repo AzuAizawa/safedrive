@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
 import AccountDeletionDialog from "@/components/AccountDeletionDialog";
 import { inspectContentProvenance } from "@/lib/contentProvenance";
+import { queueImageChecks } from "@/lib/imageAuthenticity";
 import {
   LICENSE_TRANSMISSION_LABEL,
   licenseExpiryLabel,
@@ -1115,6 +1116,8 @@ export default function VerificationPage() {
         .from("profiles")
         .update({ license_update_pending: true })
         .eq("id", user.id);
+      // AI-image check for the new photos, run by the server (CHAPTER 108).
+      queueImageChecks({ scope: "user" });
 
       // Admins are notified server-side by the notify_admins_of_license_update
       // trigger on profiles.license_update_pending (CHAPTER 35) - a renter's
@@ -2161,6 +2164,8 @@ export default function VerificationPage() {
           throw new Error("Verification Images Insert: " + insertError.message);
         }
       }
+      // AI-image check for the photos just filed, run by the server (CHAPTER 108).
+      queueImageChecks({ scope: "user" });
 
       // Step 4: Update profile with ONLY valid column names (no spreading formData which includes invalid keys)
       const fullName = [

@@ -16893,4 +16893,207 @@ commit;
 --        'updated';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 108 - Every uploaded image is checked for AI generation or editing
+-- ============================================================================
+-- Panel requirement: "Add API to detect AI images and edited images."
+--
+-- The server sends each identity photo, vehicle photo and vehicle document to
+-- the Walter Writes image detector and keeps the verdict here: real, fake
+-- (fully AI-generated) or inpainting (a real photo with AI-edited regions),
+-- with the probability of each. The admin reviewer sees it beside the image.
+-- It is a guide, never a decision: nothing is approved or rejected by it.
+--
+-- Why a table of its own instead of the ai_suspicion_score columns that
+-- verification_images and car_documents already carry: those columns are
+-- written by the uploader's browser, so a lister could send 0 for a doctored
+-- OR. Nobody but the service role writes this table - there is no insert or
+-- update policy - and only admins can read it. The uploader never sees a
+-- score, so they cannot keep adjusting a fake until it passes.
+--
+-- One row per stored file (bucket + path). A file replaced under the same
+-- path (identity photos are) is recognised as new because checked_at falls
+-- before the row that references it; the server checks it again.
+--
+-- status:
+--   checked      the detector answered; verdict and probabilities are set
+--   unsupported  not an image the detector reads (PDF, too large, unreadable)
+--   pending      not checked yet - usually the per-minute limit; retried
+--   unavailable  the detector could not be used (trial expired, no credits,
+--                key missing or invalid, service down); reason says which
+begin;
+
+create table if not exists public.image_authenticity_checks (
+  id uuid primary key default gen_random_uuid(),
+  bucket text not null,
+  storage_path text not null,
+  subject_kind text not null
+    check (subject_kind in ('identity', 'vehicle_photo', 'vehicle_document')),
+  subject_id uuid not null,
+  status text not null
+    check (status in ('checked', 'unsupported', 'pending', 'unavailable')),
+  reason text,
+  verdict text check (verdict in ('real', 'fake', 'inpainting')),
+  confidence numeric check (confidence is null or confidence between 0 and 1),
+  prob_real numeric check (prob_real is null or prob_real between 0 and 1),
+  prob_fake numeric check (prob_fake is null or prob_fake between 0 and 1),
+  prob_inpainting numeric check (prob_inpainting is null or prob_inpainting between 0 and 1),
+  detector text not null default 'walter-image-detector',
+  credits_charged integer,
+  checked_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  unique (bucket, storage_path),
+  check (status <> 'checked' or verdict is not null)
+);
+
+create index if not exists image_authenticity_checks_subject_idx
+  on public.image_authenticity_checks (subject_kind, subject_id);
+
+comment on table public.image_authenticity_checks is
+  'AI-generation / AI-edit verdict for each uploaded image, from the Walter Writes image detector (CHAPTER 108). A guide for the admin reviewer, never a decision. Written only by the service role.';
+comment on column public.image_authenticity_checks.verdict is
+  'real = no AI detected; fake = fully AI-generated; inpainting = real photo with AI-edited regions (CHAPTER 108).';
+
+alter table public.image_authenticity_checks enable row level security;
+
+drop policy if exists "Admins read image authenticity checks" on public.image_authenticity_checks;
+create policy "Admins read image authenticity checks"
+on public.image_authenticity_checks
+for select
+using (public.is_admin());
+-- No insert, update or delete policy: only the service-role API writes.
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'table exists' as check,
+--        (to_regclass('public.image_authenticity_checks') is not null)::text as result,
+--        'true' as expected
+-- union all
+-- select 'row level security on',
+--        (select relrowsecurity::text from pg_class where oid = 'public.image_authenticity_checks'::regclass),
+--        'true'
+-- union all
+-- select 'only the admin read policy',
+--        (select string_agg(cmd || ':' || policyname, ', ') from pg_policies
+--          where schemaname = 'public' and tablename = 'image_authenticity_checks'),
+--        'SELECT:Admins read image authenticity checks';
+--   (every result matches expected)
+
+-- ============================================================================
+-- CHAPTER 109 - The terms say what happens to a faked document, even after approval
+-- ============================================================================
+-- CHAPTER 108 screens every uploaded identity photo, vehicle photo and vehicle
+-- document with an AI-image detector. Two things were left unwritten:
+--
+--   1. That the screening exists, is run by a third-party provider, and only
+--      assists the manual review. A document that is silent on it cannot be
+--      pointed to when a user asks why their upload was looked at twice.
+--
+--   2. What happens when a fake is found AFTER approval. The detector can miss
+--      one on the day and a reviewer can pass it; learning later must not leave
+--      the platform with nothing to act on. Section 3.3 already calls suspected
+--      falsification reviewable and Section 9 already allows restriction or
+--      termination "after authorized review of fraud". This names the case
+--      plainly - falsified, AI-generated or AI-altered - and the steps: revoke
+--      the approval, suspend while reviewing, restrict or terminate. It keeps
+--      the rule that the detector alone decides nothing: "confirmed by an
+--      authorized review" is the trigger, never a score.
+--
+-- Terms of Service gains 3.4 after 3.3 Accuracy. The Platform Agreement gains a
+-- "Document Authenticity" item at the end of its verification list.
+--
+-- CHAPTER 106 matched its Platform Agreement anchor as '</ul><h2>...' with no
+-- whitespace, while the live document has a newline there - so the rescheduling
+-- item never reached the Platform Agreement (still v5 on 2026-09-25). This
+-- chapter matches with a regular expression that allows any whitespace, and
+-- publishes a new version only when the text actually changed.
+begin;
+
+do $chapter109_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+  tos_anchor constant text := '<h2>4. Vehicle Listing and Requirements</h2>';
+  tos_clause constant text :=
+    '<h3>3.4 Falsified, AI-Generated, or AI-Altered Documents</h3>' || E'\n' ||
+    '<p>Identity photos, vehicle photos and vehicle documents you upload are also screened by an automated '
+    'AI-image detector operated by a third-party provider. Its result assists SafeDrive''s manual review and '
+    'never decides on its own: it can miss an altered image and can flag a genuine one. Submitting a '
+    'falsified, AI-generated, or AI-altered identity or vehicle document or photo is falsification under '
+    'Section 3.3. If an authorized review confirms it - including after your account or listing was '
+    'approved - SafeDrive may revoke the verification or document approval, suspend the account while it '
+    'is reviewed, and restrict or terminate the account under Section 9. You will be told the reason, and '
+    'while a review is open you may respond or submit genuine documents.</p>';
+  pa_clause constant text :=
+    '<li><strong>Document Authenticity:</strong> Uploaded identity and vehicle images are screened by an '
+    'automated AI-image detector operated by a third-party provider, as an aid to manual review; a result '
+    'alone never approves or rejects anything. A falsified, AI-generated, or AI-altered document or photo, '
+    'once confirmed by an authorized review, may lead to revoked verification or document approval, '
+    'suspension, and termination of the account, including after approval.</li>';
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key in ('terms_of_service', 'platform_agreement')
+  loop
+    next_html := doc.content_html;
+
+    if doc.document_key = 'terms_of_service' then
+      if position('3.4 Falsified' in next_html) = 0 then
+        next_html := replace(next_html, tos_anchor, tos_clause || E'\n\n' || tos_anchor);
+      end if;
+    else
+      if position('Document Authenticity:' in next_html) = 0 then
+        -- The verification list is the one right before section 3.
+        next_html := regexp_replace(
+          next_html,
+          '</ul>(\s*<h2>3\. )',
+          pa_clause || E'\n' || '</ul>\1'
+        );
+      end if;
+    end if;
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 109'));
+    end if;
+  end loop;
+end;
+$chapter109_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'terms of service' as check_name,
+--        (select 'v' || version_number || case
+--                  when position('3.4 Falsified' in content_html) > 0 then ' updated' else ' NOT updated' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'terms_of_service') as result,
+--        'v7 updated' as expected
+-- union all
+-- select 'platform agreement',
+--        (select 'v' || version_number || case
+--                  when position('Document Authenticity:' in content_html) > 0 then ' updated' else ' NOT updated' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'platform_agreement'),
+--        'v6 updated'
+-- union all
+-- select 'exactly one published version per document',
+--        (select count(*)::text from public.legal_document_versions
+--          where status = 'published' and document_key in ('terms_of_service', 'platform_agreement')),
+--        '2';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

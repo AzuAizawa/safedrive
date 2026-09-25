@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { ImageAuthenticityBadge, type ImageAuthenticityState } from "@/components/ImageAuthenticity";
+import { queueImageChecks } from "@/lib/imageAuthenticity";
 import { supabase } from "@/lib/supabase";
 import { createPrivateStorageUrl, createPrivateStorageUrlMap } from "@/lib/privateStorage";
 import { useAuth } from "@/contexts/AuthContext";
@@ -178,10 +180,13 @@ export default function VehicleCompliancePanel({
   carId,
   admin = false,
   onChange,
+  authenticity,
 }: {
   carId: string;
   admin?: boolean;
   onChange?: () => void;
+  /** The reviewer's AI-image checks for this vehicle (CHAPTER 108). Admin only. */
+  authenticity?: ImageAuthenticityState;
 }) {
   const { user } = useAuth();
   const [documents, setDocuments] = useState<ComplianceDocument[]>([]);
@@ -286,6 +291,8 @@ export default function VehicleCompliancePanel({
       });
       if (submitError) throw submitError;
       submitted = true;
+      // The replacement is the likeliest place a doctored document is swapped in.
+      queueImageChecks({ scope: "car", carId });
       setFiles({});
       setExpiries({});
       setRevision((v) => v + 1);
@@ -393,14 +400,19 @@ export default function VehicleCompliancePanel({
                           <FileText className="h-8 w-8 text-muted-foreground" />
                         </div>
                       )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void open(d)}
-                      >
-                        View full document
-                      </Button>
+                      <div className="flex flex-col items-start gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void open(d)}
+                        >
+                          View full document
+                        </Button>
+                        {admin && authenticity && (!d.superseded_at || authenticity.checks[d.storage_path]) && (
+                          <ImageAuthenticityBadge state={authenticity} path={d.storage_path} />
+                        )}
+                      </div>
                     </div>
                     {d.review_reason && (
                       // Red is reserved for a note the lister has to act on. A pending

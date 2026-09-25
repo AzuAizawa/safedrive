@@ -1,4 +1,9 @@
 import { useState, useEffect } from "react";
+import {
+  ImageAuthenticityBadge,
+  ImageAuthenticitySummary,
+  useImageAuthenticity,
+} from "@/components/ImageAuthenticity";
 import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
 import { createPrivateStorageUrlMap } from "@/lib/privateStorage";
@@ -106,6 +111,12 @@ export default function AdminUsersPage() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState<UserWithImages | null>(null);
+  // The AI-image check for the open user's identity photos (CHAPTER 108).
+  const authenticity = useImageAuthenticity(
+    selectedUser && selectedUser.verification_images.length > 0
+      ? { scope: "user", userId: selectedUser.id }
+      : null,
+  );
   const [rejectionReason, setRejectionReason] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [showBlockInput, setShowBlockInput] = useState(false);
@@ -1491,6 +1502,11 @@ export default function AdminUsersPage() {
                         <ZoomIn className="w-3 h-3" /> Click image for Deep Zoom
                       </span>
                     </h3>
+                    <ImageAuthenticitySummary
+                      state={authenticity}
+                      paths={selectedUser.verification_images.map((img) => img.storage_path)}
+                      className="mb-3"
+                    />
                     <div className="grid grid-cols-2 gap-3">
                       {selectedUser.verification_images.map((img) => (
                         <div key={img.id} className="group relative space-y-1">
@@ -1543,6 +1559,7 @@ export default function AdminUsersPage() {
                               <Maximize2 className="w-6 h-6 text-white" />
                             </div>
                           </div>
+                          <ImageAuthenticityBadge state={authenticity} path={img.storage_path} />
                           <p className="text-[11px] text-muted-foreground leading-snug">
                             {img.provenance_summary ||
                               "No provenance scan summary is stored for this upload."}
