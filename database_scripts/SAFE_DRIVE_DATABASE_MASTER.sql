@@ -17096,4 +17096,112 @@ commit;
 --        '2';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 110 - The Privacy Policy names the AI-image detector
+-- ============================================================================
+-- Since CHAPTER 108 SafeDrive's server sends identity photos, selfies, vehicle
+-- photos and vehicle document images to a third party - Walter Writes' AI-image
+-- detector. The Privacy Policy did not say so, and its purposes section said
+-- the only automated identity processing runs "locally in the reviewer's
+-- browser and is not sent to any third party". That sentence is still true of
+-- the text recognition it describes, but read alone it now misleads. Under the
+-- Data Privacy Act a data subject must be told who receives their data and why.
+--
+-- Three edits, all in the published Privacy Policy, as one new version:
+--
+--   2. Data We Collect - the contact-inquiry line said a name and email are
+--      collected. Since CHAPTER 107 both are optional, and a visitor without
+--      an account is given a secret whose hash is stored.
+--   4. Purposes - a new item for the AI-image screening: what is sent, by
+--      whom (the server, not the uploader's browser), that only authorized
+--      reviewers see the result, and that it never decides on its own.
+--   5. Third-Party Disclosures - Walter Writes added to the integrations list.
+--
+-- It claims nothing SafeDrive has not verified about the provider's own
+-- retention: it says the provider processes the image to return a verdict
+-- under its own terms. Each edit is matched on text that is in the live
+-- version; if any anchor is missing the chapter raises instead of publishing a
+-- half-edited policy.
+begin;
+
+do $chapter110_privacy$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+  inquiry_old constant text :=
+    '<li><strong>Contact inquiry data:</strong> Name, email, optional phone, selected topics, message, reply '
+    'status, and a salted anti-abuse fingerprint submitted through the public contact form.</li>';
+  inquiry_new constant text :=
+    '<li><strong>Contact inquiry data:</strong> An optional name, email and phone, the selected topics, the '
+    'message, reply status, and a salted anti-abuse fingerprint submitted through the public contact form. '
+    'When you ask without an account, your browser keeps a random secret so it can show you the reply; '
+    'SafeDrive stores only a one-way hash of that secret.</li>';
+  purpose_anchor constant text := 'a human reviewer always makes the final decision.</li>';
+  purpose_item constant text :=
+    '<li>To screen uploaded identity photos, selfies, vehicle photos and vehicle document images for signs '
+    'of AI generation or AI editing, to deter falsified documents. SafeDrive''s server - not your browser - '
+    'sends each image to the Walter Writes AI-image detector (Section 5), which returns a verdict and '
+    'probabilities. The result is stored by SafeDrive, shown only to authorized administrators reviewing '
+    'your account or listing, and never approves or rejects anything on its own; a human reviewer decides. '
+    'PDF files are not sent. SafeDrive relies on its legitimate interest in preventing fraud for this '
+    'screening.</li>';
+  vendor_anchor constant text := '<li><strong>Selected application host:</strong>';
+  vendor_item constant text :=
+    '<li><strong>Walter Writes (Walter AI):</strong> AI-image detection of uploaded identity photos, '
+    'selfies, vehicle photos and vehicle document images. SafeDrive''s server sends the image file only; '
+    'the provider processes it to return a verdict under its own terms.</li>';
+begin
+  select id, content_html into doc
+    from public.legal_document_versions
+   where status = 'published' and document_key = 'privacy_policy';
+  if not found then
+    raise exception 'CHAPTER 110: no published privacy policy';
+  end if;
+  if position('Walter Writes' in doc.content_html) > 0 then
+    return; -- already applied
+  end if;
+
+  if position(inquiry_old in doc.content_html) = 0
+     or position(purpose_anchor in doc.content_html) = 0
+     or position(vendor_anchor in doc.content_html) = 0 then
+    raise exception 'CHAPTER 110: the published privacy policy no longer matches; nothing was changed';
+  end if;
+
+  next_html := replace(doc.content_html, inquiry_old, inquiry_new);
+  next_html := replace(next_html, purpose_anchor, purpose_anchor || E'\n' || purpose_item);
+  next_html := replace(next_html, vendor_anchor, vendor_item || E'\n' || vendor_anchor);
+
+  select coalesce(max(version_number), 0) + 1 into next_version
+    from public.legal_document_versions where document_key = 'privacy_policy';
+  update public.legal_document_versions set status = 'superseded' where id = doc.id;
+  insert into public.legal_document_versions (document_key, version_number, content_html, status)
+    values ('privacy_policy', next_version, next_html, 'published')
+    returning id into new_id;
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+      jsonb_build_object('document_key', 'privacy_policy', 'version_number', next_version,
+        'source', 'CHAPTER 110'));
+end;
+$chapter110_privacy$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'privacy policy' as check_name,
+--        (select 'v' || version_number
+--                || case when position('Walter Writes (Walter AI):' in content_html) > 0 then ' vendor' else ' NO vendor' end
+--                || case when position('To screen uploaded identity photos' in content_html) > 0 then ' purpose' else ' NO purpose' end
+--                || case when position('An optional name, email and phone' in content_html) > 0 then ' inquiry' else ' NO inquiry' end
+--           from public.legal_document_versions
+--          where status = 'published' and document_key = 'privacy_policy') as result,
+--        'v3 vendor purpose inquiry' as expected
+-- union all
+-- select 'exactly one published privacy policy',
+--        (select count(*)::text from public.legal_document_versions
+--          where status = 'published' and document_key = 'privacy_policy'),
+--        '1';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

@@ -120,3 +120,64 @@ test("running it again changes nothing", async () => {
   const { rows } = await db.query("select count(*)::int as n from public.legal_document_versions");
   assert.equal(rows[0].n, 6);
 });
+
+// CHAPTER 110 - the Privacy Policy names the AI-image detector as a recipient.
+const PRIVACY = [
+  "<h2>2. Data We Collect</h2>",
+  "<ul>",
+  "<li><strong>Contact inquiry data:</strong> Name, email, optional phone, selected topics, message, reply status, and a salted anti-abuse fingerprint submitted through the public contact form.</li>",
+  "</ul>",
+  "<h2>4. Purpose of Data Processing</h2>",
+  "<ul>",
+  "<li>To verify your identity. This processing happens locally in the reviewer's browser and is not sent to any third party; a human reviewer always makes the final decision.</li>",
+  "</ul>",
+  "<h2>5. Third-Party Disclosures</h2>",
+  "<ul>",
+  "<li><strong>Supabase:</strong> Database.</li>",
+  "<li><strong>Selected application host:</strong> Hosting is not yet selected.</li>",
+  "</ul>",
+].join("\n");
+
+const privacyChapter = async () =>
+  (await readFile(new URL("../database_scripts/SAFE_DRIVE_DATABASE_MASTER.sql", import.meta.url), "utf8"))
+    .split("-- CHAPTER 110 - The Privacy Policy names the AI-image detector")[1]
+    ?.split("-- Read-only verification")[0];
+
+const privacyFixture = async (html) => {
+  const db = await fixture();
+  await db.exec("delete from public.legal_document_versions where document_key = 'privacy_policy'");
+  await db.query(
+    "insert into public.legal_document_versions (document_key, version_number, content_html, status) values ('privacy_policy', 2, $1, 'published')",
+    [html],
+  );
+  return db;
+};
+
+test("the Privacy Policy names Walter Writes, why images go there, and that inquiries need no name", async () => {
+  const sql = await privacyChapter();
+  assert.ok(sql, "CHAPTER 110 exists");
+  const db = await privacyFixture(PRIVACY);
+  await db.exec(sql);
+  await db.exec(sql);
+  const [policy] = await published(db, "privacy_policy");
+  assert.equal(policy.version_number, 3, "one new version, even when run twice");
+  const html = policy.content_html;
+  const section5 = html.slice(html.indexOf("<h2>5."));
+  assert.match(section5, /Walter Writes \(Walter AI\):/);
+  assert.ok(section5.indexOf("Walter Writes") < section5.indexOf("Selected application host"));
+  const section4 = html.slice(html.indexOf("<h2>4."), html.indexOf("<h2>5."));
+  assert.match(section4, /server - not your browser - sends each image to the Walter Writes AI-image detector/);
+  assert.match(section4, /never approves or rejects anything on its own/);
+  assert.match(html, /An optional name, email and phone/);
+  assert.doesNotMatch(html, /Name, email, optional phone/);
+});
+
+test("a policy that no longer matches is left alone rather than half-edited", async () => {
+  const sql = await privacyChapter();
+  const db = await privacyFixture(PRIVACY.replace("Selected application host", "Vercel"));
+  await assert.rejects(db.exec(sql), /no longer matches/);
+  // As in the SQL editor: the failed chapter leaves its transaction to be rolled back.
+  await db.exec("rollback");
+  const [policy] = await published(db, "privacy_policy");
+  assert.equal(policy.version_number, 2);
+});
