@@ -81,6 +81,10 @@ const REASON_LABELS: Record<string, { label: string; detail: string }> = {
     detail: "This month's Walter Writes credits are used up. They reset next billing cycle, or top up and press Check again.",
   },
   key_invalid: { label: "Not checked · API key invalid", detail: "The WALTER_API_KEY in Vercel is invalid, inactive or expired." },
+  blocked_by_provider: {
+    label: "Not checked · detector blocked the server",
+    detail: "Walter Writes' firewall refused SafeDrive's server. The key is fine; press Check again later.",
+  },
   key_missing_scope: { label: "Not checked · key lacks access", detail: "The Walter Writes API key does not include the image detector." },
   not_configured: { label: "Not checked · detector off", detail: "No WALTER_API_KEY is set on the server." },
   service_unavailable: { label: "Not checked · detector down", detail: "The Walter Writes detector did not respond. Press Check again later." },

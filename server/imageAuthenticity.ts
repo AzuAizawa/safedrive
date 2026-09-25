@@ -68,6 +68,9 @@ export const classifyFile = (path: string, contentType: string, size: number): C
 export const interpretDetectorResponse = (httpStatus: number, body: unknown): CheckOutcome => {
   const data = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const code = typeof data.code === "string" ? data.code : "";
+  // A 403 that is not the detector's own JSON is a firewall page in front of
+  // the API refusing this server, not a problem with the key.
+  const answeredAsApi = Boolean(body && typeof body === "object");
 
   if (httpStatus === 200) {
     const verdict = data.prediction;
@@ -89,6 +92,7 @@ export const interpretDetectorResponse = (httpStatus: number, body: unknown): Ch
   }
   if (httpStatus === 400) return outcome("unsupported", code === "invalid_image" ? "invalid_image" : "rejected_file");
   if (httpStatus === 401) return outcome("unavailable", "key_invalid", true);
+  if (httpStatus === 403 && !answeredAsApi) return outcome("unavailable", "blocked_by_provider", true);
   if (httpStatus === 403) {
     const known = ["trial_expired", "insufficient_credits", "credits_exhausted"];
     return outcome("unavailable", known.includes(code) ? code : "key_missing_scope", true);
@@ -114,7 +118,16 @@ export const callWalterImageDetector = async (
       body: form,
       signal: AbortSignal.timeout(15_000),
     });
-    const body = await response.json().catch(() => null);
+    const text = await response.text();
+    let body: unknown = null;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Not JSON: an HTML error or firewall page.
+    }
+    if (response.status !== 200) {
+      console.warn("Walter image detector refused the request", response.status, text.slice(0, 300));
+    }
     return interpretDetectorResponse(response.status, body);
   } catch {
     return outcome("unavailable", "service_unavailable", true);

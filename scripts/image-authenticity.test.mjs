@@ -163,3 +163,13 @@ test("a file is checked once, again only when it is replaced or still waiting", 
   // "Check again" never re-spends a credit on an answer it already has.
   assert.equal(needsCheck(at("2026-09-25T10:00:00Z"), null, true), false);
 });
+
+test("a firewall page in front of the detector is not blamed on the key", () => {
+  // Walter's API answered 403 from Vercel's Edge network while the same key
+  // worked from a regular server; the body was not the API's own JSON.
+  const blocked = interpretDetectorResponse(403, null);
+  assert.deepEqual([blocked.status, blocked.reason, blocked.stop], ["unavailable", "blocked_by_provider", true]);
+  assert.equal(describeCheck({ ...blocked, checked_at: "x" }).label, "Not checked · detector blocked the server");
+  // A real 403 from the API, with its JSON, still reads as a key or scope problem.
+  assert.equal(interpretDetectorResponse(403, { detail: "API key does not have required scope" }).reason, "key_missing_scope");
+});

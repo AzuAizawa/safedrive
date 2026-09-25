@@ -7,7 +7,9 @@ import {
   type CheckStatus,
 } from "../server/imageAuthenticity.js";
 
-export const config = { runtime: "edge" };
+// Node.js runtime, not Edge: Walter Writes refuses requests from Vercel's Edge
+// network (HTTP 403), while the same key works from a regular server. The
+// named POST export keeps the Web-standard Request/Response signature.
 
 // Files checked per request. The trial allows 5 detector calls a minute, and
 // an edge function has to answer within ~25 s; whatever is left stays pending
@@ -104,8 +106,7 @@ const download = async (supabase: SupabaseClient, file: SourceFile) => {
  * gets every check for the subject. Which files are checked is always read
  * from the database, never taken from the caller.
  */
-export default async function handler(req: Request) {
-  if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
+export async function POST(req: Request) {
   try {
     const url = process.env.VITE_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
