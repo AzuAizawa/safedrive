@@ -102,18 +102,14 @@ const ALLOWED_PDF_TYPES = ["application/pdf"];
 // three accept either. validateUploadFile picks its error wording from the
 // list it is handed, hence the explicit third entry below.
 const ALLOWED_BUSINESS_DOCUMENT_TYPES = [...ALLOWED_IMAGE_TYPES, ...ALLOWED_PDF_TYPES];
+// The study covers NCR and Luzon first, so a vehicle can only be listed there.
+// A listing saved earlier under a Visayas or Mindanao region keeps its text;
+// editing it asks for one of these regions.
 const VEHICLE_REGION_OPTIONS = [
   "Metro Manila",
-  "Metro Cebu",
-  "Metro Davao",
   "Northern Luzon",
   "Central Luzon",
   "Southern Luzon",
-  "Western Visayas",
-  "Central Visayas",
-  "Eastern Visayas",
-  "Northern Mindanao",
-  "Southern Mindanao",
 ] as const;
 
 // Common cities/municipalities per broad region bucket above - not an
@@ -125,11 +121,6 @@ const VEHICLE_CITY_OPTIONS: Record<(typeof VEHICLE_REGION_OPTIONS)[number], stri
     "Marikina", "Pasay", "Parañaque", "Las Piñas", "Muntinlupa", "Caloocan",
     "Malabon", "Navotas", "Valenzuela", "San Juan", "Pateros",
   ],
-  "Metro Cebu": [
-    "Cebu City", "Mandaue", "Lapu-Lapu", "Talisay", "Consolacion", "Liloan",
-    "Minglanilla", "Compostela",
-  ],
-  "Metro Davao": ["Davao City", "Panabo", "Tagum", "Digos", "Samal"],
   "Northern Luzon": [
     "Baguio", "Laoag", "Vigan", "Tuguegarao", "Ilagan", "Dagupan",
     "San Fernando (La Union)", "Batac",
@@ -142,11 +133,6 @@ const VEHICLE_CITY_OPTIONS: Record<(typeof VEHICLE_REGION_OPTIONS)[number], stri
     "Batangas City", "Lipa", "Lucena", "Calamba", "Santa Rosa", "Antipolo",
     "San Pablo", "Naga (Camarines Sur)", "Legazpi", "Puerto Princesa",
   ],
-  "Western Visayas": ["Iloilo City", "Bacolod", "Roxas", "Kalibo"],
-  "Central Visayas": ["Tagbilaran", "Dumaguete"],
-  "Eastern Visayas": ["Tacloban", "Ormoc", "Catbalogan", "Calbayog"],
-  "Northern Mindanao": ["Cagayan de Oro", "Iligan", "Malaybalay", "Valencia"],
-  "Southern Mindanao": ["General Santos", "Koronadal", "Tacurong", "Kidapawan"],
 };
 const OTHER_CITY_OPTION = "Other (type manually)";
 
