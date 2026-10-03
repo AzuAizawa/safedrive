@@ -18483,4 +18483,138 @@ commit;
 --        'kind,subject_id,user_id,label,submitted_at,target_hours' as expected;
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 118 - A document sent back for correction tells the lister why
+-- ============================================================================
+-- When an admin rejected one document of a new listing - a BIR certificate
+-- with the wrong date, a blurry OR - the lister was not told. Only a
+-- resubmission through Document Renewal & Updates sent a notice when it was
+-- reviewed; the first submission sent nothing, so the listing sat in review
+-- waiting for a correction its owner did not know was needed.
+--
+-- review_vehicle_documents (reproduced from CHAPTER 80) now writes a
+-- notification when a document is rejected or revoked: which document, which
+-- car, the admin's reason, and where to upload a new one. A document that is
+-- part of a renewal still under review is left to that renewal's own notice.
+-- The same words are emailed by api/send-document-correction-email.ts, which
+-- reads them from vehicle_document_correction_message below so the two
+-- cannot drift apart.
+begin;
+
+create or replace function public.vehicle_document_correction_message(
+  p_document_type text,
+  p_plate text,
+  p_reason text
+)
+returns text
+language sql
+immutable
+as $correction_message$
+  select format(
+    'Your %s for %s needs correction: %s. Upload a new one from Document Renewal & Updates.',
+    case p_document_type
+      when 'or' then 'LTO registration / OR'
+      when 'orcr' then 'OR/CR'
+      when 'cr' then 'Certificate of Registration (CR)'
+      when 'ctpl' then 'CTPL insurance'
+      when 'comprehensive_insurance' then 'comprehensive insurance'
+      when 'dti' then 'DTI business name registration'
+      when 'mayors_permit' then 'Business / Mayor''s Permit'
+      when 'bir' then 'BIR Certificate of Registration'
+      when 'rental_agreement' then 'rental agreement'
+      else replace(p_document_type, '_', ' ')
+    end,
+    coalesce(nullif(trim(p_plate), ''), 'your vehicle'),
+    rtrim(coalesce(nullif(trim(p_reason), ''), 'see the review note'), '.'));
+$correction_message$;
+
+grant execute on function public.vehicle_document_correction_message(text, text, text)
+  to authenticated, service_role;
+
+create or replace function public.review_vehicle_documents(p_car_id uuid,p_reviews jsonb)
+returns jsonb language plpgsql security definer set search_path=public as $review$
+declare item jsonb; d public.car_documents%rowtype; decision text; rid uuid; has_rejected boolean; replacement_start timestamptz;
+begin
+  if not public.admin_can('vehicles.review') then raise exception 'Vehicle review permission required'; end if;
+  perform 1 from public.cars where id=p_car_id for update;
+  for item in select * from jsonb_array_elements(p_reviews) loop
+    select * into d from public.car_documents where id=(item->>'id')::uuid and car_id=p_car_id for update;
+    if not found then raise exception 'Document not found'; end if;
+    decision:=item->>'status';
+    if decision not in ('approved','rejected','revoked') then raise exception 'Invalid review decision'; end if;
+    if decision in ('rejected','revoked') and coalesce(trim(item->>'reason'),'')='' then raise exception 'A reason is required'; end if;
+    replacement_start:=(item->>'valid_from')::timestamptz;
+    if decision='approved' and d.compliance_status<>'approved' and d.document_type in ('cr','bir')
+      and exists(select 1 from public.car_documents where car_id=p_car_id and document_type=d.document_type and id<>d.id and compliance_status='approved') then
+      replacement_start:=coalesce(replacement_start,now());
+      update public.car_documents set superseded_at=replacement_start-interval '1 millisecond'
+        where car_id=p_car_id and document_type=d.document_type and id<>d.id and compliance_status='approved'
+          and coalesce(valid_from,'-infinity'::timestamptz)<replacement_start
+          and coalesce(superseded_at,'infinity'::timestamptz)>=replacement_start;
+    end if;
+    update public.car_documents set compliance_status=decision,
+      valid_from=case when decision='approved' then replacement_start else valid_from end,
+      valid_until=case when decision='approved'
+        then coalesce((item->>'valid_until')::timestamptz, valid_until) else valid_until end,
+      rental_use_verified=case when decision='approved'
+        then coalesce((item->>'rental_use_verified')::boolean, rental_use_verified) else rental_use_verified end,
+      review_reason=nullif(trim(item->>'reason'),''), reviewed_by=auth.uid(),reviewed_at=now()
+      where id=d.id;
+    -- Settle anything else still waiting on the same requirement.
+    if decision='approved' then
+      update public.car_documents set compliance_status='rejected',
+        review_reason='A different document was approved for this requirement, so this one was not used.',
+        reviewed_by=auth.uid(), reviewed_at=now()
+        where car_id=p_car_id and document_type=d.document_type and id<>d.id
+          and compliance_status='pending';
+    end if;
+    insert into public.audit_log(user_id,action,entity_type,entity_id,details)
+      values(auth.uid(),'vehicle_document_'||decision,'car_document',d.id::text,
+        jsonb_build_object('car_id',p_car_id,'previous_status',d.compliance_status,'review',item));
+    -- CHAPTER 118: the lister hears that a document was sent back, and why.
+    -- A document that is part of a renewal still under review is left to that
+    -- renewal's own summary notice below, so nothing is said twice.
+    if decision in ('rejected','revoked') and not exists(
+      select 1 from public.car_renewals r
+       where r.id=d.renewal_id and r.document_update and r.status='pending'
+    ) then
+      insert into public.notifications(user_id,title,message,type,link)
+        select c.owner_id,'A vehicle document needs correction',
+          public.vehicle_document_correction_message(d.document_type,c.plate_number,item->>'reason'),
+          'warning','/car-renewals'
+        from public.cars c where c.id=p_car_id;
+    end if;
+  end loop;
+  for rid in select id from public.car_renewals where car_id=p_car_id and document_update and status='pending' loop
+    if not exists(select 1 from public.car_documents where renewal_id=rid and compliance_status='pending') then
+      select exists(select 1 from public.car_documents where renewal_id=rid and compliance_status in ('rejected','revoked')) into has_rejected;
+      update public.car_renewals set status=case when has_rejected then 'rejected' else 'approved' end,reviewed_at=now() where id=rid;
+      insert into public.notifications(user_id,title,message,type,link)
+        select owner_id,'Document resubmission reviewed',
+          case when has_rejected then 'Some documents need correction. Open Document Renewal & Updates for the review reasons.'
+          else 'Your updated documents were approved. Booking availability follows all approved document validity dates.' end,
+          'vehicle','/car-renewals' from public.cars where id=p_car_id;
+    end if;
+  end loop;
+  perform public.refresh_vehicle_compliance(p_car_id);
+  return public.vehicle_compliance_summary(p_car_id,now(),now());
+end;
+$review$;
+revoke all on function public.review_vehicle_documents(uuid,jsonb) from public;
+grant execute on function public.review_vehicle_documents(uuid,jsonb) to authenticated;
+
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'correction message' as check_name,
+--        public.vehicle_document_correction_message('bir', 'TES1234', 'wrong expiration date') as result,
+--        'Your BIR Certificate of Registration for TES1234 needs correction: wrong expiration date. Upload a new one from Document Renewal & Updates.' as expected
+-- union all
+-- select 'review tells the lister',
+--        (select case when position('vehicle_document_correction_message' in prosrc) > 0 then 'yes' else 'no' end
+--           from pg_proc where proname = 'review_vehicle_documents'),
+--        'yes';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

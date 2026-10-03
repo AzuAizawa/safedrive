@@ -128,6 +128,27 @@ function DocumentReview({
       });
       if (error) throw error;
       toast.success("Document review saved");
+      // CHAPTER 118: the lister is notified in the app by the review itself;
+      // the same notice goes by email from here. A failed email never undoes
+      // the review.
+      if (status !== "approved") {
+        const { data: { session } } = await supabase.auth.getSession();
+        const sent = session?.access_token
+          ? await fetch("/api/send-document-correction-email", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({ documentId: document.id }),
+            })
+              .then((response) => response.ok)
+              .catch(() => false)
+          : false;
+        if (!sent) {
+          toast.warning("The lister was notified in the app, but the email did not go out.");
+        }
+      }
       await onReviewed();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Document review failed");
