@@ -795,13 +795,31 @@ export default async function handler(req: Request) {
         }
       }
 
+      // The extra slots a plan gives are a platform setting (CHAPTER 112); the
+      // numbers in SUBSCRIPTION_PLANS are only the fallback. The database works
+      // out limits from the plan and the live setting, so this stored value is
+      // a record of what was sold, and the figure the lister is told below.
+      const { data: slotSettings } = await supabase
+        .from("platform_settings")
+        .select("pro_extra_vehicle_slots, premium_extra_vehicle_slots")
+        .eq("id", "default")
+        .maybeSingle();
+      const settingSlots = Number(
+        plan.id === "premium"
+          ? slotSettings?.premium_extra_vehicle_slots
+          : slotSettings?.pro_extra_vehicle_slots,
+      );
+      const extraSlots = Number.isInteger(settingSlots) && settingSlots >= 0
+        ? settingSlots
+        : plan.additionalSlots;
+
       const startDate = new Date();
       const { error: insertSubscriptionError } = await supabase
         .from("subscriptions")
         .insert({
           user_id: userId,
           plan_type: plan.id,
-          additional_slots: plan.additionalSlots,
+          additional_slots: extraSlots,
           start_date: formatDateOnly(startDate),
           end_date: calculateSubscriptionEndDate(startDate),
           status: "active",
@@ -836,7 +854,7 @@ export default async function handler(req: Request) {
       await supabase.from("notifications").insert({
         user_id: userId,
         title: `${plan.label} Plan Activated`,
-        message: `Your ${plan.label} plan payment was confirmed. You now have ${plan.additionalSlots} extra vehicle slots.`,
+        message: `Your ${plan.label} plan payment was confirmed. You now have ${extraSlots} extra vehicle slots.`,
         type: "success",
         link: "/subscriptions",
       });

@@ -1505,6 +1505,11 @@ export interface Database {
           verification_review_target_hours: number;
           // CHAPTER 105. The same for a vehicle review, which is different work.
           vehicle_review_target_hours: number;
+          // CHAPTER 112. Live listings per plan: the base, and what Pro and
+          // Premium add on top of it.
+          free_vehicle_slots: number;
+          pro_extra_vehicle_slots: number;
+          premium_extra_vehicle_slots: number;
           ledger_activated_at: string | null;
           payment_processing_fee_rate: number;
           payment_processing_fixed_centavos: number;
@@ -1534,6 +1539,9 @@ export interface Database {
         Insert: {
           id?: string;
           commission_rate?: number;
+          free_vehicle_slots?: number;
+          pro_extra_vehicle_slots?: number;
+          premium_extra_vehicle_slots?: number;
           ledger_activated_at?: string | null;
           payment_processing_fee_rate?: number;
           payment_processing_fixed_centavos?: number;
@@ -1563,6 +1571,9 @@ export interface Database {
         Update: {
           id?: string;
           commission_rate?: number;
+          free_vehicle_slots?: number;
+          pro_extra_vehicle_slots?: number;
+          premium_extra_vehicle_slots?: number;
           ledger_activated_at?: string | null;
           payment_processing_fee_rate?: number;
           payment_processing_fixed_centavos?: number;

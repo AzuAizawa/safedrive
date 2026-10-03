@@ -17463,4 +17463,274 @@ commit;
 --        '2';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 112 - How many vehicles each plan can list is a platform setting
+-- ============================================================================
+-- The slot counts were written into the code: 5 for everyone, +5 on Pro,
+-- +10 on Premium. The 5 lived in two SQL functions and two pages, and the
+-- extras in the checkout, the payment webhook and the stored
+-- subscriptions.additional_slots of every paid row. Changing them meant
+-- editing code in six places.
+--
+-- They are now three platform settings, changed through the same system-admin
+-- vote as commission and fees:
+--   free_vehicle_slots           every lister's base allowance (default 5)
+--   pro_extra_vehicle_slots      added by an active Pro plan (default 5)
+--   premium_extra_vehicle_slots  added by an active Premium plan (default 10)
+-- The defaults are today's numbers, so applying this changes nothing until a
+-- vote does.
+--
+-- A change applies to everyone at once, current subscribers included. The
+-- allowance is worked out from the plan and the live setting, no longer from
+-- the additional_slots stored when the plan was bought. That column is still
+-- written as a record of what was sold, but nothing reads it for limits.
+--
+-- Lowering a value pauses listings that no longer fit, the same way an
+-- expiring plan already does: deactivate_cars_over_slot_limit keeps the oldest
+-- listings live and sets the newest to inactive. The lister is told how many
+-- were paused and can switch which ones are live from My Vehicles.
+begin;
+
+alter table public.platform_settings
+  add column if not exists free_vehicle_slots integer not null default 5,
+  add column if not exists pro_extra_vehicle_slots integer not null default 5,
+  add column if not exists premium_extra_vehicle_slots integer not null default 10;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_free_vehicle_slots_check,
+  drop constraint if exists platform_settings_pro_extra_vehicle_slots_check,
+  drop constraint if exists platform_settings_premium_extra_vehicle_slots_check;
+alter table public.platform_settings
+  add constraint platform_settings_free_vehicle_slots_check
+    check (free_vehicle_slots >= 1 and free_vehicle_slots <= 100),
+  add constraint platform_settings_pro_extra_vehicle_slots_check
+    check (pro_extra_vehicle_slots >= 0 and pro_extra_vehicle_slots <= 100),
+  add constraint platform_settings_premium_extra_vehicle_slots_check
+    check (premium_extra_vehicle_slots >= 0 and premium_extra_vehicle_slots <= 100);
+
+comment on column public.platform_settings.free_vehicle_slots is
+  'Live listings every lister may have without a paid plan (CHAPTER 112).';
+comment on column public.platform_settings.pro_extra_vehicle_slots is
+  'Live listings an active Pro plan adds on top of free_vehicle_slots (CHAPTER 112).';
+comment on column public.platform_settings.premium_extra_vehicle_slots is
+  'Live listings an active Premium plan adds on top of free_vehicle_slots (CHAPTER 112).';
+
+-- One place that answers "how many live listings may this lister have".
+-- A plan this function does not know falls back to the slots stored on it.
+create or replace function public.vehicle_slot_allowance(p_owner uuid)
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $slot_allowance$
+  select coalesce(
+    (select s.free_vehicle_slots + coalesce((
+        select max(case sub.plan_type
+                     when 'pro' then s.pro_extra_vehicle_slots
+                     when 'premium' then s.premium_extra_vehicle_slots
+                     else sub.additional_slots
+                   end)
+          from public.subscriptions sub
+         where sub.user_id = p_owner and sub.status = 'active'), 0)
+       from public.platform_settings s
+      where s.id = 'default'),
+    5);
+$slot_allowance$;
+
+revoke all on function public.vehicle_slot_allowance(uuid) from public, anon, authenticated;
+
+-- Reproduced from the current version with only the allowance line changed.
+create or replace function public.deactivate_cars_over_slot_limit(p_owner uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  allowance integer;
+  affected integer;
+begin
+  allowance := public.vehicle_slot_allowance(p_owner);
+
+  with excess as (
+    select id
+    from public.cars
+    where owner_id = p_owner and status in ('approved', 'active')
+      and deleted_at is null
+    order by created_at asc
+    offset allowance
+  )
+  update public.cars c
+    set status = 'inactive'
+    from excess
+    where c.id = excess.id;
+
+  get diagnostics affected = row_count;
+  return affected;
+end;
+$$;
+
+revoke all on function public.deactivate_cars_over_slot_limit(uuid) from public, anon, authenticated;
+
+-- Reproduced from the current version with only the allowance line changed.
+create or replace function public.trg_enforce_live_car_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  allowance integer;
+  live_count integer;
+begin
+  if old.status = 'inactive' and new.status in ('approved', 'active') then
+    allowance := public.vehicle_slot_allowance(new.owner_id);
+
+    select count(*)
+      into live_count
+      from public.cars
+      where owner_id = new.owner_id
+        and status in ('approved', 'active')
+        and deleted_at is null
+        and id <> new.id;
+
+    if live_count >= allowance then
+      raise exception
+        'Vehicle slot limit reached: your current plan allows % live listing(s). Upgrade your plan to reactivate more.',
+        allowance
+        using errcode = 'check_violation';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+-- A lowered slot count takes effect for every lister straight away.
+create or replace function public.trg_vehicle_slots_lowered()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $slots_lowered$
+declare
+  owner_row record;
+  paused integer;
+begin
+  if new.free_vehicle_slots < old.free_vehicle_slots
+     or new.pro_extra_vehicle_slots < old.pro_extra_vehicle_slots
+     or new.premium_extra_vehicle_slots < old.premium_extra_vehicle_slots then
+    for owner_row in
+      select distinct owner_id
+        from public.cars
+       where status in ('approved', 'active') and deleted_at is null
+    loop
+      paused := public.deactivate_cars_over_slot_limit(owner_row.owner_id);
+      if paused > 0 then
+        insert into public.notifications (user_id, title, message, type, link)
+        values (
+          owner_row.owner_id,
+          'Some listings were paused',
+          format(
+            'SafeDrive changed how many vehicles each plan can list. %s of your listings %s paused to fit your plan; your oldest listings stay live. You can turn one off and another on from My Vehicles.',
+            paused, case when paused = 1 then 'was' else 'were' end),
+          'warning',
+          '/my-vehicles');
+      end if;
+    end loop;
+  end if;
+  return new;
+end;
+$slots_lowered$;
+
+drop trigger if exists vehicle_slots_lowered on public.platform_settings;
+create trigger vehicle_slots_lowered
+after update of free_vehicle_slots, pro_extra_vehicle_slots, premium_extra_vehicle_slots
+on public.platform_settings
+for each row execute function public.trg_vehicle_slots_lowered();
+
+-- The settings whitelist, reproduced verbatim from CHAPTER 96 with the three
+-- slot keys added.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+immutable
+as $validate$
+declare
+  k text;
+  v numeric;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'short_notice_free_hours' then
+      if v < 0 or v > 24 or v <> floor(v) then raise exception 'short_notice_free_hours must be a whole number 0-24'; end if;
+    elsif k in ('late_cancel_fee_days', 'no_show_fee_days') then
+      if v < 0 or v > 30 then raise exception '% must be 0-30 days', k; end if;
+    elsif k in ('short_trip_late_cancel_fee_days', 'short_trip_no_show_fee_days') then
+      if v < 0 or v > 2 then raise exception '% must be 0-2 days', k; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    elsif k = 'dormant_account_days' then
+      if v < 90 or v > 3650 or v <> floor(v) then raise exception 'dormant_account_days must be a whole number 90-3650'; end if;
+    elsif k = 'no_show_grace_minutes' then
+      if v < 15 or v > 180 or v <> floor(v) then raise exception 'no_show_grace_minutes must be a whole number 15-180'; end if;
+    elsif k = 'mutual_no_show_close_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'mutual_no_show_close_hours must be a whole number 1-72'; end if;
+    elsif k = 'min_booking_notice_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'min_booking_notice_hours must be a whole number 1-168'; end if;
+    elsif k = 'account_deletion_grace_days' then
+      if v < 7 or v > 90 or v <> floor(v) then raise exception 'account_deletion_grace_days must be a whole number 7-90'; end if;
+    elsif k = 'free_vehicle_slots' then
+      if v < 1 or v > 100 or v <> floor(v) then raise exception 'free_vehicle_slots must be a whole number 1-100'; end if;
+    elsif k in ('pro_extra_vehicle_slots', 'premium_extra_vehicle_slots') then
+      if v < 0 or v > 100 or v <> floor(v) then raise exception '% must be a whole number 0-100', k; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+end;
+$validate$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'slot settings' as check_name,
+--        (select free_vehicle_slots || '/' || pro_extra_vehicle_slots || '/' || premium_extra_vehicle_slots
+--           from public.platform_settings where id = 'default') as result,
+--        '5/5/10' as expected
+-- union all
+-- select 'slot keys are votable',
+--        (select case when position('premium_extra_vehicle_slots' in prosrc) > 0 then 'yes' else 'no' end
+--           from pg_proc where proname = 'validate_platform_setting_change'),
+--        'yes'
+-- union all
+-- select 'lowering pauses listings',
+--        (select count(*)::text from pg_trigger where tgname = 'vehicle_slots_lowered'),
+--        '1';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

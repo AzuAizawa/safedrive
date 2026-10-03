@@ -55,6 +55,8 @@ import {
   formatCommissionPercent,
   useVerificationEtaMessages,
   describeWaitingSince,
+  planExtraSlots,
+  useVehicleSlotSettings,
 } from "@/lib/platformSettings";
 import type { CarBrand, CarModel } from "@/types/database";
 import {
@@ -500,6 +502,7 @@ export default function MyVehiclesPage() {
   const navigate = useNavigate();
   const { userMessage: userVerificationEta, vehicleMessage: vehicleVerificationEta } =
     useVerificationEtaMessages();
+  const slotSettings = useVehicleSlotSettings();
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [vehicleTab, setVehicleTab] = useState<VehicleTab>("in_review");
   const [loading, setLoading] = useState(true);
@@ -850,8 +853,10 @@ export default function MyVehiclesPage() {
     if (data) setModels(data);
   };
 
-  const baseSlots = 5;
-  const bonusSlots = activeSub?.additional_slots ?? 0;
+  // From the live platform setting (CHAPTER 112), so a change reaches current
+  // subscribers too. The database enforces the same numbers.
+  const baseSlots = slotSettings.free;
+  const bonusSlots = planExtraSlots(slotSettings, activeSub?.plan_type);
   const maxSlots = baseSlots + bonusSlots;
   const canAddMore = vehicles.length < maxSlots;
   const isVerifiedLister = profile?.verified_status === "verified";

@@ -12,6 +12,11 @@ import {
 } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { getCurrentSubscription } from "@/lib/subscriptions";
+import {
+  planExtraSlots,
+  useVehicleSlotSettings,
+  type VehicleSlotSettings,
+} from "@/lib/platformSettings";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { toast } from "sonner";
 
@@ -36,7 +41,11 @@ interface Subscription {
   cancelled_at: string | null;
 }
 
-const plans = [
+const slotWord = (count: number) => `${count} slot${count === 1 ? "" : "s"}`;
+
+// Slot numbers come from the live platform setting (CHAPTER 112), so what this
+// page promises is what the database allows.
+const buildPlans = (slots: VehicleSlotSettings) => [
   {
     id: "free",
     label: "Free",
@@ -47,9 +56,7 @@ const plans = [
     iconColor: "text-muted-foreground",
     cardClass: "border-2 hover:border-primary/30 transition-colors",
     additional_slots: 0,
-    features: [
-      "List up to 5 vehicles",
-    ],
+    features: [`List up to ${slots.free} vehicle${slots.free === 1 ? "" : "s"}`],
     cta: "Current Plan",
     ctaVariant: "outline" as const,
   },
@@ -62,12 +69,12 @@ const plans = [
     icon: Zap,
     iconColor: "text-blue-500",
     cardClass: "border-2 hover:border-blue-500/50 transition-colors",
-    additional_slots: 5,
+    additional_slots: slots.proExtra,
     badge: "Popular",
     badgeClass: "bg-blue-500/10 text-blue-500 border-blue-500/30",
     features: [
-      "10 total vehicle slots",
-      "+5 slots compared with Free",
+      `${slots.free + slots.proExtra} total vehicle slots`,
+      `+${slotWord(slots.proExtra)} compared with Free`,
     ],
     cta: "Choose Pro",
     ctaClass:
@@ -82,19 +89,23 @@ const plans = [
     icon: Star,
     iconColor: "text-amber-500",
     cardClass: "border-2 border-amber-500/40 shadow-2xl shadow-amber-500/10",
-    additional_slots: 10,
+    additional_slots: slots.premiumExtra,
     badge: "Best Value",
     badgeClass: "bg-amber-500/10 text-amber-500 border-amber-500/30",
     features: [
-      "15 total vehicle slots",
-      "+5 slots compared with Pro",
-      "+10 slots compared with Free",
+      `${slots.free + slots.premiumExtra} total vehicle slots`,
+      ...(slots.premiumExtra > slots.proExtra
+        ? [`+${slotWord(slots.premiumExtra - slots.proExtra)} compared with Pro`]
+        : []),
+      `+${slotWord(slots.premiumExtra)} compared with Free`,
     ],
     cta: "Choose Premium",
     ctaClass:
       "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg shadow-amber-500/30",
   },
 ];
+
+type Plan = ReturnType<typeof buildPlans>[number];
 
 export default function SubscriptionPlansPage() {
   const { user, session, profile, loading: authLoading } = useAuth();
@@ -103,6 +114,9 @@ export default function SubscriptionPlansPage() {
   const [upgrading, setUpgrading] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const slotSettings = useVehicleSlotSettings();
+  const plans = buildPlans(slotSettings);
+  const currentTotalSlots = slotSettings.free + planExtraSlots(slotSettings, currentSub?.plan_type);
 
   const fetchSubscription = useCallback(async () => {
     if (!user) return;
@@ -210,7 +224,7 @@ export default function SubscriptionPlansPage() {
     }
   };
 
-  const handleUpgrade = async (plan: (typeof plans)[number]) => {
+  const handleUpgrade = async (plan: Plan) => {
     if (!user || plan.id === currentPlanId || plan.id === "free") return;
     setUpgrading(plan.id);
 
@@ -269,7 +283,7 @@ export default function SubscriptionPlansPage() {
               <Sparkles className="h-3.5 w-3.5" />
               Currently on{" "}
               <span className="font-bold capitalize">{currentSub.plan_type}</span>{" "}
-              plan - {5 + currentSub.additional_slots} vehicle slots total
+              plan - {currentTotalSlots} vehicle slots total
               {formatPlanDate(currentSub.end_date)
                 ? ` until ${formatPlanDate(currentSub.end_date)}`
                 : ""}
@@ -278,8 +292,8 @@ export default function SubscriptionPlansPage() {
               {currentSub.cancelled_at
                 ? `Cancelled - your ${currentSub.plan_type} slots stay active until ${
                     formatPlanDate(currentSub.end_date) ?? "the end date"
-                  }, then your account reverts to Free (5 slots). No further charges.`
-                : "This is a one-time 30-day payment - there is no auto-renewal and you will not be charged again. When it ends, your account reverts to Free (5 slots) automatically."}
+                  }, then your account reverts to Free (${slotWord(slotSettings.free)}). No further charges.`
+                : `This is a one-time 30-day payment - there is no auto-renewal and you will not be charged again. When it ends, your account reverts to Free (${slotWord(slotSettings.free)}) automatically.`}
             </p>
           </div>
         )}
@@ -404,11 +418,9 @@ export default function SubscriptionPlansPage() {
         title="Cancel subscription?"
         description={
           currentSub && formatPlanDate(currentSub.end_date)
-            ? `Your ${currentSub.plan_type} plan keeps all ${
-                5 + currentSub.additional_slots
-              } slots until ${formatPlanDate(
+            ? `Your ${currentSub.plan_type} plan keeps all ${currentTotalSlots} slots until ${formatPlanDate(
                 currentSub.end_date,
-              )}. It simply will not renew and you will not be charged again. On that date your account automatically reverts to Free (5 slots), and any listings beyond 5 are paused (not deleted).`
+              )}. It simply will not renew and you will not be charged again. On that date your account automatically reverts to Free (${slotWord(slotSettings.free)}), and any listings beyond ${slotSettings.free} are paused (not deleted).`
             : "Your plan keeps its slots until the end date, then reverts to Free. It will not renew and you will not be charged again."
         }
         confirmText="Cancel subscription"

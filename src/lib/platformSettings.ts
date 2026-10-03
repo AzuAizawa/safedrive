@@ -459,3 +459,60 @@ export const fetchVehicleReviewTargetHours = async (): Promise<number> => {
     ? Math.round(hours)
     : DEFAULT_VEHICLE_REVIEW_TARGET_HOURS;
 };
+
+// CHAPTER 112. How many live listings each plan allows, from the live setting
+// rather than numbers written into the page. The database applies the same
+// rule (vehicle_slot_allowance), so these are for showing, not for enforcing.
+export type VehicleSlotSettings = {
+  free: number;
+  proExtra: number;
+  premiumExtra: number;
+};
+
+export const DEFAULT_VEHICLE_SLOT_SETTINGS: VehicleSlotSettings = {
+  free: 5,
+  proExtra: 5,
+  premiumExtra: 10,
+};
+
+const slotOr = (value: unknown, fallback: number, min: number) => {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= 100 ? number : fallback;
+};
+
+export const fetchVehicleSlotSettings = async (): Promise<VehicleSlotSettings> => {
+  const { data, error } = await supabase
+    .from("platform_settings")
+    .select("free_vehicle_slots, pro_extra_vehicle_slots, premium_extra_vehicle_slots")
+    .eq("id", "default")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load vehicle slot settings:", error);
+    return DEFAULT_VEHICLE_SLOT_SETTINGS;
+  }
+
+  return {
+    free: slotOr(data?.free_vehicle_slots, DEFAULT_VEHICLE_SLOT_SETTINGS.free, 1),
+    proExtra: slotOr(data?.pro_extra_vehicle_slots, DEFAULT_VEHICLE_SLOT_SETTINGS.proExtra, 0),
+    premiumExtra: slotOr(data?.premium_extra_vehicle_slots, DEFAULT_VEHICLE_SLOT_SETTINGS.premiumExtra, 0),
+  };
+};
+
+/** Extra live listings a plan adds; anything unknown (including Free) adds none. */
+export const planExtraSlots = (settings: VehicleSlotSettings, planType: string | null | undefined) =>
+  planType === "pro" ? settings.proExtra : planType === "premium" ? settings.premiumExtra : 0;
+
+export const useVehicleSlotSettings = () => {
+  const [settings, setSettings] = useState<VehicleSlotSettings>(DEFAULT_VEHICLE_SLOT_SETTINGS);
+  useEffect(() => {
+    let active = true;
+    void fetchVehicleSlotSettings().then((value) => {
+      if (active) setSettings(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return settings;
+};
