@@ -7,6 +7,10 @@ import {
   describeCheck,
   fetchImageChecks,
   indexChecks,
+  OVERALL_LABELS,
+  OVERALL_REJECT_AVERAGE,
+  OVERALL_REJECT_SINGLE,
+  summarizeAuthenticity,
   type AuthenticityCheck,
   type AuthenticitySubject,
   type AuthenticityTone,
@@ -225,6 +229,7 @@ export function ImageAuthenticitySummary({
   // Files the detector could not do (expired trial, no credits, detector down)
   // are retried only on purpose.
   const retryable = unique.filter((path) => state.checks[path]?.status === "unavailable").length;
+  const overall = summarizeAuthenticity(unique.map((path) => state.checks[path]));
   const blocked = state.stopReason && !["rate_limited", "busy"].includes(state.stopReason)
     ? describeCheck({ status: "unavailable", reason: state.stopReason } as AuthenticityCheck)
     : null;
@@ -273,6 +278,28 @@ export function ImageAuthenticitySummary({
           </Button>
         ) : null}
       </div>
+
+      {!state.loading && overall.suggestion && overall.average != null && overall.highest != null && (
+        <div
+          className={cn(
+            "mt-2 rounded-md border px-3 py-2",
+            TONE_CLASSES[OVERALL_LABELS[overall.suggestion].tone],
+          )}
+        >
+          <p className="text-sm font-semibold">
+            Overall: {Math.round(overall.average * 100)}% likely AI-generated or edited ·{" "}
+            {OVERALL_LABELS[overall.suggestion].label}
+          </p>
+          <p className="mt-0.5 text-xs opacity-90">
+            Average of {overall.checked} of {overall.total} file{overall.total === 1 ? "" : "s"} checked
+            {" · "}highest single file {Math.round(overall.highest * 100)}%.
+            {overall.suggestion === "reject" && overall.average <= OVERALL_REJECT_AVERAGE
+              ? ` One file alone is at or above ${Math.round(OVERALL_REJECT_SINGLE * 100)}%, which is enough to suggest rejecting.`
+              : ""}
+            {" "}A guide only - you decide.
+          </p>
+        </div>
+      )}
 
       {state.loading ? (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">

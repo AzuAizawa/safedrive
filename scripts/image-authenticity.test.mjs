@@ -15,7 +15,7 @@ import {
   interpretDetectorResponse,
   needsCheck,
 } from "../server/imageAuthenticity.ts";
-import { describeCheck } from "../src/lib/imageAuthenticityLabels.ts";
+import { describeCheck, summarizeAuthenticity } from "../src/lib/imageAuthenticityLabels.ts";
 
 const ADMIN = "11111111-1111-4111-8111-111111111111";
 const LISTER = "22222222-2222-4222-8222-222222222222";
@@ -172,4 +172,44 @@ test("a firewall page in front of the detector is not blamed on the key", () => 
   assert.equal(describeCheck({ ...blocked, checked_at: "x" }).label, "Not checked · detector blocked the server");
   // A real 403 from the API, with its JSON, still reads as a key or scope problem.
   assert.equal(interpretDetectorResponse(403, { detail: "API key does not have required scope" }).reason, "key_missing_scope");
+});
+
+// The overall reading for a whole submission: a guide for the reviewer.
+const checked = (fake, inpainting = 0) => ({
+  bucket: "b",
+  storage_path: `p-${Math.random()}`,
+  status: "checked",
+  reason: null,
+  verdict: fake + inpainting >= 0.5 ? "fake" : "real",
+  confidence: 0.9,
+  prob_real: 1 - fake - inpainting,
+  prob_fake: fake,
+  prob_inpainting: inpainting,
+  checked_at: "2026-10-03T00:00:00Z",
+});
+
+test("one forged document among nine clean photos still suggests reject", () => {
+  const overall = summarizeAuthenticity([...Array.from({ length: 9 }, () => checked(0.02)), checked(0.95)]);
+  assert.equal(overall.checked, 10);
+  assert.ok(overall.average < 0.3, "the average alone would read as clean");
+  assert.equal(overall.highest, 0.95);
+  assert.equal(overall.suggestion, "reject");
+});
+
+test("the overall reading follows the average when no single file is decisive", () => {
+  assert.equal(summarizeAuthenticity([checked(0.1), checked(0.2)]).suggestion, "clean");
+  assert.equal(summarizeAuthenticity([checked(0.4), checked(0.2, 0.2)]).suggestion, "closer");
+  assert.equal(summarizeAuthenticity([checked(0.7), checked(0.6, 0.1)]).suggestion, "reject");
+});
+
+test("files the detector could not read do not count toward the overall", () => {
+  const overall = summarizeAuthenticity([
+    checked(0.1),
+    { ...checked(0), status: "unsupported", reason: "pdf", verdict: null, prob_fake: null, prob_real: null, prob_inpainting: null, confidence: null },
+    undefined,
+  ]);
+  assert.equal(overall.checked, 1);
+  assert.equal(overall.total, 3);
+  assert.equal(overall.suggestion, "clean");
+  assert.equal(summarizeAuthenticity([undefined]).suggestion, null, "nothing checked, nothing suggested");
 });

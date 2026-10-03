@@ -95,3 +95,48 @@ const REASON_LABELS: Record<string, { label: string; detail: string }> = {
 /** The same check whichever bucket name a page happens to know the file by. */
 export const indexChecks = (checks: AuthenticityCheck[]) =>
   Object.fromEntries(checks.map((check) => [check.storage_path, check])) as Record<string, AuthenticityCheck>;
+
+// The overall reading for a whole submission. One image at a time cannot say
+// "this set looks faked"; an average alone hides the one forged document among
+// nine honest photos, so a single strong flag carries the suggestion too.
+export const OVERALL_REJECT_AVERAGE = 0.6;
+export const OVERALL_REJECT_SINGLE = 0.8;
+export const OVERALL_CLOSER_AVERAGE = 0.3;
+
+export type OverallSuggestion = "reject" | "closer" | "clean";
+
+/** How likely one checked file is AI-made or AI-edited, 0 to 1. */
+export const aiScore = (check: AuthenticityCheck): number | null => {
+  if (check.status !== "checked") return null;
+  if (check.prob_fake != null || check.prob_inpainting != null) {
+    return Math.min(1, Math.max(0, (check.prob_fake ?? 0) + (check.prob_inpainting ?? 0)));
+  }
+  if (check.confidence == null || !check.verdict) return null;
+  return check.verdict === "real" ? 1 - check.confidence : check.confidence;
+};
+
+export const summarizeAuthenticity = (checks: Array<AuthenticityCheck | undefined>) => {
+  const scores = checks.flatMap((check) => {
+    const score = check ? aiScore(check) : null;
+    return score == null ? [] : [score];
+  });
+  const total = checks.length;
+  if (!scores.length) {
+    return { checked: 0, total, average: null, highest: null, suggestion: null } as const;
+  }
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  const highest = Math.max(...scores);
+  const suggestion: OverallSuggestion =
+    average > OVERALL_REJECT_AVERAGE || highest >= OVERALL_REJECT_SINGLE
+      ? "reject"
+      : average >= OVERALL_CLOSER_AVERAGE
+        ? "closer"
+        : "clean";
+  return { checked: scores.length, total, average, highest, suggestion };
+};
+
+export const OVERALL_LABELS: Record<OverallSuggestion, { label: string; tone: AuthenticityTone }> = {
+  reject: { label: "Suggest reject", tone: "danger" },
+  closer: { label: "Check closely", tone: "warning" },
+  clean: { label: "Looks clean", tone: "ok" },
+};
