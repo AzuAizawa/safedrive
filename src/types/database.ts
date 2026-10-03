@@ -1510,6 +1510,9 @@ export interface Database {
           free_vehicle_slots: number;
           pro_extra_vehicle_slots: number;
           premium_extra_vehicle_slots: number;
+          // CHAPTER 115. Whole pesos for a 30-day plan, for new purchases.
+          pro_price_php: number;
+          premium_price_php: number;
           ledger_activated_at: string | null;
           payment_processing_fee_rate: number;
           payment_processing_fixed_centavos: number;
@@ -1542,6 +1545,8 @@ export interface Database {
           free_vehicle_slots?: number;
           pro_extra_vehicle_slots?: number;
           premium_extra_vehicle_slots?: number;
+          pro_price_php?: number;
+          premium_price_php?: number;
           ledger_activated_at?: string | null;
           payment_processing_fee_rate?: number;
           payment_processing_fixed_centavos?: number;
@@ -1574,6 +1579,8 @@ export interface Database {
           free_vehicle_slots?: number;
           pro_extra_vehicle_slots?: number;
           premium_extra_vehicle_slots?: number;
+          pro_price_php?: number;
+          premium_price_php?: number;
           ledger_activated_at?: string | null;
           payment_processing_fee_rate?: number;
           payment_processing_fixed_centavos?: number;

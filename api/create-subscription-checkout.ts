@@ -97,8 +97,25 @@ export default async function handler(req: Request) {
       return jsonResponse({ error: "Unauthorized request" }, 401);
     }
 
+    // The price is a platform setting (CHAPTER 115); the numbers in
+    // SUBSCRIPTION_PLANS are only the fallback. What is charged here is
+    // recorded below, and the webhook holds the payment to that amount, so a
+    // price change while this checkout is open does not reject the payment.
+    const { data: priceSettings } = await supabase
+      .from("platform_settings")
+      .select("pro_price_php, premium_price_php")
+      .eq("id", "default")
+      .maybeSingle();
+    const settingPrice = Number(
+      plan.id === "premium" ? priceSettings?.premium_price_php : priceSettings?.pro_price_php,
+    );
+    const amountPhp =
+      Number.isInteger(settingPrice) && settingPrice >= 100 && settingPrice <= 10000
+        ? settingPrice
+        : plan.amountPhp;
+
     const referenceNumber = `subscription:${user.id}:${plan.id}`;
-    const amountInCentavos = plan.amountPhp * 100;
+    const amountInCentavos = amountPhp * 100;
     const authToken = btoa(`${secretKey}:`);
 
     const paymongoRes = await fetch(
@@ -167,7 +184,7 @@ export default async function handler(req: Request) {
       entity_id: checkoutId,
       details: {
         plan_id: plan.id,
-        amount_php: plan.amountPhp,
+        amount_php: amountPhp,
         reference_number: referenceNumber,
         test_mode: true,
       },
@@ -177,7 +194,7 @@ export default async function handler(req: Request) {
       checkoutUrl,
       checkoutId,
       planId: plan.id,
-      amount: plan.amountPhp,
+      amount: amountPhp,
       state: "checkout_created",
       mode: "test",
     });

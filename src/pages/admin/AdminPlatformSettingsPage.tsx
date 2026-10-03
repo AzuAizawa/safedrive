@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { planOrderProblem } from "@/lib/planRules";
 import { supabase } from "@/lib/supabase";
 import {
   DEFAULT_CONTACT_EMAIL,
@@ -53,6 +54,8 @@ type SettingsRow = {
   free_vehicle_slots: number;
   pro_extra_vehicle_slots: number;
   premium_extra_vehicle_slots: number;
+  pro_price_php: number;
+  premium_price_php: number;
 };
 
 type ChangeRequest = {
@@ -324,6 +327,33 @@ const FIELDS: Record<
     },
     formatStored: (s) => `+${Math.round(s)} slots`,
   },
+  // CHAPTER 115. New purchases only; a plan already paid for runs its 30 days.
+  pro_price_php: {
+    label: "Pro plan price (30 days)",
+    hint: "What a 30-day Pro plan costs, in whole pesos (100-10,000). Must be less than Premium. Applies to new purchases; plans already paid for keep their 30 days.",
+    unit: "PHP",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return i.trim() !== "" && Number.isFinite(n) && n >= 100 && n <= 10000 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `PHP ${Math.round(s).toLocaleString()}`,
+  },
+  premium_price_php: {
+    label: "Premium plan price (30 days)",
+    hint: "What a 30-day Premium plan costs, in whole pesos (100-10,000). Must be more than Pro. Applies to new purchases; plans already paid for keep their 30 days.",
+    unit: "PHP",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return i.trim() !== "" && Number.isFinite(n) && n >= 100 && n <= 10000 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `PHP ${Math.round(s).toLocaleString()}`,
+  },
 };
 
 const FIELD_KEYS = Object.keys(FIELDS) as (keyof SettingsRow)[];
@@ -403,7 +433,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, downpayment_rate, refund_full_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes, mutual_no_show_close_hours, min_booking_notice_hours, account_deletion_grace_days, free_vehicle_slots, pro_extra_vehicle_slots, premium_extra_vehicle_slots",
+          "commission_rate, downpayment_rate, refund_full_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes, mutual_no_show_close_hours, min_booking_notice_hours, account_deletion_grace_days, free_vehicle_slots, pro_extra_vehicle_slots, premium_extra_vehicle_slots, pro_price_php, premium_price_php",
         )
         .eq("id", "default")
         .maybeSingle(),
@@ -516,12 +546,36 @@ export default function AdminPlatformSettingsPage() {
         changes[key] = parsed;
       }
     }
-    return { changes, invalid };
+    // A higher plan must stay the better deal (CHAPTER 115), judged on the
+    // values as they would stand after this change. The vote refuses it too.
+    const planKeys = [
+      "free_vehicle_slots",
+      "pro_extra_vehicle_slots",
+      "premium_extra_vehicle_slots",
+      "pro_price_php",
+      "premium_price_php",
+    ];
+    if (!invalid && planKeys.some((key) => key in changes)) {
+      const after = (key: keyof SettingsRow) => changes[key] ?? Number(settings[key]);
+      const problem = planOrderProblem({
+        free: after("free_vehicle_slots"),
+        proExtra: after("pro_extra_vehicle_slots"),
+        premiumExtra: after("premium_extra_vehicle_slots"),
+        proPricePhp: after("pro_price_php"),
+        premiumPricePhp: after("premium_price_php"),
+      });
+      if (problem) return { changes, invalid: null, planProblem: problem };
+    }
+    return { changes, invalid, planProblem: null as string | null };
   }, [drafts, settings]);
 
   const handlePropose = async () => {
     if (!draftChanges || draftChanges.invalid) {
       toast.error(`Check the value for "${draftChanges?.invalid}".`);
+      return;
+    }
+    if (draftChanges.planProblem) {
+      toast.error("The plans would be out of order", { description: draftChanges.planProblem });
       return;
     }
     if (Object.keys(draftChanges.changes).length === 0) {
@@ -955,12 +1009,18 @@ export default function AdminPlatformSettingsPage() {
                       </p>
                     </div>
                   </div>
+                  {draftChanges?.planProblem && (
+                    <p className="text-sm text-destructive" role="alert">
+                      {draftChanges.planProblem}
+                    </p>
+                  )}
                   <Button
                     onClick={handlePropose}
                     disabled={
                       proposing ||
                       !draftChanges ||
                       Boolean(draftChanges.invalid) ||
+                      Boolean(draftChanges.planProblem) ||
                       Object.keys(draftChanges.changes).length === 0
                     }
                     className="gap-2"

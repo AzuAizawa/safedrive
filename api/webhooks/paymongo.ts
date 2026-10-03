@@ -728,7 +728,35 @@ export default async function handler(req: Request) {
         );
       }
 
-      const expectedAmountInCentavos = plan.amountPhp * 100;
+      // The amount this checkout was opened for, as the checkout endpoint
+      // recorded it - the plan price is a setting (CHAPTER 115) and may have
+      // changed since. Falls back to the current setting, then the built-in
+      // price, for a checkout opened before the price was recorded.
+      const { data: checkoutAudit } = await supabase
+        .from("audit_log")
+        .select("details")
+        .eq("action", "subscription_checkout_created")
+        .eq("entity_id", checkoutId)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle();
+      const recordedPhp = Number(
+        (checkoutAudit?.details as { amount_php?: unknown } | null)?.amount_php,
+      );
+      const { data: priceSettings } = await supabase
+        .from("platform_settings")
+        .select("pro_price_php, premium_price_php")
+        .eq("id", "default")
+        .maybeSingle();
+      const settingPhp = Number(
+        plan.id === "premium" ? priceSettings?.premium_price_php : priceSettings?.pro_price_php,
+      );
+      const expectedPhp = Number.isInteger(recordedPhp) && recordedPhp > 0
+        ? recordedPhp
+        : Number.isInteger(settingPhp) && settingPhp > 0
+          ? settingPhp
+          : plan.amountPhp;
+      const expectedAmountInCentavos = expectedPhp * 100;
       if (paidAmountInCentavos !== expectedAmountInCentavos) {
         await recordWebhookSecurityEvent("failed", {
           reason: "Subscription paid amount mismatch",
@@ -885,7 +913,7 @@ export default async function handler(req: Request) {
         entity_id: checkoutId,
         details: {
           plan_id: plan.id,
-          amount_php: plan.amountPhp,
+          amount_php: expectedPhp,
           amount_in_centavos: paidAmountInCentavos,
           reference_number: referenceNumber,
           provider_payment_id: paymongoPaymentMetadata.paymentId,

@@ -14,8 +14,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getCurrentSubscription } from "@/lib/subscriptions";
 import {
   planExtraSlots,
-  useVehicleSlotSettings,
-  type VehicleSlotSettings,
+  usePlanSettings,
+  type PlanSettings,
 } from "@/lib/platformSettings";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { toast } from "sonner";
@@ -43,9 +43,10 @@ interface Subscription {
 
 const slotWord = (count: number) => `${count} slot${count === 1 ? "" : "s"}`;
 
-// Slot numbers come from the live platform setting (CHAPTER 112), so what this
-// page promises is what the database allows.
-const buildPlans = (slots: VehicleSlotSettings) => [
+// Slots and prices come from the live platform settings (CHAPTERS 112 and
+// 115), so what this page promises is what the database allows and what the
+// checkout charges.
+const buildPlans = (slots: PlanSettings) => [
   {
     id: "free",
     label: "Free",
@@ -63,7 +64,7 @@ const buildPlans = (slots: VehicleSlotSettings) => [
   {
     id: "pro",
     label: "Pro",
-    priceLabel: "PHP 199",
+    priceLabel: `PHP ${slots.proPricePhp.toLocaleString()}`,
     period: "/ month",
     tagline: "Add more vehicle slots.",
     icon: Zap,
@@ -83,7 +84,7 @@ const buildPlans = (slots: VehicleSlotSettings) => [
   {
     id: "premium",
     label: "Premium",
-    priceLabel: "PHP 299",
+    priceLabel: `PHP ${slots.premiumPricePhp.toLocaleString()}`,
     period: "/ month",
     tagline: "Maximum vehicle slots for current release.",
     icon: Star,
@@ -114,7 +115,7 @@ export default function SubscriptionPlansPage() {
   const [upgrading, setUpgrading] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const slotSettings = useVehicleSlotSettings();
+  const slotSettings = usePlanSettings();
   const plans = buildPlans(slotSettings);
   const currentTotalSlots = slotSettings.free + planExtraSlots(slotSettings, currentSub?.plan_type);
 

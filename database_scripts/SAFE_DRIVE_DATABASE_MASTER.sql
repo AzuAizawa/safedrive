@@ -18113,4 +18113,187 @@ commit;
 --        '1';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 115 - Plan prices are a setting, and a higher plan is always better
+-- ============================================================================
+-- CHAPTER 112 made the slot counts settings. The prices stayed in code: PHP 199
+-- for Pro and PHP 299 for Premium, written into the checkout and again into
+-- the payment webhook.
+--
+--   pro_price_php, premium_price_php   whole pesos, 100 to 10,000 each
+--                                      (defaults 199 and 299, today's prices)
+--
+-- They change through the same system-admin vote. A new price applies to new
+-- purchases; a plan already paid for runs its 30 days. A checkout opened before
+-- a change is honoured at the price it showed: the webhook checks the amount
+-- against what the checkout recorded, not against the new price.
+--
+-- The plans must also stay in order, so that paying more always buys more:
+--   Free slots  <  Pro total slots  <  Premium total slots
+--   Pro price   <  Premium price
+-- With CHAPTER 112 alone, an admin could have voted Premium to 3 slots while
+-- Pro gave 5 for less money. The vote now refuses that at proposal time, and a
+-- deferred check on the settings row refuses it at commit, after every key in
+-- a change has been written.
+begin;
+
+alter table public.platform_settings
+  add column if not exists pro_price_php integer not null default 199,
+  add column if not exists premium_price_php integer not null default 299;
+
+alter table public.platform_settings
+  drop constraint if exists platform_settings_pro_price_php_check,
+  drop constraint if exists platform_settings_premium_price_php_check;
+alter table public.platform_settings
+  add constraint platform_settings_pro_price_php_check
+    check (pro_price_php >= 100 and pro_price_php <= 10000),
+  add constraint platform_settings_premium_price_php_check
+    check (premium_price_php >= 100 and premium_price_php <= 10000);
+
+comment on column public.platform_settings.pro_price_php is
+  'Price in whole pesos of a 30-day Pro plan, for new purchases (CHAPTER 115).';
+comment on column public.platform_settings.premium_price_php is
+  'Price in whole pesos of a 30-day Premium plan, for new purchases (CHAPTER 115).';
+
+-- The order rule, in one place, for both the vote and the row.
+create or replace function public.check_plan_order(p_values jsonb)
+returns void
+language plpgsql
+immutable
+as $plan_order$
+begin
+  if coalesce((p_values ->> 'pro_extra_vehicle_slots')::numeric, 0) < 1 then
+    raise exception 'Pro must give more vehicle slots than Free: its extra slots must be at least 1';
+  end if;
+  if coalesce((p_values ->> 'premium_extra_vehicle_slots')::numeric, 0)
+     <= coalesce((p_values ->> 'pro_extra_vehicle_slots')::numeric, 0) then
+    raise exception 'Premium must give more vehicle slots than Pro';
+  end if;
+  if coalesce((p_values ->> 'premium_price_php')::numeric, 0)
+     <= coalesce((p_values ->> 'pro_price_php')::numeric, 0) then
+    raise exception 'Premium must cost more than Pro';
+  end if;
+end;
+$plan_order$;
+
+create or replace function public.trg_check_plan_order()
+returns trigger
+language plpgsql
+as $trg_plan_order$
+begin
+  -- Read the row as it stands at commit. NEW is the row as of each single
+  -- update, and a change written one key at a time can be out of order in
+  -- between.
+  perform public.check_plan_order(to_jsonb(s))
+     from public.platform_settings s
+    where s.id = new.id;
+  return new;
+end;
+$trg_plan_order$;
+
+drop trigger if exists check_plan_order on public.platform_settings;
+create constraint trigger check_plan_order
+after insert or update on public.platform_settings
+deferrable initially deferred
+for each row execute function public.trg_check_plan_order();
+
+-- The settings whitelist, reproduced from CHAPTER 112 with the two price keys
+-- and the plan-order check added. It now reads the current settings, so it is
+-- stable rather than immutable.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+stable
+set search_path = public
+as $validate$
+declare
+  k text;
+  v numeric;
+  merged jsonb;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'short_notice_free_hours' then
+      if v < 0 or v > 24 or v <> floor(v) then raise exception 'short_notice_free_hours must be a whole number 0-24'; end if;
+    elsif k in ('late_cancel_fee_days', 'no_show_fee_days') then
+      if v < 0 or v > 30 then raise exception '% must be 0-30 days', k; end if;
+    elsif k in ('short_trip_late_cancel_fee_days', 'short_trip_no_show_fee_days') then
+      if v < 0 or v > 2 then raise exception '% must be 0-2 days', k; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    elsif k = 'dormant_account_days' then
+      if v < 90 or v > 3650 or v <> floor(v) then raise exception 'dormant_account_days must be a whole number 90-3650'; end if;
+    elsif k = 'no_show_grace_minutes' then
+      if v < 15 or v > 180 or v <> floor(v) then raise exception 'no_show_grace_minutes must be a whole number 15-180'; end if;
+    elsif k = 'mutual_no_show_close_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'mutual_no_show_close_hours must be a whole number 1-72'; end if;
+    elsif k = 'min_booking_notice_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'min_booking_notice_hours must be a whole number 1-168'; end if;
+    elsif k = 'account_deletion_grace_days' then
+      if v < 7 or v > 90 or v <> floor(v) then raise exception 'account_deletion_grace_days must be a whole number 7-90'; end if;
+    elsif k = 'free_vehicle_slots' then
+      if v < 1 or v > 100 or v <> floor(v) then raise exception 'free_vehicle_slots must be a whole number 1-100'; end if;
+    elsif k in ('pro_extra_vehicle_slots', 'premium_extra_vehicle_slots') then
+      if v < 0 or v > 100 or v <> floor(v) then raise exception '% must be a whole number 0-100', k; end if;
+    elsif k in ('pro_price_php', 'premium_price_php') then
+      if v < 100 or v > 10000 or v <> floor(v) then raise exception '% must be a whole number of pesos 100-10000', k; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+
+  -- A higher plan is always the better deal, judged on the values as they
+  -- would stand after this change. Checked only when a plan value moves, so
+  -- an unrelated change is never held up by it.
+  if p_changes ?| array['free_vehicle_slots', 'pro_extra_vehicle_slots',
+                        'premium_extra_vehicle_slots', 'pro_price_php', 'premium_price_php'] then
+    select coalesce(to_jsonb(s), '{}'::jsonb) || p_changes
+      into merged
+      from public.platform_settings s
+     where s.id = 'default';
+    perform public.check_plan_order(merged);
+  end if;
+end;
+$validate$;
+
+
+revoke all on function public.validate_platform_setting_change(jsonb) from public, anon, authenticated;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'plan prices' as check_name,
+--        (select pro_price_php || '/' || premium_price_php
+--           from public.platform_settings where id = 'default') as result,
+--        '199/299' as expected
+-- union all
+-- select 'plan order is guarded',
+--        (select count(*)::text from pg_trigger where tgname = 'check_plan_order'),
+--        '1';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

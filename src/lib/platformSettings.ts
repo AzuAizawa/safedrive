@@ -460,19 +460,24 @@ export const fetchVehicleReviewTargetHours = async (): Promise<number> => {
     : DEFAULT_VEHICLE_REVIEW_TARGET_HOURS;
 };
 
-// CHAPTER 112. How many live listings each plan allows, from the live setting
-// rather than numbers written into the page. The database applies the same
-// rule (vehicle_slot_allowance), so these are for showing, not for enforcing.
-export type VehicleSlotSettings = {
+// CHAPTERS 112 and 115. How many live listings each plan allows and what the
+// paid plans cost, from the live settings rather than numbers written into the
+// page. The database applies the same rules (vehicle_slot_allowance, and the
+// checkout reads the price itself), so these are for showing, not enforcing.
+export type PlanSettings = {
   free: number;
   proExtra: number;
   premiumExtra: number;
+  proPricePhp: number;
+  premiumPricePhp: number;
 };
 
-export const DEFAULT_VEHICLE_SLOT_SETTINGS: VehicleSlotSettings = {
+export const DEFAULT_PLAN_SETTINGS: PlanSettings = {
   free: 5,
   proExtra: 5,
   premiumExtra: 10,
+  proPricePhp: 199,
+  premiumPricePhp: 299,
 };
 
 const slotOr = (value: unknown, fallback: number, min: number) => {
@@ -480,34 +485,43 @@ const slotOr = (value: unknown, fallback: number, min: number) => {
   return Number.isInteger(number) && number >= min && number <= 100 ? number : fallback;
 };
 
-export const fetchVehicleSlotSettings = async (): Promise<VehicleSlotSettings> => {
+const priceOr = (value: unknown, fallback: number) => {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 100 && number <= 10000 ? number : fallback;
+};
+
+export const fetchPlanSettings = async (): Promise<PlanSettings> => {
   const { data, error } = await supabase
     .from("platform_settings")
-    .select("free_vehicle_slots, pro_extra_vehicle_slots, premium_extra_vehicle_slots")
+    .select(
+      "free_vehicle_slots, pro_extra_vehicle_slots, premium_extra_vehicle_slots, pro_price_php, premium_price_php",
+    )
     .eq("id", "default")
     .maybeSingle();
 
   if (error) {
-    console.error("Failed to load vehicle slot settings:", error);
-    return DEFAULT_VEHICLE_SLOT_SETTINGS;
+    console.error("Failed to load plan settings:", error);
+    return DEFAULT_PLAN_SETTINGS;
   }
 
   return {
-    free: slotOr(data?.free_vehicle_slots, DEFAULT_VEHICLE_SLOT_SETTINGS.free, 1),
-    proExtra: slotOr(data?.pro_extra_vehicle_slots, DEFAULT_VEHICLE_SLOT_SETTINGS.proExtra, 0),
-    premiumExtra: slotOr(data?.premium_extra_vehicle_slots, DEFAULT_VEHICLE_SLOT_SETTINGS.premiumExtra, 0),
+    free: slotOr(data?.free_vehicle_slots, DEFAULT_PLAN_SETTINGS.free, 1),
+    proExtra: slotOr(data?.pro_extra_vehicle_slots, DEFAULT_PLAN_SETTINGS.proExtra, 0),
+    premiumExtra: slotOr(data?.premium_extra_vehicle_slots, DEFAULT_PLAN_SETTINGS.premiumExtra, 0),
+    proPricePhp: priceOr(data?.pro_price_php, DEFAULT_PLAN_SETTINGS.proPricePhp),
+    premiumPricePhp: priceOr(data?.premium_price_php, DEFAULT_PLAN_SETTINGS.premiumPricePhp),
   };
 };
 
 /** Extra live listings a plan adds; anything unknown (including Free) adds none. */
-export const planExtraSlots = (settings: VehicleSlotSettings, planType: string | null | undefined) =>
+export const planExtraSlots = (settings: PlanSettings, planType: string | null | undefined) =>
   planType === "pro" ? settings.proExtra : planType === "premium" ? settings.premiumExtra : 0;
 
-export const useVehicleSlotSettings = () => {
-  const [settings, setSettings] = useState<VehicleSlotSettings>(DEFAULT_VEHICLE_SLOT_SETTINGS);
+export const usePlanSettings = () => {
+  const [settings, setSettings] = useState<PlanSettings>(DEFAULT_PLAN_SETTINGS);
   useEffect(() => {
     let active = true;
-    void fetchVehicleSlotSettings().then((value) => {
+    void fetchPlanSettings().then((value) => {
       if (active) setSettings(value);
     });
     return () => {

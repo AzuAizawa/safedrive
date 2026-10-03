@@ -56,7 +56,7 @@ import {
   useVerificationEtaMessages,
   describeWaitingSince,
   planExtraSlots,
-  useVehicleSlotSettings,
+  usePlanSettings,
 } from "@/lib/platformSettings";
 import type { CarBrand, CarModel } from "@/types/database";
 import {
@@ -504,7 +504,7 @@ export default function MyVehiclesPage() {
   const navigate = useNavigate();
   const { userMessage: userVerificationEta, vehicleMessage: vehicleVerificationEta } =
     useVerificationEtaMessages();
-  const slotSettings = useVehicleSlotSettings();
+  const slotSettings = usePlanSettings();
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [vehicleTab, setVehicleTab] = useState<VehicleTab>("in_review");
   const [loading, setLoading] = useState(true);
