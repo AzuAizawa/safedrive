@@ -42,7 +42,7 @@ export default async function handler(req: Request) {
       supabase.from("profiles").select("role").eq("id", actor.id).maybeSingle(),
       supabase
         .from("car_documents")
-        .select("id, document_type, compliance_status, review_reason, reviewed_at, cars(owner_id, plate_number)")
+        .select("id, car_id, document_type, compliance_status, review_reason, reviewed_at, cars(owner_id, plate_number, status)")
         .eq("id", documentId)
         .single(),
     ]);
@@ -59,11 +59,12 @@ export default async function handler(req: Request) {
 
     const typed = document as unknown as {
       id: string;
+      car_id: string;
       document_type: string;
       compliance_status: string;
       review_reason: string | null;
       reviewed_at: string | null;
-      cars: { owner_id: string; plate_number: string | null } | null;
+      cars: { owner_id: string; plate_number: string | null; status: string } | null;
     };
 
     // Only email what the document's current state actually says happened.
@@ -71,14 +72,19 @@ export default async function handler(req: Request) {
       return respond({ error: "Document is not waiting for a correction; refresh before sending email" }, 409);
     }
 
-    const { data: message, error: messageError } = await supabase.rpc(
-      "vehicle_document_correction_message",
-      {
+    // A car still in review is corrected from My Vehicles; an approved or live
+    // one from Document Renewal & Updates. The words and link come from the
+    // same functions the in-app notice used.
+    const inReview = ["pending", "rejected"].includes(typed.cars.status);
+    const [{ data: message, error: messageError }, { data: link }] = await Promise.all([
+      supabase.rpc("vehicle_document_correction_message", {
         p_document_type: typed.document_type,
         p_plate: typed.cars.plate_number ?? "",
         p_reason: typed.review_reason ?? "",
-      },
-    );
+        p_in_review: inReview,
+      }),
+      supabase.rpc("vehicle_document_fix_link", { p_car_id: typed.car_id, p_status: typed.cars.status }),
+    ]);
     if (messageError || typeof message !== "string") {
       return respond({ error: "Correction message could not be prepared" }, 500);
     }
@@ -101,7 +107,7 @@ export default async function handler(req: Request) {
       userId: typed.cars.owner_id,
       title: "A vehicle document needs correction",
       message,
-      link: "/car-renewals",
+      link: typeof link === "string" ? link : inReview ? "/my-vehicles" : "/car-renewals",
       baseOrigin: new URL(req.url).origin,
       // A document can be sent back once; a replacement is a new document.
       eventKey: `document-correction:${typed.id}:${typed.reviewed_at ?? ""}`,

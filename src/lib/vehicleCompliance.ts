@@ -138,3 +138,44 @@ export function expiryChipTone(chip: ExpiryChip): string {
     return "border-red-500/30 bg-red-500/5 text-red-600";
   return "border-amber-500/30 bg-amber-500/5 text-amber-600";
 }
+
+export type CorrectionRow = {
+  document_type: string;
+  compliance_status: string;
+  review_reason: string | null;
+  created_at: string;
+};
+
+export type DocumentCorrection = {
+  type: ComplianceDocumentType;
+  label: string;
+  short: string;
+  reason: string | null;
+  /** A corrected file is already filed and waiting for the admin. */
+  waiting: boolean;
+};
+
+/**
+ * The documents an admin sent back that the lister still has to answer, from
+ * one car's car_documents rows. Each requirement is judged by its newest file:
+ * a rejected or revoked newest file needs correcting; a newer pending file
+ * after a rejected one means the correction is already with the admin.
+ */
+export const documentsNeedingCorrection = (rows: CorrectionRow[]): DocumentCorrection[] =>
+  COMPLIANCE_DOCUMENTS.flatMap((document): DocumentCorrection[] => {
+    const matching = rows
+      .filter((row) => matchesDocumentType(row.document_type, document.type))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const newest = matching[0];
+    if (!newest) return [];
+    const sentBack = (row: CorrectionRow) =>
+      row.compliance_status === "rejected" || row.compliance_status === "revoked";
+    if (sentBack(newest)) {
+      return [{ type: document.type, label: document.label, short: document.short, reason: newest.review_reason, waiting: false }];
+    }
+    const previous = matching[1];
+    if (newest.compliance_status === "pending" && previous && sentBack(previous)) {
+      return [{ type: document.type, label: document.label, short: document.short, reason: previous.review_reason, waiting: true }];
+    }
+    return [];
+  });

@@ -38,7 +38,7 @@ async function fixture() {
     create function public.vehicle_compliance_summary(uuid, timestamptz, timestamptz)
       returns jsonb language sql as $$ select '{"eligible": false}'::jsonb $$;
 
-    create table public.cars(id uuid primary key, owner_id uuid not null, plate_number text);
+    create table public.cars(id uuid primary key, owner_id uuid not null, plate_number text, status text default 'pending');
     create table public.car_renewals(
       id uuid primary key, car_id uuid, document_update boolean, status text, reviewed_at timestamptz);
     create table public.car_documents(
@@ -53,7 +53,7 @@ async function fixture() {
       id uuid primary key default gen_random_uuid(), user_id uuid, action text, entity_type text,
       entity_id text, details jsonb);
 
-    insert into public.cars values ('${CAR}', '${OWNER}', 'TES1234');
+    insert into public.cars values ('${CAR}', '${OWNER}', 'TES1234', 'pending');
     insert into public.car_renewals values ('${RENEWAL}', '${CAR}', true, 'pending', null);
     insert into public.car_documents(id, car_id, document_type) values
       ('${BIR}', '${CAR}', 'bir'), ('${OR_DOC}', '${CAR}', 'or');
@@ -72,7 +72,7 @@ const review = (db, id, status, reason = "") =>
 const notices = async (db) =>
   (await db.query("select title, message, link from public.notifications order by title")).rows;
 
-test("a rejected document of a new listing tells its owner what to fix", async () => {
+test("a rejected document of a car in review is fixed from My Vehicles", async () => {
   const db = await fixture();
   await review(db, BIR, "rejected", "wrong expiration date");
   const rows = await notices(db);
@@ -80,9 +80,19 @@ test("a rejected document of a new listing tells its owner what to fix", async (
   assert.equal(rows[0].title, "A vehicle document needs correction");
   assert.equal(
     rows[0].message,
-    "Your BIR Certificate of Registration for TES1234 needs correction: wrong expiration date. Upload a new one from Document Renewal & Updates.",
+    "Your BIR Certificate of Registration for TES1234 needs correction: wrong expiration date. Open My Vehicles and upload a corrected one.",
   );
-  assert.equal(rows[0].link, "/car-renewals");
+  assert.equal(rows[0].link, `/my-vehicles?fix=${CAR}`);
+});
+
+test("a document revoked on a live car is renewed from Document Renewal & Updates", async () => {
+  const db = await fixture();
+  await db.exec(`update public.cars set status = 'approved'`);
+  await review(db, OR_DOC, "revoked", "registration lapsed");
+  const rows = await notices(db);
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].message, /Upload a new one from Document Renewal & Updates\.$/);
+  assert.equal(rows[0].link, `/car-renewals?car=${CAR}`);
 });
 
 test("approving a document says nothing", async () => {
@@ -98,12 +108,40 @@ test("a document in a renewal under review is left to the renewal's own notice",
   const rows = await notices(db);
   assert.equal(rows.length, 1, "one notice, not two");
   assert.equal(rows[0].title, "Document resubmission reviewed");
+  assert.match(rows[0].message, /Open My Vehicles and choose Edit/, "the car is still in review");
+  assert.equal(rows[0].link, `/my-vehicles?fix=${CAR}`);
 });
 
 test("a reason ending in a full stop is not doubled", async () => {
   const db = await fixture();
   const { rows } = await db.query(
-    "select public.vehicle_document_correction_message('or', 'ABC 1234', 'Blurry photo.') as m",
+    "select public.vehicle_document_correction_message('or', 'ABC 1234', 'Blurry photo.', false) as m",
   );
   assert.equal(rows[0].m, "Your LTO registration / OR for ABC 1234 needs correction: Blurry photo. Upload a new one from Document Renewal & Updates.");
+});
+
+// The same rule, as My Vehicles reads it to decide what the card and Edit show.
+test("My Vehicles names exactly the documents still waiting on the lister", async () => {
+  const { documentsNeedingCorrection } = await import("../src/lib/vehicleCompliance.ts");
+  const row = (document_type, compliance_status, created_at, review_reason = null) => ({
+    document_type, compliance_status, created_at, review_reason,
+  });
+  const found = documentsNeedingCorrection([
+    row("bir", "rejected", "2026-10-03T13:04:00Z", "wrong expiration date"),
+    row("or", "approved", "2026-10-03T13:04:00Z"),
+    row("ctpl", "rejected", "2026-10-03T13:04:00Z", "blurry"),
+    row("ctpl", "pending", "2026-10-03T14:00:00Z"),
+  ]);
+  assert.deepEqual(
+    found.map((item) => [item.type, item.waiting, item.reason]),
+    [["ctpl", true, "blurry"], ["bir", false, "wrong expiration date"]],
+  );
+  assert.deepEqual(
+    documentsNeedingCorrection([
+      row("bir", "rejected", "2026-10-03T13:04:00Z", "old"),
+      row("bir", "approved", "2026-10-03T13:16:00Z"),
+    ]),
+    [],
+    "a corrected and approved document needs nothing more",
+  );
 });

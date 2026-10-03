@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import VehicleCompliancePanel from "@/components/VehicleCompliancePanel";
@@ -30,7 +30,9 @@ export default function ListerCarRenewalPage() {
   const load=useCallback(async()=>{
     if(!user) return;
     // A deleted or removed car takes no documents: its review queue is gone (CHAPTER 95).
-    const {data,error:e}=await supabase.from("cars").select("id,plate_number,status").eq("owner_id",user.id).is("deleted_at",null).order("created_at",{ascending:false});
+    // A car still in review is corrected from My Vehicles' Edit (CHAPTER 118);
+    // this page is for vehicles already approved or live.
+    const {data,error:e}=await supabase.from("cars").select("id,plate_number,status").eq("owner_id",user.id).is("deleted_at",null).not("status","in","(pending,rejected)").order("created_at",{ascending:false});
     setError(e?.message ?? "");setCars(data ?? []);setLoading(false);
     // The expiry dates live on the documents, not on cars - that is the only
     // place the DTI and the Mayor's Permit dates have ever been recorded.
@@ -46,6 +48,7 @@ export default function ListerCarRenewalPage() {
   return <main className="mx-auto max-w-4xl space-y-5 px-4 py-6">
     <h1 className="text-3xl font-bold">Document Renewal & Updates</h1>
     <p className="text-muted-foreground">Choose a vehicle to renew expired documents or optionally update business and vehicle documents. Every vehicle has its own uploads and admin review.</p>
+    <p className="text-sm text-muted-foreground">Vehicles still in review are not listed here: a document the admin sends back is corrected from <Link to="/my-vehicles" className="font-medium text-primary underline underline-offset-2">My Vehicles</Link>, under Edit.</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {loading ? <p>Loading vehicles…</p> : selected ? <>
       <Button variant="outline" onClick={()=>setParams({})}>Back to vehicles</Button>
@@ -64,7 +67,7 @@ export default function ListerCarRenewalPage() {
           <span className="mt-3 block text-sm text-primary">Renew / update documents</span>
         </button>;
       })}
-      {!cars.length && <p>You have no vehicles yet.</p>}
+      {!cars.length && <p>You have no approved vehicles yet.</p>}
     </div>}
   </main>;
 }

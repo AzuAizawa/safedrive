@@ -18496,6 +18496,12 @@ commit;
 -- notification when a document is rejected or revoked: which document, which
 -- car, the admin's reason, and where to upload a new one. A document that is
 -- part of a renewal still under review is left to that renewal's own notice.
+--
+-- Where to upload depends on the car. A car still in review (pending or
+-- rejected) is corrected from My Vehicles, under Edit, which shows only the
+-- documents sent back; Document Renewal & Updates lists approved and live
+-- cars only. The notice, its link and the renewal summary notice follow the
+-- same rule.
 -- The same words are emailed by api/send-document-correction-email.ts, which
 -- reads them from vehicle_document_correction_message below so the two
 -- cannot drift apart.
@@ -18504,14 +18510,15 @@ begin;
 create or replace function public.vehicle_document_correction_message(
   p_document_type text,
   p_plate text,
-  p_reason text
+  p_reason text,
+  p_in_review boolean
 )
 returns text
 language sql
 immutable
 as $correction_message$
   select format(
-    'Your %s for %s needs correction: %s. Upload a new one from Document Renewal & Updates.',
+    'Your %s for %s needs correction: %s. %s',
     case p_document_type
       when 'or' then 'LTO registration / OR'
       when 'orcr' then 'OR/CR'
@@ -18525,11 +18532,29 @@ as $correction_message$
       else replace(p_document_type, '_', ' ')
     end,
     coalesce(nullif(trim(p_plate), ''), 'your vehicle'),
-    rtrim(coalesce(nullif(trim(p_reason), ''), 'see the review note'), '.'));
+    rtrim(coalesce(nullif(trim(p_reason), ''), 'see the review note'), '.'),
+    case when p_in_review
+      then 'Open My Vehicles and upload a corrected one.'
+      else 'Upload a new one from Document Renewal & Updates.'
+    end);
 $correction_message$;
 
-grant execute on function public.vehicle_document_correction_message(text, text, text)
+grant execute on function public.vehicle_document_correction_message(text, text, text, boolean)
   to authenticated, service_role;
+
+-- Where a document notice for this car should lead.
+create or replace function public.vehicle_document_fix_link(p_car_id uuid, p_status text)
+returns text
+language sql
+immutable
+as $fix_link$
+  select case when p_status in ('pending', 'rejected')
+    then '/my-vehicles?fix=' || p_car_id
+    else '/car-renewals?car=' || p_car_id
+  end;
+$fix_link$;
+
+grant execute on function public.vehicle_document_fix_link(uuid, text) to authenticated, service_role;
 
 create or replace function public.review_vehicle_documents(p_car_id uuid,p_reviews jsonb)
 returns jsonb language plpgsql security definer set search_path=public as $review$
@@ -18580,8 +18605,9 @@ begin
     ) then
       insert into public.notifications(user_id,title,message,type,link)
         select c.owner_id,'A vehicle document needs correction',
-          public.vehicle_document_correction_message(d.document_type,c.plate_number,item->>'reason'),
-          'warning','/car-renewals'
+          public.vehicle_document_correction_message(d.document_type,c.plate_number,item->>'reason',
+            c.status in ('pending','rejected')),
+          'warning',public.vehicle_document_fix_link(c.id,c.status)
         from public.cars c where c.id=p_car_id;
     end if;
   end loop;
@@ -18591,9 +18617,11 @@ begin
       update public.car_renewals set status=case when has_rejected then 'rejected' else 'approved' end,reviewed_at=now() where id=rid;
       insert into public.notifications(user_id,title,message,type,link)
         select owner_id,'Document resubmission reviewed',
-          case when has_rejected then 'Some documents need correction. Open Document Renewal & Updates for the review reasons.'
+          case when has_rejected and status in ('pending','rejected')
+            then 'Some documents need correction. Open My Vehicles and choose Edit for the review reasons.'
+          when has_rejected then 'Some documents need correction. Open Document Renewal & Updates for the review reasons.'
           else 'Your updated documents were approved. Booking availability follows all approved document validity dates.' end,
-          'vehicle','/car-renewals' from public.cars where id=p_car_id;
+          'vehicle',public.vehicle_document_fix_link(id,status) from public.cars where id=p_car_id;
     end if;
   end loop;
   perform public.refresh_vehicle_compliance(p_car_id);
@@ -18608,8 +18636,8 @@ commit;
 
 -- Read-only verification after applying this chapter:
 -- select 'correction message' as check_name,
---        public.vehicle_document_correction_message('bir', 'TES1234', 'wrong expiration date') as result,
---        'Your BIR Certificate of Registration for TES1234 needs correction: wrong expiration date. Upload a new one from Document Renewal & Updates.' as expected
+--        public.vehicle_document_correction_message('bir', 'TES1234', 'wrong expiration date', true) as result,
+--        'Your BIR Certificate of Registration for TES1234 needs correction: wrong expiration date. Open My Vehicles and upload a corrected one.' as expected
 -- union all
 -- select 'review tells the lister',
 --        (select case when position('vehicle_document_correction_message' in prosrc) > 0 then 'yes' else 'no' end

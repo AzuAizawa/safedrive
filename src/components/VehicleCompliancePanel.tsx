@@ -203,12 +203,21 @@ export default function VehicleCompliancePanel({
   admin = false,
   onChange,
   authenticity,
+  onlyTypes,
+  compact = false,
 }: {
   carId: string;
   admin?: boolean;
   onChange?: () => void;
   /** The reviewer's AI-image checks for this vehicle (CHAPTER 108). Admin only. */
   authenticity?: ImageAuthenticityState;
+  /**
+   * Only these requirements, e.g. the documents an admin sent back on a car
+   * still in review (shown inside My Vehicles' Edit). All of them otherwise.
+   */
+  onlyTypes?: string[];
+  /** Leave out the coverage summary and the general intro, for use inside a dialog. */
+  compact?: boolean;
 }) {
   const { user } = useAuth();
   const [documents, setDocuments] = useState<ComplianceDocument[]>([]);
@@ -341,10 +350,12 @@ export default function VehicleCompliancePanel({
   };
 
   return (
-    <section className="space-y-4 rounded-xl border p-4">
-      <h2 className="text-lg font-semibold">
-        {admin ? "Document verification & resubmissions" : "Document Renewal & Updates"}
-      </h2>
+    <section className={compact ? "space-y-3" : "space-y-4 rounded-xl border p-4"}>
+      {!compact && (
+        <h2 className="text-lg font-semibold">
+          {admin ? "Document verification & resubmissions" : "Document Renewal & Updates"}
+        </h2>
+      )}
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           Document verification is unavailable: {error}. Booking remains disabled until verification is
@@ -352,7 +363,7 @@ export default function VehicleCompliancePanel({
         </p>
       ) : (
         <>
-          {summary && (
+          {summary && !compact && (
             <div
               className={`rounded-lg p-3 text-sm ${summary.eligible ? "bg-green-500/10" : "bg-amber-500/10"}`}
             >
@@ -375,11 +386,13 @@ export default function VehicleCompliancePanel({
               )}
             </div>
           )}
-          <p className="text-sm text-muted-foreground">
-            Only upload documents you need to replace. CR and BIR have no regular expiry. Pending
-            replacements do not extend approved coverage.
-          </p>
-          {COMPLIANCE_DOCUMENTS.map((type) => {
+          {!compact && (
+            <p className="text-sm text-muted-foreground">
+              Only upload documents you need to replace. CR and BIR have no regular expiry. Pending
+              replacements do not extend approved coverage.
+            </p>
+          )}
+          {COMPLIANCE_DOCUMENTS.filter((type) => !onlyTypes || onlyTypes.includes(type.type)).map((type) => {
             const matching = documents.filter((d) => matchesDocumentType(d.document_type, type.type));
             const pending = matching.some((d) => d.compliance_status === "pending" && d.renewal_id);
             const needs = summary?.reasons.includes(`${type.type}_coverage_required`);
@@ -536,7 +549,7 @@ export default function VehicleCompliancePanel({
           })}
           {!admin && (
             <Button type="button" disabled={busy} onClick={() => void submit()}>
-              {busy ? "Submitting…" : "Submit updated documents"}
+              {busy ? "Submitting…" : compact ? "Submit corrected documents" : "Submit updated documents"}
             </Button>
           )}
         </>

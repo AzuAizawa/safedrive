@@ -1,9 +1,15 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
-import { expiryDateToIso } from "@/lib/vehicleCompliance";
+import {
+  documentsNeedingCorrection,
+  expiryDateToIso,
+  type CorrectionRow,
+  type DocumentCorrection,
+} from "@/lib/vehicleCompliance";
+import VehicleCompliancePanel from "@/components/VehicleCompliancePanel";
 import {
   hashFileSha256,
   inspectContentProvenance,
@@ -521,6 +527,10 @@ export default function MyVehiclesPage() {
   } | null>(null);
 
   const [editVehicle, setEditVehicle] = useState<VehicleRow | null>(null);
+  // Documents an admin sent back, per car (CHAPTER 118). A car still in review
+  // is corrected from here, not from Document Renewal & Updates.
+  const [corrections, setCorrections] = useState<Record<string, DocumentCorrection[]>>({});
+  const [searchParams, setSearchParams] = useSearchParams();
   const [editPrice, setEditPrice] = useState("");
   const [editMileage, setEditMileage] = useState("");
   const [editEarlyReturnResponseWindowHours, setEditEarlyReturnResponseWindowHours] = useState("");
@@ -788,6 +798,26 @@ export default function MyVehiclesPage() {
     return blocks;
   };
 
+  const loadCorrections = async (carIds: string[]) => {
+    if (carIds.length === 0) return {};
+    const { data, error } = await supabase
+      .from("car_documents")
+      .select("car_id, document_type, compliance_status, review_reason, created_at")
+      .in("car_id", carIds);
+    if (error) {
+      console.warn("Unable to load document reviews:", error.message);
+      return {};
+    }
+    const byCar: Record<string, DocumentCorrection[]> = {};
+    for (const carId of carIds) {
+      const found = documentsNeedingCorrection(
+        ((data ?? []) as Array<CorrectionRow & { car_id: string }>).filter((row) => row.car_id === carId),
+      );
+      if (found.length) byCar[carId] = found;
+    }
+    return byCar;
+  };
+
   const fetchVehicles = useCallback(async () => {
     setLoading(true);
     try {
@@ -803,6 +833,7 @@ export default function MyVehiclesPage() {
         const rows = data as unknown as VehicleRow[];
         setVehicles(rows);
         setDeleteBlocks(await loadDeleteBlocks(rows.map((row) => row.id)));
+        setCorrections(await loadCorrections(rows.map((row) => row.id)));
       }
     } catch (err) {
       console.error("Unexpected error fetching vehicles:", err);
@@ -1146,6 +1177,45 @@ export default function MyVehiclesPage() {
       setSubmitting(false);
     }
   };
+
+  const openEditor = (v: VehicleRow) => {
+        const parsedLocation = parseStoredLocation(v.location);
+        setEditVehicle(v);
+        setEditPrice(v.price_per_day == null ? "" : String(v.price_per_day));
+        setEditMileage(v.mileage == null ? "" : String(v.mileage));
+        setEditEarlyReturnResponseWindowHours(
+          v.early_return_response_window_hours != null &&
+            v.early_return_response_window_hours >= MIN_EARLY_RETURN_RESPONSE_HOURS &&
+            v.early_return_response_window_hours <= MAX_EARLY_RETURN_RESPONSE_HOURS
+            ? String(v.early_return_response_window_hours)
+            : String(MAX_EARLY_RETURN_RESPONSE_HOURS),
+        );
+        setEditLocation(parsedLocation.region);
+        setEditCity(parsedLocation.city);
+        setEditSpecificLocation(parsedLocation.specificLocation);
+        setEditFuelCategory(v.fuel_category || "");
+        setEditFuelSubtype(v.fuel_subtype || "");
+        setEditTransmission(v.transmission || "");
+        setEditGpsAvailable(Boolean(v.gps_available));
+        setEditContact(v.contact_number || profile?.phone || "");
+        setEditAdditionalInfo(v.additional_info || "");
+        setEditRentalUseConfirmed(Boolean(v.insurer_rental_use_confirmed));
+        setEditRentalAgreement(null);
+        setEditCarImages([]);
+        setEditSubmitAttempted(false);
+  };
+
+  // /my-vehicles?fix=<car> - where a correction notice and its email lead
+  // (CHAPTER 118): straight into that car's Edit, at the documents to correct.
+  const fixCarId = searchParams.get("fix");
+  useEffect(() => {
+    if (!fixCarId || loading) return;
+    const target = vehicles.find((vehicle) => vehicle.id === fixCarId);
+    if (target) openEditor(target);
+    setSearchParams({}, { replace: true });
+    // openEditor only sets state; the link is acted on once, when it arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixCarId, loading, vehicles, setSearchParams]);
 
   const handleUpdateVehicle = async () => {
     if (!editVehicle) return;
@@ -2270,6 +2340,45 @@ export default function MyVehiclesPage() {
                         </p>
                       )}
 
+                      {["pending", "rejected"].includes(v.status) && corrections[v.id]?.length ? (() => {
+                        const toFix = corrections[v.id].filter((item) => !item.waiting);
+                        const sent = corrections[v.id].filter((item) => item.waiting);
+                        return (
+                          <div className="mt-2 space-y-1.5">
+                            {toFix.length > 0 && (
+                              <div className="rounded-md border border-red-500/30 bg-red-500/5 px-2 py-2 text-xs text-red-700 dark:text-red-300">
+                                {toFix.map((item) => (
+                                  <p key={item.type} className="flex items-start gap-1.5">
+                                    <FileWarning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                    <span>
+                                      <strong>{item.label}</strong> needs correction
+                                      {item.reason ? `: ${item.reason}` : "."}
+                                    </span>
+                                  </p>
+                                ))}
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="mt-2 h-8 gap-1.5 border-red-500/40 text-red-700 hover:bg-red-500/10 dark:text-red-300"
+                                  onClick={() => openEditor(v)}
+                                >
+                                  <Upload className="h-3.5 w-3.5" />
+                                  {toFix.length === 1 ? `Upload corrected ${toFix[0].short}` : "Fix documents"}
+                                </Button>
+                              </div>
+                            )}
+                            {sent.map((item) => (
+                              <p
+                                key={item.type}
+                                className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300"
+                              >
+                                Corrected {item.short} sent · waiting for admin review
+                              </p>
+                            ))}
+                          </div>
+                        );
+                      })() : null}
+
                       {v.status === "renewal_required" && (
                         <div className="mt-2 rounded-md border border-orange-500/25 bg-orange-500/5 px-2 py-2 text-xs">
                           <p className="flex items-start gap-1.5 text-orange-700 dark:text-orange-300">
@@ -2308,32 +2417,7 @@ export default function MyVehiclesPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        const parsedLocation = parseStoredLocation(v.location);
-                        setEditVehicle(v);
-                        setEditPrice(v.price_per_day == null ? "" : String(v.price_per_day));
-                        setEditMileage(v.mileage == null ? "" : String(v.mileage));
-                        setEditEarlyReturnResponseWindowHours(
-                          v.early_return_response_window_hours != null &&
-                            v.early_return_response_window_hours >= MIN_EARLY_RETURN_RESPONSE_HOURS &&
-                            v.early_return_response_window_hours <= MAX_EARLY_RETURN_RESPONSE_HOURS
-                            ? String(v.early_return_response_window_hours)
-                            : String(MAX_EARLY_RETURN_RESPONSE_HOURS),
-                        );
-                        setEditLocation(parsedLocation.region);
-                        setEditCity(parsedLocation.city);
-                        setEditSpecificLocation(parsedLocation.specificLocation);
-                        setEditFuelCategory(v.fuel_category || "");
-                        setEditFuelSubtype(v.fuel_subtype || "");
-                        setEditTransmission(v.transmission || "");
-                        setEditGpsAvailable(Boolean(v.gps_available));
-                        setEditContact(v.contact_number || profile?.phone || "");
-                        setEditAdditionalInfo(v.additional_info || "");
-                        setEditRentalUseConfirmed(Boolean(v.insurer_rental_use_confirmed));
-                        setEditRentalAgreement(null);
-                        setEditCarImages([]);
-                        setEditSubmitAttempted(false);
-                      }}
+                      onClick={() => openEditor(v)}
                       disabled={vehicleActionId === v.id}
                     >
                       Edit
@@ -2421,6 +2505,27 @@ export default function MyVehiclesPage() {
                   </button>
                 </CardHeader>
                 <CardContent className="max-h-[calc(100vh-11rem)] space-y-4 overflow-y-auto px-6 py-5">
+                  {["pending", "rejected"].includes(editVehicle.status) &&
+                    (corrections[editVehicle.id] ?? []).some((item) => !item.waiting) && (
+                      <div className="space-y-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3">
+                        <p className="text-sm font-semibold text-red-700 dark:text-red-300">
+                          Documents to correct
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          The admin sent these back. Upload a corrected file; only it is reviewed
+                          again - your other documents stay approved.
+                        </p>
+                        <VehicleCompliancePanel
+                          key={editVehicle.id}
+                          carId={editVehicle.id}
+                          compact
+                          onlyTypes={(corrections[editVehicle.id] ?? [])
+                            .filter((item) => !item.waiting)
+                            .map((item) => item.type)}
+                          onChange={() => void fetchVehicles()}
+                        />
+                      </div>
+                    )}
                   <ListingErrorSummary
                     id="edit-listing-error-summary"
                     errors={shownEditErrors}
