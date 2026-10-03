@@ -1,5 +1,18 @@
 import { supabase } from "./supabase";
 
+// One limit for every upload SafeDrive stores, said next to every file picker
+// so nobody learns it from an error after choosing a file.
+export const MAX_UPLOAD_MB = 10;
+export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
+/** "JPG, PNG or WebP · max 10 MB", from an input's accept list. */
+export const uploadLimitText = (accept: string, maxMb = MAX_UPLOAD_MB) => {
+  const pdf = /pdf/i.test(accept);
+  const image = /image|jpe?g|png|webp/i.test(accept);
+  const kinds = pdf && image ? "JPG, PNG, WebP or PDF" : pdf ? "PDF" : "JPG, PNG or WebP";
+  return `${kinds} · max ${maxMb} MB`;
+};
+
 /**
  * Uploads a file to Supabase Storage with validation
  * @param file - The file to upload
@@ -20,11 +33,9 @@ export const uploadFile = async (
     "vehicle-documents": ["image/jpeg", "image/png", "image/webp", "application/pdf"],
   };
 
-  const maxSize = 10 * 1024 * 1024; // 10MB
-
   // Check file size
-  if (file.size > maxSize) {
-    return { success: false, error: "File size must be under 10MB" };
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return { success: false, error: `File size must be under ${MAX_UPLOAD_MB} MB` };
   }
 
   // Check file type

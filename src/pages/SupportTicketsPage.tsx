@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { helpArticles, helpCategories, type HelpCategory } from "@/lib/helpCenter";
 import { supabase } from "@/lib/supabase";
-import { uploadFile } from "@/lib/uploadUtils";
+import { uploadFile, uploadLimitText } from "@/lib/uploadUtils";
 import {
   conversationClosesInMs,
   formatConversationCountdown,
@@ -1113,6 +1113,8 @@ export default function SupportTicketsPage() {
                       variant="outline"
                       className="rounded-xl min-w-11 px-3"
                       onClick={() => replyAttachmentInputRef.current?.click()}
+                      title={`Attach a photo or file (${uploadLimitText(ticketAttachmentAccept)})`}
+                      aria-label={`Attach a photo or file (${uploadLimitText(ticketAttachmentAccept)})`}
                     >
                       <Paperclip className="w-4 h-4" />
                     </Button>
@@ -1152,7 +1154,11 @@ export default function SupportTicketsPage() {
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
-                  ) : null}
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Attach a photo or file: {uploadLimitText(ticketAttachmentAccept)}
+                    </p>
+                  )}
                 </form>
               ) : (
                 <div className="p-4 text-center text-sm text-muted-foreground border-t border-border/50 bg-muted/20">
@@ -1289,7 +1295,11 @@ export default function SupportTicketsPage() {
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
-                  ) : null}
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {uploadLimitText(ticketAttachmentAccept)}
+                    </span>
+                  )}
                 </div>
               </div>
               </div>

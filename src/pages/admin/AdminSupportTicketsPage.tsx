@@ -22,7 +22,7 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
-import { uploadFile } from "@/lib/uploadUtils";
+import { uploadFile, uploadLimitText } from "@/lib/uploadUtils";
 import {
   adminTicketFilterTags,
   createNotification,
@@ -1284,6 +1284,8 @@ export default function AdminSupportTicketsPage() {
                       variant="outline"
                       className="rounded-xl h-11 px-3"
                       onClick={() => replyAttachmentInputRef.current?.click()}
+                      title={`Attach a photo or file (${uploadLimitText(ticketAttachmentAccept)})`}
+                      aria-label={`Attach a photo or file (${uploadLimitText(ticketAttachmentAccept)})`}
                     >
                       <Paperclip className="w-4 h-4" />
                     </Button>
@@ -1323,7 +1325,11 @@ export default function AdminSupportTicketsPage() {
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
-                  ) : null}
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Attach a photo or file: {uploadLimitText(ticketAttachmentAccept)}
+                    </p>
+                  )}
                 </form>
               ) : (
                 <div className="p-4 text-center text-sm text-amber-600 font-medium border-t border-border/50 bg-amber-500/5">

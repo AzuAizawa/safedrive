@@ -10,7 +10,7 @@ import {
   type ContentProvenanceResult,
 } from "@/lib/contentProvenance";
 import { getCurrentSubscription } from "@/lib/subscriptions";
-import { uploadFile } from "@/lib/uploadUtils";
+import { uploadFile, uploadLimitText } from "@/lib/uploadUtils";
 import { queueImageChecks } from "@/lib/imageAuthenticity";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -416,7 +416,9 @@ const DocumentField = ({
       <span className="w-full truncate text-xs text-muted-foreground">
         {file ? file.name : `Upload ${action}`}
       </span>
-      {file && <span className="text-[11px] text-muted-foreground">Click to change</span>}
+      <span className="text-[10px] text-muted-foreground">
+        {file ? "Click to change" : uploadLimitText(accept)}
+      </span>
       <input
         key={inputKey}
         type="file"
@@ -1881,6 +1883,7 @@ export default function MyVehiclesPage() {
                         ? `${carImages.length}/5 selected`
                         : "Click here"}
                     </span>
+                    <span className="text-[10px] text-muted-foreground">{uploadLimitText("image")} each</span>
                     <input
                       type="file"
                       accept="image/jpeg,image/png,image/webp"
@@ -2074,6 +2077,7 @@ export default function MyVehiclesPage() {
                   >
                     <Upload className="w-5 h-5 text-muted-foreground mb-1" />
                     <span className="text-xs text-muted-foreground">Upload rental agreement (PDF only)</span>
+                    <span className="text-[10px] text-muted-foreground">{uploadLimitText("pdf")}</span>
                     <input
                       type="file"
                       accept="application/pdf"
@@ -2723,6 +2727,7 @@ export default function MyVehiclesPage() {
                           <Upload className="h-3 w-3" />
                           {editRentalAgreement ? editRentalAgreement.name : "Choose New PDF (leave blank to keep current)"}
                         </span>
+                        <span className="text-[10px] text-muted-foreground">{uploadLimitText("pdf")}</span>
                         <input
                           type="file"
                           accept="application/pdf"
@@ -2756,6 +2761,7 @@ export default function MyVehiclesPage() {
                             ? `${editCarImages.length} new selected`
                             : "Click to Select New Images"}
                         </span>
+                        <span className="text-[10px] text-muted-foreground">{uploadLimitText("image")} each</span>
                         <input
                           type="file"
                           accept="image/jpeg,image/png,image/webp"

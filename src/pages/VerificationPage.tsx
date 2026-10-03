@@ -21,6 +21,7 @@ import {
 } from "@/lib/payoutAccount";
 import { useVerificationEtaMessages } from "@/lib/platformSettings";
 import { supabase } from "@/lib/supabase";
+import { uploadLimitText } from "@/lib/uploadUtils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1735,8 +1736,8 @@ export default function VerificationPage() {
             ) : (
               <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
                 <p className="text-xs text-muted-foreground">
-                  Upload clear photos of your current licence. If a photo is too
-                  blurry an admin can reject it with a reason.
+                  Upload clear photos of your current licence ({uploadLimitText("image")} each).
+                  If a photo is too blurry an admin can reject it with a reason.
                 </p>
                 {(
                   [
@@ -2840,6 +2841,7 @@ export default function VerificationPage() {
                             <p className="text-xs text-muted-foreground">
                               Click to upload
                             </p>
+                            <p className="text-[10px] text-muted-foreground">{uploadLimitText("image")}</p>
                           </div>
                         )}
                         <input

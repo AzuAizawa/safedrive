@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ImageAuthenticityBadge, type ImageAuthenticityState } from "@/components/ImageAuthenticity";
 import { queueImageChecks } from "@/lib/imageAuthenticity";
 import { supabase } from "@/lib/supabase";
+import { uploadLimitText } from "@/lib/uploadUtils";
 import { createPrivateStorageUrl, createPrivateStorageUrlMap } from "@/lib/privateStorage";
 import { useAuth } from "@/contexts/AuthContext";
 import { hashFileSha256, inspectContentProvenance } from "@/lib/contentProvenance";
@@ -467,6 +468,7 @@ export default function VehicleCompliancePanel({
                         <span className="px-1 text-center">
                           {files[type.type] ? "Change file" : "Upload replacement"}
                         </span>
+                        <span className="text-[10px] text-muted-foreground">{uploadLimitText(".pdf,.jpg")}</span>
                         <input
                           key={`${type.type}:${revision}`}
                           type="file"
