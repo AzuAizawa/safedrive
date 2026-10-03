@@ -509,8 +509,9 @@ test("every ledger line carries the booking and event it belongs to", () => {
   assert.equal(rows[0][0], "2026-09-15 20:19");
   assert.equal(rows[0][1], "renter payment collected");
   assert.equal(rows[0][2], "b1", "the booking is on the line, not only on a group header");
-  assert.deepEqual(rows[0].slice(3, 8), ["1010", "Cash", "2000.00", "0.00", "Funds confirmed"]);
-  assert.deepEqual(rows[1].slice(3, 8), ["2010", "Lister payable", "0.00", "1800.00", "Lister payable"]);
+  assert.equal(rows[0][3], "SD-BK-B1", "the booking reference people quote is on the line too");
+  assert.deepEqual(rows[0].slice(4, 9), ["1010", "Cash", "2000.00", "0.00", "Funds confirmed"]);
+  assert.deepEqual(rows[1].slice(4, 9), ["2010", "Lister payable", "0.00", "1800.00", "Lister payable"]);
   // Both lines repeat the journal's context, so the file can be filtered.
   assert.equal(rows[1][2], "b1");
 });
@@ -533,9 +534,36 @@ test("a record with no lines still appears, rather than vanishing from the file"
     [],
   );
   assert.equal(rows.length, 1);
-  assert.equal(rows[0][7], "(no lines recorded)");
-  assert.equal(rows[0][10], "j1", "a correction names the record it reverses");
-  assert.equal(rows[0][11], "Wrong amount released");
+  assert.equal(rows[0][8], "(no lines recorded)");
+  assert.equal(rows[0][11], "j1", "a correction names the record it reverses");
+  assert.equal(rows[0][12], "Wrong amount released");
+});
+
+test("a subscription has no booking, so its reference is the payer's email", () => {
+  const rows = buildLedgerExportRows(
+    [
+      {
+        id: "j3",
+        effective_at: "2026-09-20T01:00:00.000Z",
+        event_type: "subscription_payment_completed",
+        event_key: "subscription:cs_test_9",
+        booking_id: null,
+        provider_reference: "pay_9",
+        status: "finalized",
+        reversal_of: null,
+        correction_reason: null,
+      },
+    ],
+    [
+      { journal_id: "j3", account_code: "1010", debit_centavos: 19900, credit_centavos: 0, memo: "Pro subscription payment", party_user_id: "u9" },
+      { journal_id: "j3", account_code: "4030", debit_centavos: 0, credit_centavos: 19900, memo: "Pro subscription payment", party_user_id: "u9" },
+    ],
+    {},
+    { u9: "lister@example.com" },
+  );
+  assert.equal(rows[0][2], "", "no booking id");
+  assert.equal(rows[0][3], "lister@example.com");
+  assert.equal(rows[1][3], "lister@example.com");
 });
 
 // One range drives the whole Earnings & Insights page - totals, chart and

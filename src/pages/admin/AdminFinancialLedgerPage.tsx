@@ -8,7 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { buildCsv, csvFileName, downloadCsv } from "@/lib/csvExport";
-import { buildLedgerExportRows, LEDGER_EXPORT_HEADERS } from "@/lib/ledgerExportRows";
+import {
+  buildLedgerExportRows,
+  journalPartyUserId,
+  journalReference,
+  LEDGER_EXPORT_HEADERS,
+} from "@/lib/ledgerExportRows";
 import { pageRange, serverPageInfo } from "@/lib/pagination";
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/types/database";
@@ -54,6 +59,31 @@ const firstOfThisManilaMonth = () => `${todayInManila().slice(0, 7)}-01`;
 const EXPORT_PAGE_SIZE = 1000;
 const ENTRY_LOOKUP_CHUNK = 200;
 
+// Money with no booking behind it (a subscription) is traced by who paid, so
+// the emails of those payers are looked up alongside the records.
+const payerIdsWithoutBooking = (journals: Journal[], entries: Entry[]) => {
+  const ids = new Set<string>();
+  for (const journal of journals) {
+    if (journal.booking_id) continue;
+    const party = journalPartyUserId(entries.filter((entry) => entry.journal_id === journal.id));
+    if (party) ids.add(party);
+  }
+  return [...ids];
+};
+
+const fetchEmails = async (userIds: string[]) => {
+  const emails: Record<string, string> = {};
+  for (let index = 0; index < userIds.length; index += ENTRY_LOOKUP_CHUNK) {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, email")
+      .in("id", userIds.slice(index, index + ENTRY_LOOKUP_CHUNK));
+    if (error) throw error;
+    for (const row of data ?? []) emails[row.id] = row.email;
+  }
+  return emails;
+};
+
 export default function AdminFinancialLedgerPage() {
   const { user } = useAuth();
   const [exportFrom, setExportFrom] = useState(firstOfThisManilaMonth);
@@ -62,6 +92,7 @@ export default function AdminFinancialLedgerPage() {
   const [journals, setJournals] = useState<Journal[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [payerEmails, setPayerEmails] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   // One page of records at a time, with the total. It used to be the newest
   // 250, so older records could not be reached.
@@ -125,9 +156,16 @@ export default function AdminFinancialLedgerPage() {
       return;
     }
 
+    const entryRows = entryResult.data ?? [];
+    // A missing email only leaves the reference blank; the record still shows.
+    const emails = await fetchEmails(payerIdsWithoutBooking(journalRows, entryRows)).catch(
+      () => ({}) as Record<string, string>,
+    );
+
     setJournals(journalRows);
     setTotal(journalResult.count ?? 0);
-    setEntries(entryResult.data ?? []);
+    setEntries(entryRows);
+    setPayerEmails(emails);
     setAccounts(accountResult.data ?? []);
     setLoading(false);
   }, [page]);
@@ -210,7 +248,12 @@ export default function AdminFinancialLedgerPage() {
         csvFileName("ledger", exportFrom, exportTo),
         buildCsv(
           LEDGER_EXPORT_HEADERS,
-          buildLedgerExportRows(rangeJournals, rangeEntries, accountMap),
+          buildLedgerExportRows(
+            rangeJournals,
+            rangeEntries,
+            accountMap,
+            await fetchEmails(payerIdsWithoutBooking(rangeJournals, rangeEntries)),
+          ),
         ),
       );
 
@@ -526,6 +569,10 @@ export default function AdminFinancialLedgerPage() {
             const debit = lines.reduce((sum, line) => sum + Number(line.debit_centavos), 0);
             const credit = lines.reduce((sum, line) => sum + Number(line.credit_centavos), 0);
             const balanced = debit === credit;
+            const reference = journalReference(
+              journal,
+              payerEmails[journalPartyUserId(lines) ?? ""],
+            );
             return (
               <article key={journal.id} className="rounded-xl border bg-card p-5">
                 <div className="flex flex-col justify-between gap-2 sm:flex-row">
@@ -545,6 +592,14 @@ export default function AdminFinancialLedgerPage() {
                         </span>
                       )}
                     </div>
+                    {reference && (
+                      <p className="mt-1 text-sm">
+                        <span className="text-muted-foreground">
+                          {journal.booking_id ? "Booking Ref:" : "Email:"}
+                        </span>{" "}
+                        <span className="font-mono">{reference}</span>
+                      </p>
+                    )}
                     <p className="mt-1 text-xs text-muted-foreground">
                       {new Date(journal.effective_at).toLocaleString()}
                       {showAdvanced && ` · ${journal.event_key} · ${journal.status}`}

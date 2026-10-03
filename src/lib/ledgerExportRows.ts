@@ -5,6 +5,7 @@
 // line says. Amounts arrive in centavos and leave as peso strings, because the
 // ledger stores centavos and a bookkeeper works in pesos.
 
+import { getBookingReference } from "./bookingReference";
 import { centavosToPesoCell, type CsvCell } from "./csvExport";
 
 export type ExportJournal = {
@@ -25,12 +26,31 @@ export type ExportEntry = {
   debit_centavos: number | string | null;
   credit_centavos: number | string | null;
   memo: string | null;
+  party_user_id?: string | null;
+};
+
+/** The user a journal's money moved for: the first party named on its lines. */
+export const journalPartyUserId = (entries: ExportEntry[]): string | null =>
+  entries.find((entry) => entry.party_user_id)?.party_user_id ?? null;
+
+/**
+ * Where a record's money came from, in words an admin can act on: the booking
+ * reference the renter and lister also see, or - for money with no booking
+ * behind it, such as a subscription - the email of the person who paid.
+ */
+export const journalReference = (
+  journal: Pick<ExportJournal, "booking_id">,
+  payerEmail: string | null | undefined,
+): string => {
+  if (journal.booking_id) return getBookingReference(journal.booking_id);
+  return payerEmail ?? "";
 };
 
 export const LEDGER_EXPORT_HEADERS = [
   "Date",
   "Record",
   "Booking",
+  "Reference",
   "Account code",
   "Account name",
   "Debit (PHP)",
@@ -72,6 +92,7 @@ export const buildLedgerExportRows = (
   journals: ExportJournal[],
   entries: ExportEntry[],
   accountNames: Record<string, string> = {},
+  emailsByUserId: Record<string, string> = {},
 ): CsvCell[][] => {
   const byJournal = new Map<string, ExportEntry[]>();
   for (const entry of entries) {
@@ -87,6 +108,7 @@ export const buildLedgerExportRows = (
       manilaStamp(journal.effective_at),
       journal.event_type.replace(/_/g, " "),
       journal.booking_id ?? "",
+      journalReference(journal, emailsByUserId[journalPartyUserId(journalEntries) ?? ""]),
     ];
     const tail = [
       journal.provider_reference ?? "",
