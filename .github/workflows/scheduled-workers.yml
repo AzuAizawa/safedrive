@@ -16,6 +16,7 @@ on:
     - cron: "58 3 * * *" # flag dormant accounts for retention review, daily
     - cron: "12 4 * * *" # delete notifications past their retention window, daily
     - cron: "27 4 * * *" # carry out account deletions whose grace period has ended, daily
+    - cron: "33 * * * *" # tell people (and admins) when a review passes its target time, hourly
   workflow_dispatch: {}
 
 env:
@@ -139,5 +140,20 @@ jobs:
           echo "HTTP $code"; cat /tmp/out; echo
           if [ "$code" != "200" ]; then
             echo "::error::flag-dormant-accounts returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
+            exit 1
+          fi
+
+  notify-overdue-reviews:
+    if: github.event.schedule == '33 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call notify-overdue-reviews
+        run: |
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${SITE_URL}/api/notify-overdue-reviews")
+          echo "HTTP $code"; cat /tmp/out; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::notify-overdue-reviews returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
             exit 1
           fi
