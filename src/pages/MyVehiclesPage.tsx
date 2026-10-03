@@ -1243,7 +1243,12 @@ export default function MyVehiclesPage() {
           gps_available: editGpsAvailable,
           contact_number: editContact || null,
           additional_info: editAdditionalInfo || null,
-          insurer_rental_use_confirmed: editRentalUseConfirmed,
+          // Sent only while the car is under review. On an approved car it is
+          // derived from the admin's insurance review, and changing it here sent
+          // the car straight back to review.
+          ...(["pending", "rejected"].includes(editVehicle.status)
+            ? { insurer_rental_use_confirmed: editRentalUseConfirmed }
+            : {}),
         })
         .eq("id", editVehicle.id)
         .select("status")
@@ -2506,6 +2511,9 @@ export default function MyVehiclesPage() {
                       page, not here.
                     </p>
                   </div>
+                  {/* Only while under review: once approved, rental-use cover is
+                      settled by the admin's review of the insurance document. */}
+                  {["pending", "rejected"].includes(editVehicle.status) && (
                   <div id="edit-listing-insurer_rental_use_confirmed" className="space-y-1">
                     <label
                       className={`flex items-start gap-3 rounded-lg border p-3 text-sm ${
@@ -2516,6 +2524,7 @@ export default function MyVehiclesPage() {
                     ><input type="checkbox" className="mt-1" checked={editRentalUseConfirmed} onChange={(event) => setEditRentalUseConfirmed(event.target.checked)} aria-invalid={Boolean(editListingError("insurer_rental_use_confirmed"))} /><span>I reconfirmed intended rental use with the insurer. Changing any insurance declaration sends this vehicle back to admin review. *</span></label>
                     <FieldError message={editListingError("insurer_rental_use_confirmed")} />
                   </div>
+                  )}
                   <div id="edit-listing-location" className="space-y-2">
                     <Label>Pickup Region</Label>
                     <select

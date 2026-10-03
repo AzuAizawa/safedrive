@@ -241,10 +241,16 @@ export const validateListingEdit = (input: {
       ? "Enter a whole number of kilometres, 0 or more, or leave it blank."
       : null,
   );
-  check(
-    "insurer_rental_use_confirmed",
-    input.rentalUseConfirmed ? null : "Confirm the rental use was disclosed to your insurer before saving.",
-  );
+  // Asked only while the car is under review. Once approved, rental-use cover
+  // is settled by the admin's review of the insurance document, and the
+  // lister ticking it again counted as an insurance change that sent the car
+  // back to review.
+  if (!input.detailsRequired) {
+    check(
+      "insurer_rental_use_confirmed",
+      input.rentalUseConfirmed ? null : "Confirm the rental use was disclosed to your insurer before saving.",
+    );
+  }
   if (input.transmissionEditable) {
     check(
       "transmission",

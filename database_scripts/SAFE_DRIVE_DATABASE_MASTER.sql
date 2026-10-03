@@ -18296,4 +18296,43 @@ commit;
 --        '1';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 116 - A car the system sends back to review starts a fresh wait
+-- ============================================================================
+-- review_submitted_at (CHAPTER 105) and the overdue-notice stamp (CHAPTER 113)
+-- are set by a trigger declared "before insert or update OF STATUS". That
+-- fires only when the UPDATE statement itself names the status column. A
+-- lister's edit never does - the status is moved by
+-- return_materially_changed_car_to_review, another trigger - so a car sent
+-- back to review that way kept the time of its first submission. The lister
+-- saw "submitted 9 hours ago" for a review that had just started, and the
+-- overdue notice could fire for it within the hour.
+--
+-- The triggers now fire on every insert and update. The functions are
+-- unchanged: they still act only when the row enters pending. Triggers fire
+-- in name order, so stamp_* runs after return_materially_changed_* and sees
+-- the status it set. The identity stamp gets the same change, for the same
+-- reason.
+begin;
+
+drop trigger if exists stamp_car_review_submitted_at on public.cars;
+create trigger stamp_car_review_submitted_at
+before insert or update on public.cars
+for each row execute function public.stamp_car_review_submitted_at();
+
+drop trigger if exists stamp_verification_submitted_at on public.profiles;
+create trigger stamp_verification_submitted_at
+before insert or update on public.profiles
+for each row execute function public.stamp_verification_submitted_at();
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'stamps fire on any update' as check_name,
+--        (select count(*)::text from pg_trigger
+--          where tgname in ('stamp_car_review_submitted_at', 'stamp_verification_submitted_at')
+--            and tgattr = ''::int2vector) as result,
+--        '2' as expected;
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

@@ -198,6 +198,10 @@ test("while under review the listing details are optional, but checked if filled
   ]);
 });
 
+test("an approved car is not asked to reconfirm rental use, so a price edit keeps its approval", () => {
+  assert.deepEqual(fieldsOf(validateListingEdit({ ...readyEdit, rentalUseConfirmed: false })), []);
+});
+
 test("response hours and mileage stay inside their limits", () => {
   for (const hours of ["0", "25", "3.5", "abc"]) {
     assert.deepEqual(

@@ -29,6 +29,8 @@ async function fixture() {
   await db.exec(`
     create role anon; create role authenticated; create role service_role;
     create function public.is_admin() returns boolean language sql as $$ select false $$;
+    create table public.platform_settings(id text primary key default 'default');
+    insert into public.platform_settings(id) values('default');
 
     create table public.profiles(id uuid primary key);
     insert into public.profiles(id) values('${OWNER}'), ('${RENTER}');
@@ -50,7 +52,9 @@ async function fixture() {
       status text not null default 'pending',
       rejection_reason text,
       last_verified_at timestamptz,
-      deleted_at timestamptz);
+      deleted_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now());
     alter table public.cars add constraint cars_price_per_day_check
       check (price_per_day >= 500 and price_per_day <= 100000) not valid;
 
@@ -83,6 +87,14 @@ async function fixture() {
       for each row execute function public.return_car_image_change_to_review();
   `);
   await db.exec(await chapter("-- CHAPTER 114 - A car is reviewed on its papers, then set up for renters"));
+  await db.exec(await chapter("-- CHAPTER 105 - A vehicle waiting for review shows how long it has waited"));
+  await db.exec(`
+    alter table public.cars add column review_overdue_notified_at timestamptz;
+    alter table public.profiles add column verified_status text;
+    create function public.stamp_verification_submitted_at() returns trigger
+      language plpgsql as $$ begin return new; end $$;
+  `);
+  await db.exec(await chapter("-- CHAPTER 116 - A car the system sends back to review starts a fresh wait"));
   await db.exec(`
     create trigger return_materially_changed_car_to_review before update on public.cars
       for each row execute function public.return_materially_changed_car_to_review();
@@ -147,4 +159,21 @@ test("what an admin checks against the papers still sends the car back to review
   await setUp(db);
   await db.exec(`update public.cars set plate_number = 'XYZ 9876' where id = '${CAR}'`);
   assert.equal(await statusOf(db), "pending");
+});
+
+test("a car the system sends back to review starts a fresh wait", async () => {
+  const db = await fixture();
+  await setUp(db);
+  await db.exec(`update public.cars set review_submitted_at = now() - interval '3 days' where id = '${CAR}'`);
+  // The lister's update never names status; the review trigger moves it.
+  await db.exec(`update public.cars set plate_number = 'XYZ 9876' where id = '${CAR}'`);
+  const { rows } = await db.query(
+    "select status, review_submitted_at > now() - interval '1 minute' as fresh from public.cars where id = $1",
+    [CAR],
+  );
+  assert.deepEqual(rows[0], { status: "pending", fresh: true });
+  const tg = await db.query(
+    "select count(*)::int as n from pg_trigger where tgname = 'stamp_car_review_submitted_at' and tgattr = ''::int2vector",
+  );
+  assert.equal(tg.rows[0].n, 1, "the verification query in CHAPTER 116 reads this the same way");
 });
