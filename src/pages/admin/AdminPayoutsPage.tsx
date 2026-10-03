@@ -743,7 +743,7 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
                         </Button>
                       ) : (
                         <span className="text-xs font-medium text-amber-500">
-                          Super Admin only
+                          System Admin only
                         </span>
                       )}
                     </div>

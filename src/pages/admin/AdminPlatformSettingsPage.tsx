@@ -257,7 +257,7 @@ const FIELDS: Record<
   },
   dormant_account_days: {
     label: "Dormant account threshold",
-    hint: "Days of no login activity before a regular account is auto-flagged for the Retention Requests queue (90-3650). A super admin still has to review and execute - this only files the request. Applies live.",
+    hint: "Days of no login activity before a regular account is auto-flagged for the Retention Requests queue (90-3650). A system admin still has to review and execute - this only files the request. Applies live.",
     unit: "days",
     toDisplay: (s) => String(Math.round(s)),
     fromDisplay: (i) => {
@@ -496,7 +496,7 @@ export default function AdminPlatformSettingsPage() {
       toast.success(
         effectiveFrom
           ? `Change proposed. Once approved it starts on ${effectiveFrom}.`
-          : "Change proposed. Other super admins now review it.",
+          : "Change proposed. Other system admins now review it.",
       );
       setReason("");
       setEffectiveFrom("");
@@ -691,11 +691,11 @@ export default function AdminPlatformSettingsPage() {
         <h1 className="text-3xl font-bold tracking-tight">Platform Configuration</h1>
         <p className="mt-1 text-muted-foreground">
           Money and policy values used across bookings. Every change is proposed
-          by one super admin (whose own proposal counts as an automatic approve)
-          and needs {threshold} of {superAdminCount} super-admin approvals
+          by one system admin (whose own proposal counts as an automatic approve)
+          and needs {threshold} of {superAdminCount} system-admin approvals
           (two-thirds, re-checked on each vote) before it goes live. Each admin's
           vote is final once cast, and an unresolved proposal expires after 7 days.
-          {!isSuperAdmin && " You can view the active values; only super admins can propose or vote."}
+          {!isSuperAdmin && " You can view the active values; only system admins can propose or vote."}
         </p>
       </div>
 
@@ -852,7 +852,7 @@ export default function AdminPlatformSettingsPage() {
               <CardDescription>
                 {pending
                   ? "A change is pending review - propose again only after it resolves."
-                  : "Edit a value and propose the change for super-admin review."}
+                  : "Edit a value and propose the change for system-admin review."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -957,7 +957,7 @@ export default function AdminPlatformSettingsPage() {
                 The public address shown in the Terms of Service, Privacy Policy,
                 sign-up notice, and the sign-in / password-reset help text. This
                 is contact information, not a money or policy value, so a single
-                super admin can change it directly - no proposal or vote.
+                system admin can change it directly - no proposal or vote.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -991,7 +991,7 @@ export default function AdminPlatformSettingsPage() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Live: {contactEmail}
-                  {!isSuperAdmin && " · only a super admin can change this."}
+                  {!isSuperAdmin && " · only a system admin can change this."}
                 </p>
               </div>
             </CardContent>
@@ -1006,7 +1006,7 @@ export default function AdminPlatformSettingsPage() {
               <CardDescription>
                 Registration only accepts these providers. Like the contact
                 address this is an operational setting, not a money or policy
-                value, so a single super admin can change it directly - no
+                value, so a single system admin can change it directly - no
                 proposal or vote. It applies to the next registration only:
                 accounts that already exist keep working whatever their domain.
                 Identity is still proven by KYC, never by the email provider.
@@ -1049,7 +1049,7 @@ export default function AdminPlatformSettingsPage() {
                 <p className="text-xs text-muted-foreground">
                   Live: {signupDomains.length}{" "}
                   {signupDomains.length === 1 ? "domain" : "domains"}
-                  {!isSuperAdmin && " · only a super admin can change this."}
+                  {!isSuperAdmin && " · only a system admin can change this."}
                 </p>
               </div>
             </CardContent>
@@ -1096,7 +1096,7 @@ export default function AdminPlatformSettingsPage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   Live: {etaVehicle}
-                  {!isSuperAdmin && " · only a super admin can change these."}
+                  {!isSuperAdmin && " · only a system admin can change these."}
                 </p>
               </div>
               {isSuperAdmin ? (
@@ -1128,7 +1128,7 @@ export default function AdminPlatformSettingsPage() {
               </CardTitle>
               <CardDescription>
                 Terms and Conditions, Privacy Policy, and the Platform Agreement shown to
-                users. A single super admin can edit and publish a new version directly -
+                users. A single system admin can edit and publish a new version directly -
                 every past version is kept for the audit trail.
               </CardDescription>
             </CardHeader>
@@ -1143,7 +1143,7 @@ export default function AdminPlatformSettingsPage() {
               </Button>
               {!isSuperAdmin && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  You can view published content there; only a super admin can publish changes.
+                  You can view published content there; only a system admin can publish changes.
                 </p>
               )}
             </CardContent>

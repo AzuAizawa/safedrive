@@ -50,7 +50,7 @@ export default async function handler(req: Request) {
 
     if (requesterError || !requesterProfile || requesterProfile.role !== "super_admin") {
       return jsonResponse(
-        { error: "Only a super admin can process refunds manually" },
+        { error: "Only a system admin can process refunds manually" },
         403,
       );
     }

@@ -57,7 +57,7 @@ export default async function handler(req: Request) {
       .eq("id", actor.id)
       .maybeSingle();
     if (actorProfile?.role !== "super_admin") {
-      return respond({ error: "Super administrator access required" }, 403);
+      return respond({ error: "System administrator access required" }, 403);
     }
 
     const { data: announcement, error: announcementError } = await supabase

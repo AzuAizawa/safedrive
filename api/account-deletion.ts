@@ -148,7 +148,7 @@ export default async function handler(req: Request) {
 
     if (payload.action === "admin_delete") {
       if (profile.role !== "super_admin") {
-        return respond({ error: "Only a super admin can delete another account" }, 403);
+        return respond({ error: "Only a system admin can delete another account" }, 403);
       }
       const targetId = String(payload.userId ?? "").trim();
       const reason = String(payload.reason ?? "").trim();
@@ -190,7 +190,7 @@ export default async function handler(req: Request) {
             status: "executed",
             completed_at: now,
             legal_hold_reason: null,
-            decision_reason: `Self-service deletion carried out early by a super admin. Reason: ${reason}`,
+            decision_reason: `Self-service deletion carried out early by a system admin. Reason: ${reason}`,
             updated_at: now,
           })
           .eq("id", selfServiceRequestId)

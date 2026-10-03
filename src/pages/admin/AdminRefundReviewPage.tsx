@@ -202,7 +202,7 @@ const getRefundStatusCopy = (refund: RefundPayment) => {
     return {
       label: "Settled",
       detail:
-        "No refund was sent - either the cancellation fee covered what the renter paid, or a super admin decided no refund was due. Any lister compensation was released with this decision.",
+        "No refund was sent - either the cancellation fee covered what the renter paid, or a system admin decided no refund was due. Any lister compensation was released with this decision.",
       tone: "bg-green-500/10 text-green-700 dark:text-green-300",
     };
   }

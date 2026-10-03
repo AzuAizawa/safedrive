@@ -2078,7 +2078,7 @@ export default function AdminUsersPage() {
                     <div>
                       <p className="text-sm font-semibold flex items-center gap-2">
                         <KeyRound className="w-4 h-4" />
-                        Super Admin Password Reset
+                        System Admin Password Reset
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
                         Set a temporary password for this user when the normal recovery flow cannot be completed. Share it securely outside the app.

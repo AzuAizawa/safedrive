@@ -711,6 +711,9 @@ test("refund rows that carry no reason are named as such, not filed as a review"
     { payment_method: "GCash", notes: "Refund released by super admin through GCash." },
     { payment_method: "GCash", notes: "Refund released by super admin through GCash." },
     { payment_method: "No refund due", notes: "Settled by super admin: refund denied after review." },
+    // The same notes after the role was renamed "system admin" on screen.
+    { payment_method: "GCash", notes: "Refund released by system admin through GCash." },
+    { payment_method: "No refund due", notes: "Settled by system admin: refund denied after review." },
     // An automatic refund for a booking the lister called off.
     {
       payment_method: "demo",
@@ -721,7 +724,7 @@ test("refund rows that carry no reason are named as such, not filed as a review"
   assert.deepEqual(summary.slices[0], {
     key: "reason_not_recorded",
     label: "Released, reason not recorded",
-    count: 3,
+    count: 5,
   });
   assert.ok(
     summary.slices.some((slice) => slice.key === "lister_cancelled" && slice.count === 1),

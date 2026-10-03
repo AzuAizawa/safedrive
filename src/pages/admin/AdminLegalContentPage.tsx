@@ -117,7 +117,7 @@ export default function AdminLegalContentPage() {
           users.{" "}
           {isSuperAdmin
             ? "Publishing goes live immediately - every past version is kept for the audit trail."
-            : "Only a super admin can publish changes; you can view the published content and history."}
+            : "Only a system admin can publish changes; you can view the published content and history."}
         </p>
       </div>
 

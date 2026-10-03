@@ -56,7 +56,7 @@ export default async function handler(req: Request) {
 
     if (requesterProfile.role !== "super_admin") {
       return jsonResponse(
-        { error: "Only a super admin can process payout automation manually" },
+        { error: "Only a system admin can process payout automation manually" },
         403,
       );
     }

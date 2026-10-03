@@ -126,7 +126,7 @@ export default async function handler(req: Request) {
 
     if (requesterError || requesterProfile?.role !== "super_admin") {
       return jsonResponse(
-        { error: "Only a super admin can mark refunds as released." },
+        { error: "Only a system admin can mark refunds as released." },
         403,
       );
     }
@@ -278,9 +278,9 @@ export default async function handler(req: Request) {
     const notes = [
       noRefundDue
         ? decision.decision === "denied"
-          ? "Settled by super admin: refund denied after review."
-          : "Settled by super admin: no refund was due under the cancellation policy."
-        : `Refund released by super admin through ${refundMethod}.`,
+          ? "Settled by system admin: refund denied after review."
+          : "Settled by system admin: no refund was due under the cancellation policy."
+        : `Refund released by system admin through ${refundMethod}.`,
       decisionLine,
       note,
     ]

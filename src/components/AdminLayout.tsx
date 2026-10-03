@@ -489,7 +489,7 @@ export default function AdminLayout() {
                 : "bg-muted text-muted-foreground border-border"
             }`}>
               <Shield className="w-3 h-3" />
-              {isSuperAdmin ? "Super Admin" : "Admin"}
+              {isSuperAdmin ? "System Admin" : "Admin"}
             </div>
             <span className="hidden max-w-48 truncate text-xs text-muted-foreground md:inline">{profile?.email}</span>
           </div>

@@ -36,7 +36,7 @@ export default async function handler(req: Request) {
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) return respond({ error: "Unauthorized" }, 401);
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    if (profile?.role !== "super_admin") return respond({ error: "Super admin access required" }, 403);
+    if (profile?.role !== "super_admin") return respond({ error: "System admin access required" }, 403);
 
     const { data: settings } = await supabase.from("platform_settings").select("ledger_activated_at").eq("id", "default").maybeSingle();
     const periodStart = settings?.ledger_activated_at || new Date().toISOString();

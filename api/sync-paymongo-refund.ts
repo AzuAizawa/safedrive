@@ -91,7 +91,7 @@ export default async function handler(req: Request) {
       .single();
     if (requesterError || requesterProfile?.role !== "super_admin") {
       return jsonResponse(
-        { error: "Only a super admin can sync PayMongo refund status." },
+        { error: "Only a system admin can sync PayMongo refund status." },
         403,
       );
     }

@@ -89,7 +89,7 @@ export default async function handler(req: Request) {
 
     if (requesterProfile.role !== "super_admin") {
       return jsonResponse(
-        { error: "Only a super admin can reset another user's password" },
+        { error: "Only a system admin can reset another user's password" },
         403,
       );
     }

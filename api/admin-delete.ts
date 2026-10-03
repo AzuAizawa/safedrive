@@ -66,7 +66,7 @@ export default async function handler(req: Request) {
       .eq("id", user.id)
       .single();
     if (!requester || requester.role !== "super_admin" || requester.deleted_at) {
-      return jsonResponse({ error: "Super admin access required" }, 403);
+      return jsonResponse({ error: "System admin access required" }, 403);
     }
 
     const payload = (await req.json().catch(() => ({}))) as DeleteAdminPayload;

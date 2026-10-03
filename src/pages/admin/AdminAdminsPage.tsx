@@ -381,7 +381,7 @@ export default function AdminAdminsPage() {
         </h1>
         <p className="mt-1 max-w-3xl text-muted-foreground">
           Create staff accounts and control exactly which jobs each one can do.
-          A super admin is never created here - that is done directly in the
+          A system admin is never created here - that is done directly in the
           database. Every change is written to the audit trail, and the server
           enforces each permission regardless of what the screen shows.
         </p>

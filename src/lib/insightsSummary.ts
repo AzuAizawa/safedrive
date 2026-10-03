@@ -98,9 +98,10 @@ export const summarizeRefundKinds = (rows: RefundRow[]) => {
               const kind = classifyManualRefund(row.notes);
               // "other" here means the note carries no recognisable cause -
               // for a released refund that is a lost reason, not a judgement.
+              // Notes said "super admin" until the role was renamed "system
+              // admin" on screen; stored rows keep the old wording.
               if (kind === "other") {
-                return text.includes("released by super admin") ||
-                  text.includes("settled by super admin")
+                return /(released|settled) by (super|system) admin/.test(text)
                   ? UNRECORDED_SLICE
                   : { key: kind, label: MANUAL_REFUND_KINDS[kind].label };
               }

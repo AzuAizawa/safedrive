@@ -281,7 +281,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setSession(null);
         throw new Error(
-          "This admin account has been disabled by a super administrator.",
+          "This admin account has been disabled by a system administrator.",
         );
       }
 

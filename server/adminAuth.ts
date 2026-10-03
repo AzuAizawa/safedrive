@@ -150,7 +150,7 @@ export async function requireSuperAdmin(
     .single();
 
   if (profileError || !profile || profile.role !== "super_admin" || profile.deleted_at) {
-    return { ok: false, status: 403, error: "Super admin access required" };
+    return { ok: false, status: 403, error: "System admin access required" };
   }
 
   return {

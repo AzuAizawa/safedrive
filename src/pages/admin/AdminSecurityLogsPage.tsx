@@ -103,7 +103,7 @@ const getRoleLabel = (log: {
 }) => {
   const details = (log.details ?? {}) as Record<string, unknown>;
   const role = log.actor_role ?? null;
-  if (role === "super_admin") return { label: "Super admin", tone: "admin" as const };
+  if (role === "super_admin") return { label: "System admin", tone: "admin" as const };
   if (role === "admin") return { label: "Admin", tone: "admin" as const };
   if (role === "user") {
     return {
@@ -121,7 +121,7 @@ const getRoleLabel = (log: {
 
 const ROLE_FILTERS = [
   { value: "all", label: "All roles" },
-  { value: "super_admin", label: "Super admin" },
+  { value: "super_admin", label: "System admin" },
   { value: "admin", label: "Admin" },
   { value: "lister", label: "Lister" },
   { value: "renter", label: "Renter" },
