@@ -48,7 +48,7 @@ export default async function handler(req: Request) {
       supabase.from("profiles").select("role").eq("id", actor.id).maybeSingle(),
       supabase
         .from("cars")
-        .select("id, owner_id, status, rejection_reason, deleted_at, deletion_reason, updated_at, plate_number, car_models(name, car_brands(name))")
+        .select("id, owner_id, status, rejection_reason, deleted_at, deletion_reason, updated_at, plate_number, price_per_day, location, car_models(name, car_brands(name))")
         .eq("id", carId)
         .single(),
     ]);
@@ -75,6 +75,8 @@ export default async function handler(req: Request) {
       deletion_reason: string | null;
       updated_at: string;
       plate_number: string;
+      price_per_day: number | string | null;
+      location: string | null;
       car_models: { name: string; car_brands: { name: string } } | null;
     };
 
@@ -94,7 +96,16 @@ export default async function handler(req: Request) {
       : `vehicle ${typedCar.plate_number}`;
     const decision =
       status === "approved"
-        ? { title: "Vehicle Approved", message: `Your ${vehicle} has been approved and is now listed on SafeDrive.`, link: "/my-vehicles" }
+        ? {
+            title: "Vehicle Approved",
+            // Papers first, listing details after (CHAPTER 114): a newly
+            // approved car is listed only once its lister sets them.
+            message:
+              typedCar.price_per_day == null || !typedCar.location?.trim()
+                ? `Your ${vehicle} has been approved. Set its price per day and pickup location from My Vehicles to list it for renters.`
+                : `Your ${vehicle} has been approved and is now listed on SafeDrive.`,
+            link: "/my-vehicles",
+          }
         : status === "rejected"
           ? { title: "Vehicle Review Needs Attention", message: `Your ${vehicle} was not approved. Reason: ${typedCar.rejection_reason || "Please review your vehicle information and documents, then submit again."}`, link: "/my-vehicles" }
           : status === "pending"

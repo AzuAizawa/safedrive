@@ -61,7 +61,7 @@ interface PendingCar {
   id: string;
   plate_number: string;
   mileage: number | null;
-  price_per_day: number;
+  price_per_day: number | null;
   location: string | null;
   additional_info: string | null;
   status: string;
@@ -547,7 +547,11 @@ export default function AdminVehicleApprovalPage() {
         .insert({
           user_id: selected.profiles.id,
           title: "Vehicle Approved!",
-          message: `Your ${selected.car_models.car_brands.name} ${selected.car_models.name} has been approved and is now listed.`,
+          // Papers first, listing details after (CHAPTER 114).
+          message:
+            selected.price_per_day == null || !selected.location?.trim()
+              ? `Your ${selected.car_models.car_brands.name} ${selected.car_models.name} has been approved. Set its price per day and pickup location from My Vehicles to list it for renters.`
+              : `Your ${selected.car_models.car_brands.name} ${selected.car_models.name} has been approved and is now listed.`,
           type: "success",
           link: "/my-vehicles",
         });
@@ -576,7 +580,11 @@ export default function AdminVehicleApprovalPage() {
             provenance: getDocumentProvenanceSummary(selected.car_documents),
           },
         });
-      toast.success("Vehicle approved and listed!");
+      toast.success(
+        selected.price_per_day == null || !selected.location?.trim()
+          ? "Vehicle approved. The lister now sets its price and pickup location."
+          : "Vehicle approved and listed!",
+      );
       setSelected(null);
       setManualOcrOverride(false);
       fetchCars();
@@ -863,7 +871,9 @@ export default function AdminVehicleApprovalPage() {
                     {car.plate_number}
                   </TableCell>
                   <TableCell>
-                    ₱{Number(car.price_per_day).toLocaleString()}
+                    {car.price_per_day == null
+                      ? "Not set yet"
+                      : `₱${Number(car.price_per_day).toLocaleString()}`}
                   </TableCell>
                   <TableCell className="capitalize">
                     {car.deleted_at ? "removed" : car.status}
@@ -982,7 +992,9 @@ export default function AdminVehicleApprovalPage() {
                   <div>
                     <span className="text-muted-foreground">Price/Day:</span>{" "}
                     <span className="font-medium">
-                      ₱{Number(selected.price_per_day).toLocaleString()}
+                      {selected.price_per_day == null
+                        ? "Not set yet"
+                        : `₱${Number(selected.price_per_day).toLocaleString()}`}
                     </span>
                   </div>
                   <div>

@@ -247,7 +247,11 @@ export default function BrowseCarsPage() {
         .is("profiles.suspended_at", null)
         // So does an owner whose account is scheduled for deletion (CHAPTER 96);
         // keeping the account brings the listings back the same way.
-        .is("profiles.deletion_scheduled_for", null);
+        .is("profiles.deletion_scheduled_for", null)
+        // Approved on its papers but not yet given a price and pickup location
+        // by its lister (CHAPTER 114): not listed yet.
+        .not("price_per_day", "is", null)
+        .not("location", "is", null);
       if (error) throw error;
       if (data) setCars(data as unknown as CarWithDetails[]);
     } catch (err) {

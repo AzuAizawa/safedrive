@@ -22,20 +22,14 @@ const complete = {
   transmission: "automatic",
   plateNumber: "ABC 1234",
   plateTaken: false,
-  mileage: "",
-  pricePerDay: "1900",
-  earlyReturnResponseHours: "24",
-  region: "Metro Manila",
-  city: "Quezon City",
-  specificLocation: "SM North entrance",
   carImageCount: 3,
   hasOr: true,
   registrationExpiry: "2031-01-01",
   hasCr: true,
   hasCtpl: true,
   ctplExpiry: "2031-01-01",
-  hasComprehensive: false,
-  comprehensiveExpiry: "",
+  hasComprehensive: true,
+  comprehensiveExpiry: "2031-01-01",
   rentalUseConfirmed: true,
   hasDti: true,
   dtiExpiry: "2031-01-01",
@@ -59,17 +53,14 @@ test("an empty listing names every required field at once, top to bottom", () =>
     modelId: null,
     transmission: "",
     plateNumber: "",
-    pricePerDay: "",
-    earlyReturnResponseHours: "",
-    region: "",
-    city: "",
-    specificLocation: "",
     carImageCount: 0,
     hasOr: false,
     registrationExpiry: "",
     hasCr: false,
     hasCtpl: false,
     ctplExpiry: "",
+    hasComprehensive: false,
+    comprehensiveExpiry: "",
     rentalUseConfirmed: false,
     hasDti: false,
     dtiExpiry: "",
@@ -84,17 +75,14 @@ test("an empty listing names every required field at once, top to bottom", () =>
     "model",
     "transmission",
     "plate_number",
-    "price_per_day",
-    "early_return_response_window_hours",
-    "location",
-    "city",
-    "specific_location",
     "car_images",
     "or_file",
     "registration_expiry",
     "cr_file",
     "ctpl_file",
     "ctpl_expiry",
+    "comprehensive_insurance_file",
+    "comprehensive_insurance_expiry",
     "insurer_rental_use_confirmed",
     "dti_file",
     "dti_expiry",
@@ -124,18 +112,19 @@ test("a well-formed plate that is already registered is still a problem", () => 
   assert.match(validateNewListing({ ...complete, plateNumber: "AB12345" })[0].message, /3 letters/);
 });
 
-test("documents must still be valid, and an optional policy must be whole", () => {
+// Comprehensive insurance is required since CHAPTER 103.
+test("documents must still be valid, and comprehensive insurance is required", () => {
   assert.match(
     validateNewListing({ ...complete, registrationExpiry: "2030-06-14" })[0].message,
     /has passed/,
   );
   assert.deepEqual(fieldsOf(validateNewListing({ ...complete, registrationExpiry: TODAY })), [], "today still counts");
   assert.deepEqual(
-    fieldsOf(validateNewListing({ ...complete, hasComprehensive: true })),
+    fieldsOf(validateNewListing({ ...complete, comprehensiveExpiry: "" })),
     ["comprehensive_insurance_expiry"],
   );
   assert.deepEqual(
-    fieldsOf(validateNewListing({ ...complete, comprehensiveExpiry: "2031-01-01" })),
+    fieldsOf(validateNewListing({ ...complete, hasComprehensive: false })),
     ["comprehensive_insurance_file"],
   );
   assert.deepEqual(
@@ -145,38 +134,81 @@ test("documents must still be valid, and an optional policy must be whole", () =
   assert.deepEqual(fieldsOf(validateNewListing({ ...complete, dtiExpiry: "2020-01-01" })), ["dti_expiry"]);
 });
 
-test("photos, response hours and mileage stay inside their limits", () => {
+test("a new listing asks for the car and its papers only", () => {
   assert.deepEqual(fieldsOf(validateNewListing({ ...complete, carImageCount: 6 })), ["car_images"]);
+  // Price, location and the rest are set after approval, so a listing that
+  // carries none of them is complete.
+  for (const field of ["pricePerDay", "region", "mileage", "earlyReturnResponseHours"]) {
+    assert.ok(!(field in complete), `${field} is not part of a new listing`);
+  }
+});
+
+const setupEdit = {
+  pricePerDay: "",
+  earlyReturnResponseHours: "",
+  region: "",
+  city: "",
+  specificLocation: "",
+  mileage: "",
+  rentalUseConfirmed: true,
+  transmission: "automatic",
+  transmissionEditable: false,
+  detailsRequired: true,
+};
+
+const readyEdit = {
+  ...setupEdit,
+  pricePerDay: "1900",
+  earlyReturnResponseHours: "12",
+  region: "Metro Manila",
+  city: "Quezon City",
+  specificLocation: "SM North entrance",
+};
+
+test("an approved car cannot be saved without the details a renter books on", () => {
+  assert.deepEqual(fieldsOf(validateListingEdit(setupEdit)), [
+    "price_per_day",
+    "early_return_response_window_hours",
+    "location",
+    "city",
+    "specific_location",
+  ]);
+  assert.deepEqual(fieldsOf(validateListingEdit(readyEdit)), []);
+});
+
+test("while under review the listing details are optional, but checked if filled in", () => {
+  const pending = {
+    ...setupEdit,
+    detailsRequired: false,
+    transmission: "",
+    transmissionEditable: true,
+    rentalUseConfirmed: false,
+  };
+  assert.deepEqual(fieldsOf(validateListingEdit(pending)), ["insurer_rental_use_confirmed", "transmission"]);
+  assert.deepEqual(fieldsOf(validateListingEdit({ ...pending, pricePerDay: "100" })), [
+    "price_per_day",
+    "insurer_rental_use_confirmed",
+    "transmission",
+  ]);
+  assert.deepEqual(fieldsOf(validateListingEdit({ ...pending, city: "Quezon City" })), [
+    "location",
+    "specific_location",
+    "insurer_rental_use_confirmed",
+    "transmission",
+  ]);
+});
+
+test("response hours and mileage stay inside their limits", () => {
   for (const hours of ["0", "25", "3.5", "abc"]) {
     assert.deepEqual(
-      fieldsOf(validateNewListing({ ...complete, earlyReturnResponseHours: hours })),
+      fieldsOf(validateListingEdit({ ...readyEdit, earlyReturnResponseHours: hours })),
       ["early_return_response_window_hours"],
       hours,
     );
   }
-  assert.deepEqual(fieldsOf(validateNewListing({ ...complete, mileage: "-5" })), ["mileage"]);
-  assert.deepEqual(fieldsOf(validateNewListing({ ...complete, mileage: "0" })), []);
-});
-
-test("an edit names every problem at once, and an empty price is an error, not a silent stop", () => {
-  const edit = {
-    pricePerDay: "",
-    earlyReturnResponseHours: "",
-    rentalUseConfirmed: false,
-    transmission: "",
-    transmissionEditable: true,
-  };
-  assert.deepEqual(fieldsOf(validateListingEdit(edit)), [
-    "price_per_day",
-    "early_return_response_window_hours",
-    "insurer_rental_use_confirmed",
-    "transmission",
-  ]);
-  assert.deepEqual(
-    fieldsOf(validateListingEdit({ ...edit, pricePerDay: "900", earlyReturnResponseHours: "12", rentalUseConfirmed: true, transmissionEditable: false })),
-    [],
-    "a live listing's transmission is locked, so it is not asked for",
-  );
+  assert.deepEqual(fieldsOf(validateListingEdit({ ...readyEdit, mileage: "-5" })), ["mileage"]);
+  assert.deepEqual(fieldsOf(validateListingEdit({ ...readyEdit, mileage: "0" })), []);
+  assert.deepEqual(fieldsOf(validateListingEdit({ ...readyEdit, mileage: "45000" })), []);
 });
 
 test("an inquiry says what is missing instead of disabling Submit", () => {

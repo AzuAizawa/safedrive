@@ -70,7 +70,7 @@ type CarRecord = {
   id: string;
   owner_id: string;
   status: string | null;
-  price_per_day: number | string;
+  price_per_day: number | string | null;
   location: string | null;
   plate_number: string;
   car_models:
@@ -483,6 +483,15 @@ export default async function handler(req: Request) {
     const car = carData as unknown as CarRecord;
     if (!["approved", "active"].includes(car.status ?? "")) {
       return jsonResponse({ error: "This car is not available for booking" }, 409);
+    }
+
+    // Approved on its papers, but its lister has not yet set a price and a
+    // pickup location (CHAPTER 114, which refuses the insert as well).
+    if (car.price_per_day == null || !car.location?.trim()) {
+      return jsonResponse(
+        { error: "This vehicle is not listed yet. Please choose another one." },
+        409,
+      );
     }
 
     // The owner's suspension travels with their listings (CHAPTER 85). Browse

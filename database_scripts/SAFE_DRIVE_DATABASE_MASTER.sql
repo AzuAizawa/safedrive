@@ -17917,4 +17917,200 @@ commit;
 --        '1';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 114 - A car is reviewed on its papers, then set up for renters
+-- ============================================================================
+-- The add-a-vehicle form asked for everything at once: the car and its seven
+-- documents, and also price per day, mileage, pickup location, contact number,
+-- additional information, the early-return response limit and GPS. An admin
+-- reviews only the first group. The rest is now set by the lister after
+-- approval, from Edit.
+--
+-- 1. price_per_day may be empty. A new car is submitted without one. The
+--    500 to 100,000 check still applies once a price is set.
+--
+-- 2. An approved car without a price or a pickup location is not offered to
+--    renters. get_available_car_ids skips it, and a booking for it is refused
+--    in the database as well as by the booking endpoint. Approval itself is
+--    unchanged: the admin approves the papers, the lister then finishes the
+--    listing, and nothing is listed half-done.
+--
+-- 3. Mileage no longer sends an approved car back to review. It goes up with
+--    every trip, and no document an admin checks says what it is today.
+--    Reproduced from CHAPTER 71 (return_materially_changed_car_to_review)
+--    with only the mileage line removed.
+--
+-- 4. Replacing the photos of an approved car no longer sends it back to
+--    review. The photos are what renters see in Browse and are kept current
+--    by the lister. Every new photo is still run through the AI-image check
+--    (CHAPTER 108), which admins see, and an admin can still revoke or remove
+--    a listing whose photos are not the car. The trigger only ever acted on
+--    approved, active and inactive cars, so it is dropped; a rejected car still
+--    returns to review on any edit through the cars trigger.
+begin;
+
+alter table public.cars
+  alter column price_per_day drop not null;
+
+comment on column public.cars.price_per_day is
+  'Daily price in PHP, 500-100000. Empty until the lister sets it after approval (CHAPTER 114); a car without it is not offered to renters.';
+
+create or replace function public.return_materially_changed_car_to_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- A rejected listing returns to the queue on any edit at all. The lister is
+  -- answering the rejection, and what the admin objected to may well be one of
+  -- the fields that is no longer material below - a blurry photo caption, a
+  -- wrong contact number - so "material" is the wrong test here.
+  --
+  -- This also unsticks a listing that could not be edited at all. The lister's
+  -- own update cannot carry status or rejection_reason: protect_car_submission_fields
+  -- runs first (triggers fire in name order) and rejects both, so a rejected car
+  -- had no path back to review. Setting them here is allowed, because that guard
+  -- only polices what the lister sent.
+  if old.status = 'rejected'
+     and new.status is not distinct from old.status
+     and not (public.is_admin() or current_user in ('postgres', 'service_role', 'supabase_admin'))
+  then
+    new.status := 'pending';
+    new.rejection_reason := null;
+    new.last_verified_at := null;
+    return new;
+  end if;
+
+  if old.status in ('approved', 'active', 'inactive') and (
+    old.model_id is distinct from new.model_id or old.plate_number is distinct from new.plate_number or
+    old.transmission is distinct from new.transmission or
+    old.registration_expiry is distinct from new.registration_expiry or old.ctpl_expiry is distinct from new.ctpl_expiry or
+    old.comprehensive_insurance_expiry is distinct from new.comprehensive_insurance_expiry or
+    old.insurer_rental_use_confirmed is distinct from new.insurer_rental_use_confirmed
+  ) then
+    new.status := 'pending';
+    new.last_verified_at := null;
+    new.rejection_reason := null;
+    new.insurance_verification_status := 'pending';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists return_car_image_change_to_review on public.car_images;
+
+-- Reproduced from CHAPTER 88 with one added condition: the car has a price
+-- and a pickup location.
+create or replace function public.get_available_car_ids(
+  p_start date,
+  p_end date default null
+)
+returns table(car_id uuid)
+language plpgsql
+security definer
+set search_path = public
+stable
+as $get_available_car_ids$
+declare
+  trip_end date := coalesce(p_end, p_start + 1);
+begin
+  if p_start is null or trip_end <= p_start then
+    raise exception 'The return date must be after the pickup date.';
+  end if;
+  if trip_end - p_start > 30 then
+    raise exception 'A single trip can run at most 30 days.';
+  end if;
+
+  return query
+  select c.id
+  from public.cars c
+  where c.status in ('approved', 'active')
+    and c.deleted_at is null
+    and c.price_per_day is not null
+    and nullif(trim(c.location), '') is not null
+    and not exists (
+      select 1
+      from public.bookings b
+      where b.car_id = c.id
+        and b.status in (
+          'pending', 'confirmed', 'awaiting_payment',
+          'downpayment_paid', 'fully_paid', 'active'
+        )
+        and daterange(b.start_date, b.end_date, '[]')
+            && daterange(p_start, trip_end, '[]')
+    )
+    and not exists (
+      select 1
+      from public.approved_extension_holds() h
+      where h.car_id = c.id
+        and daterange(h.start_date, h.end_date, '[]')
+            && daterange(p_start, trip_end, '[]')
+    )
+    and not exists (
+      select 1
+      from public.vehicle_unavailability u
+      where u.car_id = c.id
+        and daterange(u.start_date, u.end_date, '[]')
+            && daterange(p_start, trip_end, '[]')
+    )
+    and coalesce((public.vehicle_compliance_summary(
+          c.id,
+          (p_start + time '09:00') at time zone 'Asia/Manila',
+          (trip_end + time '09:00') at time zone 'Asia/Manila'
+        ) ->> 'eligible')::boolean, false);
+end;
+$get_available_car_ids$;
+
+revoke all on function public.get_available_car_ids(date, date) from public, anon;
+grant execute on function public.get_available_car_ids(date, date) to authenticated, service_role;
+
+-- A new booking needs a car that has been set up for renters. Only new
+-- bookings are checked; a booking already made keeps its price snapshot.
+create or replace function public.refuse_booking_for_unlisted_car()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $refuse_unlisted$
+begin
+  if exists (
+    select 1 from public.cars c
+     where c.id = new.car_id
+       and (c.price_per_day is null or nullif(trim(c.location), '') is null)
+  ) then
+    raise exception 'This vehicle is not listed yet: its owner has not set a price and pickup location.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$refuse_unlisted$;
+
+drop trigger if exists refuse_booking_for_unlisted_car on public.bookings;
+create trigger refuse_booking_for_unlisted_car
+before insert on public.bookings
+for each row execute function public.refuse_booking_for_unlisted_car();
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'price may be empty' as check_name,
+--        (select is_nullable from information_schema.columns
+--          where table_schema = 'public' and table_name = 'cars' and column_name = 'price_per_day') as result,
+--        'YES' as expected
+-- union all
+-- select 'photo changes keep approval',
+--        (select count(*)::text from pg_trigger where tgname = 'return_car_image_change_to_review'),
+--        '0'
+-- union all
+-- select 'mileage keeps approval',
+--        (select case when position('old.mileage' in prosrc) = 0 then 'yes' else 'no' end
+--           from pg_proc where proname = 'return_materially_changed_car_to_review'),
+--        'yes'
+-- union all
+-- select 'unlisted cars cannot be booked',
+--        (select count(*)::text from pg_trigger where tgname = 'refuse_booking_for_unlisted_car'),
+--        '1';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

@@ -21,6 +21,7 @@ import TimePicker from "@/components/TimePicker";
 import CancellationPolicySummary from "@/components/CancellationPolicySummary";
 import type { CancellationTermsSettings } from "@/lib/cancellationPolicy";
 import { parseTripDatesQuery } from "@/lib/tripDates";
+import { needsListingSetup } from "@/lib/vehicleValidation";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 
@@ -224,7 +225,9 @@ export default function CarDetailPage() {
       data &&
       !(data as unknown as { deleted_at?: string | null }).deleted_at &&
       !ownerState?.deleted_at &&
-      !ownerState?.deletion_scheduled_for
+      !ownerState?.deletion_scheduled_for &&
+      // Approved but not yet given a price and pickup location (CHAPTER 114).
+      !needsListingSetup(data as unknown as Parameters<typeof needsListingSetup>[0])
     ) {
       const carRow = data as unknown as CarWithDetails;
       setCar(carRow);

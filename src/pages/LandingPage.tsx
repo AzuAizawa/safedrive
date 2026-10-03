@@ -65,6 +65,9 @@ export default function LandingPage() {
           .is("profiles.deleted_at", null)
           .is("profiles.suspended_at", null)
           .is("profiles.deletion_scheduled_for", null)
+          // Not listed until its lister sets a price and pickup location (CHAPTER 114).
+          .not("price_per_day", "is", null)
+          .not("location", "is", null)
           .order("created_at", { ascending: false })
           .limit(FEATURED_CAR_LIMIT);
 

@@ -65,6 +65,7 @@ import {
   LISTING_FIELD_LABELS,
   PLATE_NUMBER_PATTERN,
   PLATE_NUMBER_HINT,
+  needsListingSetup,
   validateListingEdit,
   validateNewListing,
   validatePlateNumber,
@@ -163,7 +164,8 @@ interface VehicleRow {
   review_submitted_at: string | null;
   plate_number: string;
   mileage: number | null;
-  price_per_day: number;
+  // Null until the lister sets it after approval (CHAPTER 114).
+  price_per_day: number | null;
   early_return_response_window_hours: number | null;
   location: string | null;
   pickup_latitude: number | null;
@@ -518,6 +520,7 @@ export default function MyVehiclesPage() {
 
   const [editVehicle, setEditVehicle] = useState<VehicleRow | null>(null);
   const [editPrice, setEditPrice] = useState("");
+  const [editMileage, setEditMileage] = useState("");
   const [editEarlyReturnResponseWindowHours, setEditEarlyReturnResponseWindowHours] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [editCity, setEditCity] = useState("");
@@ -550,19 +553,9 @@ export default function MyVehiclesPage() {
     brand_id: null as string | null,
     model_id: null as string | null,
     plate_number: "",
-    mileage: "",
-    price_per_day: "",
-    early_return_response_window_hours: "24",
-    location: "",
-    city: "",
-    specific_location: "",
     fuel_category: "",
     fuel_subtype: "",
     transmission: "",
-    gps_available: false,
-    contact_number: profile?.phone || "",
-    manufacturing_year: "",
-    additional_info: "",
     registration_expiry: "",
     ctpl_expiry: "",
     comprehensive_insurance_expiry: "",
@@ -664,12 +657,6 @@ export default function MyVehiclesPage() {
     transmission: form.transmission,
     plateNumber: form.plate_number,
     plateTaken: plateCheck.status === "taken",
-    mileage: form.mileage,
-    pricePerDay: form.price_per_day,
-    earlyReturnResponseHours: form.early_return_response_window_hours,
-    region: form.location,
-    city: form.city,
-    specificLocation: form.specific_location,
     carImageCount: carImages.length,
     hasOr: Boolean(orFile),
     registrationExpiry: form.registration_expiry,
@@ -695,9 +682,15 @@ export default function MyVehiclesPage() {
     ? validateListingEdit({
         pricePerDay: editPrice,
         earlyReturnResponseHours: editEarlyReturnResponseWindowHours,
+        region: editLocation,
+        city: editCity,
+        specificLocation: editSpecificLocation,
+        mileage: editMileage,
         rentalUseConfirmed: editRentalUseConfirmed,
         transmission: editTransmission,
         transmissionEditable: ["pending", "rejected"].includes(editVehicle.status),
+        // Once approved, the car needs these to be bookable (CHAPTER 114).
+        detailsRequired: !["pending", "rejected"].includes(editVehicle.status),
       })
     : [];
   const shownEditErrors = editSubmitAttempted ? editListingErrors : [];
@@ -1006,8 +999,6 @@ export default function MyVehiclesPage() {
     // only narrows the type for the insert below.
     const modelId = form.model_id;
     if (!modelId) return;
-    const pricePerDay = Number(form.price_per_day);
-    const earlyReturnResponseWindowHours = Number(form.early_return_response_window_hours);
 
     setSubmitting(true);
     const toastId = toast.loading("Saving vehicle details...");
@@ -1018,20 +1009,13 @@ export default function MyVehiclesPage() {
           owner_id: user.id,
           model_id: modelId,
           plate_number: form.plate_number,
-          mileage: form.mileage ? parseInt(form.mileage) : null,
-          price_per_day: pricePerDay,
-          early_return_response_window_hours: earlyReturnResponseWindowHours,
-          location: form.location ? [
-            form.location,
-            form.city || null,
-            form.specific_location || null,
-          ].filter(Boolean).join(" - ") : null,
+          // Price, location, mileage, contact, response limit and features are
+          // set after approval, from Edit (CHAPTER 114). Until a price and a
+          // pickup location are in, an approved car is not shown to renters.
+          price_per_day: null,
           fuel_category: form.fuel_category || null,
           fuel_subtype: form.fuel_subtype || null,
           transmission: form.transmission || null,
-          gps_available: form.gps_available,
-          contact_number: form.contact_number || null,
-          additional_info: form.additional_info || null,
           registration_expiry: form.registration_expiry,
           ctpl_expiry: form.ctpl_expiry,
           comprehensive_insurance_expiry:
@@ -1122,19 +1106,9 @@ export default function MyVehiclesPage() {
         brand_id: null,
         model_id: null,
         plate_number: "",
-        mileage: "",
-        price_per_day: "",
-        early_return_response_window_hours: "24",
-        location: "",
-        city: "",
-        specific_location: "",
         fuel_category: "",
         fuel_subtype: "",
         transmission: "",
-        gps_available: false,
-        contact_number: profile?.phone || "",
-        manufacturing_year: "",
-        additional_info: "",
         registration_expiry: "",
         ctpl_expiry: "",
         comprehensive_insurance_expiry: "",
@@ -1186,8 +1160,14 @@ export default function MyVehiclesPage() {
       window.requestAnimationFrame(() => focusField("edit-listing-error-summary"));
       return;
     }
-    const nextPrice = Number(editPrice);
-    const nextEarlyReturnResponseWindowHours = Number(editEarlyReturnResponseWindowHours);
+    // Blank stays blank while the car is still under review; validation has
+    // already insisted on these for an approved car.
+    const nextPrice = editPrice.trim() === "" ? null : Number(editPrice);
+    const nextEarlyReturnResponseWindowHours =
+      editEarlyReturnResponseWindowHours.trim() === ""
+        ? null
+        : Number(editEarlyReturnResponseWindowHours);
+    const nextMileage = editMileage.trim() === "" ? null : Number(editMileage);
 
     setEditing(true);
     const toastId = toast.loading("Saving changes...");
@@ -1250,6 +1230,9 @@ export default function MyVehiclesPage() {
         .update({
           price_per_day: nextPrice,
           early_return_response_window_hours: nextEarlyReturnResponseWindowHours,
+          // Mileage only moves forward with use; it no longer sends the car back
+          // to review (CHAPTER 114).
+          mileage: nextMileage,
           location:
             [editLocation, editCity, editSpecificLocation]
               .filter(Boolean)
@@ -1871,208 +1854,11 @@ export default function MyVehiclesPage() {
                     return null;
                   })()}
                 </div>
-                <div id="listing-mileage" className="space-y-2">
-                  <Label>Mileage (km) <span className="text-xs font-normal text-muted-foreground">(optional)</span></Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    aria-invalid={Boolean(listingError("mileage"))}
-                    value={form.mileage}
-                    onChange={(e) =>
-                      setForm({ ...form, mileage: e.target.value })
-                    }
-                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <FieldError message={listingError("mileage")} />
-                </div>
-                <div id="listing-price_per_day" className="space-y-2">
-                  <Label>Price per Day (PHP) *</Label>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
-                      PHP
-                    </span>
-                  <Input
-                    type="number"
-                    min="500"
-                    max={MAX_LISTING_PRICE}
-                    step="1"
-                    placeholder="Min: 500, Max: 100000"
-                    value={form.price_per_day}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setForm({
-                        ...form,
-                        price_per_day:
-                          value === ""
-                            ? ""
-                            : String(Math.min(Number(value), MAX_LISTING_PRICE)),
-                      });
-                    }}
-                    required
-                    aria-invalid={Boolean(listingError("price_per_day"))}
-                    className="pl-12 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  </div>
-                  <FieldError
-                    message={
-                      listingError("price_per_day") ??
-                      (form.price_per_day !== "" ? validateListingPrice(form.price_per_day) : null)
-                    }
-                  />
-                  {form.price_per_day !== "" && !validateListingPrice(form.price_per_day) && (
-                    <p className="text-xs text-muted-foreground">
-                      Renters pay ₱{Number(form.price_per_day).toLocaleString()}/day. You'll earn
-                      approximately ₱
-                      {(
-                        Number(form.price_per_day) -
-                        calculateCommissionAmount(Number(form.price_per_day), commissionRate)
-                      ).toLocaleString()}
-                      /day after SafeDrive's {formatCommissionPercent(commissionRate)} commission.
-                    </p>
-                  )}
-                </div>
-                <div id="listing-early_return_response_window_hours" className="space-y-2">
-                  <Label>Early-return response limit (hours) *</Label>
-                  <Input
-                    aria-invalid={Boolean(listingError("early_return_response_window_hours"))}
-                    type="number"
-                    inputMode="numeric"
-                    min={MIN_EARLY_RETURN_RESPONSE_HOURS}
-                    max={MAX_EARLY_RETURN_RESPONSE_HOURS}
-                    step={1}
-                    required
-                    placeholder={`${MIN_EARLY_RETURN_RESPONSE_HOURS}-${MAX_EARLY_RETURN_RESPONSE_HOURS}`}
-                    value={form.early_return_response_window_hours}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        early_return_response_window_hours: clampResponseHours(e.target.value),
-                      })
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    How long you have to answer an early-return request, from{" "}
-                    {MIN_EARLY_RETURN_RESPONSE_HOURS} to {MAX_EARLY_RETURN_RESPONSE_HOURS} hours. Past
-                    this it rejects itself and the original return date stands.
-                  </p>
-                  <FieldError message={listingError("early_return_response_window_hours")} />
-                </div>
-
-                <div className="space-y-4 sm:col-span-2">
-                  <div id="listing-location" className="space-y-2">
-                    <Label>Pickup/Dropoff Region *</Label>
-                    <select
-                      value={form.location}
-                      onChange={(e) => setForm({ ...form, location: e.target.value, city: "" })}
-                      required
-                      aria-invalid={Boolean(listingError("location"))}
-                      className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${INVALID_CONTROL_CLASSES}`}
-                    >
-                      <option value="" disabled>Select a region</option>
-                      {VEHICLE_REGION_OPTIONS.map((region) => (
-                        <option key={region} value={region}>{region}</option>
-                      ))}
-                    </select>
-                    <FieldError message={listingError("location")} />
-                  </div>
-                  <div id="listing-city" className="space-y-2">
-                    <Label>City/Municipality *</Label>
-                    {(() => {
-                      const cityChoices = VEHICLE_CITY_OPTIONS[form.location as (typeof VEHICLE_REGION_OPTIONS)[number]] ?? [];
-                      const isOther = form.city !== "" && !cityChoices.includes(form.city);
-                      return (
-                        <>
-                          <select
-                            value={isOther ? OTHER_CITY_OPTION : form.city}
-                            onChange={(e) =>
-                              setForm({
-                                ...form,
-                                city: e.target.value === OTHER_CITY_OPTION ? "" : e.target.value,
-                              })
-                            }
-                            disabled={!form.location}
-                            required
-                            aria-invalid={Boolean(listingError("city"))}
-                            className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${INVALID_CONTROL_CLASSES}`}
-                          >
-                            <option value="" disabled>
-                              {form.location ? "Select a city/municipality" : "Select a region first"}
-                            </option>
-                            {cityChoices.map((city) => (
-                              <option key={city} value={city}>{city}</option>
-                            ))}
-                            <option value={OTHER_CITY_OPTION}>{OTHER_CITY_OPTION}</option>
-                          </select>
-                          {isOther && (
-                            <Input
-                              value={form.city}
-                              onChange={(e) => setForm({ ...form, city: e.target.value })}
-                              placeholder="Type the city or municipality"
-                              required
-                              aria-invalid={Boolean(listingError("city"))}
-                              className="mt-2"
-                            />
-                          )}
-                          <FieldError message={listingError("city")} />
-                        </>
-                      );
-                    })()}
-                  </div>
-                  <div id="listing-specific_location" className="space-y-2">
-                    <Label>Specific Pick-up Location/Landmark *</Label>
-                    <Input
-                      value={form.specific_location}
-                      onChange={(e) => setForm({ ...form, specific_location: e.target.value })}
-                      placeholder="e.g. SM Megamall Building A entrance"
-                      required
-                      aria-invalid={Boolean(listingError("specific_location"))}
-                    />
-                    <FieldError message={listingError("specific_location")} />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Contact Number</Label>
-                  <Input
-                    value={form.contact_number}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        contact_number: sanitizePhilippineMobileNumber(e.target.value),
-                      })
-                    }
-                    maxLength={11}
-                    placeholder="e.g. 0917 123 4567"
-                  />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Additional Information</Label>
-                  <Input
-                    value={form.additional_info}
-                    onChange={(e) =>
-                      setForm({ ...form, additional_info: e.target.value })
-                    }
-                    placeholder="Any extra details about your car..."
-                  />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Optional Features</Label>
-                  <label className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-3 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.gps_available}
-                      onChange={(e) =>
-                        setForm({ ...form, gps_available: e.target.checked })
-                      }
-                      className="mt-0.5 h-4 w-4 accent-primary"
-                    />
-                    <span className="space-y-1">
-                      <span className="block font-medium">GPS available in vehicle</span>
-                      <span className="block text-xs text-muted-foreground">
-                        Use this only if the vehicle itself includes owner-provided GPS equipment. SafeDrive will not live-track the trip.
-                      </span>
-                    </span>
-                  </label>
-                </div>
+                <p className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground sm:col-span-2">
+                  Price per day, pickup location, mileage, contact number and features
+                  are set after the admin approves your documents, from Edit. The car is
+                  listed for renters once its price and pickup location are in.
+                </p>
               </div>
 
               {/* Image uploads */}
@@ -2390,7 +2176,10 @@ export default function MyVehiclesPage() {
           ) : null}
 
           {visibleVehicles.map((v) => {
-            const badge = statusBadge[v.status] || statusBadge.pending;
+            const setupNeeded = needsListingSetup(v);
+            const badge = setupNeeded
+              ? { label: "Needs setup", color: "text-amber-600 bg-amber-50 dark:bg-amber-950/30" }
+              : statusBadge[v.status] || statusBadge.pending;
             return (
               <Card key={v.id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -2403,7 +2192,8 @@ export default function MyVehiclesPage() {
                         {v.car_models.car_brands.name} {v.car_models.name}
                       </h3>
                       <p className="text-sm text-muted-foreground mt-0.5">
-                        <span className="font-medium text-foreground">{v.plate_number}</span> &bull; ₱{Number(v.price_per_day).toLocaleString()}/day
+                        <span className="font-medium text-foreground">{v.plate_number}</span> &bull;{" "}
+                        {v.price_per_day == null ? "Price not set yet" : `₱${Number(v.price_per_day).toLocaleString()}/day`}
                       </p>
                       {(v.fuel_category || v.fuel_subtype) && (
                         <p className="mt-1 text-xs text-muted-foreground">
@@ -2461,6 +2251,16 @@ export default function MyVehiclesPage() {
                         </p>
                       )}
 
+                      {setupNeeded && (
+                        <p className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+                          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            Approved. Set the price per day and pickup location with
+                            Edit to list it - renters cannot see or book it until then.
+                          </span>
+                        </p>
+                      )}
+
                       {v.status === "renewal_required" && (
                         <div className="mt-2 rounded-md border border-orange-500/25 bg-orange-500/5 px-2 py-2 text-xs">
                           <p className="flex items-start gap-1.5 text-orange-700 dark:text-orange-300">
@@ -2502,7 +2302,8 @@ export default function MyVehiclesPage() {
                       onClick={() => {
                         const parsedLocation = parseStoredLocation(v.location);
                         setEditVehicle(v);
-                        setEditPrice(v.price_per_day.toString());
+                        setEditPrice(v.price_per_day == null ? "" : String(v.price_per_day));
+                        setEditMileage(v.mileage == null ? "" : String(v.mileage));
                         setEditEarlyReturnResponseWindowHours(
                           v.early_return_response_window_hours != null &&
                             v.early_return_response_window_hours >= MIN_EARLY_RETURN_RESPONSE_HOURS &&
@@ -2517,7 +2318,7 @@ export default function MyVehiclesPage() {
                         setEditFuelSubtype(v.fuel_subtype || "");
                         setEditTransmission(v.transmission || "");
                         setEditGpsAvailable(Boolean(v.gps_available));
-                        setEditContact(v.contact_number || "");
+                        setEditContact(v.contact_number || profile?.phone || "");
                         setEditAdditionalInfo(v.additional_info || "");
                         setEditRentalUseConfirmed(Boolean(v.insurer_rental_use_confirmed));
                         setEditRentalAgreement(null);
@@ -2715,20 +2516,22 @@ export default function MyVehiclesPage() {
                     ><input type="checkbox" className="mt-1" checked={editRentalUseConfirmed} onChange={(event) => setEditRentalUseConfirmed(event.target.checked)} aria-invalid={Boolean(editListingError("insurer_rental_use_confirmed"))} /><span>I reconfirmed intended rental use with the insurer. Changing any insurance declaration sends this vehicle back to admin review. *</span></label>
                     <FieldError message={editListingError("insurer_rental_use_confirmed")} />
                   </div>
-                  <div className="space-y-2">
+                  <div id="edit-listing-location" className="space-y-2">
                     <Label>Pickup Region</Label>
                     <select
                       value={editLocation}
                       onChange={(e) => { setEditLocation(e.target.value); setEditCity(""); }}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      aria-invalid={Boolean(editListingError("location"))}
+                      className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${INVALID_CONTROL_CLASSES}`}
                     >
                       <option value="">Select a region</option>
                       {VEHICLE_REGION_OPTIONS.map((region) => (
                         <option key={region} value={region}>{region}</option>
                       ))}
                     </select>
+                    <FieldError message={editListingError("location")} />
                   </div>
-                  <div className="space-y-2">
+                  <div id="edit-listing-city" className="space-y-2">
                     <Label>City/Municipality</Label>
                     {(() => {
                       const cityChoices = VEHICLE_CITY_OPTIONS[editLocation as (typeof VEHICLE_REGION_OPTIONS)[number]] ?? [];
@@ -2739,7 +2542,8 @@ export default function MyVehiclesPage() {
                             value={isOther ? OTHER_CITY_OPTION : editCity}
                             onChange={(e) => setEditCity(e.target.value === OTHER_CITY_OPTION ? "" : e.target.value)}
                             disabled={!editLocation}
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-invalid={Boolean(editListingError("city"))}
+                            className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60 ${INVALID_CONTROL_CLASSES}`}
                           >
                             <option value="">
                               {editLocation ? "Select a city/municipality" : "Select a region first"}
@@ -2754,20 +2558,24 @@ export default function MyVehiclesPage() {
                               value={editCity}
                               onChange={(e) => setEditCity(e.target.value)}
                               placeholder="Type the city or municipality"
+                              aria-invalid={Boolean(editListingError("city"))}
                               className="mt-2"
                             />
                           )}
+                          <FieldError message={editListingError("city")} />
                         </>
                       );
                     })()}
                   </div>
-                  <div className="space-y-2">
+                  <div id="edit-listing-specific_location" className="space-y-2">
                     <Label>Specific Pick-up Location/Landmark</Label>
                     <Input
                       value={editSpecificLocation}
                       onChange={(e) => setEditSpecificLocation(e.target.value)}
                       placeholder="e.g. STI Novaliches, building entrance, mall pickup bay"
+                      aria-invalid={Boolean(editListingError("specific_location"))}
                     />
+                    <FieldError message={editListingError("specific_location")} />
                   </div>
                   {/* Correctable while the listing is under review or was sent
                       back, and fixed once it is live - changing it on an approved
@@ -2846,6 +2654,23 @@ export default function MyVehiclesPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                  <div id="edit-listing-mileage" className="space-y-2">
+                    <Label>
+                      Mileage (km){" "}
+                      <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      aria-invalid={Boolean(editListingError("mileage"))}
+                      value={editMileage}
+                      onChange={(e) => setEditMileage(e.target.value)}
+                      className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <FieldError message={editListingError("mileage")} />
                   </div>
                   <div className="space-y-2">
                     <Label>Contact Number</Label>

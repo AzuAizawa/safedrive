@@ -108,18 +108,15 @@ const expiryError = (value: string, today: string, document: string) =>
       ? `That date has passed - the ${document} must still be valid.`
       : null;
 
+// A new listing is the car and its papers only: what an admin reviews. Price,
+// pickup location, mileage, contact, response limit and features are set by
+// the lister after approval, through Edit, before the car can be booked.
 export type NewListingInput = {
   brandId: string | null;
   modelId: string | null;
   transmission: string;
   plateNumber: string;
   plateTaken: boolean;
-  mileage: string;
-  pricePerDay: string;
-  earlyReturnResponseHours: string;
-  region: string;
-  city: string;
-  specificLocation: string;
   carImageCount: number;
   hasOr: boolean;
   registrationExpiry: string;
@@ -160,24 +157,6 @@ export const validateNewListing = (input: NewListingInput): ListingFieldError[] 
     validatePlateNumber(input.plateNumber) ??
       (input.plateTaken ? "This plate number is already registered in SafeDrive." : null),
   );
-  check(
-    "mileage",
-    input.mileage.trim() !== "" && !(Number(input.mileage) >= 0)
-      ? "Enter a mileage of 0 or more, or leave it blank."
-      : null,
-  );
-  check("price_per_day", validateListingPrice(input.pricePerDay));
-  check("early_return_response_window_hours", responseHoursError(input.earlyReturnResponseHours));
-  check("location", input.region ? null : "Select the pickup/dropoff region.");
-  check(
-    "city",
-    input.city.trim()
-      ? null
-      : input.region
-        ? "Select the city or municipality, or type it under Other."
-        : "Select a region first, then the city.",
-  );
-  check("specific_location", input.specificLocation.trim() ? null : "Enter where the renter picks the car up.");
   check(
     "car_images",
     input.carImageCount < 1
@@ -220,17 +199,48 @@ export const validateNewListing = (input: NewListingInput): ListingFieldError[] 
 export const validateListingEdit = (input: {
   pricePerDay: string;
   earlyReturnResponseHours: string;
+  region: string;
+  city: string;
+  specificLocation: string;
+  mileage: string;
   rentalUseConfirmed: boolean;
   transmission: string;
   /** Only while the listing is under review or was sent back. */
   transmissionEditable: boolean;
+  /**
+   * Once approved, a car needs its listing details to be bookable. While it
+   * is still under review they are optional, but checked if filled in.
+   */
+  detailsRequired: boolean;
 }): ListingFieldError[] => {
   const errors: ListingFieldError[] = [];
   const check = (field: ListingField, message: string | null) => {
     if (message) errors.push({ field, message });
   };
-  check("price_per_day", validateListingPrice(input.pricePerDay));
-  check("early_return_response_window_hours", responseHoursError(input.earlyReturnResponseHours));
+  const wanted = (value: string) => input.detailsRequired || value.trim() !== "";
+  if (wanted(input.pricePerDay)) check("price_per_day", validateListingPrice(input.pricePerDay));
+  if (wanted(input.earlyReturnResponseHours)) {
+    check("early_return_response_window_hours", responseHoursError(input.earlyReturnResponseHours));
+  }
+  if (wanted(input.region + input.city + input.specificLocation)) {
+    check("location", input.region ? null : "Select the pickup/dropoff region.");
+    check(
+      "city",
+      input.city.trim()
+        ? null
+        : input.region
+          ? "Select the city or municipality, or type it under Other."
+          : "Select a region first, then the city.",
+    );
+    check("specific_location", input.specificLocation.trim() ? null : "Enter where the renter picks the car up.");
+  }
+  check(
+    "mileage",
+    input.mileage.trim() !== "" &&
+      !(Number(input.mileage) >= 0 && Number.isInteger(Number(input.mileage)))
+      ? "Enter a whole number of kilometres, 0 or more, or leave it blank."
+      : null,
+  );
   check(
     "insurer_rental_use_confirmed",
     input.rentalUseConfirmed ? null : "Confirm the rental use was disclosed to your insurer before saving.",
@@ -243,3 +253,16 @@ export const validateListingEdit = (input: {
   }
   return errors;
 };
+
+/**
+ * An approved car whose lister has not yet set what a renter books on
+ * (CHAPTER 114). It is hidden from renters and cannot be booked until both a
+ * daily price and a pickup location are in.
+ */
+export const needsListingSetup = (car: {
+  status: string;
+  price_per_day: number | string | null;
+  location: string | null;
+}) =>
+  ["approved", "active", "inactive"].includes(car.status) &&
+  (car.price_per_day == null || !car.location?.trim());

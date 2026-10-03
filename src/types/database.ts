@@ -353,7 +353,7 @@ export interface Database {
           model_id: string;
           plate_number: string;
           mileage: number | null;
-          price_per_day: number;
+          price_per_day: number | null;
           early_return_response_window_hours: number | null;
           pickup_latitude: number | null;
           pickup_longitude: number | null;
@@ -387,7 +387,7 @@ export interface Database {
           model_id: string;
           plate_number: string;
           mileage?: number | null;
-          price_per_day: number;
+          price_per_day?: number | null;
           early_return_response_window_hours?: number | null;
           pickup_latitude?: number | null;
           pickup_longitude?: number | null;
@@ -419,7 +419,7 @@ export interface Database {
           model_id?: string;
           plate_number?: string;
           mileage?: number | null;
-          price_per_day?: number;
+          price_per_day?: number | null;
           early_return_response_window_hours?: number | null;
           pickup_latitude?: number | null;
           pickup_longitude?: number | null;
