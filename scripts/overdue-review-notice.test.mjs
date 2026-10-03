@@ -74,6 +74,7 @@ async function fixture() {
   await db.exec(await chapter("-- CHAPTER 104 - A review that is late is visible as late"));
   await db.exec(await chapter("-- CHAPTER 105 - A vehicle waiting for review shows how long it has waited"));
   await db.exec(await chapter("-- CHAPTER 113 - A review that runs past its target time is announced, once"));
+  await db.exec(await chapter("-- CHAPTER 117 - A late review is emailed as well as notified"));
 
   // Everyone submits now; the late ones are then aged past the 24-hour target.
   await db.exec(`
@@ -85,7 +86,15 @@ async function fixture() {
   return db;
 }
 
-const run = async (db) => (await db.query("select * from public.notify_overdue_reviews()")).rows[0];
+// CHAPTER 117: one row per notice, which the worker turns into emails.
+const runRows = async (db) => (await db.query("select * from public.notify_overdue_reviews()")).rows;
+const run = async (db) => {
+  const rows = await runRows(db);
+  return {
+    identity_notices: rows.filter((row) => row.kind === "identity").length,
+    vehicle_notices: rows.filter((row) => row.kind === "vehicle").length,
+  };
+};
 const notesFor = async (db, user) =>
   (await db.query("select title, message, link from public.notifications where user_id = $1 order by title", [user])).rows;
 
@@ -146,4 +155,26 @@ test("the target follows the platform setting", async () => {
   const db = await fixture();
   await db.exec("update public.platform_settings set verification_review_target_hours = 48, vehicle_review_target_hours = 12");
   assert.deepEqual(await run(db), { identity_notices: 0, vehicle_notices: 1 }, "30h is under 48h but over 12h");
+});
+
+test("each notice comes back as a row the worker can email", async () => {
+  const db = await fixture();
+  const rows = await runRows(db);
+  const byKind = Object.fromEntries(rows.map((row) => [row.kind, row]));
+  assert.equal(byKind.identity.user_id, LATE_USER);
+  assert.equal(byKind.identity.label, "Lara Late");
+  assert.equal(byKind.identity.target_hours, 24);
+  assert.equal(byKind.vehicle.subject_id, LATE_CAR);
+  assert.equal(byKind.vehicle.user_id, FRESH_USER, "the vehicle's owner is the one emailed");
+  assert.equal(byKind.vehicle.label, "ABC 1234");
+  assert.ok(byKind.vehicle.submitted_at instanceof Date);
+});
+
+test("CHAPTER 117's verification query reads the new row shape", async () => {
+  const db = await fixture();
+  const { rows } = await db.query(`
+    select string_agg(a, ',' order by n) as result from pg_proc p,
+      unnest(p.proargnames, p.proargmodes::text[]) with ordinality as x(a, m, n)
+     where p.proname = 'notify_overdue_reviews' and m = 't'`);
+  assert.equal(rows[0].result, "kind,subject_id,user_id,label,submitted_at,target_hours");
 });

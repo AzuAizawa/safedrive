@@ -18335,4 +18335,152 @@ commit;
 --        '2' as expected;
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 117 - A late review is emailed as well as notified
+-- ============================================================================
+-- CHAPTER 113 announced a late review in the app only. Someone waiting on a
+-- review is the person least likely to be looking at SafeDrive, so the same
+-- notice now goes by email, to the person waiting and to every admin.
+--
+-- Email cannot be sent from the database, so notify_overdue_reviews() now
+-- returns one row per notice it wrote (who, what, since when) instead of two
+-- counts, and api/notify-overdue-reviews.ts sends the emails from those rows.
+-- The in-app notices and the once-per-submission stamps are unchanged from
+-- CHAPTER 113. A different return type cannot be replaced in place, so the
+-- function is dropped and created again.
+begin;
+
+drop function if exists public.notify_overdue_reviews();
+
+create or replace function public.notify_overdue_reviews()
+returns table (
+  kind text,
+  subject_id uuid,
+  user_id uuid,
+  label text,
+  submitted_at timestamptz,
+  target_hours integer
+)
+language plpgsql
+security definer
+set search_path = public
+as $notify_overdue$
+#variable_conflict use_column
+declare
+  identity_target integer;
+  vehicle_target integer;
+  late record;
+begin
+  select coalesce(s.verification_review_target_hours, 24),
+         coalesce(s.vehicle_review_target_hours, 24)
+    into identity_target, vehicle_target
+    from public.platform_settings s
+   where s.id = 'default';
+  identity_target := coalesce(identity_target, 24);
+  vehicle_target := coalesce(vehicle_target, 24);
+
+  for late in
+    select p.id, coalesce(nullif(trim(p.full_name), ''), p.email) as who, p.verification_submitted_at
+      from public.profiles p
+     where p.verified_status = 'pending'
+       and p.deleted_at is null
+       and p.verification_submitted_at is not null
+       and p.verification_overdue_notified_at is null
+       and p.verification_submitted_at < now() - make_interval(hours => identity_target)
+     for update of p skip locked
+  loop
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      late.id,
+      'Your verification is taking longer than usual',
+      'Your identity verification is still in the review queue - it has passed our usual review time. You do not need to resubmit; we will notify you as soon as it is decided.',
+      'info',
+      '/verify');
+
+    insert into public.notifications (user_id, title, message, type, link)
+    select a.id,
+           'Identity review past target',
+           format('%s has waited more than %s hours for identity review.', late.who, identity_target),
+           'warning',
+           '/admin/users'
+      from public.profiles a
+     where a.role in ('admin', 'super_admin')
+       and a.deleted_at is null
+       and a.admin_disabled_at is null;
+
+    update public.profiles
+       set verification_overdue_notified_at = now()
+     where id = late.id;
+
+    kind := 'identity';
+    subject_id := late.id;
+    user_id := late.id;
+    label := late.who;
+    submitted_at := late.verification_submitted_at;
+    target_hours := identity_target;
+    return next;
+  end loop;
+
+  for late in
+    select c.id, c.owner_id, c.plate_number, c.review_submitted_at
+      from public.cars c
+     where c.status = 'pending'
+       and c.deleted_at is null
+       and c.review_submitted_at is not null
+       and c.review_overdue_notified_at is null
+       and c.review_submitted_at < now() - make_interval(hours => vehicle_target)
+     for update of c skip locked
+  loop
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      late.owner_id,
+      'Your vehicle review is taking longer than usual',
+      format('The review of %s has passed our usual review time. It is still in the queue - you do not need to resubmit; we will notify you as soon as it is decided.',
+        coalesce(late.plate_number, 'your vehicle')),
+      'info',
+      '/my-vehicles');
+
+    insert into public.notifications (user_id, title, message, type, link)
+    select a.id,
+           'Vehicle review past target',
+           format('%s has waited more than %s hours for vehicle review.',
+             coalesce(late.plate_number, 'A vehicle'), vehicle_target),
+           'warning',
+           '/admin/vehicle-approval'
+      from public.profiles a
+     where a.role in ('admin', 'super_admin')
+       and a.deleted_at is null
+       and a.admin_disabled_at is null;
+
+    update public.cars
+       set review_overdue_notified_at = now()
+     where id = late.id;
+
+    kind := 'vehicle';
+    subject_id := late.id;
+    user_id := late.owner_id;
+    label := coalesce(late.plate_number, 'A vehicle');
+    submitted_at := late.review_submitted_at;
+    target_hours := vehicle_target;
+    return next;
+  end loop;
+
+  return;
+end;
+$notify_overdue$;
+
+revoke all on function public.notify_overdue_reviews() from public, anon, authenticated;
+grant execute on function public.notify_overdue_reviews() to service_role;
+
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'job returns one row per notice' as check_name,
+--        (select string_agg(a, ',' order by n) from pg_proc p,
+--           unnest(p.proargnames, p.proargmodes::text[]) with ordinality as x(a, m, n)
+--          where p.proname = 'notify_overdue_reviews' and m = 't') as result,
+--        'kind,subject_id,user_id,label,submitted_at,target_hours' as expected;
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.
