@@ -887,7 +887,7 @@ export default function AdminPlatformSettingsPage() {
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                  {approvals} approve · {rejects} reject · {superAdminCount} super
+                  {approvals} approve · {rejects} reject · {superAdminCount} system
                   admins total{myVote ? ` · your vote: ${myVote} (final)` : ""}
                 </p>
 
@@ -1167,7 +1167,7 @@ export default function AdminPlatformSettingsPage() {
               <CardDescription>
                 The "how long does review take" wording shown to users after they
                 submit identity verification, and to listers after they submit a
-                vehicle. Display text, not a policy value, so a single super
+                vehicle. Display text, not a policy value, so a single system
                 admin edits it directly - raise it during a peak season so
                 nobody complains that day 3 passed with no decision.
               </CardDescription>
