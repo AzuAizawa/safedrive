@@ -5,7 +5,10 @@ import {
 } from "../server/vehicleCompliance.js";
 import { addDays } from "date-fns";
 import { createClient } from "@supabase/supabase-js";
-import { processAutomaticRefundForBooking } from "../server/refundAutomation.js";
+import {
+  createManualRefundReview,
+  processAutomaticRefundForBooking,
+} from "../server/refundAutomation.js";
 import { runBookingCompletionSideEffects } from "../server/bookingCompletion.js";
 import { sendUserNotificationEmail } from "../server/email.js";
 import { blockedIpResponse } from "../server/ipBlock.js";
@@ -172,16 +175,6 @@ const getFirstCapturedBookingPaymentAt = (booking: BookingRecord) => {
   return timestamps.length ? timestamps[0] : null;
 };
 
-const getCapturedBookingPaymentTotal = (booking: BookingRecord) =>
-  booking.payments
-    .filter(
-      (payment) =>
-        REFUNDABLE_BOOKING_PAYMENT_TYPES.includes(payment.payment_type) &&
-        payment.status === "completed" &&
-        Number(payment.amount) > 0,
-    )
-    .reduce((total, payment) => total + Number(payment.amount || 0), 0);
-
 const DEFAULT_REFUND_FULL_HOURS = 24;
 
 const clampNumber = (value: unknown, min: number, max: number, fallback: number) => {
@@ -268,128 +261,6 @@ const getReturnCheckinEligibleMs = (booking: BookingRecord, approvedEarly: Appro
     if (earlyMs !== null) return earlyMs;
   }
   return getBookingDropoffMs(booking);
-};
-
-const createManualRefundReview = async (
-  supabase: ReturnType<typeof getSupabaseAdmin>,
-  booking: BookingRecord,
-  userId: string,
-  manualDestinationNote: string | null,
-  automaticFailureReason: string,
-  recommendedRefundAmount?: number,
-) => {
-  const capturedTotal = getCapturedBookingPaymentTotal(booking);
-  if (!Number.isFinite(capturedTotal) || capturedTotal <= 0) {
-    throw new Error(
-      "Manual refund review cannot be created without a captured refundable amount.",
-    );
-  }
-  const hasRecommendation =
-    typeof recommendedRefundAmount === "number" &&
-    Number.isFinite(recommendedRefundAmount) &&
-    recommendedRefundAmount >= 0 &&
-    recommendedRefundAmount <= capturedTotal;
-  const refundAmount = hasRecommendation ? recommendedRefundAmount : capturedTotal;
-
-  const safeDestinationNote =
-    manualDestinationNote ||
-    "Admin must choose and record the manual refund return method during refund review.";
-  const note = [
-    "Manual refund review required.",
-    hasRecommendation
-      ? `Policy recommendation: refund PHP ${refundAmount.toLocaleString()} of PHP ${capturedTotal.toLocaleString()} captured (short-notice cancellation). Admin confirms or adjusts.`
-      : null,
-    safeDestinationNote,
-    `Automatic refund result: ${automaticFailureReason}`,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .slice(0, 450);
-
-  const { data: existingRefundPayment, error: existingRefundPaymentError } =
-    await supabase
-      .from("payments")
-      .select("id")
-      .eq("booking_id", booking.id)
-      .eq("payment_type", "refund")
-      .eq("status", "pending")
-      .eq("payment_method", "manual_review")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-  if (existingRefundPaymentError) throw existingRefundPaymentError;
-
-  let refundPaymentId = existingRefundPayment?.id as string | undefined;
-
-  if (!refundPaymentId) {
-    const { data: refundPayment, error: refundPaymentError } = await supabase
-      .from("payments")
-      .insert({
-        booking_id: booking.id,
-        amount: -Math.abs(refundAmount),
-        payment_type: "refund",
-        status: "pending",
-        payment_method: "manual_review",
-        transaction_id: null,
-        notes: note,
-      })
-      .select("id")
-      .single();
-
-    if (refundPaymentError) throw refundPaymentError;
-    refundPaymentId = refundPayment?.id as string | undefined;
-  }
-
-  const { data: existingTicket, error: existingTicketError } = await supabase
-    .from("support_tickets")
-    .select("id")
-    .eq("booking_id", booking.id)
-    .eq("tag", "manual_refund")
-    .in("status", ["open", "in_progress"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (existingTicketError) throw existingTicketError;
-
-  const reusedExistingTicket = Boolean(existingTicket?.id);
-  const { data: ticket, error: ticketError } = reusedExistingTicket
-    ? { data: existingTicket, error: null }
-    : await supabase
-        .from("support_tickets")
-        .insert({
-          user_id: userId,
-          subject: `Manual refund review: ${getVehicleLabel(booking)}`,
-          tag: "manual_refund",
-          booking_id: booking.id,
-          status: "open",
-        })
-        .select("id")
-        .single();
-
-  if (ticketError) throw ticketError;
-
-  if (ticket?.id && !reusedExistingTicket) {
-    await supabase.from("ticket_messages").insert({
-      ticket_id: ticket.id,
-      sender_id: userId,
-      message: note,
-    });
-
-    // A case with no notice behind it is silence to the renter. SafeDrive may
-    // still need the account to send the refund to, and they cannot answer a
-    // question in a case they were never told about.
-    await supabase.from("notifications").insert({
-      user_id: userId,
-      title: "Your refund is with SafeDrive support",
-      message: `The refund for ${getVehicleLabel(booking)} is being reviewed by SafeDrive. A support case is open for it - watch there for any question, and reply if support asks where to send the money.`,
-      type: "info",
-      link: "/support",
-    });
-  }
-
-  return refundPaymentId;
 };
 
 export default async function handler(req: Request) {

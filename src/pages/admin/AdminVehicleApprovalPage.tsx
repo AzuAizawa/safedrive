@@ -52,7 +52,6 @@ import {
   FileText,
   Loader2,
   RefreshCw,
-  RotateCcw,
   X,
   XCircle,
 } from "lucide-react";
@@ -416,7 +415,7 @@ export default function AdminVehicleApprovalPage() {
 
   const sendVehicleDecisionEmail = async (
     target: PendingCar,
-    status: "approved" | "rejected" | "pending" | "removed" | "restored",
+    status: "approved" | "rejected" | "pending",
   ) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) return "not_attempted";
@@ -755,10 +754,10 @@ export default function AdminVehicleApprovalPage() {
     setRemoveNote("");
   };
 
-  // Removal archives the car instead of deleting its row (CHAPTER 95).
-  // public.admin_remove_car writes the reason, the lister's notification and
-  // the audit row together, and CHAPTER 86's guard refuses a car with a trip or
-  // payout still open - that refusal is shown to the admin as it is.
+  // Removal goes through the server (CHAPTER 120): bookings that have not
+  // started are cancelled and refunded in full, the car is erased - or, with a
+  // trip under way, hidden now and erased when it ends - and the lister and
+  // renters are notified and emailed. A refusal is shown to the admin as it is.
   const handleRemoveVehicle = async () => {
     if (!selected || !adminUser || !removeReasonCode) return;
     const note = removeNote.trim();
@@ -768,55 +767,55 @@ export default function AdminVehicleApprovalPage() {
     }
     setActionLoading(true);
     try {
-      const { error } = await supabase.rpc("admin_remove_car", {
-        p_car_id: selected.id,
-        p_reason_code: removeReasonCode,
-        p_note: note,
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch("/api/vehicle-removal", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        body: JSON.stringify({
+          action: "remove",
+          carId: selected.id,
+          reasonCode: removeReasonCode,
+          note,
+        }),
       });
-      if (error) {
-        toast.error("Vehicle was not removed", { description: error.message });
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        state?: "removed" | "scheduled";
+        cancelledBookings?: number;
+        emailState?: string;
+      };
+      if (!response.ok) {
+        toast.error("Vehicle was not removed", {
+          description: [
+            body.error,
+            body.cancelledBookings
+              ? `${body.cancelledBookings} booking(s) were already cancelled and refunded.`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        });
+        fetchCars();
         return;
       }
-      showVehicleEmailWarning(
-        await sendVehicleDecisionEmail(selected, "removed"),
-        "Vehicle removed",
-      );
-      toast.success("Vehicle removed", {
+      showVehicleEmailWarning(body.emailState ?? "unknown", "Vehicle removed");
+      const cancelled = body.cancelledBookings
+        ? ` ${body.cancelledBookings} booking(s) that had not started were cancelled and the renters refunded in full.`
+        : "";
+      toast.success(body.state === "scheduled" ? "Removal scheduled" : "Vehicle removed", {
         description:
-          "It is off Browse and the lister's listings, and the lister was told why. Past bookings keep their record. You can restore it from the Removed tab.",
+          (body.state === "scheduled"
+            ? "A trip is under way, so the car is off Browse now and will be erased when that trip ends."
+            : "Its plate, documents and photos were erased; past bookings and earnings stay on record.") +
+          cancelled +
+          " The lister was told why.",
       });
       setSelected(null);
       closeRemoveForm();
       setManualOcrOverride(false);
-      fetchCars();
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleRestoreVehicle = async () => {
-    if (!selected || !adminUser) return;
-    setActionLoading(true);
-    try {
-      const { data, error } = await supabase.rpc("admin_restore_car", {
-        p_car_id: selected.id,
-      });
-      if (error) {
-        toast.error("Vehicle was not restored", { description: error.message });
-        return;
-      }
-      showVehicleEmailWarning(
-        await sendVehicleDecisionEmail(selected, "restored"),
-        "Vehicle restored",
-      );
-      const restoredStatus = (data as { status?: string } | null)?.status;
-      toast.success("Vehicle restored", {
-        description:
-          restoredStatus === "pending"
-            ? "It is back on the lister's listings and waiting in Pending for review before it can be booked."
-            : "It is back on the lister's listings.",
-      });
-      setSelected(null);
       fetchCars();
     } finally {
       setActionLoading(false);
@@ -865,7 +864,7 @@ export default function AdminVehicleApprovalPage() {
             {activeTab === "pending"
               ? "New listings and document resubmissions both appear here."
               : activeTab === "removed"
-                ? "Cars removed by an admin or deleted by their lister appear here, and can be restored."
+                ? "Cars removed by an admin or deleted by their lister appear here. Their plate, documents and photos are erased; the owner adds the car again to list it."
                 : "Waiting for new vehicle submissions."}
           </p>
         </div>
@@ -1649,10 +1648,11 @@ export default function AdminVehicleApprovalPage() {
                   <div>
                     <p className="font-semibold text-destructive">Remove this vehicle listing</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      The car is archived, not deleted: it leaves Browse and the lister's listings, its
-                      past bookings keep their record, and it can be restored from the Removed tab. A car
-                      with a booking not yet finished, or a payout not yet received, cannot be removed.
-                      The lister is sent the reason and your note.
+                      The car's plate, documents and photos are erased; its past bookings and earnings
+                      stay on record, and a payout still owed is paid. Bookings that have not started are
+                      cancelled and the renters refunded in full. A trip under way is not cut short: the
+                      car leaves Browse now and is erased when that trip ends. The lister may add the car
+                      again with valid documents. The lister and renters are notified and emailed.
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -1729,27 +1729,6 @@ export default function AdminVehicleApprovalPage() {
                       {selected.deletion_reason ? ` Reason: ${selected.deletion_reason}` : ""}
                     </p>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Restoring tells the lister. A car that was live goes back to Pending for review
-                    before it can be booked; a car whose owner's account is closed stays removed.
-                  </p>
-                  {canDelete ? (
-                    <div className="flex justify-end">
-                      <Button
-                        variant="outline"
-                        onClick={() => void handleRestoreVehicle()}
-                        disabled={actionLoading}
-                        className="gap-2"
-                      >
-                        {actionLoading ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <RotateCcw className="w-4 h-4" />
-                        )}
-                        Restore
-                      </Button>
-                    </div>
-                  ) : null}
                 </div>
               )}
             </div>

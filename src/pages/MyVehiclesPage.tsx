@@ -190,19 +190,20 @@ interface VehicleRow {
   status: string;
   rejection_reason: string | null;
   created_at: string | null;
+  // CHAPTER 120. SafeDrive is removing this car once its current trip ends.
+  removal_scheduled_at: string | null;
   car_models: { name: string; body_type: string; car_brands: { name: string } };
 }
 
 /**
  * Why a car cannot be deleted yet.
  *
- * Deleting a car does not remove its row (CHAPTER 86). A booking is DISPLAYED
- * by joining cars - nine API handlers and three pages read
- * booking.cars.car_models.car_brands.name to say what was rented - so removing
- * the row would leave every past booking of that car unable to name the
- * vehicle. Deleting marks cars.deleted_at instead: gone from this list, gone
- * from Browse, the listing slot freed, and the bookings it explains still
- * resolving.
+ * Deleting a car erases it but keeps its row (CHAPTERS 86 and 120). A booking
+ * is DISPLAYED by joining cars - nine API handlers and three pages read
+ * booking.cars.car_models.car_brands.name to say what was rented - so the make
+ * and model stay while the plate, papers and photos go: gone from this list,
+ * gone from Browse, the listing slot and the plate freed, and the bookings it
+ * explains still resolving.
  *
  * Past bookings therefore do NOT block a delete. Only what is still in the air
  * does, and these two are ordered by what the lister should do next: finish the
@@ -967,7 +968,7 @@ export default function MyVehiclesPage() {
     setPlateCheck({ status: "checking", message: "Checking plate number..." });
     const { data, error } = await supabase
       .from("cars")
-      .select("id, owner_id, deleted_at")
+      .select("id")
       .eq("plate_number", normalized)
       .maybeSingle();
 
@@ -976,18 +977,11 @@ export default function MyVehiclesPage() {
       return;
     }
 
-    // A plate stays with its car after a delete or a removal (the row explains
-    // past bookings), so re-adding your own archived car is a restore, not a
-    // new listing - say so instead of a bare "taken".
-    const ownArchived = Boolean(data?.deleted_at) && data?.owner_id === user?.id;
+    // A deleted car gives its plate up (CHAPTER 120), so a match is a car
+    // still on SafeDrive.
     setPlateCheck(
       data
-        ? {
-            status: "taken",
-            message: ownArchived
-              ? "This plate belongs to a car you deleted or that SafeDrive removed. Open a support case to have it restored instead of adding it again."
-              : "This plate number is already registered in SafeDrive.",
-          }
+        ? { status: "taken", message: "This plate number is already registered in SafeDrive." }
         : { status: "available", message: "Plate number is available." },
     );
   };
@@ -1543,23 +1537,24 @@ export default function MyVehiclesPage() {
     const toastId = toast.loading("Deleting vehicle...");
 
     try {
-      // Not a row removal: nine API handlers and three pages render a booking
-      // by joining cars, so deleting the row would leave every past booking of
-      // this car unable to say what was rented. The car is marked instead - it
-      // leaves this list, leaves Browse, and frees the listing slot, while the
-      // bookings it explains keep resolving (CHAPTER 86).
-      const { error } = await supabase
-        .from("cars")
-        .update({ deleted_at: new Date().toISOString() })
-        .eq("id", vehicle.id)
-        .eq("owner_id", user.id);
-
-      if (error) throw error;
+      // The server erases the car - plate, papers, photos - keeps its bookings
+      // and earnings, and emails the owner (CHAPTER 120).
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch("/api/vehicle-removal", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        body: JSON.stringify({ action: "delete", carId: vehicle.id }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(body.error || "Please try again.");
 
       toast.success("Vehicle deleted.", {
         id: toastId,
         description:
-          "It is off your listings and your slot is free. Past bookings keep their record.",
+          "Its plate, documents and photos were removed. Past bookings and earnings stay on record. To list it again, add it as a new car.",
       });
       fetchVehicles();
     } catch (error) {
@@ -2256,9 +2251,11 @@ export default function MyVehiclesPage() {
 
           {visibleVehicles.map((v) => {
             const setupNeeded = needsListingSetup(v);
-            const badge = setupNeeded
-              ? { label: "Needs setup", color: "text-amber-600 bg-amber-50 dark:bg-amber-950/30" }
-              : statusBadge[v.status] || statusBadge.pending;
+            const badge = v.removal_scheduled_at
+              ? { label: "Being removed after the current trip", color: "text-red-600 bg-red-50 dark:bg-red-950/30" }
+              : setupNeeded
+                ? { label: "Needs setup", color: "text-amber-600 bg-amber-50 dark:bg-amber-950/30" }
+                : statusBadge[v.status] || statusBadge.pending;
             return (
               <Card key={v.id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -2930,7 +2927,7 @@ export default function MyVehiclesPage() {
         title="Delete vehicle listing?"
         description={
           deleteTargetVehicle
-            ? `Delete ${deleteTargetVehicle.car_models.car_brands.name} ${deleteTargetVehicle.car_models.name} (${deleteTargetVehicle.plate_number})? It comes off your listings and frees a slot. Bookings that already happened keep their record, and only SafeDrive support can bring the car back.`
+            ? `Delete ${deleteTargetVehicle.car_models.car_brands.name} ${deleteTargetVehicle.car_models.name} (${deleteTargetVehicle.plate_number})? Deleting removes this car's plate, documents and photos and frees a slot. Past bookings and earnings stay on record. To list it again, add it as a new car.`
             : ""
         }
         confirmText="Delete Vehicle"

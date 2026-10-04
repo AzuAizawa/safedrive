@@ -8,7 +8,7 @@ name: Scheduled workers
 
 on:
   schedule:
-    - cron: "*/15 * * * *" # booking-deadline expiry
+    - cron: "*/15 * * * *" # booking-deadline expiry; finish vehicle removals
     - cron: "7 * * * *" # return reminders, once per hour
     - cron: "23 3 * * *" # flag vehicles with expired compliance documents, daily
     - cron: "41 3 * * *" # notify renters whose driver's licence is expiring, daily
@@ -155,5 +155,20 @@ jobs:
           echo "HTTP $code"; cat /tmp/out; echo
           if [ "$code" != "200" ]; then
             echo "::error::notify-overdue-reviews returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
+            exit 1
+          fi
+
+  finish-vehicle-removals:
+    if: github.event.schedule == '*/15 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call vehicle-removal
+        run: |
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${SITE_URL}/api/vehicle-removal")
+          echo "HTTP $code"; cat /tmp/out; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::vehicle-removal returned HTTP $code (check the CRON_SECRET repo secret matches Vercel)"
             exit 1
           fi

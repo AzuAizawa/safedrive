@@ -18808,4 +18808,521 @@ commit;
 --        'yes';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 120 - A deleted car is erased; what it earned stays on record
+-- ============================================================================
+-- CHAPTERS 86 and 95 archived a deleted or removed car: the row, its plate,
+-- its OR/CR and business papers and its photos all stayed, so support could
+-- bring it back. A lister who deleted TES1234 and then added it again was
+-- told the plate "belongs to a car you deleted - open a support case".
+--
+-- Deleting now works the way account deletion does (CHAPTER 96): the car is
+-- anonymised. Its plate (replaced, since plate_number is unique and required),
+-- contact number, notes and pickup location are cleared; its compliance
+-- documents, photos, renewals, blocked dates and reminders are removed, and
+-- their stored files are queued for the server to delete through the Storage
+-- API. What stays is what explains money and contracts: the car row with its
+-- make and model, bookings, payments and payouts, cancellations, reviews, the
+-- rental agreements renters accepted, and trip-condition evidence. The plate,
+-- who removed the car, when and why are kept in the audit log.
+--
+-- To list the car again, its owner adds it as a new car; it is reviewed like
+-- any other. Nothing is restored any more, so admin_restore_car is retired.
+--
+-- A lister still cannot delete a car with a booking that has not finished, or
+-- with a payout not yet received (CHAPTER 86). An admin removing a car - fake
+-- papers, a policy breach - is not held by a payout: the owner is still paid
+-- for trips that happened. Bookings that have not started are cancelled and
+-- refunded in full by the server before remove_vehicle_for runs; a trip under
+-- way is never cut short. Instead the car leaves Browse at once and is erased
+-- by finish_scheduled_vehicle_removals once that trip has ended.
+--
+-- Every step tells the people it affects, in the app (here) and by email
+-- (api/vehicle-removal.ts, from the rows these functions return).
+--
+-- Apply this chapter only. Three columns, one table and five functions are
+-- added; two functions and one trigger function are replaced; two functions
+-- lose their grants. Every car already deleted or removed is anonymised.
+-- ============================================================================
+begin;
+
+alter table public.cars
+  add column if not exists removal_scheduled_at timestamptz,
+  add column if not exists removal_scheduled_by uuid,
+  add column if not exists removal_reason text;
+
+-- Files of erased cars, deleted by api/vehicle-removal.ts through the Storage
+-- API and then taken off this list.
+create table if not exists public.vehicle_file_purge_queue (
+  bucket text not null,
+  path text not null,
+  queued_at timestamptz not null default now(),
+  primary key (bucket, path)
+);
+alter table public.vehicle_file_purge_queue enable row level security;
+revoke all on public.vehicle_file_purge_queue from public, anon, authenticated;
+grant select, delete on public.vehicle_file_purge_queue to service_role;
+
+-- Reproduced from its last version with one added rule: an erased car never
+-- returns to review. Erasing replaces the plate, which would otherwise send an
+-- approved car back to the admin queue.
+create or replace function public.return_materially_changed_car_to_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- CHAPTER 120: a deleted or removed car is not a listing any more.
+  if new.deleted_at is not null then
+    return new;
+  end if;
+
+  -- A rejected listing returns to the queue on any edit at all. The lister is
+  -- answering the rejection, and what the admin objected to may well be one of
+  -- the fields that is no longer material below - a blurry photo caption, a
+  -- wrong contact number - so "material" is the wrong test here.
+  --
+  -- This also unsticks a listing that could not be edited at all. The lister's
+  -- own update cannot carry status or rejection_reason: protect_car_submission_fields
+  -- runs first (triggers fire in name order) and rejects both, so a rejected car
+  -- had no path back to review. Setting them here is allowed, because that guard
+  -- only polices what the lister sent.
+  if old.status = 'rejected'
+     and new.status is not distinct from old.status
+     and not (public.is_admin() or current_user in ('postgres', 'service_role', 'supabase_admin'))
+  then
+    new.status := 'pending';
+    new.rejection_reason := null;
+    new.last_verified_at := null;
+    return new;
+  end if;
+
+  if old.status in ('approved', 'active', 'inactive') and (
+    old.model_id is distinct from new.model_id or old.plate_number is distinct from new.plate_number or
+    old.transmission is distinct from new.transmission or
+    old.registration_expiry is distinct from new.registration_expiry or old.ctpl_expiry is distinct from new.ctpl_expiry or
+    old.comprehensive_insurance_expiry is distinct from new.comprehensive_insurance_expiry or
+    old.insurer_rental_use_confirmed is distinct from new.insurer_rental_use_confirmed
+  ) then
+    new.status := 'pending';
+    new.last_verified_at := null;
+    new.rejection_reason := null;
+    new.insurance_verification_status := 'pending';
+  end if;
+  return new;
+end;
+$$;
+
+-- Reproduced from CHAPTER 95 with two changes: nothing is restored any more,
+-- and a payout still owed holds back only the lister's own delete.
+create or replace function public.guard_car_soft_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $guard_car_soft_delete$
+declare
+  unfinished integer;
+  owed integer;
+  privileged boolean;
+begin
+  -- No signed-in user means the SQL editor or the service role. RLS already
+  -- keeps anonymous visitors from updating cars at all.
+  privileged := auth.uid() is null or coalesce(public.admin_can('vehicles.delete'), false);
+
+  -- Only the removal record changed, not whether the car is removed.
+  if new.deleted_at is not distinct from old.deleted_at then
+    if not privileged and (
+      new.deleted_by is distinct from old.deleted_by
+      or new.deletion_reason is distinct from old.deletion_reason
+    ) then
+      raise exception 'Only SafeDrive can record who removed a vehicle and why';
+    end if;
+    return new;
+  end if;
+
+  -- CHAPTER 120: an erased car has nothing left to restore.
+  if new.deleted_at is null then
+    raise exception 'A deleted vehicle cannot be restored. Its owner adds it again as a new car.';
+  end if;
+
+  -- Re-stamping a car that is already removed is left alone, as before.
+  if old.deleted_at is not null then
+    return new;
+  end if;
+
+  select count(*) into unfinished
+  from public.bookings b
+  where b.car_id = new.id
+    and b.status in (
+      'pending', 'confirmed', 'awaiting_payment',
+      'downpayment_paid', 'fully_paid', 'active'
+    );
+
+  if unfinished > 0 then
+    raise exception 'This car still has % booking(s) that have not finished. Finish or cancel them first.', unfinished;
+  end if;
+
+  -- A payout is recorded as a payments row of type 'payout'; anything pending
+  -- or failed is still owed, not written off. SafeDrive removing a car does
+  -- not wait for it: the owner is paid for trips that happened either way.
+  if not privileged then
+    select count(*) into owed
+    from public.payments p
+    join public.bookings b on b.id = p.booking_id
+    where b.car_id = new.id
+      and p.payment_type = 'payout'
+      and p.status in ('pending', 'failed');
+
+    if owed > 0 then
+      raise exception 'A payout for this car has not reached its owner yet. It has to be settled first.';
+    end if;
+  end if;
+
+  if privileged then
+    new.deleted_by := coalesce(new.deleted_by, auth.uid());
+  else
+    new.deleted_by := auth.uid();
+    new.deletion_reason := null;
+  end if;
+
+  return new;
+end;
+$guard_car_soft_delete$;
+
+-- A car SafeDrive is removing after its current trip stays where SafeDrive
+-- put it: off Browse, and only SafeDrive decides when it goes.
+create or replace function public.guard_car_pending_removal()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $guard_car_pending_removal$
+begin
+  if auth.uid() is null or coalesce(public.admin_can('vehicles.delete'), false) then
+    return new;
+  end if;
+  if new.removal_scheduled_at is distinct from old.removal_scheduled_at
+     or new.removal_scheduled_by is distinct from old.removal_scheduled_by
+     or new.removal_reason is distinct from old.removal_reason then
+    raise exception 'Only SafeDrive can schedule the removal of a vehicle';
+  end if;
+  if old.removal_scheduled_at is not null and (
+    new.status is distinct from old.status or new.deleted_at is distinct from old.deleted_at
+  ) then
+    raise exception 'SafeDrive is removing this vehicle when its current trip ends, so it cannot be changed';
+  end if;
+  return new;
+end;
+$guard_car_pending_removal$;
+
+drop trigger if exists guard_car_pending_removal on public.cars;
+create trigger guard_car_pending_removal
+  before update on public.cars
+  for each row execute function public.guard_car_pending_removal();
+
+-- Erase one car. Internal: called by the functions below and the backfill.
+create or replace function public.retire_car(p_car_id uuid, p_actor uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $retire_car$
+declare
+  compliance_types constant text[] := array[
+    'or', 'cr', 'orcr', 'ctpl', 'comprehensive_insurance', 'dti', 'mayors_permit', 'bir'];
+begin
+  perform 1 from public.cars where id = p_car_id for update;
+
+  insert into public.vehicle_file_purge_queue (bucket, path)
+  select coalesce(d.storage_bucket, 'vehicle-private-documents'), d.storage_path
+    from public.car_documents d
+   where d.car_id = p_car_id and d.document_type = any (compliance_types)
+     and d.storage_path is not null and d.storage_path !~ '^https?://'
+  union
+  select 'vehicle-documents', i.storage_path
+    from public.car_images i
+   where i.car_id = p_car_id
+     and i.storage_path is not null and i.storage_path !~ '^https?://'
+  on conflict do nothing;
+
+  -- Rental agreements stay, but no longer point at renewals about to go.
+  update public.car_documents set renewal_id = null
+   where car_id = p_car_id and renewal_id is not null
+     and not (document_type = any (compliance_types));
+  delete from public.car_documents
+   where car_id = p_car_id and document_type = any (compliance_types);
+  delete from public.car_images where car_id = p_car_id;
+  delete from public.car_renewals where car_id = p_car_id;
+  delete from public.vehicle_unavailability where car_id = p_car_id;
+  delete from public.vehicle_compliance_reminders where car_id = p_car_id;
+
+  update public.cars set
+    deleted_at = coalesce(deleted_at, now()),
+    deleted_by = coalesce(deleted_by, p_actor),
+    deletion_reason = coalesce(p_reason, deletion_reason),
+    status = 'inactive',
+    plate_number = 'DELETED-' || left(id::text, 8),
+    contact_number = null,
+    additional_info = null,
+    location = null,
+    removal_scheduled_at = null,
+    removal_scheduled_by = null,
+    removal_reason = null,
+    updated_at = now()
+  where id = p_car_id;
+end;
+$retire_car$;
+revoke all on function public.retire_car(uuid, uuid, text) from public, anon, authenticated;
+
+-- "Toyota Vios (ABC 1234)", read before the plate is erased.
+create or replace function public.vehicle_label(p_car_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $vehicle_label$
+  select coalesce(nullif(btrim(concat_ws(' ', b.name, m.name)), ''), 'vehicle') || ' (' || c.plate_number || ')'
+    from public.cars c
+    left join public.car_models m on m.id = c.model_id
+    left join public.car_brands b on b.id = m.brand_id
+   where c.id = p_car_id;
+$vehicle_label$;
+revoke all on function public.vehicle_label(uuid) from public, anon, authenticated;
+
+-- The lister's own delete, called by api/vehicle-removal.ts for the signed-in
+-- owner. Returns the notice it wrote so the server can email the same words.
+create or replace function public.delete_my_vehicle_for(p_owner uuid, p_car_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $delete_my_vehicle$
+declare
+  v_car record;
+  v_vehicle text;
+  v_unfinished integer;
+  v_title text := 'Vehicle deleted';
+  v_message text;
+begin
+  select id, owner_id, plate_number, model_id, deleted_at, removal_scheduled_at
+    into v_car from public.cars where id = p_car_id for update;
+  if not found or v_car.owner_id is distinct from p_owner then
+    raise exception 'Only the owner can delete this vehicle';
+  end if;
+  if v_car.deleted_at is not null then
+    raise exception 'This vehicle is already deleted';
+  end if;
+  if v_car.removal_scheduled_at is not null then
+    raise exception 'SafeDrive is already removing this vehicle when its current trip ends';
+  end if;
+
+  select count(*) into v_unfinished from public.bookings
+   where car_id = p_car_id
+     and status in ('pending', 'confirmed', 'awaiting_payment', 'downpayment_paid', 'fully_paid', 'active');
+  if v_unfinished > 0 then
+    raise exception 'This car still has % booking(s) that have not finished. Finish or cancel them first.', v_unfinished;
+  end if;
+  if exists (
+    select 1 from public.payments p join public.bookings b on b.id = p.booking_id
+     where b.car_id = p_car_id and p.payment_type = 'payout' and p.status in ('pending', 'failed')
+  ) then
+    raise exception 'A payout for this car has not reached its owner yet. It has to be settled first.';
+  end if;
+
+  v_vehicle := public.vehicle_label(p_car_id);
+  perform public.retire_car(p_car_id, p_owner, null);
+
+  v_message := 'Your ' || v_vehicle || ' was deleted. Its plate, documents and photos were removed; '
+    || 'past bookings and earnings stay on record. To list it again, add it as a new car.';
+  insert into public.notifications (user_id, title, message, type, link)
+  values (p_owner, v_title, v_message, 'info', '/my-vehicles');
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (p_owner, 'lister_deleted_vehicle', 'car', p_car_id::text,
+    jsonb_build_object('plate', v_car.plate_number, 'vehicle', v_vehicle, 'erased', true));
+
+  return jsonb_build_object('car_id', p_car_id, 'owner_id', p_owner,
+    'vehicle', v_vehicle, 'title', v_title, 'message', v_message);
+end;
+$delete_my_vehicle$;
+revoke all on function public.delete_my_vehicle_for(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.delete_my_vehicle_for(uuid, uuid) to service_role;
+
+-- SafeDrive removing a car, called by api/vehicle-removal.ts after it has
+-- cancelled and refunded the bookings that had not started. A trip still
+-- under way (or one the server could not cancel) defers the erasure.
+create or replace function public.remove_vehicle_for(
+  p_admin uuid,
+  p_car_id uuid,
+  p_reason_code text,
+  p_note text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $remove_vehicle$
+declare
+  v_car record;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+  v_label text;
+  v_reason text;
+  v_vehicle text;
+  v_title text;
+  v_message text;
+  v_state text;
+begin
+  if not coalesce(public.admin_can_for(p_admin, 'vehicles.delete'), false) then
+    raise exception 'Removing a vehicle requires the vehicles.delete permission';
+  end if;
+
+  v_label := case p_reason_code
+    when 'invalid_documents' then 'Fake or invalid documents'
+    when 'policy_violation' then 'Policy violation'
+    when 'owner_request' then 'The owner asked for it'
+    when 'other' then 'Other'
+  end;
+  if v_label is null then
+    raise exception 'Choose a reason for removing this vehicle';
+  end if;
+  if v_note is null or length(v_note) < 10 then
+    raise exception 'Give a note of at least 10 characters so the lister knows why';
+  end if;
+
+  select id, owner_id, plate_number, deleted_at, removal_scheduled_at
+    into v_car from public.cars where id = p_car_id for update;
+  if not found then
+    raise exception 'Vehicle not found';
+  end if;
+  if v_car.deleted_at is not null then
+    raise exception 'This vehicle has already been removed';
+  end if;
+  if v_car.removal_scheduled_at is not null then
+    raise exception 'This vehicle is already being removed when its current trip ends';
+  end if;
+
+  v_reason := v_label || ': ' || v_note;
+  v_vehicle := public.vehicle_label(p_car_id);
+
+  if exists (
+    select 1 from public.bookings
+     where car_id = p_car_id
+       and status in ('pending', 'confirmed', 'awaiting_payment', 'downpayment_paid', 'fully_paid', 'active')
+  ) then
+    v_state := 'scheduled';
+    update public.cars set
+      removal_scheduled_at = now(),
+      removal_scheduled_by = p_admin,
+      removal_reason = v_reason,
+      status = 'inactive',
+      updated_at = now()
+    where id = p_car_id;
+    v_title := 'Your vehicle is being removed';
+    v_message := 'SafeDrive is removing your ' || v_vehicle || '. Reason: ' || rtrim(v_reason, '.')
+      || '. It is off Browse now and will be removed when its current trip ends. '
+      || 'Past bookings and earnings stay on record, and you are still paid for the trip under way.';
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (p_admin, 'admin_scheduled_vehicle_removal', 'car', p_car_id::text,
+      jsonb_build_object('plate', v_car.plate_number, 'reason_code', p_reason_code, 'reason', v_reason));
+  else
+    v_state := 'removed';
+    perform public.retire_car(p_car_id, p_admin, v_reason);
+    v_title := 'Your vehicle listing was removed';
+    v_message := 'SafeDrive removed your ' || v_vehicle || '. Reason: ' || rtrim(v_reason, '.')
+      || '. Its plate, documents and photos were removed; past bookings and earnings stay on record. '
+      || 'You may add it again as a new car with valid documents.';
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (p_admin, 'admin_deleted_vehicle', 'car', p_car_id::text,
+      jsonb_build_object('plate', v_car.plate_number, 'reason_code', p_reason_code,
+        'reason', v_reason, 'erased', true));
+  end if;
+
+  insert into public.notifications (user_id, title, message, type, link)
+  values (v_car.owner_id, v_title, v_message, 'error', '/my-vehicles');
+
+  return jsonb_build_object('state', v_state, 'car_id', p_car_id, 'owner_id', v_car.owner_id,
+    'vehicle', v_vehicle, 'reason', v_reason, 'title', v_title, 'message', v_message);
+end;
+$remove_vehicle$;
+revoke all on function public.remove_vehicle_for(uuid, uuid, text, text) from public, anon, authenticated;
+grant execute on function public.remove_vehicle_for(uuid, uuid, text, text) to service_role;
+
+-- Erase every car whose removal was waiting on a trip that has now ended.
+-- Run by api/vehicle-removal.ts every 15 minutes; returns the notices written.
+create or replace function public.finish_scheduled_vehicle_removals()
+returns table(car_id uuid, owner_id uuid, title text, message text)
+language plpgsql
+security definer
+set search_path = public
+as $finish_removals$
+declare
+  v_car record;
+  v_vehicle text;
+begin
+  for v_car in
+    select c.id, c.owner_id, c.plate_number, c.removal_scheduled_by, c.removal_reason
+      from public.cars c
+     where c.removal_scheduled_at is not null and c.deleted_at is null
+       and not exists (
+         select 1 from public.bookings b
+          where b.car_id = c.id
+            and b.status in ('pending', 'confirmed', 'awaiting_payment', 'downpayment_paid', 'fully_paid', 'active'))
+     for update of c skip locked
+  loop
+    v_vehicle := public.vehicle_label(v_car.id);
+    perform public.retire_car(v_car.id, v_car.removal_scheduled_by, v_car.removal_reason);
+    car_id := v_car.id;
+    owner_id := v_car.owner_id;
+    title := 'Your vehicle listing was removed';
+    message := 'The trip on your ' || v_vehicle || ' has ended, so SafeDrive has now removed it. Reason: '
+      || rtrim(coalesce(v_car.removal_reason, 'not given'), '.')
+      || '. Its plate, documents and photos were removed; past bookings and earnings stay on record. '
+      || 'You may add it again as a new car with valid documents.';
+    insert into public.notifications (user_id, title, message, type, link)
+    values (v_car.owner_id, title, message, 'error', '/my-vehicles');
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (v_car.removal_scheduled_by, 'admin_deleted_vehicle', 'car', v_car.id::text,
+      jsonb_build_object('plate', v_car.plate_number, 'reason', v_car.removal_reason,
+        'erased', true, 'after_trip', true));
+    return next;
+  end loop;
+end;
+$finish_removals$;
+revoke all on function public.finish_scheduled_vehicle_removals() from public, anon, authenticated;
+grant execute on function public.finish_scheduled_vehicle_removals() to service_role;
+
+-- Both now go through api/vehicle-removal.ts, which also refunds and emails.
+revoke all on function public.admin_remove_car(uuid, text, text) from public, anon, authenticated;
+revoke all on function public.admin_restore_car(uuid) from public, anon, authenticated;
+
+-- Every car already deleted or removed is erased the same way.
+do $backfill$
+declare v_id uuid;
+begin
+  for v_id in
+    select id from public.cars
+     where deleted_at is not null and plate_number not like 'DELETED-%'
+  loop
+    perform public.retire_car(v_id, null, null);
+  end loop;
+end;
+$backfill$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'deleted cars erased' as check_name,
+--        (select count(*)::text from public.cars
+--          where deleted_at is not null and plate_number not like 'DELETED-%') as result,
+--        '0' as expected
+-- union all
+-- select 'removal functions',
+--        (select count(*)::text from pg_proc
+--          where proname in ('delete_my_vehicle_for', 'remove_vehicle_for',
+--                            'finish_scheduled_vehicle_removals', 'retire_car')),
+--        '4';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.
