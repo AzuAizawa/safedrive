@@ -156,15 +156,15 @@ export default function AccountDeletionDialog({ onClose }: { onClose: () => void
           {status && status.canSelfDelete && !status.scheduledFor && status.suspended && (
             <div className="space-y-2 text-sm text-muted-foreground">
               <p>
-                A suspended account cannot be deleted from here. Send a privacy request and
+                A suspended account cannot be deleted from here. Open a support ticket and
                 SafeDrive will review it.
               </p>
               <Link
-                to="/privacy-request?type=deletion"
+                to="/support?tag=privacy&subject=Delete%20my%20account"
                 className="font-medium text-primary underline underline-offset-2"
                 onClick={onClose}
               >
-                Send a privacy request
+                Open a support ticket
               </Link>
             </div>
           )}

@@ -86,7 +86,8 @@ export async function loadAdminAttentionItems(isSuperAdmin: boolean) {
     const [refundResult, payoutResult, retentionResult, reconciliationResult] = await Promise.all([
       supabase.from("payments").select("id,booking_id,status,created_at").eq("payment_type", "refund").in("status", ["pending", "failed"]).order("created_at"),
       supabase.from("payments").select("id,booking_id,status,created_at").eq("payment_type", "payout").in("status", ["pending", "failed"]).order("created_at"),
-      supabase.from("data_retention_requests").select("id,request_type,requester_email,status,created_at").in("status", ["submitted", "identity_check", "under_review", "approved"]).order("created_at"),
+      // Deletions run on their own (CHAPTER 121); only a held one needs a person.
+      supabase.from("data_retention_requests").select("id,request_type,requester_email,status,created_at,legal_hold_reason").eq("status", "legal_hold").order("created_at"),
       supabase.from("reconciliation_items").select("id,issue_type,severity,status,created_at").in("status", ["open", "investigating"]).order("created_at"),
     ]);
 
@@ -111,8 +112,8 @@ export async function loadAdminAttentionItems(isSuperAdmin: boolean) {
       })),
       ...(retentionResult.data ?? []).map((item) => ({
         id: `retention-${item.id}`,
-        title: `${item.request_type.replace(/_/g, " ")} request`,
-        detail: `${item.requester_email} · ${item.status.replace(/_/g, " ")}`,
+        title: "Account deletion on hold",
+        detail: `${item.requester_email} · ${item.legal_hold_reason ?? "held"}`,
         createdAt: item.created_at,
         kind: "security" as const,
         link: "/admin/retention-requests",

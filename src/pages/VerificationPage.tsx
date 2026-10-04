@@ -1834,10 +1834,10 @@ export default function VerificationPage() {
             </CardContent>
             <CardContent className="p-5 border-t border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                <div>
-                  <p className="flex items-center gap-2 font-semibold text-foreground"><DatabaseZap className="h-4 w-4" /> Privacy &amp; Data Requests</p>
-                  <p className="text-xs text-muted-foreground">Request access, correction, restriction, anonymization, or deletion of eligible personal data.</p>
+                  <p className="flex items-center gap-2 font-semibold text-foreground"><DatabaseZap className="h-4 w-4" /> Your Data</p>
+                  <p className="text-xs text-muted-foreground">Download a copy of your data, or see how to delete your account or raise a privacy question.</p>
                </div>
-               <Button variant="outline" type="button" onClick={() => navigate("/privacy-request")}>Manage Data Requests</Button>
+               <Button variant="outline" type="button" onClick={() => navigate("/privacy-request")}>Your Data</Button>
             </CardContent>
             <CardContent className="p-5 border-t border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                <div>
@@ -2983,10 +2983,10 @@ export default function VerificationPage() {
 
           <CardContent className="p-5 border-t border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
              <div>
-                <p className="flex items-center gap-2 font-semibold text-foreground"><DatabaseZap className="h-4 w-4" /> Privacy &amp; Data Requests</p>
-                <p className="text-xs text-muted-foreground">Request access, correction, restriction, anonymization, or deletion of eligible personal data.</p>
+                <p className="flex items-center gap-2 font-semibold text-foreground"><DatabaseZap className="h-4 w-4" /> Your Data</p>
+                <p className="text-xs text-muted-foreground">Download a copy of your data, or see how to delete your account or raise a privacy question.</p>
              </div>
-             <Button variant="outline" type="button" onClick={() => navigate("/privacy-request")}>Manage Data Requests</Button>
+             <Button variant="outline" type="button" onClick={() => navigate("/privacy-request")}>Your Data</Button>
           </CardContent>
 
           {canDeleteAccountFromSettings && (

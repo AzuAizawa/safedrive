@@ -1,4 +1,5 @@
 import { createSupabaseAdmin } from "../server/payoutAutomation";
+import { sendUserNotificationEmail } from "../server/email.js";
 
 export const config = {
   runtime: "edge",
@@ -11,20 +12,15 @@ const jsonResponse = (body: Record<string, unknown>, status = 200) =>
   });
 
 /**
- * Daily job (Chapter 58): auto-files a 'deletion' data_retention_requests
- * row for any regular-user account whose last login (profiles.
- * active_session_started_at, falling back to created_at) predates the
- * admin-configured dormant_account_days threshold. Skips anyone with an
- * open request already, or a booking in progress. This only FILES the
- * request into the existing human-reviewed pipeline
- * (AdminRetentionRequestsPage.tsx) - a super admin still has to approve it
- * and click through to public.anonymize_user(), which never touches
- * bookings/payments/ledger data. All the real logic lives in the
- * public.flag_dormant_accounts() SQL function (same pattern as
- * notify_expiring_licenses(), called by api/flag-expiring-licenses.ts).
+ * Daily job (CHAPTERS 58 and 121): an account nobody has signed in to for
+ * dormant_account_days is scheduled for deletion the way Delete Account
+ * schedules one - hidden, deleted after the grace period unless its owner
+ * signs in and keeps it, then anonymized by api/process-account-deletions.ts.
+ * public.flag_dormant_accounts() schedules each one, writes the in-app notice
+ * and returns the accounts; each owner is emailed the same notice from here.
  *
- * Point the same scheduler that runs the other cron endpoints at this URL
- * (~once a day) with `Authorization: Bearer <CRON_SECRET>`.
+ * Called by .github/workflows/scheduled-workers.yml with
+ * `Authorization: Bearer <CRON_SECRET>`.
  */
 export default async function handler(req: Request) {
   if (!["GET", "POST"].includes(req.method)) {
@@ -52,7 +48,31 @@ export default async function handler(req: Request) {
     if (error) {
       return jsonResponse({ error: error.message }, 500);
     }
-    return jsonResponse({ success: true, flagged: Number(data ?? 0) });
+    const scheduled = (data ?? []) as Array<{
+      user_id: string;
+      request_id: string;
+      scheduled_for: string;
+      idle_days: number;
+    }>;
+    const baseOrigin = new URL(req.url).origin;
+    let emailFailures = 0;
+    for (const account of scheduled) {
+      const when = new Date(account.scheduled_for).toLocaleString("en-PH", {
+        timeZone: "Asia/Manila",
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+      const result = await sendUserNotificationEmail(supabase, {
+        userId: account.user_id,
+        title: "Your account is scheduled for deletion",
+        message: `You have not signed in to SafeDrive for ${account.idle_days} days, so your account will be deleted on ${when} (Manila). Until then it is hidden. Sign in and choose to keep your account before then if you still want it. After that date your personal details are erased; bookings and payments you took part in are kept without your name.`,
+        link: "/verify",
+        baseOrigin,
+        eventKey: `dormant-deletion:${account.request_id}`,
+      });
+      if (result.state !== "sent") emailFailures += 1;
+    }
+    return jsonResponse({ success: true, scheduled: scheduled.length, emailFailures });
   } catch (error) {
     return jsonResponse(
       {

@@ -1,121 +1,139 @@
 import { createClient } from "@supabase/supabase-js";
 
 export const config = { runtime: "edge" };
-const respond = (body: Record<string, unknown>, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
-const allowedTypes = new Set(["access", "correction", "deletion", "anonymization", "restriction"]);
-const withdrawableStatuses = ["submitted", "identity_check", "under_review"];
+
+/**
+ * GET: the signed-in member's own data, as one JSON document (CHAPTER 121).
+ *
+ * Privacy requests are no longer filed here. A member downloads their data
+ * themselves, deletes their account from account settings (CHAPTER 96), and
+ * raises a correction, a restriction or anything else as a support ticket
+ * tagged Privacy / Data.
+ *
+ * Only the member's own records are read, by their id, with the service role.
+ * Left out on purpose: ID numbers and identity images (kept encrypted or
+ * private; shown on the account page), arrival locations and photos, and other
+ * people's personal details - the other side of a booking, a reviewer's name,
+ * another participant's messages.
+ */
+const respond = (body: Record<string, unknown>, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+
+const lastFour = (value: string | null) => (value ? `****${value.slice(-4)}` : null);
 
 export default async function handler(req: Request) {
-  if (!['GET', 'POST', 'PATCH'].includes(req.method)) return respond({ error: "Method not allowed" }, 405);
+  if (req.method === "POST" || req.method === "PATCH") {
+    return respond(
+      {
+        error:
+          "Privacy requests are no longer filed here. Download your data from Your Data, delete your account from Account settings, or open a support ticket tagged Privacy / Data.",
+      },
+      410,
+    );
+  }
+  if (req.method !== "GET") return respond({ error: "Method not allowed" }, 405);
+
   try {
     const url = process.env.VITE_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
-    const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
-    const key = serviceKey || anonKey;
     const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-    if (!url || !key) return respond({ error: "The privacy-request service is not configured on this deployment" }, 503);
+    if (!url || !serviceKey) return respond({ error: "The data export is not configured on this deployment" }, 503);
     if (!token) return respond({ error: "Unauthorized" }, 401);
-    const supabase = createClient(url, key, serviceKey
-      ? { auth: { persistSession: false, autoRefreshToken: false } }
-      : {
-          auth: { persistSession: false, autoRefreshToken: false },
-          global: { headers: { Authorization: `Bearer ${token}` } },
-        });
+
+    const supabase = createClient(url, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user?.email) return respond({ error: "Unauthorized" }, 401);
-    if (req.method === 'GET') {
-      const { data, error } = await supabase.from("data_retention_requests").select("id, request_type, status, request_details, decision_reason, legal_hold_reason, due_at, completed_at, created_at, updated_at").eq("subject_user_id", user.id).order("created_at", { ascending: false });
-      if (error) throw error;
-      return respond({ requests: data ?? [] });
-    }
-    if (req.method === 'PATCH') {
-      const body = (await req.json().catch(() => ({}))) as { requestId?: string; action?: string };
-      const requestId = String(body.requestId || "").trim();
-      if (body.action !== "withdraw" || !requestId) {
-        return respond({ error: "Provide a requestId and action: 'withdraw'" }, 400);
-      }
-      if (!serviceKey) {
-        const { data, error } = await supabase.rpc("withdraw_data_retention_request", {
-          p_request_id: requestId,
-        });
-        if (error) throw error;
-        const row = Array.isArray(data) ? data[0] : data;
-        return respond({ success: true, request: row });
-      }
-      const { data: existing, error: findError } = await supabase
-        .from("data_retention_requests")
-        .select("id, status, request_type, requester_email, subject_user_id")
-        .eq("id", requestId)
-        .maybeSingle();
-      if (findError) throw findError;
-      if (!existing || existing.subject_user_id !== user.id) {
-        return respond({ error: "Request not found" }, 404);
-      }
-      if (!withdrawableStatuses.includes(existing.status)) {
-        return respond({ error: `This request can no longer be withdrawn (status: ${existing.status})` }, 409);
-      }
-      const { error: updateError } = await supabase
-        .from("data_retention_requests")
-        .update({
-          status: "cancelled",
-          decision_reason: `Withdrawn by the requester on ${new Date().toISOString().slice(0, 16).replace("T", " ")}.`,
-        })
-        .eq("id", requestId)
-        .eq("subject_user_id", user.id)
-        .in("status", withdrawableStatuses);
-      if (updateError) throw updateError;
-      const { data: superAdmins } = await supabase
+    if (authError || !user) return respond({ error: "Unauthorized" }, 401);
+    const me = user.id;
+
+    const carLabel = "cars(plate_number, car_models(name, car_brands(name)))";
+    const [profile, bookings, vehicles, written, received, tickets] = await Promise.all([
+      supabase
         .from("profiles")
-        .select("id")
-        .eq("role", "super_admin")
-        .is("deleted_at", null);
-      if (superAdmins?.length) {
-        await supabase.from("notifications").insert(
-          superAdmins.map((admin) => ({
-            user_id: admin.id,
-            title: "Privacy Request Withdrawn",
-            message: `${existing.requester_email} withdrew their ${existing.request_type} request.`,
-            type: "info",
-            link: `/admin/retention-requests?request=${requestId}`,
-          })),
-        );
-      }
-      await supabase.from("audit_log").insert({
-        user_id: user.id,
-        action: "data_retention_request_withdrawn",
-        entity_type: "data_retention_request",
-        entity_id: requestId,
-        details: { request_type: existing.request_type, previous_status: existing.status },
-      });
-      return respond({ success: true, request: { id: requestId, status: "cancelled" } });
-    }
+        .select("email, full_name, first_name, middle_name, last_name, phone, secondary_phone, address, birthday, gender, verified_status, role, is_lister, emergency_contact_number, payout_method, payout_account_name, payout_account_number, created_at")
+        .eq("id", me)
+        .single(),
+      supabase
+        .from("bookings")
+        .select(`id, renter_id, owner_id, status, start_date, end_date, pickup_time, dropoff_time, total_days, base_price, commission, total_price, downpayment_amount, balance_amount, created_at, ${carLabel}, payments(payment_type, amount, status, created_at)`)
+        .or(`renter_id.eq.${me},owner_id.eq.${me}`)
+        .order("start_date", { ascending: false }),
+      supabase
+        .from("cars")
+        .select("plate_number, status, price_per_day, location, created_at, deleted_at, car_models(name, car_brands(name))")
+        .eq("owner_id", me)
+        .order("created_at", { ascending: false }),
+      supabase.from("booking_reviews").select("booking_id, reviewer_role, rating, feedback, created_at").eq("reviewer_id", me),
+      supabase.from("booking_reviews").select("booking_id, reviewer_role, rating, feedback, created_at").eq("reviewee_id", me),
+      supabase
+        .from("support_tickets")
+        .select("id, subject, tag, status, booking_id, created_at, ticket_messages(sender_id, message, attachment_name, created_at)")
+        .or(`user_id.eq.${me},participant_user_id.eq.${me}`)
+        .order("created_at", { ascending: false }),
+    ]);
+    const failure = [profile, bookings, vehicles, written, received, tickets].find((result) => result.error)?.error;
+    if (failure) throw failure;
 
-    const payload = (await req.json()) as { requestType?: string; details?: string };
-    const requestType = String(payload.requestType || "").trim();
-    const details = String(payload.details || "").trim();
-    if (!allowedTypes.has(requestType) || details.length < 10 || details.length > 3000) return respond({ error: "Choose a valid request type and provide 10 to 3,000 characters of detail" }, 400);
-    if (!serviceKey) {
-      const { data, error } = await supabase.rpc("submit_data_retention_request", {
-        p_request_type: requestType,
-        p_details: details,
-      });
-      if (error) throw error;
-      const created = Array.isArray(data) ? data[0] : data;
-      if (!created) throw new Error("Request was not recorded");
-      return respond({ success: true, request: created }, 201);
-    }
+    const profileRow = profile.data as Record<string, unknown> & { payout_account_number: string | null };
+    type Ticket = {
+      id: string;
+      subject: string;
+      tag: string | null;
+      status: string;
+      booking_id: string | null;
+      created_at: string;
+      ticket_messages: Array<{ sender_id: string; message: string; attachment_name: string | null; created_at: string }>;
+    };
+    type Booking = Record<string, unknown> & { renter_id: string; owner_id: string; commission: unknown };
 
-    const { count } = await supabase.from("data_retention_requests").select("id", { count: "exact", head: true }).eq("subject_user_id", user.id).eq("request_type", requestType).in("status", ["submitted", "identity_check", "under_review", "approved", "legal_hold"]);
-    if ((count ?? 0) > 0) return respond({ error: "You already have an open request of this type" }, 409);
-    const dueAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: created, error } = await supabase.from("data_retention_requests").insert({ subject_user_id: user.id, requester_email: user.email.toLowerCase(), request_type: requestType, request_details: details, due_at: dueAt }).select("id, status, due_at").single();
-    if (error || !created) throw error || new Error("Request was not recorded");
-    const { data: admins } = await supabase.from("profiles").select("id").eq("role", "super_admin").is("deleted_at", null);
-    if (admins?.length) await supabase.from("notifications").insert(admins.map((admin) => ({ user_id: admin.id, title: "New Privacy Data Request", message: `${user.email} submitted a ${requestType} request. Verify identity and review legal or operational holds before acting.`, type: "warning", link: `/admin/retention-requests?request=${created.id}` })));
-    await supabase.from("audit_log").insert({ user_id: user.id, action: "data_retention_request_submitted", entity_type: "data_retention_request", entity_id: created.id, details: { request_type: requestType, due_at: dueAt } });
-    return respond({ success: true, request: created }, 201);
+    const exportedAt = new Date().toISOString();
+    const document = {
+      exported_at: exportedAt,
+      notice:
+        "Your SafeDrive data. ID numbers and identity images, arrival locations and photos, and other people's personal details are not included.",
+      profile: { ...profileRow, payout_account_number: lastFour(profileRow.payout_account_number) },
+      bookings: ((bookings.data ?? []) as Booking[]).map(({ renter_id, owner_id, commission, ...booking }) => ({
+        your_role: renter_id === me ? "renter" : "lister",
+        ...booking,
+        ...(owner_id === me ? { commission } : {}),
+      })),
+      vehicles: vehicles.data ?? [],
+      reviews_written: written.data ?? [],
+      reviews_received: received.data ?? [],
+      support_tickets: ((tickets.data ?? []) as Ticket[]).map(({ ticket_messages, ...ticket }) => ({
+        ...ticket,
+        your_messages: (ticket_messages ?? [])
+          .filter((message) => message.sender_id === me)
+          .map(({ sender_id: _sender, ...message }) => message),
+      })),
+    };
+
+    await supabase.from("audit_log").insert({
+      user_id: me,
+      action: "personal_data_exported",
+      entity_type: "profile",
+      entity_id: me,
+      details: {
+        bookings: document.bookings.length,
+        vehicles: document.vehicles.length,
+        support_tickets: document.support_tickets.length,
+      },
+    });
+
+    return new Response(JSON.stringify(document, null, 2), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "Content-Disposition": `attachment; filename="safedrive-my-data-${exportedAt.slice(0, 10)}.json"`,
+      },
+    });
   } catch (error) {
-    console.error("Data request failed", error);
-    return respond({ error: error instanceof Error ? error.message : "Data request failed" }, 500);
+    console.error("Data export failed", error);
+    return respond({ error: error instanceof Error ? error.message : "Data export failed" }, 500);
   }
 }

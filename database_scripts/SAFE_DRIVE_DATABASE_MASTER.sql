@@ -19337,4 +19337,200 @@ commit;
 --        '4';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 121 - A dormant account is deleted the way a member deletes one
+-- ============================================================================
+-- CHAPTER 58 filed a "deletion" privacy request for every regular account with
+-- no sign-in for dormant_account_days, and a super admin then had to approve
+-- it and run the anonymization by hand. Every other step of a request had
+-- already gone: Delete Account (CHAPTER 96) runs by itself after a grace
+-- period, a member downloads their own data, and anything else is a support
+-- ticket. The dormant queue was the last thing the Privacy Requests page did.
+--
+-- flag_dormant_accounts() now schedules the deletion the way
+-- schedule_account_deletion() does for a member who asks: the account is
+-- hidden, deleted after account_deletion_grace_days unless its owner signs in
+-- and keeps it (cancel_account_deletion), and anonymized on the day by
+-- run_due_account_deletions(). The owner is notified here and emailed by
+-- api/flag-dormant-accounts.ts from the rows this returns. An account with a
+-- booking, refund, payout or booking case still open, or a suspended one, is
+-- left alone, as Delete Account would refuse it. Requests CHAPTER 58 filed and
+-- nobody acted on are closed; the account is flagged again on the next run.
+--
+-- The Privacy Policy said members "submit and track an access, correction,
+-- restriction, anonymization, or deletion request from the Data Requests
+-- page". That page now offers a download of one's own data; a correction, a
+-- restriction or any other privacy request is a support ticket. Both clauses
+-- are republished as a new version where they still read exactly as
+-- published, as CHAPTER 96 did, and the policy now says what happens to an
+-- account nobody signs in to.
+--
+-- Apply this chapter only. One function is replaced; open dormant requests
+-- are closed; the Privacy Policy gets a new version.
+-- ============================================================================
+begin;
+
+drop function if exists public.flag_dormant_accounts();
+create function public.flag_dormant_accounts()
+returns table(
+  user_id uuid,
+  email text,
+  full_name text,
+  request_id uuid,
+  scheduled_for timestamptz,
+  idle_days integer
+)
+language plpgsql
+security definer
+set search_path = public
+as $flag_dormant$
+#variable_conflict use_column
+declare
+  v_threshold integer;
+  v_grace integer;
+  v_when timestamptz;
+  v_request uuid;
+  v_idle integer;
+  r record;
+begin
+  select dormant_account_days, account_deletion_grace_days
+    into v_threshold, v_grace
+    from public.platform_settings where id = 'default';
+  v_threshold := coalesce(v_threshold, 365);
+  v_grace := coalesce(v_grace, 30);
+
+  for r in
+    select p.id, p.email, p.full_name,
+           coalesce(p.active_session_started_at, p.created_at) as last_active_at
+      from public.profiles p
+     where p.role = 'user'
+       and p.deleted_at is null
+       and p.suspended_at is null
+       and p.deletion_scheduled_for is null
+       and coalesce(p.active_session_started_at, p.created_at)
+           < now() - make_interval(days => v_threshold)
+       and cardinality(public.account_deletion_blockers(p.id)) = 0
+       and not exists (
+         select 1 from public.data_retention_requests d
+          where d.subject_user_id = p.id
+            and d.status in ('submitted', 'identity_check', 'under_review', 'approved', 'legal_hold'))
+     for update of p skip locked
+  loop
+    v_when := now() + make_interval(days => v_grace);
+    v_idle := floor(extract(epoch from (now() - r.last_active_at)) / 86400)::integer;
+
+    insert into public.data_retention_requests (
+      subject_user_id, requester_email, request_type, status,
+      request_details, decision_reason, due_at
+    ) values (
+      r.id,
+      coalesce(r.email, 'unknown@safedrive.invalid'),
+      'deletion',
+      'approved',
+      'Dormant account: no sign-in for ' || v_idle || ' days (limit: ' || v_threshold || ' days).',
+      'Scheduled for ' || to_char(v_when at time zone 'Asia/Manila', 'Mon DD, YYYY HH12:MI AM')
+        || ' (Manila). Signing in and keeping the account before then cancels it; after it, the account is anonymized automatically.',
+      v_when
+    )
+    returning id into v_request;
+
+    update public.profiles set
+      deletion_requested_at = now(),
+      deletion_scheduled_for = v_when,
+      deletion_request_id = v_request,
+      updated_at = now()
+    where id = r.id;
+
+    insert into public.notifications (user_id, title, message, type, link)
+    values (
+      r.id,
+      'Your account is scheduled for deletion',
+      'You have not signed in to SafeDrive for ' || v_idle || ' days, so your account will be deleted on '
+        || to_char(v_when at time zone 'Asia/Manila', 'Mon DD, YYYY HH12:MI AM')
+        || ' (Manila). Until then it is hidden. Sign in and choose to keep your account before then if you still want it.',
+      'warning',
+      '/verify'
+    );
+
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (
+      null, 'dormant_account_deletion_scheduled', 'profile', r.id::text,
+      jsonb_build_object('scheduled_for', v_when, 'grace_days', v_grace,
+        'idle_days', v_idle, 'dormant_days_threshold', v_threshold, 'request_id', v_request)
+    );
+
+    user_id := r.id;
+    email := r.email;
+    full_name := r.full_name;
+    request_id := v_request;
+    scheduled_for := v_when;
+    idle_days := v_idle;
+    return next;
+  end loop;
+end;
+$flag_dormant$;
+revoke all on function public.flag_dormant_accounts() from public, anon, authenticated;
+grant execute on function public.flag_dormant_accounts() to service_role;
+
+-- Requests CHAPTER 58 filed and nobody acted on. The next run schedules those
+-- accounts the new way.
+update public.data_retention_requests set
+  status = 'cancelled',
+  decision_reason = coalesce(decision_reason || ' ', '')
+    || 'Closed by CHAPTER 121: dormant accounts are now scheduled for deletion automatically, with notice to the owner.',
+  updated_at = now()
+where request_details like 'System-flagged: no login activity%'
+  and status in ('submitted', 'identity_check', 'under_review');
+
+do $chapter121_legal$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key = 'privacy_policy'
+  loop
+    next_html := replace(doc.content_html,
+      $p62$a suspended account is reviewed through a privacy request instead. Other deletion or erasure requests start an identity and scope review; approved deletion may use erasure, blocking, restricted archival, or anonymization depending on the record and applicable obligation.$p62$,
+      $p62_new$a suspended account is reviewed through a support ticket instead. An account nobody has signed in to for a set number of days (currently 365 by default) is scheduled for deletion in the same way, and its owner is notified and emailed; signing in and choosing to keep the account cancels the deletion.$p62_new$);
+    next_html := replace(next_html,
+      $pcontact$Registered users may also submit and track an access, correction, restriction, anonymization, or deletion request from the Data Requests page, and can delete their own account from their account settings.$pcontact$,
+      $pcontact_new$Registered users can download a copy of their own data from the Your Data page and delete their own account from their account settings. For a correction, a restriction of processing, or any other privacy request, open a support ticket tagged Privacy / Data.$pcontact_new$);
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 121'));
+    end if;
+  end loop;
+end;
+$chapter121_legal$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'dormant schedules deletion' as check_name,
+--        (select case when position('deletion_scheduled_for' in prosrc) > 0 then 'yes' else 'no' end
+--           from pg_proc where proname = 'flag_dormant_accounts') as result,
+--        'yes' as expected
+-- union all
+-- select 'privacy policy republished',
+--        (select case when position('Your Data page' in content_html) > 0 then 'yes' else 'no' end
+--           from public.legal_document_versions
+--          where document_key = 'privacy_policy' and status = 'published'),
+--        'yes';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

@@ -397,7 +397,7 @@ export default function SignUpPage() {
 
                   <div>
                     <h4 className="font-semibold text-foreground mb-1">8. Data Privacy (RA 10173)</h4>
-                    <p>The database master defines encryption, Row-Level Security, and private-storage controls that must be verified in the live project. We do not sell personal data. You may use the Data Requests page or contact <a href={`mailto:${contactEmail}`} className="font-semibold text-primary underline underline-offset-2">{contactEmail}</a> to exercise applicable privacy rights.</p>
+                    <p>The database master defines encryption, Row-Level Security, and private-storage controls that must be verified in the live project. We do not sell personal data. You may download your data from the Your Data page, open a support ticket, or contact <a href={`mailto:${contactEmail}`} className="font-semibold text-primary underline underline-offset-2">{contactEmail}</a> to exercise applicable privacy rights.</p>
                   </div>
 
                   <p className="text-xs text-muted-foreground pt-2 border-t border-border/40">These Terms are governed by the laws of the Republic of the Philippines.</p>

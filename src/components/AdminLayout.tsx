@@ -67,11 +67,10 @@ const allNavItems: AdminNavItem[] = [
   // missed, so the menu and the screen disagreed.
   { to: "/admin/financial-ledger", label: "Money Records", icon: ClipboardList, superAdminOnly: true },
   { to: "/admin/reconciliation", label: "Reconciliation", icon: ShieldCheck, superAdminOnly: true },
-  // Named for what it actually is: Data Privacy Act request handling (a
-  // person asking for their data, or asking to be deleted), on a 30-day
-  // clock. It is not a finance screen and reads as jargon when called
-  // "Retention Requests".
-  { to: "/admin/retention-requests", label: "Privacy Requests", icon: ShieldCheck, superAdminOnly: true },
+  // A view of account deletions and the retention schedule (CHAPTER 121).
+  // Members download their own data and delete their own accounts, so there
+  // are no requests left to handle here.
+  { to: "/admin/retention-requests", label: "Account Deletions", icon: ShieldCheck, superAdminOnly: true },
 ];
 
 export default function AdminLayout() {

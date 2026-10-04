@@ -14,6 +14,9 @@ export const ticketTags = [
   { value: "location_violation", label: "Location / Place Violation" },
   { value: "vehicle", label: "Vehicle Issue" },
   { value: "payment", label: "Payment" },
+  // A correction, a restriction or any other privacy question (CHAPTER 121).
+  { value: "privacy", label: "Privacy / Data" },
+  { value: "other", label: "Other" },
 ] as const;
 
 export const ticketAttachmentBucket = "support-attachments";

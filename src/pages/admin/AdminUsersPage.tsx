@@ -1094,7 +1094,7 @@ export default function AdminUsersPage() {
     setDeleteReason("");
   };
 
-  // Runs public.anonymize_user() - the same routine the Privacy Requests queue
+  // Runs public.anonymize_user() - the same routine the old Privacy Requests queue
   // and the daily self-service deletion run - through api/account-deletion.ts
   // (CHAPTER 96), because a database function cannot do the other two things a
   // deletion owes the person: email them the reason at the address about to be

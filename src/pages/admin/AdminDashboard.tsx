@@ -37,7 +37,7 @@ export default function AdminDashboard() {
         supabase.from("guest_inquiries").select("id, created_at").in("status", ["open", "in_progress"]).order("created_at", { ascending: true }),
         isSuperAdmin ? supabase.from("payments").select("id, created_at").eq("payment_type", "payout").in("status", ["pending", "failed"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         isSuperAdmin ? supabase.from("payments").select("id, created_at").eq("payment_type", "refund").in("status", ["pending", "failed"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
-        isSuperAdmin ? supabase.from("data_retention_requests").select("id, created_at").in("status", ["submitted", "identity_check", "under_review", "approved"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
+        isSuperAdmin ? supabase.from("data_retention_requests").select("id, created_at").eq("status", "legal_hold").order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         isSuperAdmin ? supabase.from("reconciliation_items").select("id, created_at").in("status", ["open", "investigating"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(6),
       ]);
@@ -57,7 +57,7 @@ export default function AdminDashboard() {
         // Not finance-flagged: this queue is Data Privacy Act request
         // handling, and grouping it with payouts/refunds made it read as a
         // money screen.
-        { label: "Privacy requests", count: retention.data?.length ?? 0, oldest: retention.data?.[0]?.created_at ?? null, to: "/admin/retention-requests", icon: ShieldCheck },
+        { label: "Deletions on hold", count: retention.data?.length ?? 0, oldest: retention.data?.[0]?.created_at ?? null, to: "/admin/retention-requests", icon: ShieldCheck },
         { label: "Reconciliation issues", count: reconciliation.data?.length ?? 0, oldest: reconciliation.data?.[0]?.created_at ?? null, to: "/admin/reconciliation", icon: ShieldCheck, finance: true },
       );
       setQueues(operational);

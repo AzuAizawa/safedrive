@@ -263,7 +263,7 @@ const FIELDS: Record<
   },
   dormant_account_days: {
     label: "Dormant account threshold",
-    hint: "Days of no login activity before a regular account is auto-flagged for the Retention Requests queue (90-3650). A system admin still has to review and execute - this only files the request. Applies live.",
+    hint: "Days with no sign-in before a regular account is scheduled for deletion (90-3650). Its owner is notified and emailed, and the account is deleted after the account deletion grace period unless they sign in and keep it. Applies live.",
     unit: "days",
     toDisplay: (s) => String(Math.round(s)),
     fromDisplay: (i) => {

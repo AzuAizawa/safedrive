@@ -6,28 +6,27 @@ it is not aspirational.
 
 ## 1. Guiding rule
 
-A "delete my account" request is **reviewed, not auto-executed**. An approved
-deletion is satisfied by **anonymization** whenever financial, contract,
-dispute, fraud, tax, or legal-hold records must be retained. This follows DPA
-principles (legitimate purpose, proportionality) and the GDPR Art. 17(3)
-carve-outs that PH practice tracks.
+A member exercises their rights themselves; nothing waits on an admin
+(CHAPTER 121). Deleting an account is satisfied by **anonymization** whenever
+financial, contract, dispute, fraud, tax, or legal-hold records must be
+retained. This follows DPA principles (legitimate purpose, proportionality)
+and the GDPR Art. 17(3) carve-outs that PH practice tracks.
 
-There is **no timer**. `data_retention_requests.due_at` (+30 days) is a target
-response deadline for a human reviewer. No cron acts on these rows.
+## 2. How each right is exercised
 
-## 2. Request lifecycle
-
-| Stage | Who | What happens |
+| Right | Where | What happens |
 |---|---|---|
-| `submitted` | user (`/privacy-request` → `POST /api/data-request` → `submit_data_retention_request`) | Row created, super admins notified, audit entry written. Account unaffected. |
-| `identity_check` → `under_review` | admin (`/admin/retention-requests`, "Advance review") | Verify the requester is the data subject; check operational / legal holds. |
-| `approved` / `denied` / `legal_hold` | super admin ("Approve / Deny / Legal hold" — written reason required) | `legal_hold` can later be released back to `under_review` ("Release legal hold"). |
-| `executed` | super admin ("Run anonymization" or "Record execution") | Terminal. `completed_at` + execution note stored. |
-| `cancelled` | user ("Withdraw request", while `submitted` / `identity_check` / `under_review`) — `PATCH /api/data-request` → `withdraw_data_retention_request` | User changed their mind. Re-submittable later. |
+| Access / portability | **Your Data** (`/privacy-request`) → "Download my data" (`GET /api/data-request`) | One JSON file of the member's own profile, bookings, payments, vehicles, reviews and support tickets. ID numbers and images, arrival locations and photos, and other people's details are left out. Audited as `personal_data_exported`. |
+| Erasure | Account settings → **Delete account** (CHAPTER 96) | Scheduled `account_deletion_grace_days` ahead (default 30); hidden meanwhile; signing in and keeping it cancels; `run_due_account_deletions()` anonymizes on the day. |
+| Erasure of an unused account | Automatic: `flag_dormant_accounts()` daily (CHAPTER 121) | No sign-in for `dormant_account_days` (default 365) schedules the same deletion; the owner is notified and emailed. Skips suspended accounts and any with a booking, refund, payout or booking case still open. |
+| Rectification, restriction, objection, anything else | Support ticket tagged **Privacy / Data** | Answered in the ticket. A restriction is applied by suspending the account in User Management; a suspended member who wants deletion is anonymized from User Management ("Anonymize"). |
 
-Submitting a request does **not** restrict the account. A user can keep
-booking, listing, and accepting bookings while a request is pending; an active
-rental is an operational hold the reviewer must clear first.
+Every scheduled deletion is listed, read-only, on **Account Deletions**
+(`/admin/retention-requests`) with the retention schedule. A deletion that is
+held (a suspension, or something still open on its date) shows there and on
+the admin dashboard as "Deletions on hold", and is resolved from User
+Management. `POST` / `PATCH /api/data-request` answer 410: requests are no
+longer filed.
 
 ## 3. What blocks a hard delete
 
@@ -44,11 +43,10 @@ staff-account equivalent). Every other account is **anonymized**.
 
 ## 4. Scripted anonymization — `public.anonymize_user(p_user_id, p_request_id)`
 
-`SECURITY DEFINER`, super-admin only, one transaction. Wired to the "Run
-anonymization" button on `/admin/retention-requests` for an `approved`
-`deletion` / `anonymization` request that has a linked `subject_user_id`; the
-returned report is stored verbatim as the execution note and an
-`user_anonymized` audit row is written.
+`SECURITY DEFINER`, super-admin only, one transaction. Run by the daily
+scheduled-deletion job and by "Anonymize" in User Management
+(`api/account-deletion.ts`); the returned report is stored as the execution
+note and an `user_anonymized` audit row is written.
 
 **Refuses** if: the caller is not a super admin; the target is `admin` /
 `super_admin` (demote first); the account is already `deleted_at`; or the user
