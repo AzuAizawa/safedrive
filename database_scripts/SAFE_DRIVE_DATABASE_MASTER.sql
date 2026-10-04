@@ -18841,8 +18841,9 @@ commit;
 -- (api/vehicle-removal.ts, from the rows these functions return).
 --
 -- Apply this chapter only. Three columns, one table and five functions are
--- added; two functions and one trigger function are replaced; two functions
--- lose their grants. Every car already deleted or removed is anonymised.
+-- added; two functions and one trigger function are replaced; the plate
+-- format check also accepts an erased car's placeholder; two functions lose
+-- their grants. Every car already deleted or removed is anonymised.
 -- ============================================================================
 begin;
 
@@ -18850,6 +18851,17 @@ alter table public.cars
   add column if not exists removal_scheduled_at timestamptz,
   add column if not exists removal_scheduled_by uuid,
   add column if not exists removal_reason text;
+
+-- A live plate keeps the format the listing form enforces; an erased car's
+-- placeholder is allowed on an erased car only.
+alter table public.cars
+  drop constraint if exists cars_plate_number_format;
+alter table public.cars
+  add constraint cars_plate_number_format
+  check (
+    plate_number ~ '^[A-Z]{3}[ -]?[0-9]{3,4}$'
+    or (deleted_at is not null and plate_number ~ '^DELETED-[0-9a-f]{8}$')
+  );
 
 -- Files of erased cars, deleted by api/vehicle-removal.ts through the Storage
 -- API and then taken off this list.

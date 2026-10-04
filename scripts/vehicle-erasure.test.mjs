@@ -51,7 +51,8 @@ async function fixture({ deletedBeforeChapter = false } = {}) {
       id uuid primary key default gen_random_uuid(),
       owner_id uuid references public.profiles(id) not null,
       model_id uuid references public.car_models(id),
-      plate_number text unique not null,
+      plate_number text unique not null
+        constraint cars_plate_number_format check (plate_number ~ '^[A-Z]{3}[ -]?[0-9]{3,4}$'),
       status text default 'approved',
       location text, contact_number text, additional_info text,
       rejection_reason text,
@@ -210,6 +211,18 @@ test("an admin removal erases the car and is not held by an owed payout", async 
   assert.equal(audit.rows[0].action, "admin_deleted_vehicle");
   assert.equal(audit.rows[0].user_id, ADMIN);
   assert.equal(audit.rows[0].details.plate, "ABC 1234");
+});
+
+test("a live car still needs a real plate; the placeholder is for erased cars only", async () => {
+  const db = await fixture();
+  await assert.rejects(
+    db.query(`update public.cars set plate_number = 'DELETED-44444444' where id = $1`, [CAR]),
+    /cars_plate_number_format/,
+  );
+  await assert.rejects(
+    db.query(`insert into public.cars(owner_id, model_id, plate_number) values($1, $2, 'not a plate')`, [OWNER, MODEL]),
+    /cars_plate_number_format/,
+  );
 });
 
 test("only a vehicle remover may remove, with a listed reason and a real note", async () => {
