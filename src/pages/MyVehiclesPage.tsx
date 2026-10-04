@@ -566,8 +566,6 @@ export default function MyVehiclesPage() {
     brand_id: null as string | null,
     model_id: null as string | null,
     plate_number: "",
-    fuel_category: "",
-    fuel_subtype: "",
     transmission: "",
     registration_expiry: "",
     ctpl_expiry: "",
@@ -645,13 +643,6 @@ export default function MyVehiclesPage() {
   const selectedModel = form.model_id
     ? models.find((model) => model.id === form.model_id) || null
     : null;
-  const availableFuelSubtypes = form.fuel_category
-    ? [
-        ...FUEL_CATEGORY_OPTIONS[
-          form.fuel_category as keyof typeof FUEL_CATEGORY_OPTIONS
-        ],
-      ]
-    : [];
   const availableEditFuelSubtypes = editFuelCategory
     ? [
         ...FUEL_CATEGORY_OPTIONS[
@@ -1036,12 +1027,11 @@ export default function MyVehiclesPage() {
           owner_id: user.id,
           model_id: modelId,
           plate_number: form.plate_number,
-          // Price, location, mileage, contact, response limit and features are
-          // set after approval, from Edit (CHAPTER 114). Until a price and a
-          // pickup location are in, an approved car is not shown to renters.
+          // Price, location, mileage, contact, response limit, fuel detail and
+          // features are set after approval, from Edit (CHAPTER 114). Until a
+          // price and a pickup location are in, an approved car is not shown
+          // to renters.
           price_per_day: null,
-          fuel_category: form.fuel_category || null,
-          fuel_subtype: form.fuel_subtype || null,
           transmission: form.transmission || null,
           registration_expiry: form.registration_expiry,
           ctpl_expiry: form.ctpl_expiry,
@@ -1133,8 +1123,6 @@ export default function MyVehiclesPage() {
         brand_id: null,
         model_id: null,
         plate_number: "",
-        fuel_category: "",
-        fuel_subtype: "",
         transmission: "",
         registration_expiry: "",
         ctpl_expiry: "",
@@ -1802,60 +1790,6 @@ export default function MyVehiclesPage() {
                     </p>
                   )}
                 </div>
-                <div className="space-y-2">
-                  <Label>Fuel Category (Optional)</Label>
-                  <Select
-                    value={form.fuel_category || ""}
-                    onValueChange={(val) =>
-                      setForm({
-                        ...form,
-                        fuel_category: val ?? "",
-                        fuel_subtype: "",
-                      })
-                    }
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Select a category for extra fuel detail" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.keys(FUEL_CATEGORY_OPTIONS).map((category) => (
-                        <SelectItem key={category} value={category}>
-                          {category}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Optional only. This helps describe hybrid, diesel, electric, or alternative fuel setups more clearly.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label>Fuel Detail (Optional)</Label>
-                  <Select
-                    value={form.fuel_subtype || ""}
-                    onValueChange={(val) =>
-                      setForm({ ...form, fuel_subtype: val ?? "" })
-                    }
-                    disabled={!form.fuel_category}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue
-                        placeholder={
-                          form.fuel_category
-                            ? "Select the matching fuel detail"
-                            : "Choose a fuel category first"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableFuelSubtypes.map((subtype) => (
-                        <SelectItem key={subtype} value={subtype}>
-                          {subtype}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
                 <div id="listing-transmission" className="space-y-2">
                   <Label>Transmission *</Label>
                   <select
@@ -1927,9 +1861,9 @@ export default function MyVehiclesPage() {
                   })()}
                 </div>
                 <p className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground sm:col-span-2">
-                  Price per day, pickup location, mileage, contact number and features
-                  are set after the admin approves your documents, from Edit. The car is
-                  listed for renters once its price and pickup location are in.
+                  Price per day, pickup location, mileage, contact number, fuel detail and
+                  features are set after the admin approves your documents, from Edit. The
+                  car is listed for renters once its price and pickup location are in.
                 </p>
               </div>
 
