@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import {
   COMPLIANCE_DOCUMENTS,
   documentLabel,
-  matchesDocumentType,
+  latestDocuments,
   requiresExpiry,
   expiryDateToIso,
   isoToManilaInput,
@@ -349,6 +349,8 @@ export default function VehicleCompliancePanel({
     }
   };
 
+  const latestByType = latestDocuments(documents);
+
   return (
     <section className={compact ? "space-y-3" : "space-y-4 rounded-xl border p-4"}>
       {!compact && (
@@ -393,8 +395,11 @@ export default function VehicleCompliancePanel({
             </p>
           )}
           {COMPLIANCE_DOCUMENTS.filter((type) => !onlyTypes || onlyTypes.includes(type.type)).map((type) => {
-            const matching = documents.filter((d) => matchesDocumentType(d.document_type, type.type));
-            const pending = matching.some((d) => d.compliance_status === "pending" && d.renewal_id);
+            // Only the newest file is shown. Older ones stay on record but are
+            // never acted on, and a new upload replaces one still pending.
+            const latest = latestByType.get(type.type);
+            const matching = latest ? [latest] : [];
+            const pending = latest?.compliance_status === "pending" && Boolean(latest.renewal_id);
             const needs = summary?.reasons.includes(`${type.type}_coverage_required`);
             return (
               <div key={type.type} className="space-y-2 rounded-lg border p-3">
@@ -487,13 +492,13 @@ export default function VehicleCompliancePanel({
                   <div className="space-y-2">
                     <p className="text-xs text-muted-foreground">
                       {pending
-                        ? "Replacement awaiting admin review"
+                        ? "Replacement awaiting admin review. Uploading another file replaces it."
                         : "Update document (leave empty to retain approved version)"}
                     </p>
                     <div className="flex flex-wrap items-start gap-4">
                       <label
                         className={`flex h-24 w-[150px] shrink-0 flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-xs text-muted-foreground transition-colors ${
-                          busy || pending
+                          busy
                             ? "cursor-not-allowed opacity-50"
                             : "cursor-pointer hover:border-primary/50"
                         }`}
@@ -507,7 +512,7 @@ export default function VehicleCompliancePanel({
                           key={`${type.type}:${revision}`}
                           type="file"
                           className="hidden"
-                          disabled={busy || pending}
+                          disabled={busy}
                           accept=".pdf,.jpg,.jpeg,.png,.webp"
                           onChange={(e) => {
                             const file = e.target.files?.[0] ?? null;
@@ -532,7 +537,7 @@ export default function VehicleCompliancePanel({
                           <Input
                             type="date"
                             className="w-[190px]"
-                            disabled={busy || pending}
+                            disabled={busy}
                             min={new Date().toISOString().slice(0, 10)}
                             value={expiries[type.type] ?? ""}
                             onChange={(e) =>

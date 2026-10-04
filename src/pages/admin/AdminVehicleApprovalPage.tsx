@@ -20,6 +20,7 @@ import {
   runVehicleOcrVerification,
   type VehicleOcrVerificationResult,
 } from "@/lib/vehicleOcr";
+import { documentsBlockingApproval } from "@/lib/vehicleCompliance";
 import { Button } from "@/components/ui/button";
 import AdminSectionTabs from "@/components/AdminSectionTabs";
 import { Input } from "@/components/ui/input";
@@ -101,6 +102,7 @@ interface PendingCar {
     superseded_at?: string | null;
     review_flag: string;
     review_reason: string | null;
+    compliance_status: string;
     created_at: string;
   }[];
   profiles: {
@@ -115,6 +117,8 @@ interface PendingCar {
     address: string | null;
   };
 }
+
+type ReviewedDocument = { document_type: string; compliance_status: string; created_at: string };
 
 // The codes public.admin_remove_car accepts (CHAPTER 95), with the label the
 // lister reads in front of the admin's note. Keep the two lists identical.
@@ -209,6 +213,10 @@ export default function AdminVehicleApprovalPage() {
   const [documentUrls, setDocumentUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<PendingCar | null>(null);
+  const [reviewedDocuments, setReviewedDocuments] = useState<{
+    carId: string;
+    rows: ReviewedDocument[];
+  } | null>(null);
   // The AI-image check for every photo and document of the open listing (CHAPTER 108).
   const authenticity = useImageAuthenticity(selected ? { scope: "car", carId: selected.id } : null);
   const [rejectionReason, setRejectionReason] = useState("");
@@ -506,8 +514,38 @@ export default function AdminVehicleApprovalPage() {
     };
   }, [getUrl, ocrRunKey, selected]);
 
+  // A document reviewed inside the panel changes what may be approved, so its
+  // statuses are read again rather than trusted from the list. Kept apart from
+  // `selected` so a review does not restart OCR for the whole car.
+  const reloadReviewedDocuments = async () => {
+    if (!selected) return;
+    const carId = selected.id;
+    const { data } = await supabase
+      .from("car_documents")
+      .select("document_type, compliance_status, created_at")
+      .eq("car_id", carId);
+    if (data) setReviewedDocuments({ carId, rows: data as ReviewedDocument[] });
+  };
+
+  // Opening a car, even the same one again, starts from the freshly listed rows.
+  useEffect(() => setReviewedDocuments(null), [selected]);
+
+  // Every document's newest file must be approved first. The OCR override
+  // never covers a document the reviewer sent back (CHAPTER 119).
+  const approvalBlockers = selected
+    ? documentsBlockingApproval(
+        reviewedDocuments?.carId === selected.id ? reviewedDocuments.rows : selected.car_documents,
+      )
+    : [];
+
   const handleApprove = async () => {
     if (!selected || !adminUser) return;
+    if (approvalBlockers.length) {
+      toast.error("Approve or send back every document first.", {
+        description: approvalBlockers.join(" · "),
+      });
+      return;
+    }
     const ocrAccepted = ocrResult?.passed || manualOcrOverride;
     if (!ocrAccepted) {
       toast.error("Review OCR warnings or enable manual review override.");
@@ -1064,7 +1102,13 @@ export default function AdminVehicleApprovalPage() {
                 </div>
               )}
 
-              <VehicleCompliancePanel key={selected.id} carId={selected.id} admin authenticity={authenticity} />
+              <VehicleCompliancePanel
+                key={selected.id}
+                carId={selected.id}
+                admin
+                authenticity={authenticity}
+                onChange={() => void reloadReviewedDocuments()}
+              />
               <div className={`rounded-lg border p-4 ${selected.registration_expiry && selected.ctpl_expiry && selected.insurer_rental_use_confirmed ? "border-green-500/30 bg-green-500/5" : "border-red-500/30 bg-red-500/5"}`}>
                 <h4 className="font-semibold">Registration & insurance review</h4>
                 <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
@@ -1485,6 +1529,23 @@ export default function AdminVehicleApprovalPage() {
                 </label>
               )}
 
+              {activeTab === "pending" && approvalBlockers.length > 0 && (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700 dark:text-red-400"
+                >
+                  <p className="font-medium">
+                    Approve or send back every document first. The manual review override does not cover
+                    these:
+                  </p>
+                  <ul className="mt-1 list-disc pl-5 text-xs">
+                    {approvalBlockers.map((blocker) => (
+                      <li key={blocker}>{blocker}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {/* Actions */}
               {activeTab === "pending" && canReview && (
                 <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap">
@@ -1493,6 +1554,7 @@ export default function AdminVehicleApprovalPage() {
                     disabled={
                       actionLoading ||
                       ocrStatus === "running" ||
+                      approvalBlockers.length > 0 ||
                       (!ocrResult?.passed && !manualOcrOverride)
                     }
                     className="gap-2"

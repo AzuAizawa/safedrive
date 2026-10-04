@@ -18645,4 +18645,167 @@ commit;
 --        'yes';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 119 - One file per document, and no approval past a document that
+-- is not approved
+-- ============================================================================
+-- Two things went wrong on a car in review whose BIR the admin sent back:
+--
+-- 1. The admin could still approve the car. "Manual review override" exists
+--    for OCR that cannot read a clear scan, but approving with it checked
+--    passed over the BIR marked "Needs correction" too. The only database
+--    guard, enforce_vehicle_insurance_approval, looks at registration and
+--    CTPL dates, not at whether each document was approved.
+--    enforce_vehicle_documents_reviewed now refuses to approve a car coming
+--    out of review while the newest file of any of its documents is pending,
+--    rejected or revoked. A live car moving between approved and
+--    renewal_required (refresh_vehicle_compliance) is not affected.
+--
+-- 2. Each resubmission stacked on the last. A lister who sent the BIR again
+--    while the previous one still waited was refused ("A replacement for bir
+--    is already awaiting review"), and every earlier file stayed in the list.
+--    submit_vehicle_document_update (reproduced from its last version) now
+--    lets the new file replace one still pending for the same document: the
+--    pending row is removed and recorded in the audit log, and its renewal is
+--    closed quietly, or removed if nothing is left in it. The stored file is
+--    kept. A rejected file is not removed, so the admin's reason stays on
+--    record.
+--
+-- Apply this chapter only. One trigger is added and one function replaced.
+-- No existing document, car or booking is changed.
+-- ============================================================================
+begin;
+
+create or replace function public.enforce_vehicle_documents_reviewed()
+returns trigger language plpgsql security definer set search_path = public as $reviewed$
+declare blocking text;
+begin
+  if new.status = 'approved'
+     and coalesce(old.status, '') not in ('approved', 'active', 'renewal_required') then
+    select string_agg(latest.label || case latest.compliance_status
+             when 'pending' then ' is still waiting for review'
+             when 'rejected' then ' needs correction'
+             when 'revoked' then ' had its approval revoked'
+             else ' is not approved' end, '; ' order by latest.n)
+      into blocking
+      from (
+        select distinct on (k.n) k.n, k.label, d.compliance_status
+          from (values
+            (1, 'or', 'LTO registration / OR'),
+            (2, 'cr', 'Certificate of Registration (CR)'),
+            (3, 'ctpl', 'CTPL insurance'),
+            (4, 'comprehensive_insurance', 'Comprehensive insurance (rental use)'),
+            (5, 'dti', 'DTI business name registration'),
+            (6, 'mayors_permit', 'Business / Mayor''s Permit'),
+            (7, 'bir', 'BIR Certificate of Registration (Form 2303)')
+          ) as k(n, type, label)
+          join public.car_documents d
+            on d.car_id = new.id
+           and (d.document_type = k.type or (k.type in ('or', 'cr') and d.document_type = 'orcr'))
+         order by k.n, d.created_at desc
+      ) latest
+     where latest.compliance_status <> 'approved';
+    if blocking is not null then
+      raise exception 'Approve or send back every document first: %', blocking;
+    end if;
+  end if;
+  return new;
+end;
+$reviewed$;
+
+drop trigger if exists enforce_vehicle_documents_reviewed on public.cars;
+create trigger enforce_vehicle_documents_reviewed
+  before update of status on public.cars
+  for each row execute function public.enforce_vehicle_documents_reviewed();
+
+create or replace function public.submit_vehicle_document_update(p_car_id uuid,p_documents jsonb)
+returns uuid language plpgsql security definer set search_path=public as $submit$
+declare rid uuid; item jsonb; k text; path text; expiry timestamptz; replaced record;
+begin
+  if auth.uid() is null or not exists(select 1 from public.cars where id=p_car_id and owner_id=auth.uid()) then
+    raise exception 'Only the vehicle owner can submit documents'; end if;
+  perform 1 from public.cars where id=p_car_id for update;
+  if exists(select 1 from public.cars where id=p_car_id and deleted_at is not null) then
+    raise exception 'This vehicle was removed from SafeDrive. Open a support case to have it restored before submitting documents'; end if;
+  if p_documents is null or jsonb_typeof(p_documents)<>'array' or jsonb_array_length(p_documents)=0 then raise exception 'Upload at least one document'; end if;
+  insert into public.car_renewals(car_id,lister_id,status,document_update)
+    values(p_car_id,auth.uid(),'pending',true) returning id into rid;
+  for item in select * from jsonb_array_elements(p_documents) loop
+    k:=item->>'document_type'; path:=item->>'storage_path';
+    if k is null or k not in ('or','cr','ctpl','comprehensive_insurance','dti','mayors_permit','bir') then raise exception 'Unsupported document type'; end if;
+    expiry:=nullif(item->>'valid_until','')::timestamptz;
+    if k in ('or','ctpl','comprehensive_insurance','dti','mayors_permit') and expiry is null then
+      raise exception 'Enter the expiry date shown on the % document',k; end if;
+    if path is null or path not like auth.uid()::text||'/'||p_car_id::text||'/%'
+      or not exists(select 1 from storage.objects where bucket_id='vehicle-private-documents' and name=path) then
+      raise exception 'Document must be uploaded to this vehicle private folder'; end if;
+    -- CHAPTER 119: the new file replaces one still waiting for the same document.
+    for replaced in
+      select id, renewal_id, storage_path from public.car_documents
+       where car_id=p_car_id and document_type=k and compliance_status='pending'
+         and renewal_id is distinct from rid
+       for update
+    loop
+      delete from public.car_documents where id=replaced.id;
+      insert into public.audit_log(user_id,action,entity_type,entity_id,details)
+        values(auth.uid(),'vehicle_document_replaced','car_document',replaced.id::text,
+          jsonb_build_object('car_id',p_car_id,'document_type',k,
+            'storage_path',replaced.storage_path,'replaced_by_renewal',rid));
+      if replaced.renewal_id is not null then
+        if not exists(select 1 from public.car_documents where renewal_id=replaced.renewal_id) then
+          delete from public.car_renewals where id=replaced.renewal_id;
+        elsif not exists(select 1 from public.car_documents
+                          where renewal_id=replaced.renewal_id and compliance_status='pending') then
+          update public.car_renewals
+             set status=case when exists(select 1 from public.car_documents
+                                          where renewal_id=replaced.renewal_id
+                                            and compliance_status in ('rejected','revoked'))
+                             then 'rejected' else 'approved' end,
+                 reviewed_at=now()
+           where id=replaced.renewal_id and status='pending';
+        end if;
+      end if;
+    end loop;
+    insert into public.car_documents(
+      car_id,document_type,storage_path,storage_bucket,renewal_id,valid_until,
+      content_sha256,provenance_status,provenance_source,provenance_summary,
+      ai_suspicion_score,ai_detector_name,ai_detector_version,review_flag)
+    values(
+      p_car_id,k,path,'vehicle-private-documents',rid,expiry,
+      nullif(item->>'content_sha256',''),
+      case when item->>'provenance_status' in
+        ('unknown','credential_present','credential_missing','credential_invalid')
+        then item->>'provenance_status' else 'unknown' end,
+      nullif(item->>'provenance_source',''),
+      nullif(item->>'provenance_summary',''),
+      case when (item->>'ai_suspicion_score') ~ '^[0-9]*\.?[0-9]+$'
+        and (item->>'ai_suspicion_score')::numeric between 0 and 1
+        then (item->>'ai_suspicion_score')::numeric else null end,
+      nullif(item->>'ai_detector_name',''),
+      nullif(item->>'ai_detector_version',''),
+      case when item->>'review_flag' in
+        ('none','needs_admin_review','approved_after_review','rejected_after_review')
+        then item->>'review_flag' else 'none' end);
+  end loop;
+  return rid;
+end;
+$submit$;
+revoke all on function public.submit_vehicle_document_update(uuid,jsonb) from public;
+grant execute on function public.submit_vehicle_document_update(uuid,jsonb) to authenticated;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'approval guard' as check_name,
+--        (select count(*)::text from pg_trigger
+--          where tgname = 'enforce_vehicle_documents_reviewed' and not tgisinternal) as result,
+--        '1' as expected
+-- union all
+-- select 'resubmission replaces pending',
+--        (select case when position('vehicle_document_replaced' in prosrc) > 0
+--                      and position('already awaiting review' in prosrc) = 0 then 'yes' else 'no' end
+--           from pg_proc where proname = 'submit_vehicle_document_update'),
+--        'yes';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

@@ -179,3 +179,39 @@ export const documentsNeedingCorrection = (rows: CorrectionRow[]): DocumentCorre
     }
     return [];
   });
+
+/**
+ * The newest file filed for each requirement, newest first per type. Earlier
+ * files stay in car_documents for the record but are not shown: the lister and
+ * the admin only ever act on the latest one.
+ */
+export const latestDocuments = <T extends { document_type: string; created_at: string }>(
+  rows: T[],
+): Map<ComplianceDocumentType, T> =>
+  new Map(
+    COMPLIANCE_DOCUMENTS.flatMap((document): [ComplianceDocumentType, T][] => {
+      const newest = rows
+        .filter((row) => matchesDocumentType(row.document_type, document.type))
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+      return newest ? [[document.type, newest]] : [];
+    }),
+  );
+
+const BLOCKING_STATUS: Record<string, string> = {
+  pending: "is still waiting for review",
+  rejected: "needs correction",
+  revoked: "had its approval revoked",
+};
+
+/**
+ * Why a car in review cannot be approved yet: every requirement whose newest
+ * file is not approved (CHAPTER 119 refuses the same in the database).
+ */
+export const documentsBlockingApproval = (
+  rows: { document_type: string; compliance_status: string; created_at: string }[],
+): string[] =>
+  [...latestDocuments(rows)].flatMap(([type, row]) =>
+    row.compliance_status === "approved"
+      ? []
+      : [`${documentLabel(type)} ${BLOCKING_STATUS[row.compliance_status] ?? "is not approved"}`],
+  );
