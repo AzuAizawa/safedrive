@@ -19533,4 +19533,120 @@ commit;
 --        'yes';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 122 - The admin is told which document came back, and by email
+-- ============================================================================
+-- When a lister sent documents again, every admin was notified "Vehicle
+-- renewal submitted - A lister submitted updated compliance documents for
+-- review", whatever was sent. On a new car still in review that answers a
+-- "Needs correction" it is not a renewal at all, and the notice named neither
+-- the document nor the car. It was also never emailed.
+--
+-- The notice now says who sent what for which car - "Ana Cruz sent a
+-- corrected CTPL insurance for ABC 1234, a vehicle still in review" - and
+-- "updated" rather than "corrected" for a live listing. It is worded by
+-- vehicle_resubmission_notice(), which api/send-document-correction-email.ts
+-- also reads to email the same words to the admins.
+--
+-- notify_car_renewal_submitted fired when the renewal row was inserted, before
+-- submit_vehicle_document_update had filed its documents, so it could not know
+-- them. It is now a constraint trigger deferred to the end of the transaction,
+-- when the documents are there.
+--
+-- Apply this chapter only. Two functions are added, one trigger function is
+-- replaced and its trigger is recreated as a deferred constraint trigger.
+-- ============================================================================
+begin;
+
+create or replace function public.vehicle_document_label(p_document_type text)
+returns text
+language sql
+immutable
+as $document_label$
+  select case p_document_type
+    when 'or' then 'LTO registration / OR'
+    when 'orcr' then 'OR/CR'
+    when 'cr' then 'Certificate of Registration (CR)'
+    when 'ctpl' then 'CTPL insurance'
+    when 'comprehensive_insurance' then 'comprehensive insurance'
+    when 'dti' then 'DTI business name registration'
+    when 'mayors_permit' then 'Business / Mayor''s Permit'
+    when 'bir' then 'BIR Certificate of Registration'
+    when 'rental_agreement' then 'rental agreement'
+    else replace(p_document_type, '_', ' ')
+  end;
+$document_label$;
+grant execute on function public.vehicle_document_label(text) to authenticated, service_role;
+
+-- The admins' notice for one submission of documents. No row when the
+-- submission has no documents left (a later one replaced them all).
+create or replace function public.vehicle_resubmission_notice(p_renewal_id uuid)
+returns table(car_id uuid, title text, message text, link text)
+language sql
+stable
+security definer
+set search_path = public
+as $resubmission_notice$
+  select
+    c.id,
+    case when c.status in ('pending', 'rejected')
+      then 'Corrected document submitted' else 'Updated documents submitted' end,
+    coalesce(nullif(btrim(p.full_name), ''), 'A lister')
+      || case when c.status in ('pending', 'rejected') then ' sent a corrected ' else ' sent an updated ' end
+      || string_agg(public.vehicle_document_label(d.document_type), ', ' order by d.document_type)
+      || ' for ' || c.plate_number
+      || case when c.status in ('pending', 'rejected')
+           then ', a vehicle still in review.' else ', a live listing.' end
+      || ' Review it in Vehicle Approval.',
+    '/admin/vehicle-approval?tab=pending'
+  from public.car_renewals r
+  join public.cars c on c.id = r.car_id
+  join public.profiles p on p.id = c.owner_id
+  join public.car_documents d on d.renewal_id = r.id
+  where r.id = p_renewal_id
+  group by c.id, c.status, p.full_name, c.plate_number;
+$resubmission_notice$;
+revoke all on function public.vehicle_resubmission_notice(uuid) from public, anon, authenticated;
+grant execute on function public.vehicle_resubmission_notice(uuid) to service_role;
+
+create or replace function public.notify_car_renewal_submitted()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $notify$
+declare
+  n record;
+begin
+  select * into n from public.vehicle_resubmission_notice(new.id);
+  if not found then
+    return null;
+  end if;
+  insert into public.notifications (user_id, title, message, type, link)
+  select p.id, n.title, n.message, 'vehicle', n.link
+    from public.profiles p
+   where p.role in ('admin', 'super_admin') and p.deleted_at is null;
+  return null;
+end;
+$notify$;
+
+drop trigger if exists notify_car_renewal_submitted on public.car_renewals;
+create constraint trigger notify_car_renewal_submitted
+  after insert on public.car_renewals
+  deferrable initially deferred
+  for each row execute function public.notify_car_renewal_submitted();
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'notice names the document' as check_name,
+--        public.vehicle_document_label('ctpl') as result,
+--        'CTPL insurance' as expected
+-- union all
+-- select 'trigger is deferred',
+--        (select case when tgdeferrable and tginitdeferred then 'yes' else 'no' end
+--           from pg_trigger where tgname = 'notify_car_renewal_submitted'),
+--        'yes';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

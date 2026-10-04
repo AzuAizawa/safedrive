@@ -316,12 +316,25 @@ export default function VehicleCompliancePanel({
           review_flag: provenance.review_flag,
         });
       }
-      const { error: submitError } = await supabase.rpc("submit_vehicle_document_update", {
+      const { data: renewalId, error: submitError } = await supabase.rpc("submit_vehicle_document_update", {
         p_car_id: carId,
         p_documents: payload,
       });
       if (submitError) throw submitError;
       submitted = true;
+      // CHAPTER 122: the admins were notified in the app; email them the
+      // same words. A failed email never undoes the submission.
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token && renewalId) {
+        void fetch("/api/send-document-correction-email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ renewalId }),
+        }).catch(() => undefined);
+      }
       // The replacement is the likeliest place a doctored document is swapped in.
       queueImageChecks({ scope: "car", carId });
       setFiles({});

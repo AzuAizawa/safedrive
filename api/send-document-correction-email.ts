@@ -1,12 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
-import { sendUserNotificationEmail } from "../server/email.js";
+import { sendAdminAlertEmail, sendUserNotificationEmail } from "../server/email.js";
 
 export const config = { runtime: "edge" };
 
 // CHAPTER 118. When an admin sends a vehicle document back, review_vehicle_documents
 // writes the in-app notice; this emails the owner the same words, read from
 // vehicle_document_correction_message so the two cannot drift apart.
-type Payload = { documentId?: string };
+//
+// CHAPTER 122. The other direction: when the owner sends documents again
+// ({ renewalId }), the admins were notified in the app by the database; this
+// emails them the same words, read from vehicle_resubmission_notice.
+type Payload = { documentId?: string; renewalId?: string };
 
 const respond = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -35,6 +39,34 @@ export default async function handler(req: Request) {
     if (actorError || !actor) return respond({ error: "Unauthorized request" }, 401);
 
     const payload = (await req.json().catch(() => ({}))) as Payload;
+
+    const renewalId = payload.renewalId?.trim();
+    if (renewalId) {
+      const { data: renewal } = await supabase
+        .from("car_renewals")
+        .select("id, cars(owner_id)")
+        .eq("id", renewalId)
+        .maybeSingle();
+      const owner = (renewal as unknown as { cars: { owner_id: string } | null } | null)?.cars?.owner_id;
+      if (!renewal || owner !== actor.id) return respond({ error: "Submission not found" }, 404);
+
+      const { data: notices, error: noticeError } = await supabase.rpc("vehicle_resubmission_notice", {
+        p_renewal_id: renewalId,
+      });
+      if (noticeError) return respond({ error: "The admin notice could not be prepared" }, 500);
+      const notice = (notices as Array<{ title: string; message: string; link: string }> | null)?.[0];
+      if (!notice) return respond({ success: true, deliveryState: "not_needed" });
+
+      const result = await sendAdminAlertEmail(supabase, {
+        subject: notice.title,
+        message: notice.message,
+        link: notice.link,
+        baseOrigin: new URL(req.url).origin,
+        eventKey: `document-resubmitted:${renewalId}`,
+      });
+      return respond({ success: result.state === "sent", deliveryState: result.state });
+    }
+
     const documentId = payload.documentId?.trim();
     if (!documentId) return respond({ error: "Document is required" }, 400);
 
