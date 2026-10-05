@@ -1660,6 +1660,26 @@ export default function AdminUsersPage() {
                             <p className="text-xs font-semibold text-muted-foreground">
                               LTO digital-licence QR
                             </p>
+                            {kycOcrReview.qr.officialLink && (
+                              <div className="flex flex-col gap-2 rounded border border-primary/30 bg-primary/5 p-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+                                <p className="leading-snug">
+                                  The LTO page shows "Verified Digital ID" and the licence number. It
+                                  should read{" "}
+                                  <strong>
+                                    {displayPii(selectedUser.driver_license, decryptedPii.driver_license)}
+                                  </strong>
+                                  , the number this user submitted.
+                                </p>
+                                <a
+                                  href={kycOcrReview.qr.officialLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="shrink-0 rounded-md border border-primary/40 px-3 py-1.5 font-semibold text-primary hover:bg-primary/10"
+                                >
+                                  Open LTO verification ↗
+                                </a>
+                              </div>
+                            )}
                             <div className="grid gap-2 sm:grid-cols-2">
                               {kycOcrReview.qr.checks.map((check, index) => (
                                 <div

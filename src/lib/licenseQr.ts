@@ -20,6 +20,13 @@ export type LicenseQrResult = {
   decoded: boolean;
   /** Only surfaced when the QR content is a URL (safe to show); never a raw PII blob. */
   linkHost: string | null;
+  /**
+   * The QR's own link, only when it points at an official LTO domain. The
+   * LTMS digital licence QR opens an LTO page showing "Verified Digital ID"
+   * and the licence number; the reviewer opens it here instead of scanning
+   * the screenshot with a phone. Any other link is never offered as a link.
+   */
+  officialLink: string | null;
   isOfficialLtoHost: boolean;
   checks: LicenseQrCheck[];
 };
@@ -65,6 +72,7 @@ async function imageDataFromUrl(url: string): Promise<ImageData | null> {
 const unreadable = (reason: string): LicenseQrResult => ({
   decoded: false,
   linkHost: null,
+  officialLink: null,
   isOfficialLtoHost: false,
   checks: [{ label: "Digital licence QR", status: "unreadable", summary: reason }],
 });
@@ -162,5 +170,11 @@ export async function decodeLicenseQr(params: {
     );
   }
 
-  return { decoded: true, linkHost, isOfficialLtoHost, checks };
+  return {
+    decoded: true,
+    linkHost,
+    officialLink: isOfficialLtoHost && /^https:\/\//i.test(raw) ? raw : null,
+    isOfficialLtoHost,
+    checks,
+  };
 }
