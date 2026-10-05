@@ -33,6 +33,21 @@ import {
   type EarlyReturnRow,
 } from "@/lib/earlyReturns";
 import { formatTimeLabel } from "@/lib/timeOptions";
+import { buildCsv, csvFileName, downloadCsv } from "@/lib/csvExport";
+import {
+  describeRange,
+  periodRange,
+  PERIOD_LABELS,
+  manilaToday,
+  type EarningsPeriod,
+} from "@/lib/earningsPeriod";
+import {
+  buildListerStatistics,
+  LISTER_STATISTICS_HEADERS,
+  listerStatisticsCsvRows,
+  type StatsCar,
+  type StatsSection,
+} from "@/lib/listerStatistics";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -331,6 +346,13 @@ export default function ListerBookingsPage() {
   const [ratingValue, setRatingValue] = useState<number>(5);
   const [submittingRating, setSubmittingRating] = useState(false);
   const [pageTab, setPageTab] = useState<"overview" | "bookings" | "statistics">("bookings");
+  // One period drives the whole Statistics tab, as on the admin's Earnings page.
+  const [statsPeriod, setStatsPeriod] = useState<EarningsPeriod>("year");
+  const [statsFrom, setStatsFrom] = useState(() => `${manilaToday().slice(0, 4)}-01-01`);
+  const [statsTo, setStatsTo] = useState(() => manilaToday());
+  // Every car the lister has had, deleted ones too, so a past period shows the
+  // cars that were listed then.
+  const [statsCars, setStatsCars] = useState<StatsCar[]>([]);
   const [bookingSection, setBookingSection] = useState<
     "all" | "incoming" | "active" | "completed" | "issues"
   >("all");
@@ -1557,117 +1579,80 @@ export default function ListerBookingsPage() {
     };
   }, [bookings, getApparentStatus]);
 
-  const statistics = useMemo(() => {
-    const statusBuckets = [
-      {
-        label: "Incoming",
-        value: bookings.filter((booking) => getBookingSection(booking) === "incoming").length,
-        color: "#f59e0b",
-      },
-      {
-        label: "Payment",
-        value: bookings.filter((booking) =>
-          ["confirmed", "awaiting_payment", "downpayment_paid"].includes(
-            getApparentStatus(booking),
-          ),
-        ).length,
-        color: "#3b82f6",
-      },
-      {
-        label: "Active",
-        value: bookings.filter((booking) => getBookingSection(booking) === "active").length,
-        color: "#10b981",
-      },
-      {
-        label: "Completed",
-        value: bookings.filter((booking) => getBookingSection(booking) === "completed").length,
-        color: "#22c55e",
-      },
-      {
-        label: "Issues",
-        value: bookings.filter((booking) => getBookingSection(booking) === "issues").length,
-        color: "#ef4444",
-      },
-    ];
-
-    const total = Math.max(1, statusBuckets.reduce((sum, item) => sum + item.value, 0));
-    let cursor = 0;
-    const conicStops = statusBuckets
-      .filter((item) => item.value > 0)
-      .map((item) => {
-        const start = cursor;
-        const end = cursor + (item.value / total) * 100;
-        cursor = end;
-        return `${item.color} ${start}% ${end}%`;
-      })
-      .join(", ");
-
-    const monthBuckets = Array.from({ length: 6 }, (_, index) => {
-      const date = new Date();
-      date.setMonth(date.getMonth() - (5 - index));
-      return {
-        key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
-        label: format(date, "MMM"),
-        bookings: 0,
-        revenue: 0,
-      };
-    });
-
-    const monthMap = new Map(monthBuckets.map((bucket) => [bucket.key, bucket]));
-    bookings.forEach((booking) => {
-      const date = new Date(booking.start_date);
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-      const bucket = monthMap.get(key);
-      if (!bucket) return;
-      bucket.bookings += 1;
-      if (getApparentStatus(booking) === "completed") {
-        bucket.revenue += Number(booking.base_price || 0) - Number(booking.commission || 0);
-      }
-    });
-
-    const vehicleMap = new Map<string, { label: string; count: number; revenue: number }>();
-    bookings.forEach((booking) => {
-      const label = `${booking.cars.car_models.car_brands.name} ${booking.cars.car_models.name}`;
-      const current = vehicleMap.get(booking.car_id) ?? {
-        label,
-        count: 0,
-        revenue: 0,
-      };
-      current.count += 1;
-      if (getApparentStatus(booking) === "completed") {
-        current.revenue += Number(booking.base_price || 0) - Number(booking.commission || 0);
-      }
-      vehicleMap.set(booking.car_id, current);
-    });
-
-    const topVehicles = [...vehicleMap.values()]
-      .sort((left, right) => right.count - left.count || right.revenue - left.revenue)
-      .slice(0, 5);
-
-    const completedCount = statusBuckets.find((item) => item.label === "Completed")?.value ?? 0;
-    const completionRate = bookings.length
-      ? Math.round((completedCount / bookings.length) * 100)
-      : 0;
-    const totalRevenue = bookings
-      .filter((booking) => getApparentStatus(booking) === "completed")
-      .reduce(
-        (sum, booking) => sum + Number(booking.base_price || 0) - Number(booking.commission || 0),
-        0,
-      );
-    const maxMonthlyRevenue = Math.max(1, ...monthBuckets.map((bucket) => bucket.revenue));
-    const maxVehicleCount = Math.max(1, ...topVehicles.map((vehicle) => vehicle.count));
-
-    return {
-      statusBuckets,
-      conicStops,
-      monthBuckets,
-      topVehicles,
-      completionRate,
-      totalRevenue,
-      maxMonthlyRevenue,
-      maxVehicleCount,
+  useEffect(() => {
+    if (pageTab !== "statistics" || !user) return;
+    let cancelled = false;
+    void supabase
+      .from("cars")
+      .select("id, plate_number, created_at, deleted_at, car_models(name, car_brands(name))")
+      .eq("owner_id", user.id)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          toast.error("Vehicles could not be loaded for statistics", { description: error.message });
+          return;
+        }
+        setStatsCars(
+          ((data ?? []) as unknown as Array<{
+            id: string;
+            plate_number: string;
+            created_at: string;
+            deleted_at: string | null;
+            car_models: { name: string; car_brands: { name: string } } | null;
+          }>).map((car) => ({
+            id: car.id,
+            label: car.car_models
+              ? `${car.car_models.car_brands.name} ${car.car_models.name}`
+              : "Vehicle",
+            plate_number: car.plate_number,
+            created_at: car.created_at,
+            deleted_at: car.deleted_at,
+          })),
+        );
+      });
+    return () => {
+      cancelled = true;
     };
-  }, [bookings, getApparentStatus, getBookingSection]);
+  }, [pageTab, user]);
+
+  const statsRange = useMemo(
+    () => periodRange(statsPeriod, { from: statsFrom, to: statsTo }),
+    [statsPeriod, statsFrom, statsTo],
+  );
+
+  const statistics = useMemo(
+    () =>
+      buildListerStatistics({
+        range: statsRange,
+        cars: statsCars,
+        bookings: bookings.map((booking) => {
+          const section = getBookingSection(booking);
+          const status = getApparentStatus(booking);
+          return {
+            id: booking.id,
+            car_id: booking.car_id,
+            start_date: booking.start_date,
+            base_price: booking.base_price,
+            commission: booking.commission,
+            section: (section === "all" ? "other" : section) as StatsSection,
+            awaitingPayment: ["confirmed", "awaiting_payment", "downpayment_paid"].includes(status),
+            completed: status === "completed",
+          };
+        }),
+      }),
+    [bookings, statsCars, statsRange, getApparentStatus, getBookingSection],
+  );
+
+  const exportStatistics = () => {
+    if (statsRange.from > statsRange.to) {
+      toast.error("The start date is after the end date.");
+      return;
+    }
+    downloadCsv(
+      csvFileName("lister-statistics", statsRange.from, statsRange.to),
+      buildCsv(LISTER_STATISTICS_HEADERS, listerStatisticsCsvRows(statistics.vehicles)),
+    );
+  };
 
   const sectionCounts = useMemo(
     () => ({
@@ -2487,15 +2472,64 @@ export default function ListerBookingsPage() {
 
       {pageTab === "statistics" && (
         <div className="space-y-4">
+          <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="flex flex-wrap items-center gap-2">
+              {(["month", "year", "all", "custom"] as EarningsPeriod[]).map((option) => (
+                <Button
+                  key={option}
+                  type="button"
+                  size="sm"
+                  variant={statsPeriod === option ? "default" : "outline"}
+                  onClick={() => setStatsPeriod(option)}
+                >
+                  {PERIOD_LABELS[option]}
+                </Button>
+              ))}
+            </div>
+            {statsPeriod === "custom" && (
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="space-y-1 text-sm">
+                  <span className="block text-muted-foreground">From</span>
+                  <Input
+                    type="date"
+                    value={statsFrom}
+                    max={statsTo || undefined}
+                    onChange={(event) => setStatsFrom(event.target.value)}
+                    className="w-full sm:w-44"
+                  />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="block text-muted-foreground">To</span>
+                  <Input
+                    type="date"
+                    value={statsTo}
+                    min={statsFrom || undefined}
+                    onChange={(event) => setStatsTo(event.target.value)}
+                    className="w-full sm:w-44"
+                  />
+                </label>
+              </div>
+            )}
+            <Button type="button" variant="outline" className="gap-2" onClick={exportStatistics}>
+              <Download className="h-4 w-4" />
+              Export CSV
+            </Button>
+            <p className="text-xs text-muted-foreground sm:basis-full">
+              Showing <strong className="text-foreground">{describeRange(statsPeriod, statsRange)}</strong>.
+              A booking counts in the month its pickup falls in; a vehicle shows for any period it was
+              listed in.
+            </p>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-3">
             <Card>
               <CardContent className="p-5">
                 <p className="text-sm text-muted-foreground">Completed payout value</p>
                 <p className="mt-2 text-2xl font-bold">
-                  PHP {statistics.totalRevenue.toLocaleString()}
+                  PHP {statistics.totalPayout.toLocaleString()}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Net lister payout from completed rentals.
+                  Net lister payout from rentals completed in this period.
                 </p>
               </CardContent>
             </Card>
@@ -2504,7 +2538,8 @@ export default function ListerBookingsPage() {
                 <p className="text-sm text-muted-foreground">Completion rate</p>
                 <p className="mt-2 text-2xl font-bold">{statistics.completionRate}%</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Completed rentals compared with all booking records.
+                  Completed rentals out of the {statistics.bookingCount} booking
+                  {statistics.bookingCount === 1 ? "" : "s"} in this period.
                 </p>
               </CardContent>
             </Card>
@@ -2512,12 +2547,12 @@ export default function ListerBookingsPage() {
               <CardContent className="p-5">
                 <p className="text-sm text-muted-foreground">Most booked vehicle</p>
                 <p className="mt-2 text-xl font-bold">
-                  {statistics.topVehicles[0]?.label ?? "No bookings yet"}
+                  {statistics.vehicles[0]?.bookings ? statistics.vehicles[0].label : "No bookings in this period"}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {statistics.topVehicles[0]
-                    ? `${statistics.topVehicles[0].count} booking${statistics.topVehicles[0].count === 1 ? "" : "s"} recorded`
-                    : "Vehicle stats will appear after bookings are created."}
+                  {statistics.vehicles[0]?.bookings
+                    ? `${statistics.vehicles[0].bookings} booking${statistics.vehicles[0].bookings === 1 ? "" : "s"} in this period`
+                    : "Try a longer period."}
                 </p>
               </CardContent>
             </Card>
@@ -2526,15 +2561,10 @@ export default function ListerBookingsPage() {
           <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
             <Card>
               <CardContent className="p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold">Booking Mix</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Current spread of incoming, active, completed, and issue bookings.
-                    </p>
-                  </div>
-                </div>
-
+                <h2 className="text-base font-semibold">Booking Mix</h2>
+                <p className="text-sm text-muted-foreground">
+                  Incoming, payment, active, completed and issue bookings in this period.
+                </p>
                 <div className="mt-5 flex items-center justify-center">
                   <div
                     className="relative grid h-44 w-44 place-items-center rounded-full"
@@ -2546,21 +2576,17 @@ export default function ListerBookingsPage() {
                   >
                     <div className="grid h-28 w-28 place-items-center rounded-full bg-card text-center">
                       <div>
-                        <p className="text-2xl font-bold">{bookings.length}</p>
+                        <p className="text-2xl font-bold">{statistics.bookingCount}</p>
                         <p className="text-xs text-muted-foreground">bookings</p>
                       </div>
                     </div>
                   </div>
                 </div>
-
                 <div className="mt-5 space-y-2">
                   {statistics.statusBuckets.map((bucket) => (
                     <div key={bucket.label} className="flex items-center justify-between gap-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span
-                          className="h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: bucket.color }}
-                        />
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: bucket.color }} />
                         <span className="text-muted-foreground">{bucket.label}</span>
                       </div>
                       <span className="font-medium">{bucket.value}</span>
@@ -2572,39 +2598,36 @@ export default function ListerBookingsPage() {
 
             <Card>
               <CardContent className="p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold">Six-Month Rental Performance</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Completed payout value by pickup month.
-                    </p>
+                <h2 className="text-base font-semibold">Rental Performance</h2>
+                <p className="text-sm text-muted-foreground">
+                  Completed payout value by pickup month, for every month in this period.
+                </p>
+                <div className="mt-6 overflow-x-auto">
+                  <div className="flex h-64 min-w-full items-end gap-3 border-b border-border/60 pb-3">
+                    {statistics.months.map((bucket) => {
+                      const height = Math.max(
+                        bucket.payout > 0 ? 18 : 6,
+                        Math.round((bucket.payout / statistics.maxMonthlyPayout) * 190),
+                      );
+                      return (
+                        <div key={bucket.key} className="flex min-w-12 flex-1 flex-col items-center gap-2">
+                          <div className="flex h-52 w-full items-end justify-center">
+                            <div
+                              className="w-full max-w-14 rounded-t-md bg-primary/80 transition-all"
+                              style={{ height }}
+                              title={`${bucket.label}: PHP ${bucket.payout.toLocaleString()} from ${bucket.bookings} booking(s)`}
+                            />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-xs font-medium">{bucket.label}</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              PHP {bucket.payout.toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                </div>
-
-                <div className="mt-6 flex h-64 items-end gap-3 border-b border-border/60 pb-3">
-                  {statistics.monthBuckets.map((bucket) => {
-                    const height = Math.max(
-                      bucket.revenue > 0 ? 18 : 6,
-                      Math.round((bucket.revenue / statistics.maxMonthlyRevenue) * 190),
-                    );
-                    return (
-                      <div key={bucket.key} className="flex min-w-0 flex-1 flex-col items-center gap-2">
-                        <div className="flex h-52 w-full items-end justify-center">
-                          <div
-                            className="w-full max-w-14 rounded-t-md bg-primary/80 transition-all"
-                            style={{ height }}
-                            title={`${bucket.label}: PHP ${bucket.revenue.toLocaleString()}`}
-                          />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-xs font-medium">{bucket.label}</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            PHP {bucket.revenue.toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
               </CardContent>
             </Card>
@@ -2612,42 +2635,47 @@ export default function ListerBookingsPage() {
 
           <Card>
             <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-semibold">Top Vehicles by Bookings</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Which listings are getting the most rental activity.
-                  </p>
-                </div>
-              </div>
-
-              {statistics.topVehicles.length === 0 ? (
-                <p className="mt-4 text-sm text-muted-foreground">
-                  No booking statistics yet.
-                </p>
+              <h2 className="text-base font-semibold">Your vehicles in this period</h2>
+              <p className="text-sm text-muted-foreground">
+                Every vehicle you had listed during the period, booked or not. A vehicle you deleted
+                shows for the periods it was listed in.
+              </p>
+              {statistics.vehicles.length === 0 ? (
+                <p className="mt-4 text-sm text-muted-foreground">No vehicles were listed in this period.</p>
               ) : (
-                <div className="mt-5 space-y-4">
-                  {statistics.topVehicles.map((vehicle) => (
-                    <div key={vehicle.label} className="space-y-2">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-medium">{vehicle.label}</span>
-                        <span className="text-muted-foreground">
-                          {vehicle.count} booking{vehicle.count === 1 ? "" : "s"} | PHP {vehicle.revenue.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="h-2 rounded-full bg-muted">
-                        <div
-                          className="h-2 rounded-full bg-green-500"
-                          style={{
-                            width: `${Math.max(
-                              8,
-                              Math.round((vehicle.count / statistics.maxVehicleCount) * 100),
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-xs text-muted-foreground">
+                        <th className="py-2 pr-3 font-medium">Vehicle</th>
+                        <th className="py-2 pr-3 text-right font-medium">Bookings</th>
+                        <th className="py-2 pr-3 text-right font-medium">Completed</th>
+                        <th className="py-2 pr-3 text-right font-medium">Issues</th>
+                        <th className="py-2 text-right font-medium">Payout</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statistics.vehicles.map((vehicle) => (
+                        <tr key={vehicle.id} className="border-b border-border/50 last:border-0">
+                          <td className="py-2 pr-3">
+                            <span className="font-medium">{vehicle.label}</span>
+                            {vehicle.plate && (
+                              <span className="ml-2 text-xs text-muted-foreground">{vehicle.plate}</span>
+                            )}
+                            {vehicle.deletedOn && (
+                              <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                                Deleted {format(new Date(`${vehicle.deletedOn}T00:00:00`), "MMM d, yyyy")}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-3 text-right">{vehicle.bookings}</td>
+                          <td className="py-2 pr-3 text-right">{vehicle.completed}</td>
+                          <td className="py-2 pr-3 text-right">{vehicle.issues}</td>
+                          <td className="py-2 text-right">PHP {vehicle.payout.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </CardContent>
