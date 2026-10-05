@@ -7,7 +7,6 @@ export type ListerRating = RatingSummary & { tripCount: number };
 export type PublicCarReview = {
   id: string;
   rating: number;
-  feedback: string | null;
   created_at: string;
   reviewer_name: string;
   reviewer_avatar: string | null;
@@ -27,7 +26,7 @@ export type RenterReputation = {
   average: number | null;
   reviewCount: number;
   tripCount: number;
-  recent: Array<{ rating: number; feedback: string | null; created_at: string }>;
+  recent: Array<{ rating: number; created_at: string }>;
 };
 
 /** "4.8" with one decimal, or null when there is nothing to show. */

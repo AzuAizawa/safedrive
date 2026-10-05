@@ -329,7 +329,6 @@ export default function ListerBookingsPage() {
   const [incidentLoading, setIncidentLoading] = useState<string | null>(null);
   const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [ratingValue, setRatingValue] = useState<number>(5);
-  const [ratingFeedback, setRatingFeedback] = useState("");
   const [submittingRating, setSubmittingRating] = useState(false);
   const [pageTab, setPageTab] = useState<"overview" | "bookings" | "statistics">("bookings");
   const [bookingSection, setBookingSection] = useState<
@@ -1103,7 +1102,6 @@ export default function ListerBookingsPage() {
   const openRateRenterModal = (booking: ListerBooking) => {
     setRatingBooking(booking);
     setRatingValue(5);
-    setRatingFeedback("");
   };
 
   const handleReportBooking = (booking: ListerBooking) => {
@@ -1195,7 +1193,6 @@ export default function ListerBookingsPage() {
       reviewee_id: ratingBooking.renter_id,
       reviewer_role: "owner",
       rating: ratingValue,
-      feedback: ratingFeedback.trim(),
     });
 
     if (error) {
@@ -1213,7 +1210,6 @@ export default function ListerBookingsPage() {
     } else {
       toast.success("Thanks for your rating.");
       setRatingBooking(null);
-      setRatingFeedback("");
       fetchBookings();
     }
     setSubmittingRating(false);
@@ -4049,40 +4045,6 @@ export default function ListerBookingsPage() {
                 </div>
               </div>
 
-              {(() => {
-                const rep = renterReputations[selectedRenter.renter_id];
-                if (!rep || rep.recent.length === 0) return null;
-                return (
-                  <div>
-                    <h4 className="font-semibold text-sm mb-2">
-                      Recent feedback from other listers
-                    </h4>
-                    <div className="space-y-2">
-                      {rep.recent.map((item, i) => (
-                        <div
-                          key={i}
-                          className="rounded-lg border border-border/50 bg-muted/20 p-3 text-sm"
-                        >
-                          <div className="flex items-center gap-0.5 text-amber-500">
-                            {Array.from({ length: 5 }).map((_, s) => (
-                              <Star
-                                key={s}
-                                className={`h-3 w-3 ${s < item.rating ? "fill-current" : ""}`}
-                              />
-                            ))}
-                          </div>
-                          {item.feedback?.trim() && (
-                            <p className="mt-1 text-muted-foreground">
-                              {item.feedback.trim()}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-
               <div className="grid grid-cols-2 gap-4 text-sm bg-muted/30 p-4 rounded-xl border border-border/50">
                 <div>
                   <span className="text-muted-foreground block text-xs uppercase tracking-wider mb-1">Phone</span>
@@ -4204,22 +4166,6 @@ export default function ListerBookingsPage() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-sm font-medium mb-2 block">
-                    Optional feedback
-                  </label>
-                  <textarea
-                    value={ratingFeedback}
-                    onChange={(e) => setRatingFeedback(e.target.value)}
-                    rows={4}
-                    maxLength={500}
-                    placeholder="Tell us about communication, punctuality, and how the handoff went."
-                    className="flex min-h-[110px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-                  />
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {ratingFeedback.length}/500 characters
-                  </p>
-                </div>
               </div>
 
               <div className="p-5 border-t border-border flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">

@@ -67,8 +67,8 @@ export default async function handler(req: Request) {
         .select("plate_number, status, price_per_day, location, created_at, deleted_at, car_models(name, car_brands(name))")
         .eq("owner_id", me)
         .order("created_at", { ascending: false }),
-      supabase.from("booking_reviews").select("booking_id, reviewer_role, rating, feedback, created_at").eq("reviewer_id", me),
-      supabase.from("booking_reviews").select("booking_id, reviewer_role, rating, feedback, created_at").eq("reviewee_id", me),
+      supabase.from("booking_reviews").select("booking_id, reviewer_role, rating, created_at").eq("reviewer_id", me),
+      supabase.from("booking_reviews").select("booking_id, reviewer_role, rating, created_at").eq("reviewee_id", me),
       supabase
         .from("support_tickets")
         .select("id, subject, tag, status, booking_id, created_at, ticket_messages(sender_id, message, attachment_name, created_at)")

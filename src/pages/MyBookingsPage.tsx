@@ -285,7 +285,6 @@ export default function MyBookingsPage() {
   const [selectedOwner, setSelectedOwner] = useState<BookingRow | null>(null);
   const [ratingBooking, setRatingBooking] = useState<BookingRow | null>(null);
   const [ratingValue, setRatingValue] = useState<number>(5);
-  const [ratingFeedback, setRatingFeedback] = useState("");
   const [submittingRating, setSubmittingRating] = useState(false);
   const [pageTab, setPageTab] = useState<"overview" | "bookings" | "payments">("bookings");
   const [bookingView, setBookingView] = useState<"active" | "history">("active");
@@ -1113,7 +1112,6 @@ export default function MyBookingsPage() {
   const openRateBookingModal = (booking: BookingRow) => {
     setRatingBooking(booking);
     setRatingValue(5);
-    setRatingFeedback("");
   };
 
   const handleRateBooking = async () => {
@@ -1155,7 +1153,6 @@ export default function MyBookingsPage() {
       reviewee_id: ratingBooking.owner_id,
       reviewer_role: "renter",
       rating: ratingValue,
-      feedback: ratingFeedback.trim(),
     });
 
     if (error) {
@@ -1173,7 +1170,6 @@ export default function MyBookingsPage() {
     } else {
       toast.success("Thanks for your rating.");
       setRatingBooking(null);
-      setRatingFeedback("");
       fetchBookings();
     }
     setSubmittingRating(false);
@@ -2962,8 +2958,8 @@ export default function MyBookingsPage() {
                         !reviewedByRenter && (
                           <div className="mt-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-left">
                             <p className="text-xs text-muted-foreground">
-                              The lister cancelled this booking. You can leave
-                              feedback about the experience.
+                              The lister cancelled this booking. You can rate
+                              the experience.
                             </p>
                             <Button
                               size="sm"
@@ -3683,22 +3679,6 @@ export default function MyBookingsPage() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-sm font-medium mb-2 block">
-                    Optional feedback
-                  </label>
-                  <textarea
-                    value={ratingFeedback}
-                    onChange={(e) => setRatingFeedback(e.target.value)}
-                    rows={4}
-                    maxLength={500}
-                    placeholder="Tell us about the car condition, pickup, and overall experience."
-                    className="flex min-h-[110px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-                  />
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {ratingFeedback.length}/500 characters
-                  </p>
-                </div>
               </div>
 
               <div className="p-5 border-t border-border flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">

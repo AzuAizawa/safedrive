@@ -19826,4 +19826,42 @@ commit;
 --        '3';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 124 - A review is a star rating, with no comment
+-- ============================================================================
+-- A renter rated a trip from one to five stars and could add a comment, shown
+-- on the car's public page under their name; a lister rated a renter the same
+-- way, and the comment was shown to other listers. Nobody could take a comment
+-- down - not the lister it was about, not an admin - so one abusive line after
+-- a trip that went fine stayed on the car for good. Moderating comments would
+-- be a feature of its own; the stars already say how a trip went.
+--
+-- Reviews are now stars only, both ways. The comments already written are
+-- erased and the column refuses any new one. The functions that return reviews
+-- are unchanged: their feedback field is simply empty.
+--
+-- Apply this chapter only. Every stored review comment is erased; ratings are
+-- untouched.
+-- ============================================================================
+begin;
+
+update public.booking_reviews set feedback = null where feedback is not null;
+
+alter table public.booking_reviews
+  drop constraint if exists booking_reviews_no_feedback;
+alter table public.booking_reviews
+  add constraint booking_reviews_no_feedback check (feedback is null);
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'comments left' as check_name,
+--        (select count(*)::text from public.booking_reviews where feedback is not null) as result,
+--        '0' as expected
+-- union all
+-- select 'comments refused',
+--        (select count(*)::text from pg_constraint where conname = 'booking_reviews_no_feedback'),
+--        '1';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

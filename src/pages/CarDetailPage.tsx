@@ -992,7 +992,7 @@ export default function CarDetailPage() {
           <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
             <h3 className="font-semibold">Reviews from renters</h3>
             <p className="text-xs text-muted-foreground">
-              Feedback from completed SafeDrive bookings for this vehicle.
+              Star ratings from completed SafeDrive bookings for this vehicle.
             </p>
 
             {reviewCount === 0 ? (
@@ -1082,11 +1082,6 @@ export default function CarDetailPage() {
                       {review.is_cancellation_review && (
                         <p className="mt-1.5 inline-flex rounded-md bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500">
                           The lister cancelled this booking
-                        </p>
-                      )}
-                      {review.feedback?.trim() && (
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          {review.feedback.trim()}
                         </p>
                       )}
                     </div>
