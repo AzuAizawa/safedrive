@@ -19649,4 +19649,181 @@ commit;
 --        'yes';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 123 - Identity numbers are locked with a key kept in the Vault
+-- ============================================================================
+-- Driver's licence and national ID numbers are stored encrypted
+-- (handle_pii_encryption -> encrypt_pii). Checked on the live project:
+--   * app.settings.encryption_key was never set, so every number was
+--     encrypted with the fallback key written in this file - anyone with the
+--     source could read them;
+--   * admins could not read them: the admin screens showed "Encrypted value
+--     unavailable", and the KYC check said "No submitted license number is
+--     available". encrypt_pii and decrypt_pii had no search_path of their own
+--     while pgcrypto lives in the extensions schema, so whether
+--     pgp_sym_decrypt was found depended on who called; decrypt_pii swallowed
+--     the error and returned NULL.
+--
+-- Now:
+--   * a random key is created inside Supabase Vault (vault.create_secret) and
+--     read only through pii_encryption_key(), which no client role may call.
+--     The key appears nowhere in the code or in this file;
+--   * encrypt_pii and decrypt_pii use that key, set their own search_path and
+--     call extensions.pgp_sym_* by name. decrypt_pii still answers admins only;
+--   * every number already stored is decrypted with the old fallback key and
+--     encrypted again with the Vault key. A number already on the Vault key is
+--     left as it is, so running this again changes nothing.
+--
+-- Prerequisite: Supabase Vault (Database -> Extensions -> supabase_vault). If
+-- it is missing this chapter stops before changing anything.
+--
+-- Apply this chapter only. One function is added, two are replaced, and the
+-- stored identity numbers are re-encrypted. No value is lost or changed.
+-- ============================================================================
+begin;
+
+do $vault_check$
+begin
+  if to_regclass('vault.decrypted_secrets') is null then
+    raise exception 'Supabase Vault is not enabled. Turn on supabase_vault under Database > Extensions, then run this chapter again.';
+  end if;
+  if not exists (select 1 from vault.decrypted_secrets where name = 'pii_encryption_key') then
+    perform vault.create_secret(
+      encode(extensions.gen_random_bytes(32), 'base64'),
+      'pii_encryption_key',
+      'SafeDrive: encrypts driver licence and national ID numbers (CHAPTER 123)'
+    );
+  end if;
+end;
+$vault_check$;
+
+create or replace function public.pii_encryption_key()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $pii_key$
+  select decrypted_secret from vault.decrypted_secrets where name = 'pii_encryption_key' limit 1;
+$pii_key$;
+revoke all on function public.pii_encryption_key() from public, anon, authenticated, service_role;
+
+create or replace function public.encrypt_pii(content text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $encrypt_pii$
+declare
+  k text;
+begin
+  if content is null then
+    return null;
+  end if;
+  if content like 'pgp:%' then
+    return content;
+  end if;
+  k := public.pii_encryption_key();
+  if k is null then
+    raise exception 'The identity-number key is missing from the Vault; refusing to store it unencrypted';
+  end if;
+  return 'pgp:' || encode(extensions.pgp_sym_encrypt(content, k), 'base64');
+end;
+$encrypt_pii$;
+
+create or replace function public.decrypt_pii(encrypted_content text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $decrypt_pii$
+declare
+  k text;
+begin
+  if encrypted_content is null then
+    return null;
+  end if;
+  if encrypted_content not like 'pgp:%' then
+    return encrypted_content;
+  end if;
+  if not public.is_admin() then
+    return null;
+  end if;
+  k := public.pii_encryption_key();
+  if k is null then
+    return null;
+  end if;
+  return extensions.pgp_sym_decrypt(decode(substring(encrypted_content from 5), 'base64'), k);
+exception when others then
+  return null;
+end;
+$decrypt_pii$;
+
+revoke execute on function public.encrypt_pii(text) from public, anon, authenticated;
+revoke execute on function public.decrypt_pii(text) from public, anon;
+grant execute on function public.decrypt_pii(text) to authenticated;
+
+-- Move every stored number from the fallback key to the Vault key.
+do $reencrypt$
+declare
+  legacy constant text := 'safedrive-dev-secret-key-fallback';
+  k text := public.pii_encryption_key();
+  r record;
+  v_license text;
+  v_national text;
+  plain text;
+begin
+  for r in
+    select id, driver_license, national_id from public.profiles
+     where driver_license like 'pgp:%' or national_id like 'pgp:%'
+     for update
+  loop
+    v_license := r.driver_license;
+    v_national := r.national_id;
+
+    -- Already on the Vault key: leave it. Otherwise open it with the old key
+    -- and lock it with the new one. A value neither key opens stops the whole
+    -- chapter, so nothing is half-moved.
+
+    if r.driver_license like 'pgp:%' then
+      begin
+        perform extensions.pgp_sym_decrypt(decode(substring(r.driver_license from 5), 'base64'), k);
+      exception when others then
+        plain := extensions.pgp_sym_decrypt(decode(substring(r.driver_license from 5), 'base64'), legacy);
+        v_license := 'pgp:' || encode(extensions.pgp_sym_encrypt(plain, k), 'base64');
+      end;
+    end if;
+
+    if r.national_id like 'pgp:%' then
+      begin
+        perform extensions.pgp_sym_decrypt(decode(substring(r.national_id from 5), 'base64'), k);
+      exception when others then
+        plain := extensions.pgp_sym_decrypt(decode(substring(r.national_id from 5), 'base64'), legacy);
+        v_national := 'pgp:' || encode(extensions.pgp_sym_encrypt(plain, k), 'base64');
+      end;
+    end if;
+
+    if v_license is distinct from r.driver_license or v_national is distinct from r.national_id then
+      update public.profiles set driver_license = v_license, national_id = v_national where id = r.id;
+    end if;
+  end loop;
+end;
+$reencrypt$;
+
+commit;
+
+-- Read-only verification after applying this chapter (an error here means a
+-- number did not move to the Vault key):
+-- select 'identity numbers on the Vault key' as check_name,
+--        (select count(*) filter (where extensions.pgp_sym_decrypt(
+--            decode(substring(driver_license from 5), 'base64'), public.pii_encryption_key()) is not null)::text
+--           from public.profiles where driver_license like 'pgp:%') as result,
+--        (select count(*)::text from public.profiles where driver_license like 'pgp:%') as expected
+-- union all
+-- select 'functions pinned to a search_path',
+--        (select count(*)::text from pg_proc
+--          where proname in ('encrypt_pii', 'decrypt_pii', 'pii_encryption_key') and proconfig is not null),
+--        '3';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.
