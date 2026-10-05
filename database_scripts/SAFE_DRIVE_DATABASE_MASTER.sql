@@ -19864,4 +19864,75 @@ commit;
 --        '1';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 125 - The Terms say SafeDrive does not track or recover vehicles
+-- ============================================================================
+-- The Terms of Service said nothing about where a rented car is during a trip,
+-- or about one that goes missing. The Platform Agreement covers a car that is
+-- not returned (Section 6) but not who tracks it or who deals with the police.
+-- A listing's "GPS option" is the lister's own device, not a SafeDrive service.
+--
+-- Section 7 of the Terms gains two clauses after 7.3:
+--   7.4 Vehicle Monitoring - SafeDrive offers no GPS tracking or live location;
+--       the Lister watches over the car, with any device at their own expense.
+--   7.5 Lost, Missing, or Stolen Vehicles - SafeDrive does not recover or
+--       investigate; the Lister and Renter report to the PNP or other
+--       authorities, and SafeDrive answers official requests with its records
+--       under the Data Privacy Act.
+-- Republished as a new version as CHAPTER 94 did; running this again changes
+-- nothing.
+--
+-- Apply this chapter only. The Terms of Service get a new version.
+-- ============================================================================
+begin;
+
+do $chapter125_terms$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key = 'terms_of_service'
+      and position('7.4 Vehicle Monitoring' in content_html) = 0
+  loop
+    next_html := replace(doc.content_html,
+      $anchor$<h2>8. User Conduct</h2>$anchor$,
+      $clauses$<p><strong>7.4 Vehicle Monitoring:</strong> SafeDrive does not provide GPS tracking or real-time vehicle location monitoring services. Car owners (Listers) are solely responsible for monitoring the location and condition of their vehicle during the rental period, including the installation of any personal GPS or telematics device, at their own discretion and expense. A listing's GPS option describes the Lister's own device, not a SafeDrive service.</p>
+<p><strong>7.5 Lost, Missing, or Stolen Vehicles:</strong> SafeDrive is a third-party intermediary platform only and does not conduct vehicle recovery, investigations, or law enforcement activities. In the event a vehicle is reported lost, missing, stolen, or carnapped, the Lister and Renter shall be solely responsible for resolving the matter directly, including filing reports with and coordinating directly with the Philippine National Police or other appropriate government authorities. SafeDrive will cooperate with official law enforcement requests by providing relevant transaction and identity verification records when necessary, in accordance with the Data Privacy Act of 2012 (Republic Act No. 10173), but assumes no liability for vehicle recovery or resulting losses, to the extent Philippine law permits (Section 7.3).</p>
+
+<h2>8. User Conduct</h2>$clauses$);
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 125'));
+    end if;
+  end loop;
+end;
+$chapter125_terms$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'terms carry 7.4 and 7.5' as check_name,
+--        (select case when position('7.4 Vehicle Monitoring' in content_html) > 0
+--                      and position('7.5 Lost, Missing, or Stolen Vehicles' in content_html) > 0
+--                 then 'yes' else 'no' end
+--           from public.legal_document_versions
+--          where document_key = 'terms_of_service' and status = 'published') as result,
+--        'yes' as expected;
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.
