@@ -849,11 +849,15 @@ export default async function handler(req: Request) {
     for (const unattended of (unattendedPickups ?? []) as unknown as Array<
       RefundableBooking & { car_id: string; pickup_no_show_notified_at: string | null }
     >) {
-      const times = getMutualNoShowTimes(unattended, pickupGraceMinutes, mutualNoShowCloseHours);
+      const noticeSentAtMs = unattended.pickup_no_show_notified_at
+        ? Date.parse(unattended.pickup_no_show_notified_at)
+        : null;
+      const times = getMutualNoShowTimes(unattended, pickupGraceMinutes, mutualNoShowCloseHours, noticeSentAtMs);
       if (!times || Date.now() < times.noticeAtMs) continue;
       const vehicleLabel = getVehicleLabel(unattended);
 
-      if (Date.now() >= times.closeAtMs) {
+      // Never cancelled before both sides were warned, and an hour after that.
+      if (noticeSentAtMs !== null && Date.now() >= times.closeAtMs) {
         // Only a booking still untouched is closed: a check-in a moment ago wins.
         const { data: closed, error: closeError } = await supabase
           .from("bookings")
@@ -946,7 +950,7 @@ export default async function handler(req: Request) {
           console.error("Unattended-pickup cancellation follow-up failed", unattended.id, error);
         }
         mutualNoShowClosed += 1;
-      } else if (!unattended.pickup_no_show_notified_at) {
+      } else if (noticeSentAtMs === null) {
         const { data: claimedNotice, error: claimNoticeError } = await supabase
           .from("bookings")
           .update({ pickup_no_show_notified_at: new Date().toISOString() })
@@ -958,7 +962,9 @@ export default async function handler(req: Request) {
         if (claimNoticeError) throw claimNoticeError;
         if (!claimedNotice) continue;
 
-        const closesAt = formatManilaTime(times.closeAtMs);
+        // The close time as it stands once this warning is on record.
+        const closesAtMs = Math.max(times.closeAtMs, Date.now() + 3_600_000);
+        const closesAt = formatManilaTime(closesAtMs);
         const noticeRenterTitle = "Nobody has checked in yet";
         const noticeRenterMessage = `The pickup time for ${vehicleLabel} has passed and neither you nor the lister has checked in. Tap "I Have Arrived" when you are there. If nobody checks in by ${closesAt}, SafeDrive cancels the booking and refunds you in full; a missed pickup is recorded on both accounts.`;
         const noticeOwnerTitle = "Nobody has checked in yet";
@@ -988,7 +994,7 @@ export default async function handler(req: Request) {
           action: "mutual_no_show_notified",
           entity_type: "booking",
           entity_id: unattended.id,
-          details: { automated: true, closes_at: new Date(times.closeAtMs).toISOString() },
+          details: { automated: true, closes_at: new Date(closesAtMs).toISOString() },
         });
         mutualNoShowNotified += 1;
       }

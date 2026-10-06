@@ -431,7 +431,9 @@ test("a pickup nobody checks in for is warned after the grace window and closed 
     assert.equal(times.noticeAtMs, PICKUP + 30 * 60_000);
     assert.equal(times.closeAtMs, PICKUP + 6 * HOUR);
     const tight = policy.getMutualNoShowTimes(booking, 180, 1);
-    assert.equal(tight.closeAtMs, tight.noticeAtMs, "never closed before the warning is due");
+    assert.equal(tight.closeAtMs, tight.noticeAtMs + HOUR, "never closed within an hour of the warning");
+    const warnedLate = policy.getMutualNoShowTimes(booking, 30, 6, PICKUP + 5.5 * HOUR);
+    assert.equal(warnedLate.closeAtMs, PICKUP + 6.5 * HOUR, "the hour counts from when the warning went out");
     assert.equal(policy.getMutualNoShowTimes({ start_date: "", pickup_time: null }, 30, 6), null);
   }
 });

@@ -152,6 +152,7 @@ interface ListerBooking {
   downpayment_amount: number;
   balance_amount: number;
   status: string;
+  pickup_no_show_notified_at?: string | null;
   dispute_status?: string | null;
   owner_completed: boolean;
   renter_completed: boolean;
@@ -2846,7 +2847,12 @@ export default function ListerBookingsPage() {
             // SafeDrive closes the booking, the same time the server uses.
             const unattendedPickup =
               b.status === "fully_paid" && !b.renter_arrived_at && !b.lister_arrived_at
-                ? getMutualNoShowTimes(b, graceMinutes, mutualNoShowCloseHours)
+                ? getMutualNoShowTimes(
+                    b,
+                    graceMinutes,
+                    mutualNoShowCloseHours,
+                    b.pickup_no_show_notified_at ? Date.parse(b.pickup_no_show_notified_at) : null,
+                  )
                 : null;
             const showUnattendedNotice =
               unattendedPickup !== null && clockNow >= unattendedPickup.noticeAtMs;

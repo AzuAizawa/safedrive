@@ -236,8 +236,8 @@ const FIELDS: Record<
     formatStored: (s) => `${Math.round(s)} min`,
   },
   mutual_no_show_close_hours: {
-    label: "Close a pickup nobody checked in for",
-    hint: "Hours after the pickup time before a paid booking that neither side checked in for is cancelled automatically - the renter is refunded in full after support review and the missed pickup counts on both accounts (1-72). Both sides are warned first. Applies live.",
+    label: "Close a pickup that never became a trip",
+    hint: "Hours after the pickup time before SafeDrive settles a paid pickup nobody reported (1-72). It covers all three cases: neither side checked in (cancelled, renter refunded in full, missed pickup on both accounts); only one side checked in (settled as a no-show by the side that did not come); or both checked in but the car was never handed over. Whoever checked in can report a no-show as soon as the no-show wait time passes, so this is only the safety net. Both sides are warned first, and nothing closes within an hour of that warning. Applies live.",
     unit: "hours",
     toDisplay: (s) => String(Math.round(s)),
     fromDisplay: (i) => {

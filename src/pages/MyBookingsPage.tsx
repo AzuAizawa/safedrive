@@ -102,6 +102,7 @@ interface BookingRow {
   paymongo_balance_checkout_id?: string | null;
   pickup_time: string | null;
   dropoff_time: string | null;
+  pickup_no_show_notified_at?: string | null;
   created_at: string;
   agreement_storage_path_snapshot: string | null;
   // The pickup point as it stood when this booking was made. cars.location is
@@ -2083,7 +2084,14 @@ export default function MyBookingsPage() {
               booking.status === "fully_paid" &&
               !booking.renter_arrived_at &&
               !booking.lister_arrived_at
-                ? getMutualNoShowTimes(booking, graceMinutes, mutualNoShowCloseHours)
+                ? getMutualNoShowTimes(
+                    booking,
+                    graceMinutes,
+                    mutualNoShowCloseHours,
+                    booking.pickup_no_show_notified_at
+                      ? Date.parse(booking.pickup_no_show_notified_at)
+                      : null,
+                  )
                 : null;
             const showUnattendedNotice =
               unattendedPickup !== null && clockNow >= unattendedPickup.noticeAtMs;

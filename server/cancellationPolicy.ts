@@ -326,22 +326,28 @@ export const pickupBlocksCancellation = (
 };
 
 // A paid pickup nobody checks in for (CHAPTER 92). Both sides are told once
-// the no-show grace window has passed; closeHours after the pickup time -
-// never before that notice - the booking is cancelled and the renter refunded
-// in full. api/expire-booking-deadlines.ts acts on these times and both
-// booking pages show them.
+// the no-show grace window has passed; closeHours after the pickup time the
+// booking is cancelled and the renter refunded in full - but never within an
+// hour of that notice, so a short close time under a long grace window cannot
+// warn and cancel at once. noticeSentAtMs is when the notice actually went out
+// (pickup_no_show_notified_at); before then the hour counts from when it is
+// due. api/expire-booking-deadlines.ts acts on these times and both booking
+// pages show them.
 export const getMutualNoShowTimes = (
   booking: Pick<CancellationPolicyBooking, "start_date" | "pickup_time">,
   graceMinutes: number,
   closeHours: number,
+  noticeSentAtMs: number | null = null,
 ) => {
   const pickupMs = getPickupMs(booking);
   if (pickupMs === null) return null;
   const noticeAtMs = pickupMs + graceMinutes * 60_000;
+  const warnedAtMs =
+    noticeSentAtMs !== null && Number.isFinite(noticeSentAtMs) ? noticeSentAtMs : noticeAtMs;
   return {
     pickupMs,
     noticeAtMs,
-    closeAtMs: Math.max(pickupMs + closeHours * HOUR_MS, noticeAtMs),
+    closeAtMs: Math.max(pickupMs + closeHours * HOUR_MS, warnedAtMs + HOUR_MS),
   };
 };
 
