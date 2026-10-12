@@ -31,7 +31,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { CarBrand, CarModel } from "@/types/database";
+import type { BodyType, CarBrand, CarModel } from "@/types/database";
 
 /**
  * Deleting versus discontinuing.
@@ -51,30 +51,13 @@ type CatalogEntry = { discontinued_at?: string | null };
 
 const isDiscontinued = (entry: CatalogEntry) => Boolean(entry.discontinued_at);
 
-const bodyTypes = [
-  "sedan",
-  "suv",
-  "hatchback",
-  "van",
-  "pickup",
-  "coupe",
-  "convertible",
-  "wagon",
-  "mpv",
-];
 const fuelTypes = ["gasoline", "diesel", "hybrid", "electric", "full electric"];
 
-const defaultSeats: Record<string, number> = {
-  sedan: 5,
-  coupe: 4,
-  hatchback: 5,
-  suv: 7,
-  van: 12,
-  pickup: 5,
-  convertible: 4,
-  wagon: 5,
-  mpv: 7,
-};
+const titleCase = (value: string) =>
+  value
+    .split(" ")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 
 export default function AdminCarCatalogPage() {
   const { user: adminUser } = useAuth();
@@ -83,6 +66,15 @@ export default function AdminCarCatalogPage() {
   );
   const [loading, setLoading] = useState(true);
   const [expandedBrand, setExpandedBrand] = useState<string | null>(null);
+
+  // Body types are catalog entries too (CHAPTER 126): added, discontinued, and
+  // deleted only while no model uses one.
+  const [bodyTypes, setBodyTypes] = useState<BodyType[]>([]);
+  const [newBodyTypeName, setNewBodyTypeName] = useState("");
+  const [newBodyTypeSeats, setNewBodyTypeSeats] = useState(5);
+  const [addingBodyType, setAddingBodyType] = useState(false);
+  const [bodyTypeDeleteTarget, setBodyTypeDeleteTarget] = useState<BodyType | null>(null);
+  const [bodyTypeDeleteLoading, setBodyTypeDeleteLoading] = useState(false);
 
   // Add brand form
   const [newBrandName, setNewBrandName] = useState("");
@@ -124,8 +116,14 @@ export default function AdminCarCatalogPage() {
         .from("car_models")
         .select("*")
         .order("name");
+      const { data: typesData, error: tErr } = await supabase
+        .from("body_types")
+        .select("*")
+        .order("name");
       if (bErr) throw bErr;
       if (mErr) throw mErr;
+      if (tErr) throw tErr;
+      setBodyTypes(typesData ?? []);
 
       if (brandsData && modelsData) {
         setBrands(
@@ -179,6 +177,86 @@ export default function AdminCarCatalogPage() {
       fetchBrands();
     }
     setAddingBrand(false);
+  };
+
+  /** How many catalog models name each body type. A type in use cannot be deleted. */
+  const bodyTypeUsage = brands
+    .flatMap((brand) => brand.models)
+    .reduce<Record<string, number>>((counts, model) => {
+      counts[model.body_type] = (counts[model.body_type] ?? 0) + 1;
+      return counts;
+    }, {});
+
+  const handleAddBodyType = async () => {
+    const name = newBodyTypeName.trim().toLowerCase().replace(/\s+/g, " ");
+    if (!name || !adminUser) return;
+    setAddingBodyType(true);
+    const { error } = await supabase
+      .from("body_types")
+      .insert({ name, default_seats: newBodyTypeSeats });
+    setAddingBodyType(false);
+    if (error) {
+      toast.error("Failed to add body type", {
+        description:
+          String((error as { code?: unknown }).code) === "23505"
+            ? `"${titleCase(name)}" is already on the list.`
+            : error.message,
+      });
+      return;
+    }
+    await supabase.from("audit_log").insert({
+      user_id: adminUser.id,
+      action: "admin_added_body_type",
+      entity_type: "body_type",
+      details: { name, default_seats: newBodyTypeSeats },
+    });
+    toast.success(`Body type "${titleCase(name)}" added!`);
+    setNewBodyTypeName("");
+    setNewBodyTypeSeats(5);
+    fetchBrands();
+  };
+
+  const toggleBodyTypeDiscontinued = async (bodyType: BodyType) => {
+    setDiscontinuingId(`body:${bodyType.name}`);
+    const { error } = await supabase
+      .from("body_types")
+      .update({
+        discontinued_at: isDiscontinued(bodyType) ? null : new Date().toISOString(),
+      })
+      .eq("name", bodyType.name);
+    setDiscontinuingId(null);
+    if (error) {
+      toast.error("Could not update this body type", { description: error.message });
+      return;
+    }
+    toast.success(
+      isDiscontinued(bodyType)
+        ? `"${titleCase(bodyType.name)}" is offered again.`
+        : `"${titleCase(bodyType.name)}" is no longer offered for new models. Existing models keep it.`,
+    );
+    fetchBrands();
+  };
+
+  const handleDeleteBodyType = async () => {
+    if (!bodyTypeDeleteTarget) return;
+    setBodyTypeDeleteLoading(true);
+    const { error } = await supabase
+      .from("body_types")
+      .delete()
+      .eq("name", bodyTypeDeleteTarget.name);
+    setBodyTypeDeleteLoading(false);
+    setBodyTypeDeleteTarget(null);
+    if (error) {
+      toast.error("Body type was not deleted", {
+        description:
+          String((error as { code?: unknown }).code) === "23503"
+            ? "A model uses this body type, so it cannot be deleted. Discontinue it instead."
+            : error.message,
+      });
+      return;
+    }
+    toast.success("Body type deleted");
+    fetchBrands();
   };
 
   const handleAddModel = async (brandId: string) => {
@@ -358,9 +436,116 @@ export default function AdminCarCatalogPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Car Catalog</h1>
         <p className="text-muted-foreground mt-1">
-          Manage car brands and models available for listing
+          Manage body types, car brands and models available for listing
         </p>
       </div>
+
+      {/* Body types */}
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <div>
+            <h2 className="font-semibold">Body Types</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Picked for each model. Default seats fill the model form and can be changed there.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Input
+              placeholder="New body type (e.g., utility van)"
+              value={newBodyTypeName}
+              onChange={(e) => setNewBodyTypeName(e.target.value)}
+              className="h-10"
+              onKeyDown={(e) => e.key === "Enter" && handleAddBodyType()}
+            />
+            <div className="flex gap-3">
+              <div className="flex items-center gap-2">
+                <Label className="text-xs whitespace-nowrap">Default seats</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={newBodyTypeSeats}
+                  onChange={(e) =>
+                    setNewBodyTypeSeats(
+                      Math.min(60, Math.max(1, parseInt(e.target.value) || 1)),
+                    )
+                  }
+                  className="h-10 w-20"
+                />
+              </div>
+              <Button
+                onClick={handleAddBodyType}
+                disabled={addingBodyType || !newBodyTypeName.trim()}
+                className="gap-2 shrink-0"
+              >
+                {addingBodyType ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+                Add Body Type
+              </Button>
+            </div>
+          </div>
+          {bodyTypes.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {bodyTypes.map((t) => {
+                const used = bodyTypeUsage[t.name] ?? 0;
+                return (
+                  <div
+                    key={t.name}
+                    className="flex items-center gap-1.5 rounded-md border border-border py-1 pl-3 pr-1 text-sm"
+                  >
+                    <span className="font-medium">{titleCase(t.name)}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {t.default_seats} seats · {used} model{used === 1 ? "" : "s"}
+                    </span>
+                    {isDiscontinued(t) && (
+                      <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                        Discontinued
+                      </span>
+                    )}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      disabled={discontinuingId === `body:${t.name}`}
+                      onClick={() => void toggleBodyTypeDiscontinued(t)}
+                      title={
+                        isDiscontinued(t)
+                          ? "Offer this body type again"
+                          : "Stop offering this body type for new models. Existing models keep it."
+                      }
+                    >
+                      {discontinuingId === `body:${t.name}` ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : isDiscontinued(t) ? (
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      ) : (
+                        <Archive className="w-3.5 h-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-destructive"
+                      disabled={used > 0}
+                      onClick={() => setBodyTypeDeleteTarget(t)}
+                      title={
+                        used > 0
+                          ? "Models use this body type, so it cannot be deleted. Discontinue it instead."
+                          : "Delete body type"
+                      }
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Add Brand */}
       <Card>
@@ -514,9 +699,8 @@ export default function AdminCarCatalogPage() {
                                 ...modelForm,
                                 body_type: v as string,
                                 seats:
-                                  defaultSeats[
-                                    v as keyof typeof defaultSeats
-                                  ] || 5,
+                                  bodyTypes.find((t) => t.name === v)
+                                    ?.default_seats || 5,
                               })
                             }
                           >
@@ -524,14 +708,13 @@ export default function AdminCarCatalogPage() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {bodyTypes.map((t) => (
-                                <SelectItem key={t} value={t}>
-                                  {t
-                                    .split(" ")
-                                    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-                                    .join(" ")}
-                                </SelectItem>
-                              ))}
+                              {bodyTypes
+                                .filter((t) => !isDiscontinued(t))
+                                .map((t) => (
+                                  <SelectItem key={t.name} value={t.name}>
+                                    {titleCase(t.name)}
+                                  </SelectItem>
+                                ))}
                             </SelectContent>
                           </Select>
                         </div>
@@ -694,6 +877,20 @@ export default function AdminCarCatalogPage() {
         isLoading={modelDeleteLoading}
         onConfirm={handleDeleteModel}
         onCancel={() => setModelDeleteTarget(null)}
+      />
+      <ConfirmDialog
+        open={Boolean(bodyTypeDeleteTarget)}
+        title="Delete this body type?"
+        description={
+          bodyTypeDeleteTarget
+            ? `No model uses "${titleCase(bodyTypeDeleteTarget.name)}", so deleting it removes a catalog entry and nothing else. If you only want to stop offering it, use Discontinue instead.`
+            : ""
+        }
+        confirmText="Delete Body Type"
+        destructive
+        isLoading={bodyTypeDeleteLoading}
+        onConfirm={handleDeleteBodyType}
+        onCancel={() => setBodyTypeDeleteTarget(null)}
       />
       <ConfirmDialog
         open={Boolean(brandDeleteTarget)}

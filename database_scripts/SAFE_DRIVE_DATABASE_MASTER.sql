@@ -19935,4 +19935,94 @@ commit;
 --        'yes' as expected;
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 126 - A body type is a catalog entry, like a brand
+-- Apply this chapter only, staging first. One table is added and filled, and
+-- car_models.body_type gains a foreign key to it. No model is withdrawn and no
+-- listing is touched.
+-- ============================================================================
+-- An admin could add a brand and a model but not a body type: the nine types
+-- were a fixed list in AdminCarCatalogPage.tsx. A vehicle that is none of them
+-- - a Mitsubishi L300 is not the same thing as a 12-seat van - had nowhere to
+-- go but the nearest wrong one.
+--
+-- So the list moves into the catalog and behaves like the rest of it: an admin
+-- adds one, discontinues one (it stops being offered for new models, and every
+-- model already using it keeps it), and deletes one only while no model uses
+-- it. Each type carries the seat count the model form starts from, which used
+-- to sit beside the fixed list.
+--
+-- car_models.body_type stays text and keeps its value; a foreign key now holds
+-- it to the list, so a model can only name a type the catalog has. AUV joins
+-- the original nine.
+begin;
+
+create table if not exists public.body_types (
+  name text primary key check (name <> '' and name = lower(btrim(name))),
+  default_seats integer not null default 5 check (default_seats between 1 and 60),
+  discontinued_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+insert into public.body_types (name, default_seats) values
+  ('sedan', 5), ('suv', 7), ('hatchback', 5), ('van', 12), ('pickup', 5),
+  ('coupe', 4), ('convertible', 4), ('wagon', 5), ('mpv', 7), ('auv', 7)
+on conflict (name) do nothing;
+
+-- The admin form only ever wrote the lowercase names above, but a model typed
+-- in by hand could carry a capital or a stray space. Tidy those, then make sure
+-- any type already in use is on the list before the key is added.
+update public.car_models
+   set body_type = lower(btrim(body_type))
+ where body_type <> lower(btrim(body_type));
+
+insert into public.body_types (name)
+select distinct body_type from public.car_models where body_type <> ''
+on conflict (name) do nothing;
+
+do $chapter126_fkey$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'car_models_body_type_fkey'
+  ) then
+    alter table public.car_models
+      add constraint car_models_body_type_fkey
+      foreign key (body_type) references public.body_types(name)
+      on update cascade;
+  end if;
+end;
+$chapter126_fkey$;
+
+alter table public.body_types enable row level security;
+
+drop policy if exists "Catalog read access body types" on public.body_types;
+create policy "Catalog read access body types" on public.body_types
+  for select using (true);
+
+drop policy if exists "Catalog write access body types" on public.body_types;
+create policy "Catalog write access body types" on public.body_types
+  for all using (public.admin_can('catalog.manage'))
+  with check (public.admin_can('catalog.manage'));
+
+grant select on public.body_types to anon, authenticated;
+grant insert, update, delete on public.body_types to authenticated;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'body types listed' as check_name,
+--        (select count(*)::text from public.body_types where name in
+--          ('sedan','suv','hatchback','van','pickup','coupe','convertible','wagon','mpv','auv')) as result,
+--        '10' as expected
+-- union all
+-- select 'models naming an unlisted type',
+--        (select count(*)::text from public.car_models m
+--          where not exists (select 1 from public.body_types t where t.name = m.body_type)),
+--        '0'
+-- union all
+-- select 'body type key in place',
+--        (select count(*)::text from pg_constraint where conname = 'car_models_body_type_fkey'),
+--        '1';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

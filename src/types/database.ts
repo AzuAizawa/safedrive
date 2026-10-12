@@ -304,6 +304,12 @@ export interface Database {
         Update: { id?: string; name?: string; created_at?: string; discontinued_at?: string | null };
         Relationships: [];
       };
+      body_types: {
+        Row: { name: string; default_seats: number; discontinued_at: string | null; created_at: string };
+        Insert: { name: string; default_seats?: number; discontinued_at?: string | null; created_at?: string };
+        Update: { name?: string; default_seats?: number; discontinued_at?: string | null; created_at?: string };
+        Relationships: [];
+      };
       car_models: {
         Row: {
           id: string;
@@ -2101,6 +2107,7 @@ export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 export type Car = Database["public"]["Tables"]["cars"]["Row"];
 export type CarBrand = Database["public"]["Tables"]["car_brands"]["Row"];
 export type CarModel = Database["public"]["Tables"]["car_models"]["Row"];
+export type BodyType = Database["public"]["Tables"]["body_types"]["Row"];
 export type CarImage = Database["public"]["Tables"]["car_images"]["Row"];
 export type CarDocument = Database["public"]["Tables"]["car_documents"]["Row"];
 export type Booking = Database["public"]["Tables"]["bookings"]["Row"];
