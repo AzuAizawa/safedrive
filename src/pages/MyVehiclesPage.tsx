@@ -2164,6 +2164,8 @@ export default function MyVehiclesPage() {
                           Fuel detail: {[v.fuel_category, v.fuel_subtype].filter(Boolean).join(" - ")}
                         </p>
                       )}
+                      {/* Set once the car is approved; not shown while it is in review. */}
+                      {!VEHICLE_TAB_STATUSES.in_review.includes(v.status) && (<>
                       <p className="mt-1 text-xs text-muted-foreground">
                         GPS option:{" "}
                         <span className="font-medium text-foreground">
@@ -2178,6 +2180,7 @@ export default function MyVehiclesPage() {
                             : "24h (default)"}
                         </span>
                       </p>
+                      </>)}
                       <p
                         className={`mt-1 text-xs ${
                           v.transmission ? "text-muted-foreground" : "text-amber-600"
@@ -2422,8 +2425,8 @@ export default function MyVehiclesPage() {
                   {editVehicle.status === "pending" &&
                     !(corrections[editVehicle.id] ?? []).some((item) => !item.waiting) && (
                       <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-muted-foreground">
-                        This car is still under review. Price, pickup location and other
-                        listing details can be set once it is approved.
+                        In review. If a document needs to be resubmitted, you will
+                        correct it here.
                       </p>
                     )}
                   {editVehicle.status !== "pending" && (<>
