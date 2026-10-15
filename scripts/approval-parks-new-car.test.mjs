@@ -145,3 +145,46 @@ test("any number can be approved; only as many as the slots can be turned on", a
   await db.query("update public.cars set status = 'approved' where id = $1", [CARS[2]]);
   assert.equal(await statusOf(db, CARS[2]), "approved");
 });
+
+// CHAPTER 129 - the audit trail names the move instead of calling it a disable.
+async function auditedFixture() {
+  const db = await fixture();
+  await db.exec(`
+    create schema auth;
+    create function auth.uid() returns uuid language sql as $$ select null::uuid $$;
+    create function public.is_admin() returns boolean language sql as $$ select false $$;
+    create table public.audit_log(
+      id uuid primary key default gen_random_uuid(), user_id uuid, action text,
+      entity_type text, entity_id uuid, details jsonb, created_at timestamptz default clock_timestamp());
+    alter table public.cars add column plate_number text, add column price_per_day numeric;
+  `);
+  const text = await readMaster();
+  const start = text.indexOf("create or replace function public.audit_vehicle_lifecycle()");
+  const triggerEnd = "execute function public.audit_vehicle_lifecycle();";
+  await db.exec(text.slice(start, text.indexOf(triggerEnd, start) + triggerEnd.length));
+  await db.exec(await chapter("-- CHAPTER 129 - The audit trail says why a newly approved car is inactive"));
+  return db;
+}
+const actions = async (db, id) =>
+  (await db.query("select action from public.audit_log where entity_id = $1 order by created_at", [id])).rows.map(
+    (r) => r.action,
+  );
+
+test("a first approval is audited as parked, not as disabled", async () => {
+  const db = await auditedFixture();
+  await approve(db, CARS[0]);
+  assert.equal(await statusOf(db, CARS[0]), "inactive");
+  assert.deepEqual(await actions(db, CARS[0]), ["vehicle_parked_after_approval"]);
+});
+
+test("turning a car off is still audited as disabled", async () => {
+  const db = await auditedFixture();
+  await approve(db, CARS[0]);
+  await db.query("update public.cars set status = 'approved' where id = $1", [CARS[0]]);
+  await db.query("update public.cars set status = 'inactive' where id = $1", [CARS[0]]);
+  assert.deepEqual(await actions(db, CARS[0]), [
+    "vehicle_parked_after_approval",
+    "vehicle_enabled",
+    "vehicle_disabled",
+  ]);
+});

@@ -35,6 +35,7 @@ const actionLabels: Record<string, string> = {
   super_admin_updated_platform_commission: "Updated platform commission",
   vehicle_submitted: "Submitted vehicle for approval",
   admin_approved_vehicle: "Approved vehicle listing",
+  vehicle_parked_after_approval: "Approved vehicle moved to Inactive for setup",
   admin_rejected_vehicle: "Rejected vehicle listing",
   booking_created: "Created booking request",
   payout_sent: "Sent owner payout",

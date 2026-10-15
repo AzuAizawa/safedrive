@@ -20372,4 +20372,106 @@ commit;
 --        '1';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 129 - The audit trail says why a newly approved car is inactive
+-- Apply this chapter only, after CHAPTER 128. Two functions are replaced. No
+-- row is changed.
+-- ============================================================================
+-- CHAPTER 127 moves a car approved for the first time to inactive. The audit
+-- trigger recorded that move as 'vehicle_disabled' by the approving admin, as
+-- if the admin had turned the car off. It is now recorded as
+-- 'vehicle_parked_after_approval'. A lister or admin turning a car off is still
+-- 'vehicle_disabled'.
+begin;
+
+-- Reproduced from CHAPTER 127 with the move marked for the audit trigger.
+create or replace function public.park_newly_approved_car()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $park_newly_approved_car$
+begin
+  if new.status = 'approved'
+     and old.status is distinct from 'approved'
+     and not old.compliance_previously_approved then
+    -- Read by audit_vehicle_lifecycle, for this transaction only.
+    perform set_config('safedrive.parking_car', new.id::text, true);
+    update public.cars set status = 'inactive' where id = new.id;
+    perform set_config('safedrive.parking_car', '', true);
+  end if;
+  return null;
+end;
+$park_newly_approved_car$;
+
+-- Reproduced from its original chapter with the parking move named.
+create or replace function public.audit_vehicle_lifecycle()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  actor_id uuid;
+begin
+  actor_id := coalesce(auth.uid(), case when tg_op = 'DELETE' then old.owner_id else new.owner_id end);
+
+  if tg_op = 'INSERT' then
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (
+      actor_id,
+      'vehicle_submitted',
+      'car',
+      new.id,
+      jsonb_build_object('plate', new.plate_number, 'price', new.price_per_day)
+    );
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' and old.status is distinct from new.status then
+    if old.status = 'approved' and new.status = 'inactive' then
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+      values (actor_id,
+        -- CHAPTER 129: the system moving a car it just approved is not the
+        -- lister or the admin turning it off.
+        case when current_setting('safedrive.parking_car', true) = new.id::text
+          then 'vehicle_parked_after_approval' else 'vehicle_disabled' end,
+        'car', new.id,
+        jsonb_build_object('plate', new.plate_number, 'previous_status', old.status, 'new_status', new.status));
+    elsif old.status = 'inactive' and new.status = 'approved' then
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+      values (actor_id, 'vehicle_enabled', 'car', new.id,
+        jsonb_build_object('plate', new.plate_number, 'previous_status', old.status, 'new_status', new.status));
+    end if;
+    return new;
+  end if;
+
+  if tg_op = 'DELETE' then
+    insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+    values (
+      actor_id,
+      case when public.is_admin() then 'vehicle_deleted_by_admin' else 'vehicle_deleted_by_lister' end,
+      'car',
+      old.id,
+      jsonb_build_object('plate', old.plate_number)
+    );
+    return old;
+  end if;
+
+  return new;
+end;
+$$;
+
+comment on function public.park_newly_approved_car() is
+  'Moves a car approved for the first time to inactive; audited as vehicle_parked_after_approval (CHAPTER 129).';
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'audit names the parking move' as check_name,
+--        (select case when position('vehicle_parked_after_approval' in prosrc) > 0 then 'yes' else 'no' end
+--           from pg_proc where proname = 'audit_vehicle_lifecycle') as result,
+--        'yes' as expected;
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

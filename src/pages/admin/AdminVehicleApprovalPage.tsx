@@ -356,7 +356,10 @@ export default function AdminVehicleApprovalPage() {
                   ...(resubmittedIds.length ? [`id.in.(${resubmittedIds.join(",")})`] : []),
                 ].join(","),
               )
-            : baseQuery.is("deleted_at", null).in("status", ["approved", "active"]);
+            // Approved cars, live or not: a newly approved car waits in
+            // inactive until its lister sets it up (CHAPTER 127), and one
+            // its lister turned off is still on SafeDrive.
+            : baseQuery.is("deleted_at", null).in("status", ["approved", "active", "inactive"]);
       const { data, error } = await scopedQuery.order(
         activeTab === "removed" ? "deleted_at" : "created_at",
         { ascending: false },
@@ -817,7 +820,7 @@ export default function AdminVehicleApprovalPage() {
           Vehicle Management
         </h1>
         <p className="text-muted-foreground mt-1">
-          Review pending car approvals and monitor active cars.
+          Review pending car approvals and monitor approved cars.
         </p>
       </div>
 
@@ -827,7 +830,7 @@ export default function AdminVehicleApprovalPage() {
         ariaLabel="Vehicle management view"
         tabs={[
           { value: "pending", label: "Pending & resubmissions" },
-          { value: "active", label: "Active cars" },
+          { value: "active", label: "Approved cars" },
           { value: "removed", label: "Removed" },
         ]}
       />
@@ -846,7 +849,7 @@ export default function AdminVehicleApprovalPage() {
               ? "Nothing waiting for review"
               : activeTab === "removed"
                 ? "No removed cars"
-                : "No active cars"}
+                : "No approved cars"}
           </h3>
           <p className="text-muted-foreground text-sm">
             {activeTab === "pending"
@@ -901,7 +904,13 @@ export default function AdminVehicleApprovalPage() {
                       : `₱${Number(car.price_per_day).toLocaleString()}`}
                   </TableCell>
                   <TableCell className="capitalize">
-                    {car.deleted_at ? "removed" : car.status}
+                    {car.deleted_at
+                      ? "removed"
+                      : activeTab === "active"
+                        ? car.status === "inactive"
+                          ? "Inactive"
+                          : "Live"
+                        : car.status}
                   </TableCell>
                   {/* CHAPTER 105. How long this submission has waited, so the
                       queue can be read as a queue rather than a list. Red past
