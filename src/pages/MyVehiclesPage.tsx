@@ -554,9 +554,6 @@ export default function MyVehiclesPage() {
   // when it can be. Read before the button is drawn, not after it fails.
   const [deleteBlocks, setDeleteBlocks] = useState<Record<string, DeleteBlock>>({});
   const [disableTarget, setDisableTarget] = useState<VehicleRow | null>(null);
-  const [disableReason, setDisableReason] = useState<
-    "stolen" | "damaged" | "other"
-  >("other");
   const [disableBookings, setDisableBookings] = useState<
     { id: string; status: string }[] | null
   >(null);
@@ -1404,23 +1401,9 @@ export default function MyVehiclesPage() {
         return;
       }
 
-      const pendingOrPaid = relevant.filter((row) => row.status !== "active");
-      if (pendingOrPaid.length === 0) {
-        // Nothing to cancel — disable straight away.
-        const { error: disableError } = await supabase
-          .from("cars")
-          .update({ status: "inactive" })
-          .eq("id", vehicle.id)
-          .eq("owner_id", user.id);
-        if (disableError) throw disableError;
-        toast.success("Vehicle listing has been disabled.");
-        fetchVehicles();
-        return;
-      }
-
+      // Always confirmed, with or without bookings to cancel.
       setDisableTarget(vehicle);
-      setDisableReason("other");
-      setDisableBookings(pendingOrPaid);
+      setDisableBookings(relevant.filter((row) => row.status !== "active"));
     } catch (error) {
       toast.error("Failed to disable vehicle", {
         description:
@@ -1434,14 +1417,9 @@ export default function MyVehiclesPage() {
   const confirmDisableWithBookings = async () => {
     if (!user || !disableTarget || !disableBookings) return;
     const vehicle = disableTarget;
-    const reason = disableReason;
-    const waiveStrike = reason === "stolen" || reason === "damaged";
-    const reasonNote =
-      reason === "stolen"
-        ? "Lister took the car offline: reported stolen or missing."
-        : reason === "damaged"
-          ? "Lister took the car offline: damaged and under repair."
-          : "Lister took the car offline.";
+    // No reason is asked: taking a car offline is the lister's call, and
+    // cancellations it causes show in their completion rate like any other.
+    const reasonNote = "Lister took the car offline.";
 
     setDisableSubmitting(true);
     try {
@@ -1457,7 +1435,6 @@ export default function MyVehiclesPage() {
             bookingId: booking.id,
             action: "cancel",
             note: reasonNote,
-            waiveStrike,
           }),
         });
         if (!res.ok) {
@@ -1480,23 +1457,16 @@ export default function MyVehiclesPage() {
         .eq("owner_id", user.id);
       if (disableError) throw disableError;
 
-      if (waiveStrike) {
-        // Give SafeDrive support a paper trail for the waiver.
-        await supabase.from("support_tickets").insert({
-          user_id: user.id,
-          subject: `Vehicle taken offline (${
-            reason === "stolen" ? "stolen/missing" : "damaged"
-          }): ${vehicle.car_models.car_brands.name} ${vehicle.car_models.name} (${vehicle.plate_number})`,
-          tag: "vehicle_offline",
-          status: "open",
-        });
-      }
-
-      toast.success("Vehicle listing has been disabled.", {
-        description: `${disableBookings.length} affected booking${
-          disableBookings.length === 1 ? "" : "s"
-        } cancelled and refunded where paid.`,
-      });
+      toast.success(
+        "Vehicle listing has been disabled.",
+        disableBookings.length > 0
+          ? {
+              description: `${disableBookings.length} affected booking${
+                disableBookings.length === 1 ? "" : "s"
+              } cancelled and refunded where paid.`,
+            }
+          : undefined,
+      );
       setDisableTarget(null);
       setDisableBookings(null);
       fetchVehicles();
@@ -2900,12 +2870,14 @@ export default function MyVehiclesPage() {
         title="Take this car offline?"
         description={
           disableTarget && disableBookings
-            ? `${disableBookings.length} upcoming booking${
-                disableBookings.length === 1 ? "" : "s"
-              } for ${disableTarget.car_models.car_brands.name} ${disableTarget.car_models.name} (${disableTarget.plate_number}) will be cancelled. Paid bookings are refunded automatically.`
+            ? disableBookings.length === 0
+              ? `${disableTarget.car_models.car_brands.name} ${disableTarget.car_models.name} (${disableTarget.plate_number}) will be hidden from renters until you turn it back on.`
+              : `${disableBookings.length} upcoming booking${
+                  disableBookings.length === 1 ? "" : "s"
+                } for ${disableTarget.car_models.car_brands.name} ${disableTarget.car_models.name} (${disableTarget.plate_number}) will be cancelled and paid renters refunded in full. These cancellations show in your completion rate.`
             : ""
         }
-        confirmText="Cancel Bookings & Take Offline"
+        confirmText={disableBookings?.length ? "Cancel Bookings & Take Offline" : "Take Offline"}
         destructive
         isLoading={disableSubmitting}
         onCancel={() => {
@@ -2913,35 +2885,7 @@ export default function MyVehiclesPage() {
           setDisableBookings(null);
         }}
         onConfirm={confirmDisableWithBookings}
-      >
-        <div className="space-y-3">
-          <div>
-            <Label htmlFor="disable-reason">Why are you taking it offline?</Label>
-            <Select
-              value={disableReason}
-              onValueChange={(value) =>
-                setDisableReason(value as "stolen" | "damaged" | "other")
-              }
-            >
-              <SelectTrigger id="disable-reason" className="mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="stolen">Vehicle stolen or missing</SelectItem>
-                <SelectItem value="damaged">
-                  Vehicle damaged — under repair
-                </SelectItem>
-                <SelectItem value="other">Personal use / other</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
-            {disableReason === "other"
-              ? "Cancelling confirmed bookings on short notice can affect your completion rate, the same as any lister cancellation."
-              : "Because this is outside your control, these cancellations are recorded but will not count against your completion rate. SafeDrive support opens a case to verify."}
-          </p>
-        </div>
-      </ConfirmDialog>
+      />
     </div>
   );
 }

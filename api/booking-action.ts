@@ -39,10 +39,6 @@ type BookingActionPayload = {
   action?: BookingAction;
   arrivalPhotoUrl?: string | null;
   note?: string | null;
-  // Set by the lister "take car offline" flow when the reason is stolen /
-  // damaged and an incident case is open: the cancellation is still recorded
-  // but excluded from the completion rate and the auto-pause strike count.
-  waiveStrike?: boolean;
 };
 
 type BookingRecord = {
@@ -849,7 +845,6 @@ export default async function handler(req: Request) {
         renter && refundPlan
           ? refundPlan.outcome !== "free"
           : hoursBeforePickup !== null && hoursBeforePickup < cancelFullHours;
-      const strikeWaived = !renter && payload.waiveStrike === true;
 
       await supabase.from("booking_cancellations").upsert(
         {
@@ -868,69 +863,10 @@ export default async function handler(req: Request) {
         { onConflict: "booking_id" },
       );
 
-      // Separate write so a deploy that lands before CHAPTER 31 (no
-      // strike_waived column) still records the cancellation above.
-      if (strikeWaived) {
-        await supabase
-          .from("booking_cancellations")
-          .update({ strike_waived: true })
-          .eq("booking_id", bookingRecord.id);
-      }
-
-      // Lister strike + auto-pause: 3 late cancellations of a paid booking
-      // inside 60 days pulls every one of the lister's live listings offline
-      // pending a support review.
-      if (!renter && cancelWasLate && hasCapturedBookingPayment && !strikeWaived) {
-        const sixtyDaysAgo = new Date(
-          Date.now() - 60 * 24 * 3_600_000,
-        ).toISOString();
-        const { count: recentLateCancels } = await supabase
-          .from("booking_cancellations")
-          .select("booking_id", { count: "exact", head: true })
-          .eq("lister_id", bookingRecord.owner_id)
-          // A pickup nobody showed up for counts against the lister too (CHAPTER 92).
-          .in("cancelled_by_role", ["lister", "both"])
-          .eq("was_late", true)
-          .eq("had_captured_payment", true)
-          .eq("strike_waived", false)
-          .gte("cancelled_at", sixtyDaysAgo);
-
-        if ((recentLateCancels ?? 0) >= 3) {
-          const { data: pausedCars } = await supabase
-            .from("cars")
-            .update({ status: "inactive" })
-            .eq("owner_id", bookingRecord.owner_id)
-            .in("status", ["approved", "active"])
-            // A removed car is not a live listing; pausing it would count it.
-            .is("deleted_at", null)
-            .select("id");
-          const pausedCount = pausedCars?.length ?? 0;
-          if (pausedCount > 0) {
-            await supabase.from("notifications").insert({
-              user_id: bookingRecord.owner_id,
-              title: "Listings paused",
-              message: `Your ${pausedCount} active listing${
-                pausedCount === 1 ? " was" : "s were"
-              } paused after repeated last-minute cancellations. Contact SafeDrive support to reactivate.`,
-              type: "error",
-              link: "/lister-bookings",
-            });
-            await supabase.from("audit_log").insert({
-              user_id: bookingRecord.owner_id,
-              action: "lister_listings_auto_paused",
-              entity_type: "profile",
-              entity_id: bookingRecord.owner_id,
-              details: {
-                reason: "repeated_late_cancellations",
-                window_days: 60,
-                late_cancellations: recentLateCancels,
-                cars_paused: pausedCount,
-              },
-            });
-          }
-        }
-      }
-
+      // A lister cancellation is not punished beyond showing in their
+      // completion rate, which renters see on the car page. The old strike
+      // auto-pause told the lister to contact support, but nothing there could
+      // lift it and the lister could simply turn the cars back on.
       const counterpartyId = renter
         ? bookingRecord.owner_id
         : bookingRecord.renter_id;
