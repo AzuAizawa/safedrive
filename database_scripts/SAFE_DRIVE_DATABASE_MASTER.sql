@@ -20092,4 +20092,284 @@ commit;
 --        '0';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 128 - The rental agreement is reviewed like the other documents
+-- Apply this chapter only, after CHAPTER 127. Existing agreements that are
+-- already in force are marked approved; no car changes status and no booking
+-- is touched.
+-- ============================================================================
+-- The rental agreement was asked for with the papers when a car was added, but
+-- it was not one of them. The admin could not approve it or send it back on its
+-- own; it was approved silently with the whole car
+-- (approve_latest_car_agreement_with_vehicle). And a new one uploaded from Edit
+-- (queue_rental_agreement_version) withdrew the approved agreement at once and
+-- sent the whole car back to review, so a lister who only reworded a clause took
+-- the car off Browse until an admin looked at it.
+--
+-- Now it is the eighth document:
+--   * the admin approves it or sends it back with a reason, like the BIR or the
+--     OR (review_vehicle_documents already handles any document);
+--   * a car in review cannot be approved while it is not approved
+--     (enforce_vehicle_documents_reviewed);
+--   * a live car's lister replaces it from Document Renewal & Updates
+--     (submit_vehicle_document_update). The car stays listed and renters keep
+--     the approved agreement until the new one is approved.
+--
+-- car_agreement_versions still decides what a renter signs. A new file queues
+-- a pending version; approving the file approves that version and retires the
+-- previous one; sending it back rejects it; a pending file that is replaced
+-- retires its version.
+begin;
+
+-- Agreements already in force were never reviewed as documents. Their file is
+-- the one the version points at; mark it approved. (Before the triggers below
+-- exist, so this does not reorder any version.)
+update public.car_documents d
+   set compliance_status = 'approved',
+       reviewed_at = coalesce(v.approved_at, d.reviewed_at, now())
+  from public.car_agreement_versions v
+ where v.document_id = d.id
+   and v.status in ('approved', 'superseded')
+   and d.document_type = 'rental_agreement'
+   and d.compliance_status = 'pending';
+
+-- A new file queues a version. It no longer withdraws the approved one or takes
+-- the car back to review.
+create or replace function public.queue_rental_agreement_version()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  next_version integer;
+begin
+  if new.document_type <> 'rental_agreement' then return new; end if;
+
+  select coalesce(max(version_number), 0) + 1 into next_version
+  from public.car_agreement_versions where car_id = new.car_id;
+
+  insert into public.car_agreement_versions (
+    car_id, document_id, version_number, storage_path, content_sha256, status, uploaded_by
+  )
+  select new.car_id, new.id, next_version, new.storage_path, new.content_sha256, 'pending', c.owner_id
+  from public.cars c where c.id = new.car_id;
+  return new;
+end;
+$$;
+
+-- The document review decides the version.
+create or replace function public.sync_rental_agreement_version()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $sync_agreement$
+declare
+  next_version integer;
+begin
+  if new.document_type <> 'rental_agreement'
+     or new.compliance_status is not distinct from old.compliance_status then
+    return null;
+  end if;
+
+  if new.compliance_status = 'approved' then
+    update public.car_agreement_versions
+       set status = 'superseded'
+     where car_id = new.car_id and status = 'approved' and document_id is distinct from new.id;
+    update public.car_agreement_versions
+       set status = 'approved', approved_by = auth.uid(), approved_at = now()
+     where document_id = new.id;
+    if not found then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.car_agreement_versions where car_id = new.car_id;
+      insert into public.car_agreement_versions (
+        car_id, document_id, version_number, storage_path, content_sha256,
+        status, uploaded_by, approved_by, approved_at)
+      select new.car_id, new.id, next_version, new.storage_path, new.content_sha256,
+             'approved', c.owner_id, auth.uid(), now()
+        from public.cars c where c.id = new.car_id;
+    end if;
+  elsif new.compliance_status in ('rejected', 'revoked') then
+    update public.car_agreement_versions
+       set status = 'rejected'
+     where document_id = new.id and status in ('pending', 'approved');
+  end if;
+  return null;
+end;
+$sync_agreement$;
+
+drop trigger if exists sync_rental_agreement_version on public.car_documents;
+create trigger sync_rental_agreement_version
+  after update of compliance_status on public.car_documents
+  for each row execute function public.sync_rental_agreement_version();
+
+-- A pending file replaced by a newer one (CHAPTER 119) retires its version.
+-- Before the delete, while the version still points at the file.
+create or replace function public.retire_replaced_rental_agreement_version()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $retire_agreement$
+begin
+  if old.document_type = 'rental_agreement' then
+    update public.car_agreement_versions
+       set status = 'superseded'
+     where document_id = old.id and status = 'pending';
+  end if;
+  return old;
+end;
+$retire_agreement$;
+
+drop trigger if exists retire_replaced_rental_agreement_version on public.car_documents;
+create trigger retire_replaced_rental_agreement_version
+  before delete on public.car_documents
+  for each row execute function public.retire_replaced_rental_agreement_version();
+
+-- Approving the car no longer approves the agreement behind the admin's back.
+drop trigger if exists approve_latest_car_agreement_with_vehicle on public.cars;
+
+-- Reproduced from CHAPTER 119 with the rental agreement added as the eighth
+-- document.
+create or replace function public.enforce_vehicle_documents_reviewed()
+returns trigger language plpgsql security definer set search_path = public as $reviewed$
+declare blocking text;
+begin
+  if new.status = 'approved'
+     and coalesce(old.status, '') not in ('approved', 'active', 'renewal_required') then
+    select string_agg(latest.label || case latest.compliance_status
+             when 'pending' then ' is still waiting for review'
+             when 'rejected' then ' needs correction'
+             when 'revoked' then ' had its approval revoked'
+             else ' is not approved' end, '; ' order by latest.n)
+      into blocking
+      from (
+        select distinct on (k.n) k.n, k.label, d.compliance_status
+          from (values
+            (1, 'or', 'LTO registration / OR'),
+            (2, 'cr', 'Certificate of Registration (CR)'),
+            (3, 'ctpl', 'CTPL insurance'),
+            (4, 'comprehensive_insurance', 'Comprehensive insurance (rental use)'),
+            (5, 'dti', 'DTI business name registration'),
+            (6, 'mayors_permit', 'Business / Mayor''s Permit'),
+            (7, 'bir', 'BIR Certificate of Registration (Form 2303)'),
+            (8, 'rental_agreement', 'Rental agreement')
+          ) as k(n, type, label)
+          join public.car_documents d
+            on d.car_id = new.id
+           and (d.document_type = k.type or (k.type in ('or', 'cr') and d.document_type = 'orcr'))
+         order by k.n, d.created_at desc
+      ) latest
+     where latest.compliance_status <> 'approved';
+    if blocking is not null then
+      raise exception 'Approve or send back every document first: %', blocking;
+    end if;
+  end if;
+  return new;
+end;
+$reviewed$;
+
+drop trigger if exists enforce_vehicle_documents_reviewed on public.cars;
+create trigger enforce_vehicle_documents_reviewed
+  before update of status on public.cars
+  for each row execute function public.enforce_vehicle_documents_reviewed();
+
+-- Reproduced from CHAPTER 119 with rental_agreement accepted (it has no expiry).
+create or replace function public.submit_vehicle_document_update(p_car_id uuid,p_documents jsonb)
+returns uuid language plpgsql security definer set search_path=public as $submit$
+declare rid uuid; item jsonb; k text; path text; expiry timestamptz; replaced record;
+begin
+  if auth.uid() is null or not exists(select 1 from public.cars where id=p_car_id and owner_id=auth.uid()) then
+    raise exception 'Only the vehicle owner can submit documents'; end if;
+  perform 1 from public.cars where id=p_car_id for update;
+  if exists(select 1 from public.cars where id=p_car_id and deleted_at is not null) then
+    raise exception 'This vehicle was removed from SafeDrive. Open a support case to have it restored before submitting documents'; end if;
+  if p_documents is null or jsonb_typeof(p_documents)<>'array' or jsonb_array_length(p_documents)=0 then raise exception 'Upload at least one document'; end if;
+  insert into public.car_renewals(car_id,lister_id,status,document_update)
+    values(p_car_id,auth.uid(),'pending',true) returning id into rid;
+  for item in select * from jsonb_array_elements(p_documents) loop
+    k:=item->>'document_type'; path:=item->>'storage_path';
+    if k is null or k not in ('or','cr','ctpl','comprehensive_insurance','dti','mayors_permit','bir','rental_agreement') then raise exception 'Unsupported document type'; end if;
+    expiry:=nullif(item->>'valid_until','')::timestamptz;
+    if k in ('or','ctpl','comprehensive_insurance','dti','mayors_permit') and expiry is null then
+      raise exception 'Enter the expiry date shown on the % document',k; end if;
+    if path is null or path not like auth.uid()::text||'/'||p_car_id::text||'/%'
+      or not exists(select 1 from storage.objects where bucket_id='vehicle-private-documents' and name=path) then
+      raise exception 'Document must be uploaded to this vehicle private folder'; end if;
+    -- CHAPTER 119: the new file replaces one still waiting for the same document.
+    for replaced in
+      select id, renewal_id, storage_path from public.car_documents
+       where car_id=p_car_id and document_type=k and compliance_status='pending'
+         and renewal_id is distinct from rid
+       for update
+    loop
+      delete from public.car_documents where id=replaced.id;
+      insert into public.audit_log(user_id,action,entity_type,entity_id,details)
+        values(auth.uid(),'vehicle_document_replaced','car_document',replaced.id::text,
+          jsonb_build_object('car_id',p_car_id,'document_type',k,
+            'storage_path',replaced.storage_path,'replaced_by_renewal',rid));
+      if replaced.renewal_id is not null then
+        if not exists(select 1 from public.car_documents where renewal_id=replaced.renewal_id) then
+          delete from public.car_renewals where id=replaced.renewal_id;
+        elsif not exists(select 1 from public.car_documents
+                          where renewal_id=replaced.renewal_id and compliance_status='pending') then
+          update public.car_renewals
+             set status=case when exists(select 1 from public.car_documents
+                                          where renewal_id=replaced.renewal_id
+                                            and compliance_status in ('rejected','revoked'))
+                             then 'rejected' else 'approved' end,
+                 reviewed_at=now()
+           where id=replaced.renewal_id and status='pending';
+        end if;
+      end if;
+    end loop;
+    insert into public.car_documents(
+      car_id,document_type,storage_path,storage_bucket,renewal_id,valid_until,
+      content_sha256,provenance_status,provenance_source,provenance_summary,
+      ai_suspicion_score,ai_detector_name,ai_detector_version,review_flag)
+    values(
+      p_car_id,k,path,'vehicle-private-documents',rid,expiry,
+      nullif(item->>'content_sha256',''),
+      case when item->>'provenance_status' in
+        ('unknown','credential_present','credential_missing','credential_invalid')
+        then item->>'provenance_status' else 'unknown' end,
+      nullif(item->>'provenance_source',''),
+      nullif(item->>'provenance_summary',''),
+      case when (item->>'ai_suspicion_score') ~ '^[0-9]*\.?[0-9]+$'
+        and (item->>'ai_suspicion_score')::numeric between 0 and 1
+        then (item->>'ai_suspicion_score')::numeric else null end,
+      nullif(item->>'ai_detector_name',''),
+      nullif(item->>'ai_detector_version',''),
+      case when item->>'review_flag' in
+        ('none','needs_admin_review','approved_after_review','rejected_after_review')
+        then item->>'review_flag' else 'none' end);
+  end loop;
+  return rid;
+end;
+$submit$;
+revoke all on function public.submit_vehicle_document_update(uuid,jsonb) from public;
+grant execute on function public.submit_vehicle_document_update(uuid,jsonb) to authenticated;
+
+comment on column public.car_documents.compliance_status is
+  'Review state of this file. The rental agreement is reviewed here too; approving it approves its car_agreement_versions row (CHAPTER 128).';
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'agreement in force but not approved' as check_name,
+--        (select count(*)::text from public.car_agreement_versions v
+--           join public.car_documents d on d.id = v.document_id
+--          where v.status = 'approved' and d.compliance_status <> 'approved') as result,
+--        '0' as expected
+-- union all
+-- select 'car approval no longer approves the agreement',
+--        (select count(*)::text from pg_trigger where tgname = 'approve_latest_car_agreement_with_vehicle'),
+--        '0'
+-- union all
+-- select 'agreement review trigger in place',
+--        (select count(*)::text from pg_trigger where tgname = 'sync_rental_agreement_version'),
+--        '1';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

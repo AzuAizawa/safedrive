@@ -6,6 +6,9 @@ export const COMPLIANCE_DOCUMENTS = [
   { type: "dti", label: "DTI business name registration", short: "DTI", expires: true, optional: false },
   { type: "mayors_permit", label: "Business / Mayor's Permit", short: "Permit", expires: true, optional: false },
   { type: "bir", label: "BIR Certificate of Registration (Form 2303)", short: "BIR", expires: false, optional: false },
+  // Reviewed like the papers; a live car's lister replaces it from Document
+  // Renewal & Updates and the approved one stays in force meanwhile (CHAPTER 128).
+  { type: "rental_agreement", label: "Rental agreement", short: "Agreement", expires: false, optional: false },
 ] as const;
 
 export type ComplianceDocumentType = typeof COMPLIANCE_DOCUMENTS[number]["type"];

@@ -48,7 +48,6 @@ import {
   Car,
   CheckCircle,
   Eye,
-  ExternalLink,
   FileText,
   Loader2,
   RefreshCw,
@@ -192,17 +191,6 @@ const getDocumentProvenanceSummary = (documents: PendingCar["car_documents"]) =>
     (doc) => doc.review_flag === "needs_admin_review",
   ).length,
 });
-
-const getLatestRentalAgreement = (documents: PendingCar["car_documents"]) =>
-  documents
-    .filter(
-      (document) => document.document_type?.toLowerCase() === "rental_agreement",
-    )
-    .slice()
-    .sort(
-      (left, right) =>
-        new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
-    )[0];
 
 export default function AdminVehicleApprovalPage() {
   const { user: adminUser, can } = useAuth();
@@ -1195,65 +1183,6 @@ export default function AdminVehicleApprovalPage() {
                 </div>
               )}
 
-              {/* Rental Agreement: a listing can retain older uploads, but only the newest agreement is reviewable. */}
-              {getLatestRentalAgreement(selected.car_documents) && (
-                <div>
-                  <h4 className="font-semibold mb-2">Rental Agreement</h4>
-                  {(() => {
-                    const doc = getLatestRentalAgreement(selected.car_documents)!;
-                    return (
-                      <div key={doc.id} className="inline-block align-top">
-                        <div className="mb-1 flex flex-wrap gap-1">
-                          {(() => {
-                            const badge = getProvenanceBadge(
-                              asProvenanceStatus(doc.provenance_status),
-                            );
-                            return (
-                              <span
-                                className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${badge.className}`}
-                              >
-                                {badge.label}
-                              </span>
-                            );
-                          })()}
-                          {asReviewFlag(doc.review_flag) !== "none" &&
-                            (() => {
-                              const badge = getReviewFlagBadge(
-                                asReviewFlag(doc.review_flag),
-                              );
-                              return (
-                                <span
-                                  className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${badge.className}`}
-                                >
-                                  {badge.label}
-                                </span>
-                              );
-                            })()}
-                        </div>
-                        <a
-                          href={getUrl("vehicle-private-documents", doc.storage_path)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-block"
-                        >
-                          <div className="w-48 h-32 rounded-lg border bg-muted/40 hover:ring-2 hover:ring-primary cursor-pointer flex flex-col items-center justify-center gap-2 text-center p-4">
-                            <FileText className="w-8 h-8 text-primary" />
-                            <span className="text-sm font-medium">Open Rental Agreement</span>
-                            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                              Review document <ExternalLink className="w-3 h-3" />
-                            </span>
-                          </div>
-                        </a>
-                        <ImageAuthenticityBadge state={authenticity} path={doc.storage_path} className="mt-1 max-w-48" />
-                        <p className="mt-1 max-w-48 text-[11px] text-muted-foreground leading-snug">
-                          {doc.provenance_summary ||
-                            "No provenance scan summary is stored for this document."}
-                        </p>
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
 
               {/* Automated OCR verification */}
               <div

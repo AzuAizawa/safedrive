@@ -23,13 +23,18 @@ import {
 
 const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
 
-export function validateComplianceUpload(file: File): boolean {
-  if (!ALLOWED_TYPES.includes(file.type) || file.size > 10 * 1024 * 1024 || file.size === 0) {
-    toast.error("Upload a PDF, JPG, PNG or WebP, up to 10 MB.");
+export function validateComplianceUpload(file: File, pdfOnly = false): boolean {
+  const allowed = pdfOnly ? ["application/pdf"] : ALLOWED_TYPES;
+  if (!allowed.includes(file.type) || file.size > 10 * 1024 * 1024 || file.size === 0) {
+    toast.error(pdfOnly ? "Upload a PDF, up to 10 MB." : "Upload a PDF, JPG, PNG or WebP, up to 10 MB.");
     return false;
   }
   return true;
 }
+
+// The rental agreement is a contract renters read, so it stays a PDF as it was
+// when the car was added.
+const PDF_ONLY_DOCUMENTS = new Set(["rental_agreement"]);
 
 // Shows the file the lister just picked, before it is sent. An image gets a real
 // thumbnail so a wrong page or an upside-down scan is caught here rather than by
@@ -521,16 +526,16 @@ export default function VehicleCompliancePanel({
                         <span className="px-1 text-center">
                           {files[type.type] ? "Change file" : "Upload replacement"}
                         </span>
-                        <span className="text-[10px] text-muted-foreground">{uploadLimitText(".pdf,.jpg")}</span>
+                        <span className="text-[10px] text-muted-foreground">{uploadLimitText(PDF_ONLY_DOCUMENTS.has(type.type) ? ".pdf" : ".pdf,.jpg")}</span>
                         <input
                           key={`${type.type}:${revision}`}
                           type="file"
                           className="hidden"
                           disabled={busy}
-                          accept=".pdf,.jpg,.jpeg,.png,.webp"
+                          accept={PDF_ONLY_DOCUMENTS.has(type.type) ? ".pdf" : ".pdf,.jpg,.jpeg,.png,.webp"}
                           onChange={(e) => {
                             const file = e.target.files?.[0] ?? null;
-                            if (!file || validateComplianceUpload(file))
+                            if (!file || validateComplianceUpload(file, PDF_ONLY_DOCUMENTS.has(type.type)))
                               setFiles((old) => ({ ...old, [type.type]: file }));
                             else e.target.value = "";
                           }}

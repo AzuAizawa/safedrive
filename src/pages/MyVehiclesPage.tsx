@@ -545,7 +545,6 @@ export default function MyVehiclesPage() {
   const [editContact, setEditContact] = useState("");
   const [editAdditionalInfo, setEditAdditionalInfo] = useState("");
   const [editRentalUseConfirmed, setEditRentalUseConfirmed] = useState(false);
-  const [editRentalAgreement, setEditRentalAgreement] = useState<File | null>(null);
   const [editCarImages, setEditCarImages] = useState<File[]>([]);
   const [editing, setEditing] = useState(false);
   const [vehicleActionId, setVehicleActionId] = useState<string | null>(null);
@@ -1179,7 +1178,6 @@ export default function MyVehiclesPage() {
         setEditContact(v.contact_number || profile?.phone || "");
         setEditAdditionalInfo(v.additional_info || "");
         setEditRentalUseConfirmed(Boolean(v.insurer_rental_use_confirmed));
-        setEditRentalAgreement(null);
         setEditCarImages([]);
         setEditSubmitAttempted(false);
   };
@@ -1224,24 +1222,6 @@ export default function MyVehiclesPage() {
     const toastId = toast.loading("Saving changes...");
 
     try {
-      if (editRentalAgreement) {
-        toast.loading("Uploading new rental agreement...", { id: toastId });
-        const path = `${user?.id}/${editVehicle.id}/rental_agreement_${Date.now()}`;
-        const provenance = await inspectContentProvenance(editRentalAgreement);
-        const contentSha256 = await hashFileSha256(editRentalAgreement);
-        const result = await uploadFile(editRentalAgreement, "vehicle-private-documents", path);
-        if (!result.success) throw new Error(result.error || "Upload failed");
-
-        await supabase.from("car_documents").delete().eq("car_id", editVehicle.id).eq("document_type", "rental_agreement");
-        await insertCarDocument(
-          editVehicle.id,
-          "rental_agreement",
-          path,
-          provenance,
-          contentSha256,
-        );
-      }
-
       if (editCarImages.length > 0) {
         toast.loading("Uploading new car images...", { id: toastId });
         await supabase.from("car_images").delete().eq("car_id", editVehicle.id);
@@ -1258,7 +1238,7 @@ export default function MyVehiclesPage() {
         }
       }
 
-      if (editCarImages.length > 0 || editRentalAgreement) {
+      if (editCarImages.length > 0) {
         queueImageChecks({ scope: "car", carId: editVehicle.id });
       }
 
@@ -2400,8 +2380,8 @@ export default function MyVehiclesPage() {
                     ) : (
                       <>
                         Update booking-facing details like price and pickup info.
-                        Registration, CTPL, and comprehensive insurance are
-                        updated on the Registration &amp; Insurance Renewal page.
+                        Registration, insurance, the rental agreement and the other
+                        papers are updated on the Document Renewal &amp; Updates page.
                       </>
                     )}
                   </CardDescription>
@@ -2527,7 +2507,7 @@ export default function MyVehiclesPage() {
                       {editVehicle.comprehensive_insurance_expiry || "Not supplied"}
                     </p>
                     <p className="mt-1">
-                      These are updated with supporting documents through the{" "}
+                      These and your rental agreement are updated with supporting documents through the{" "}
                       <button
                         type="button"
                         className="font-medium text-primary underline underline-offset-2"
@@ -2536,7 +2516,7 @@ export default function MyVehiclesPage() {
                           navigate("/car-renewals");
                         }}
                       >
-                        Registration &amp; Insurance Renewal
+                        Document Renewal &amp; Updates
                       </button>{" "}
                       page, not here.
                     </p>
@@ -2744,38 +2724,6 @@ export default function MyVehiclesPage() {
                         </span>
                       </span>
                     </label>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Update Rental Agreement (PDF)</Label>
-                    <div className="flex items-center gap-4">
-                      <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded border border-dashed p-2 transition hover:bg-muted/50">
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Upload className="h-3 w-3" />
-                          {editRentalAgreement ? editRentalAgreement.name : "Choose New PDF (leave blank to keep current)"}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">{uploadLimitText("pdf")}</span>
-                        <input
-                          type="file"
-                          accept="application/pdf"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0] || null;
-                            if (!file) {
-                              setEditRentalAgreement(null);
-                              return;
-                            }
-                            if (validateUploadFile(file, ALLOWED_PDF_TYPES, "rental agreement")) {
-                              setEditRentalAgreement(file);
-                            } else {
-                              e.currentTarget.value = "";
-                            }
-                          }}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      If you require a security deposit from renters, state its terms directly in this agreement - SafeDrive does not collect, hold, or mediate security deposits between you and the renter.
-                    </p>
                   </div>
                   <div className="space-y-2 pb-2">
                     <Label>Update Car Images</Label>
