@@ -159,13 +159,16 @@ export default async function handler(req: Request) {
       const providerListUrl = new URL("https://api.paymongo.com/v1/payments");
       providerListUrl.searchParams.set("limit", "100");
       providerListUrl.searchParams.set("status", "paid");
-      providerListUrl.searchParams.set("created_at[gte]", String(Math.floor(new Date(periodStart).getTime() / 1000)));
+      // PayMongo answers any created_at[gte] filter with HTTP 500, so the
+      // period is applied to the returned records instead.
+      const periodStartSeconds = Math.floor(new Date(periodStart).getTime() / 1000);
       const providerListResponse = await fetch(providerListUrl, { headers: { Accept: "application/json", Authorization: authorization } });
       if (providerListResponse.ok) {
         const providerList = await providerListResponse.json();
-        const providerRecords = Array.isArray(providerList?.data) ? providerList.data : [];
+        const listedRecords: Array<{ id?: unknown; attributes?: { amount?: unknown; created_at?: unknown } }> = Array.isArray(providerList?.data) ? providerList.data : [];
+        const providerRecords = listedRecords.filter((record) => Number(record?.attributes?.created_at) >= periodStartSeconds);
         providerPaymentRecordsChecked = providerRecords.length;
-        providerPaymentListTruncated = providerRecords.length === 100;
+        providerPaymentListTruncated = listedRecords.length === 100;
         if (providerPaymentListTruncated) {
           issues.push({ issue_type: "provider_payment_list_may_be_truncated", severity: "warning", provider_reference: "first 100 paid payments" });
         }
@@ -188,12 +191,22 @@ export default async function handler(req: Request) {
       if (journal.status !== "finalized") issues.push({ booking_id: journal.booking_id, issue_type: "draft_ledger_journal_requires_review", severity: "warning", provider_reference: journal.provider_reference, local_reference: journal.id });
     }
 
-    if (issues.length) {
-      const { error: itemError } = await supabase.from("reconciliation_items").insert(issues.map((issue) => ({ ...issue, run_id: run.id, status: "open" })));
+    // A problem already open from an earlier run is not filed again: every
+    // run used to add a fresh copy, so one old checkout became three rows and
+    // re-sent the critical alert each time.
+    const { data: openItems, error: openError } = await supabase.from("reconciliation_items").select("issue_type, booking_id, provider_reference, local_reference").eq("status", "open");
+    if (openError) throw openError;
+    const issueKey = (issue: Pick<Issue, "issue_type" | "booking_id" | "provider_reference" | "local_reference">) =>
+      [issue.issue_type, issue.booking_id ?? "", issue.provider_reference ?? "", issue.local_reference ?? ""].join("|");
+    const alreadyOpen = new Set((openItems ?? []).map(issueKey));
+    const newIssues = issues.filter((issue) => !alreadyOpen.has(issueKey(issue)));
+    if (newIssues.length) {
+      const { error: itemError } = await supabase.from("reconciliation_items").insert(newIssues.map((issue) => ({ ...issue, run_id: run.id, status: "open" })));
       if (itemError) throw itemError;
     }
-    const criticalCount = issues.filter((issue) => issue.severity === "critical").length;
-    const { error: completionError } = await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString(), summary: { issues: issues.length, critical: criticalCount, records_checked: { payments: payments.length, journals: journals.length, subscriptions: subscriptionsResult.data?.length ?? 0 }, provider_checks_enabled: Boolean(paymongoKey), provider_checkout_groups_checked: paymongoKey ? providerCheckoutGroups.length : 0, provider_payment_records_checked: providerPaymentRecordsChecked, provider_checks_unavailable: providerChecksUnavailable, provider_checks_truncated: Boolean(paymongoKey && (allProviderCheckoutGroups.length > providerCheckoutGroups.length || providerPaymentListTruncated)) } }).eq("id", run.id);
+    // The summary counts everything found; the alert only what is new.
+    const criticalCount = newIssues.filter((issue) => issue.severity === "critical").length;
+    const { error: completionError } = await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString(), summary: { issues: issues.length, new_issues: newIssues.length, critical: issues.filter((issue) => issue.severity === "critical").length, records_checked: { payments: payments.length, journals: journals.length, subscriptions: subscriptionsResult.data?.length ?? 0 }, provider_checks_enabled: Boolean(paymongoKey), provider_checkout_groups_checked: paymongoKey ? providerCheckoutGroups.length : 0, provider_payment_records_checked: providerPaymentRecordsChecked, provider_checks_unavailable: providerChecksUnavailable, provider_checks_truncated: Boolean(paymongoKey && (allProviderCheckoutGroups.length > providerCheckoutGroups.length || providerPaymentListTruncated)) } }).eq("id", run.id);
     if (completionError) throw completionError;
     if (criticalCount > 0) {
       const { data: superAdmins } = await supabase.from("profiles").select("id").eq("role", "super_admin").is("deleted_at", null);
