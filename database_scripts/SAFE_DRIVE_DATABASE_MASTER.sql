@@ -20025,4 +20025,71 @@ commit;
 --        '1';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 127 - A newly approved car waits in Inactive for its lister
+-- Apply this chapter only. One function and one trigger are added. No car is
+-- changed when it is applied.
+-- ============================================================================
+-- A lister's slots used to cap how many cars they could have at all, in any
+-- state, and an approved car went straight into the live count even though it
+-- has no price or pickup location yet (CHAPTER 114) and no renter can see it.
+--
+-- Slots now cap only the cars that are live at once. A lister may add as many
+-- cars as they like; when one is approved for the first time it is moved to
+-- inactive straight away, and the lister sets it up and turns on the ones they
+-- want. Turning a car on is already refused while the plan is full
+-- (trg_enforce_live_car_limit), so that is where the limit is kept.
+--
+-- The car still passes through 'approved': every check and side effect tied to
+-- approval (documents reviewed, registration and CTPL current, the rental
+-- agreement approved, compliance_previously_approved set) runs as before. This
+-- trigger fires after them and moves the car on.
+--
+-- Only a first approval is moved. A car that was approved before and came back
+-- to review - an edited plate, a renewal - keeps its approval and its place,
+-- since it may have bookings waiting.
+begin;
+
+create or replace function public.park_newly_approved_car()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $park_newly_approved_car$
+begin
+  if new.status = 'approved'
+     and old.status is distinct from 'approved'
+     and not old.compliance_previously_approved then
+    update public.cars set status = 'inactive' where id = new.id;
+  end if;
+  return null;
+end;
+$park_newly_approved_car$;
+
+revoke all on function public.park_newly_approved_car() from public, anon, authenticated;
+
+drop trigger if exists park_newly_approved_car on public.cars;
+create trigger park_newly_approved_car
+  after update of status on public.cars
+  for each row execute function public.park_newly_approved_car();
+
+comment on column public.cars.compliance_previously_approved is
+  'True once the car has ever been approved. Its first approval lands in inactive (CHAPTER 127).';
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'park trigger in place' as check_name,
+--        (select count(*)::text from pg_trigger where tgname = 'park_newly_approved_car') as result,
+--        '1' as expected
+-- union all
+-- select 'live cars over their slots',
+--        (select count(*)::text from (
+--           select owner_id from public.cars
+--            where status in ('approved', 'active') and deleted_at is null
+--            group by owner_id
+--           having count(*) > public.vehicle_slot_allowance(owner_id)) over_limit),
+--        '0';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

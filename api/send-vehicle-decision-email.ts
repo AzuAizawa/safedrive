@@ -102,7 +102,7 @@ export default async function handler(req: Request) {
             // approved car is listed only once its lister sets them.
             message:
               typedCar.price_per_day == null || !typedCar.location?.trim()
-                ? `Your ${vehicle} has been approved. Set its price per day and pickup location from My Vehicles to list it for renters.`
+                ? `Your ${vehicle} has been approved. Set its price per day and pickup location from My Vehicles, then turn it on to list it for renters.`
                 : `Your ${vehicle} has been approved and is now listed on SafeDrive.`,
             link: "/my-vehicles",
           }

@@ -873,9 +873,11 @@ export default function MyVehiclesPage() {
   const baseSlots = slotSettings.free;
   const bonusSlots = planExtraSlots(slotSettings, activeSub?.plan_type);
   const maxSlots = baseSlots + bonusSlots;
-  const canAddMore = vehicles.length < maxSlots;
+  // Slots cap the cars live at once, not how many a lister may add: a newly
+  // approved car waits in Inactive until it is set up and turned on
+  // (CHAPTER 127).
+  const liveCount = vehicles.filter((v) => v.status === "approved" || v.status === "active").length;
   const isVerifiedLister = profile?.verified_status === "verified";
-  const slotsRemaining = Math.max(maxSlots - vehicles.length, 0);
   // A new listing needs somewhere to send its rental payouts. Cars already
   // listed keep working - only adding another one waits for this (CHAPTER 99,
   // which enforces the same rule in the database).
@@ -888,9 +890,7 @@ export default function MyVehiclesPage() {
     ? "Finish account verification first. Only verified users can submit vehicles for admin approval."
     : !hasPayoutDestination
       ? "Add your GCash or Maya payout details before adding another vehicle. That is where SafeDrive sends the rental payments for it."
-      : !canAddMore
-        ? `Your current plan already uses all ${maxSlots} available listing slots.`
-        : null;
+      : null;
   // Fixed order for a lister's own list (no filter/sort controls - this page is
   // for adding cars and tracking their approval, not browsing): live listings
   // first, then pending review, then rejected/inactive; newest first in each.
@@ -1331,9 +1331,13 @@ export default function MyVehiclesPage() {
   const enableVehicleListing = async (vehicle: VehicleRow) => {
     if (!user) return;
 
-    const liveCount = vehicles.filter((item) =>
-      isLiveVehicle(item.status),
-    ).length;
+    // Turning on a car renters could not see anyway would only spend a slot.
+    if (needsListingSetup(vehicle)) {
+      toast.error("Finish setting up this car first", {
+        description: "Set its price per day and pickup location from Edit, then turn it on.",
+      });
+      return;
+    }
     if (liveCount >= maxSlots) {
       toast.error("Vehicle slot limit reached", {
         description: `Your current plan allows ${maxSlots} live listing${
@@ -1553,7 +1557,7 @@ export default function MyVehiclesPage() {
           <h1 className="text-3xl font-bold tracking-tight">My Vehicles</h1>
           <div className="flex flex-wrap items-center gap-3 mt-1">
             <p className="text-muted-foreground">
-              {vehicles.length}/{maxSlots} slots used
+              {liveCount}/{maxSlots} live
             </p>
             <span className={`text-xs font-bold px-2 py-0.5 rounded-full border capitalize ${
               activeSub?.plan_type === "premium"
@@ -1571,7 +1575,7 @@ export default function MyVehiclesPage() {
             )}
           </div>
         </div>
-        {isVerifiedLister && hasPayoutDestination && canAddMore && !showForm && (
+        {isVerifiedLister && hasPayoutDestination && !showForm && (
           <Button onClick={() => setShowForm(true)} className="gap-2">
             <Plus className="w-4 h-4" /> Add Vehicle
           </Button>
@@ -1590,7 +1594,7 @@ export default function MyVehiclesPage() {
             </Button>
           </Link>
         )}
-        {isVerifiedLister && !canAddMore && !showForm && (
+        {isVerifiedLister && liveCount >= maxSlots && !showForm && (
           <Link to="/subscriptions">
             <Button variant="outline" className="gap-2 border-primary/40 text-primary">
               Upgrade Plan
@@ -1646,12 +1650,11 @@ export default function MyVehiclesPage() {
               </p>
             </div>
 
-            <div className={`rounded-lg border px-3 py-3 text-sm ${canAddMore ? "border-emerald-500/20 bg-emerald-500/5" : "border-amber-500/20 bg-amber-500/5"}`}>
-              <p className="font-medium">Available listing slots</p>
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-3 text-sm">
+              <p className="font-medium">Live listing slots</p>
               <p className="mt-1 text-muted-foreground">
-                {canAddMore
-                  ? `${slotsRemaining} slot${slotsRemaining === 1 ? "" : "s"} remaining on your current plan.`
-                  : `All ${maxSlots} slots are currently used. Upgrade your plan before adding another vehicle.`}
+                {liveCount} of {maxSlots} live. Add as many cars as you like; up to {maxSlots} can be
+                turned on at once.
               </p>
             </div>
           </div>
@@ -1686,7 +1689,8 @@ export default function MyVehiclesPage() {
           <CardHeader>
             <CardTitle>List a New Vehicle</CardTitle>
             <CardDescription>
-              Your vehicle will be reviewed by our team before going live.{" "}
+              Your vehicle will be reviewed by our team. Once approved it waits in Inactive until
+              you set its price and pickup location and turn it on.{" "}
               {vehicleVerificationEta}
             </CardDescription>
           </CardHeader>
@@ -2850,7 +2854,7 @@ export default function MyVehiclesPage() {
         title="Delete vehicle listing?"
         description={
           deleteTargetVehicle
-            ? `Delete ${deleteTargetVehicle.car_models.car_brands.name} ${deleteTargetVehicle.car_models.name} (${deleteTargetVehicle.plate_number})? Deleting removes this car's plate, documents and photos and frees a slot. Past bookings and earnings stay on record. To list it again, add it as a new car.`
+            ? `Delete ${deleteTargetVehicle.car_models.car_brands.name} ${deleteTargetVehicle.car_models.name} (${deleteTargetVehicle.plate_number})? Deleting removes this car's plate, documents and photos. Past bookings and earnings stay on record. To list it again, add it as a new car.`
             : ""
         }
         confirmText="Delete Vehicle"

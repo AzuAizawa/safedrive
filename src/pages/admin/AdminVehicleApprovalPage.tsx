@@ -587,7 +587,7 @@ export default function AdminVehicleApprovalPage() {
           // Papers first, listing details after (CHAPTER 114).
           message:
             selected.price_per_day == null || !selected.location?.trim()
-              ? `Your ${selected.car_models.car_brands.name} ${selected.car_models.name} has been approved. Set its price per day and pickup location from My Vehicles to list it for renters.`
+              ? `Your ${selected.car_models.car_brands.name} ${selected.car_models.name} has been approved. Set its price per day and pickup location from My Vehicles, then turn it on to list it for renters.`
               : `Your ${selected.car_models.car_brands.name} ${selected.car_models.name} has been approved and is now listed.`,
           type: "success",
           link: "/my-vehicles",
@@ -619,7 +619,7 @@ export default function AdminVehicleApprovalPage() {
         });
       toast.success(
         selected.price_per_day == null || !selected.location?.trim()
-          ? "Vehicle approved. The lister now sets its price and pickup location."
+          ? "Vehicle approved. It waits in the lister's Inactive list until they set it up and turn it on."
           : "Vehicle approved and listed!",
       );
       setSelected(null);

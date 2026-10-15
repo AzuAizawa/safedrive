@@ -57,7 +57,7 @@ const buildPlans = (slots: PlanSettings) => [
     iconColor: "text-muted-foreground",
     cardClass: "border-2 hover:border-primary/30 transition-colors",
     additional_slots: 0,
-    features: [`List up to ${slots.free} vehicle${slots.free === 1 ? "" : "s"}`],
+    features: [`Up to ${slots.free} live listing${slots.free === 1 ? "" : "s"} at once`],
     cta: "Current Plan",
     ctaVariant: "outline" as const,
   },
@@ -74,7 +74,7 @@ const buildPlans = (slots: PlanSettings) => [
     badge: "Popular",
     badgeClass: "bg-blue-500/10 text-blue-500 border-blue-500/30",
     features: [
-      `${slots.free + slots.proExtra} total vehicle slots`,
+      `${slots.free + slots.proExtra} live listing slots`,
       `+${slotWord(slots.proExtra)} compared with Free`,
     ],
     cta: "Choose Pro",
@@ -94,7 +94,7 @@ const buildPlans = (slots: PlanSettings) => [
     badge: "Best Value",
     badgeClass: "bg-amber-500/10 text-amber-500 border-amber-500/30",
     features: [
-      `${slots.free + slots.premiumExtra} total vehicle slots`,
+      `${slots.free + slots.premiumExtra} live listing slots`,
       ...(slots.premiumExtra > slots.proExtra
         ? [`+${slotWord(slots.premiumExtra - slots.proExtra)} compared with Pro`]
         : []),
@@ -276,7 +276,7 @@ export default function SubscriptionPlansPage() {
           Choose Your Plan
         </h1>
         <p className="mt-3 max-w-2xl text-lg text-muted-foreground">
-          Upgrade only the number of vehicle slots available to your lister account.
+          Upgrade only how many of your cars can be live at once. You can add as many cars as you like on any plan.
         </p>
         {!loading && currentSub && (
           <div className="mt-4 space-y-2">
