@@ -2421,9 +2421,15 @@ export default function MyVehiclesPage() {
                 <CardHeader className="relative shrink-0 border-b border-border/60 pb-4 pr-12">
                   <CardTitle>Edit Listing: {editVehicle.plate_number}</CardTitle>
                   <CardDescription>
-                    Update booking-facing details like price and pickup info.
-                    Registration, CTPL, and comprehensive insurance are
-                    updated on the Registration &amp; Insurance Renewal page.
+                    {editVehicle.status === "pending" ? (
+                      "Under admin review. Only documents sent back for correction can be changed here."
+                    ) : (
+                      <>
+                        Update booking-facing details like price and pickup info.
+                        Registration, CTPL, and comprehensive insurance are
+                        updated on the Registration &amp; Insurance Renewal page.
+                      </>
+                    )}
                   </CardDescription>
                   <button
                     type="button"
@@ -2457,6 +2463,16 @@ export default function MyVehiclesPage() {
                         />
                       </div>
                     )}
+                  {/* Under review only the documents matter: price, pickup and the
+                      rest are set once the car is approved (CHAPTER 114). */}
+                  {editVehicle.status === "pending" &&
+                    !(corrections[editVehicle.id] ?? []).some((item) => !item.waiting) && (
+                      <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-muted-foreground">
+                        This car is still under review. Price, pickup location and other
+                        listing details can be set once it is approved.
+                      </p>
+                    )}
+                  {editVehicle.status !== "pending" && (<>
                   <ListingErrorSummary
                     id="edit-listing-error-summary"
                     errors={shownEditErrors}
@@ -2834,11 +2850,13 @@ export default function MyVehiclesPage() {
                       </p>
                     </div>
                   </div>
+                  </>)}
                 </CardContent>
                 <CardFooter className="shrink-0 gap-3 border-t border-border/60 bg-card px-6 py-4">
                   <Button variant="outline" className="flex-1" onClick={() => setEditVehicle(null)} disabled={editing}>
-                    Cancel
+                    {editVehicle.status === "pending" ? "Close" : "Cancel"}
                   </Button>
+                  {editVehicle.status !== "pending" && (
                   <Button
                     className="flex-1"
                     onClick={handleUpdateVehicle}
@@ -2850,6 +2868,7 @@ export default function MyVehiclesPage() {
                       "Save Changes"
                     )}
                   </Button>
+                  )}
                 </CardFooter>
               </Card>
             </div>

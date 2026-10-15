@@ -31,7 +31,8 @@ const manila = (value: string) =>
  * the retention schedule. Nothing is approved here: a deletion runs on its
  * date unless its owner signs in and keeps the account, and one that is held
  * (a suspension, an unfinished booking or payout) is handled from User
- * Management. Requests filed before CHAPTER 121 stay listed as history.
+ * Management. Older privacy requests of other kinds stay in the table but are
+ * not listed here.
  */
 export default function AdminRetentionRequestsPage() {
   const [requests, setRequests] = useState<Request[]>([]);
@@ -42,7 +43,9 @@ export default function AdminRetentionRequestsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     const [requestResult, ruleResult] = await Promise.all([
-      supabase.from("data_retention_requests").select("*").order("created_at", { ascending: false }),
+      // Deletions only: an old correction or access request is not one, and its
+      // due date read as a deletion date.
+      supabase.from("data_retention_requests").select("*").eq("request_type", "deletion").order("created_at", { ascending: false }),
       supabase.from("retention_policy_rules").select("*").order("record_category"),
     ]);
     const error = requestResult.error || ruleResult.error;

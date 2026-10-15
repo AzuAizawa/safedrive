@@ -436,7 +436,8 @@ export default function VehicleCompliancePanel({
                         {STATUS_BADGES[d.compliance_status]?.label ?? d.compliance_status}
                       </span>
                       {d.renewal_id && d.compliance_status === "pending" ? "Replacement you sent · " : ""}
-                      {new Date(d.created_at).toLocaleDateString()}
+                      {/* Labelled: a bare date read as an expiry on documents that have none. */}
+                      Uploaded {new Date(d.created_at).toLocaleDateString("en-PH", { timeZone: "Asia/Manila" })}
                       {d.valid_until
                         ? ` · expiry ${new Date(d.valid_until).toLocaleDateString("en-PH", { timeZone: "Asia/Manila" })}`
                         : ""}
