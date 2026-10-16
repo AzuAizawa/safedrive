@@ -369,6 +369,8 @@ export default function ListerBookingsPage() {
   const [supportOpenCount, setSupportOpenCount] = useState(0);
   const [recentNotifications, setRecentNotifications] = useState<ListerNotificationItem[]>([]);
   const [payoutLogs, setPayoutLogs] = useState<Payment[]>([]);
+  // What the renter paid and was refunded; read for the cancelled-booking summary.
+  const [renterPaymentLogs, setRenterPaymentLogs] = useState<Payment[]>([]);
   const [payoutLogsLoading, setPayoutLogsLoading] = useState(false);
   const [renterReputations, setRenterReputations] = useState<
     Record<string, RenterReputation>
@@ -717,6 +719,7 @@ export default function ListerBookingsPage() {
         const bookingIds = bookings.map((booking) => booking.id);
         if (bookingIds.length === 0) {
           setPayoutLogs([]);
+          setRenterPaymentLogs([]);
           return;
         }
 
@@ -724,11 +727,12 @@ export default function ListerBookingsPage() {
           .from("payments")
           .select("*")
           .in("booking_id", bookingIds)
-          .eq("payment_type", "payout")
           .order("created_at", { ascending: false });
 
         if (error) throw error;
-        setPayoutLogs((data as Payment[]) ?? []);
+        const rows = (data as Payment[]) ?? [];
+        setPayoutLogs(rows.filter((payment) => payment.payment_type === "payout"));
+        setRenterPaymentLogs(rows.filter((payment) => payment.payment_type !== "payout"));
       } catch (error) {
         console.error("Error fetching payout logs:", error);
         toast.error("Failed to load payout history");
@@ -1807,6 +1811,64 @@ export default function ListerBookingsPage() {
     profile?.payout_method && profile?.payout_account_name && profile?.payout_account_number,
   );
 
+  // A cancelled booking's money, both sides: what the renter got back and what
+  // the lister keeps as compensation (server/cancellationCompensation.ts pays it
+  // as a payout row once the last refund is settled).
+  const getCancellationMoney = useCallback(
+    (booking: ListerBooking) => {
+      const rows = renterPaymentLogs.filter((payment) => payment.booking_id === booking.id);
+      const paid = rows
+        .filter((payment) => payment.payment_type !== "refund" && payment.status === "completed")
+        .reduce((total, payment) => total + Math.max(0, Number(payment.amount) || 0), 0);
+      const refunds = rows.filter((payment) => payment.payment_type === "refund");
+      const refunded = refunds.reduce((total, payment) => total + Math.abs(Number(payment.amount) || 0), 0);
+      const refundOpen = refunds.some((payment) => payment.status !== "completed");
+      const payout = latestPayoutByBooking.get(booking.id);
+
+      if (paid <= 0 && refunds.length === 0 && !payout) {
+        return {
+          settled: true,
+          refundLine: "No payment was taken, so nothing is refunded or owed.",
+          compensationLine: null as string | null,
+        };
+      }
+
+      const refundLine =
+        refunds.length === 0
+          ? "Renter refund: not recorded yet"
+          : `Renter refunded: ${formatPeso(refunded)} - ${
+              !refundOpen
+                ? "Completed"
+                : refunds.some((payment) => payment.status === "failed")
+                  ? "Needs review"
+                  : refunds.some((payment) => payment.payment_method === "manual_review")
+                    ? "Waiting for admin review"
+                    : "Processing"
+            }`;
+
+      const compensationLine = payout
+        ? `Your compensation: ${formatPeso(Number(payout.amount) || 0)} - ${
+            payout.status === "completed"
+              ? "Released"
+              : payout.status === "failed"
+                ? "Needs review"
+                : "Processing"
+          }`
+        : refundOpen || refunds.length === 0
+          ? "Your compensation: decided once the renter's refund is settled"
+          : refunded >= paid
+            ? "Your compensation: none - the renter was refunded in full"
+            : "Your compensation: not released yet";
+
+      return {
+        settled: !refundOpen && refunds.length > 0 && (!payout || payout.status === "completed"),
+        refundLine,
+        compensationLine,
+      };
+    },
+    [latestPayoutByBooking, renterPaymentLogs],
+  );
+
   const getBookingPayoutStatus = useCallback(
     (booking: ListerBooking) => {
       const payoutRecord = latestPayoutByBooking.get(booking.id);
@@ -2812,8 +2874,11 @@ export default function ListerBookingsPage() {
             const latestApprovedEarly = latestApprovedEarlyReturn(earlyReturnsByBooking[b.id]);
             const processGuidance = getProcessGuidance(b, apparentState);
             const payoutStatus = getBookingPayoutStatus(b);
+            const cancellationMoney =
+              apparentState === "cancelled" ? getCancellationMoney(b) : null;
             const shouldShowPayoutStatus =
-              apparentState === "completed" || Boolean(latestPayoutByBooking.get(b.id));
+              !cancellationMoney &&
+              (apparentState === "completed" || Boolean(latestPayoutByBooking.get(b.id)));
             const showProjectedPayout = [
               "downpayment_paid",
               "fully_paid",
@@ -3122,6 +3187,22 @@ export default function ListerBookingsPage() {
                           </p>
                           <p className="mt-1 font-semibold">{nextStep.title}</p>
                           <p className="mt-1 opacity-80">{nextStep.body}</p>
+                        </div>
+                      ) : null}
+
+                      {cancellationMoney ? (
+                        <div
+                          className={`mt-2 w-full rounded-lg border px-3 py-2 text-left text-[11px] leading-relaxed ${
+                            cancellationMoney.settled
+                              ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : "border-blue-500/20 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                          }`}
+                        >
+                          <p className="font-semibold">Cancellation money</p>
+                          <p className="mt-1">{cancellationMoney.refundLine}</p>
+                          {cancellationMoney.compensationLine ? (
+                            <p className="mt-1">{cancellationMoney.compensationLine}</p>
+                          ) : null}
                         </div>
                       ) : null}
 
