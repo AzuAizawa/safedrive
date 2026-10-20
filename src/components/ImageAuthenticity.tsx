@@ -11,7 +11,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -297,18 +297,13 @@ export function ImageAuthenticitySummary({
   // when Walter is down. An upload only ever uses Walter Writes.
   const providerMenu = (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="gap-1 px-2"
-          disabled={state.loading || state.running}
-          aria-label={`Detector: ${providerLabel}. Change detector`}
-        >
-          {providerLabel}
-          <ChevronDown className="h-3.5 w-3.5" />
-        </Button>
+      <DropdownMenuTrigger
+        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1 px-2")}
+        disabled={state.loading || state.running}
+        aria-label={`Detector: ${providerLabel}. Change detector`}
+      >
+        {providerLabel}
+        <ChevronDown className="h-3.5 w-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
         <DropdownMenuLabel className="text-xs">Detector for this check</DropdownMenuLabel>
