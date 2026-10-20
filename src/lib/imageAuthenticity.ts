@@ -22,6 +22,7 @@ const post = async (
   mode: "run" | "force" | "peek" = "run",
   keepalive = false,
   provider: DetectorProvider = "walter",
+  since: string | null = null,
 ) => {
   const {
     data: { session },
@@ -31,7 +32,7 @@ const post = async (
     method: "POST",
     keepalive,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify({ ...subject, force: mode === "force", peek: mode === "peek", provider }),
+    body: JSON.stringify({ ...subject, force: mode === "force", peek: mode === "peek", provider, since }),
   });
 };
 
@@ -54,8 +55,9 @@ export const fetchImageChecks = async (
   subject: AuthenticitySubject,
   mode: "run" | "force" | "peek" = "peek",
   provider: DetectorProvider = "walter",
+  since: string | null = null,
 ) => {
-  const response = await post(subject, mode, false, provider);
+  const response = await post(subject, mode, false, provider, since);
   if (!response) throw new Error("Sign in again to check images.");
   const payload = (await response.json().catch(() => ({}))) as Partial<AuthenticityResponse> & { error?: string };
   if (!response.ok) throw new Error(payload.error || "Image check is unavailable.");

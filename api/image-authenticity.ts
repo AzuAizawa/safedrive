@@ -31,6 +31,12 @@ type Payload = {
   force?: boolean;
   peek?: boolean;
   provider?: DetectorProvider;
+  /**
+   * A reviewer's "check everything again": every file whose check is at or
+   * before this server time is checked anew. The screen sends the newest
+   * checked_at it holds, so the cutoff never depends on the reviewer's clock.
+   */
+  since?: string;
 };
 
 type SubjectKind = "identity" | "vehicle_photo" | "vehicle_document";
@@ -182,9 +188,14 @@ export async function POST(req: Request) {
     };
     const force = reviewer && payload.force === true;
     const peek = reviewer && payload.peek === true;
+    const sinceTime = reviewer && payload.since ? new Date(payload.since).getTime() : NaN;
+    const redo = (file: SourceFile) => {
+      const check = find(file);
+      return Number.isFinite(sinceTime) && check !== undefined && new Date(check.checked_at).getTime() <= sinceTime;
+    };
     const queue = peek
       ? []
-      : files.filter((file) => !file.historical && needsCheck(find(file), file.created_at, force));
+      : files.filter((file) => !file.historical && (redo(file) || needsCheck(find(file), file.created_at, force)));
 
     const started = Date.now();
     let processed = 0;
@@ -233,7 +244,7 @@ export async function POST(req: Request) {
     const remaining = files.filter((file) => {
       if (file.historical) return false;
       const check = find(file);
-      return !check || check.status === "pending" || needsCheck(check, file.created_at, false);
+      return !check || check.status === "pending" || redo(file) || needsCheck(check, file.created_at, false);
     }).length;
 
     if (!reviewer) return jsonResponse({ ok: true, remaining });

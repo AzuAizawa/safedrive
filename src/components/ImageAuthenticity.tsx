@@ -11,6 +11,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -54,6 +55,8 @@ export type ImageAuthenticityState = {
   run: () => Promise<void>;
   /** Also retry files the detector could not do - expired trial, no credits. */
   recheck: () => Promise<void>;
+  /** Check every file again with the chosen detector, replacing its current result. */
+  recheckAll: () => Promise<void>;
   running: boolean;
   /** The detector the reviewer's buttons use: Walter Writes, or Sightengine as the backup. */
   provider: DetectorProvider;
@@ -85,20 +88,31 @@ export function useImageAuthenticity(subject: AuthenticitySubject | null): Image
   subjectRef.current = subject;
   const providerRef = useRef(provider);
   providerRef.current = provider;
+  const checksRef = useRef(checks);
+  checksRef.current = checks;
+  // Set while "check all again" is under way: the newest server checked_at at
+  // the moment it was pressed. Everything checked at or before it is redone.
+  const sinceRef = useRef<string | null>(null);
   const polls = useRef(0);
 
   const request = useCallback(async (mode: "run" | "force" | "peek") => {
     const current = subjectRef.current;
-    if (!current) return;
+    if (!current) return null;
     try {
-      const result = await fetchImageChecks(current, mode, providerRef.current);
+      const result = await fetchImageChecks(current, mode, providerRef.current, sinceRef.current);
       setChecks(indexChecks(result.checks));
       setRemaining(result.remaining);
       setStopReason(result.stopReason);
       setProviders(result.providers);
       setError(null);
+      // A wait on the per-minute limit keeps the cutoff, so the poll finishes the redo.
+      const waitingOnLimit = result.stopReason === "rate_limited" || result.stopReason === "busy";
+      if (result.remaining === 0 || (result.stopReason && !waitingOnLimit)) sinceRef.current = null;
+      return result;
     } catch (reason) {
+      sinceRef.current = null;
       setError(reason instanceof Error ? reason.message : "Image check is unavailable.");
+      return null;
     }
   }, []);
 
@@ -109,6 +123,7 @@ export function useImageAuthenticity(subject: AuthenticitySubject | null): Image
     setError(null);
     setActive(false);
     polls.current = 0;
+    sinceRef.current = null;
     if (!key) return;
     setLoading(true);
     void request("peek").finally(() => setLoading(false));
@@ -138,6 +153,20 @@ export function useImageAuthenticity(subject: AuthenticitySubject | null): Image
   );
   const run = useCallback(() => start("run"), [start]);
   const recheck = useCallback(() => start("force"), [start]);
+  const recheckAll = useCallback(async () => {
+    const times = Object.values(checksRef.current).map((check) => new Date(check.checked_at).getTime());
+    sinceRef.current = times.length ? new Date(Math.max(...times)).toISOString() : null;
+    polls.current = 0;
+    setActive(true);
+    setRunning(true);
+    // The server checks a few files per call; keep going until all are done
+    // or the detector stops (a wait on its per-minute limit is polled after).
+    for (let round = 0; round < 8; round += 1) {
+      const result = await request("force");
+      if (!result || result.remaining === 0 || result.stopReason) break;
+    }
+    setRunning(false);
+  }, [request]);
 
   // A stop reason belongs to the detector that gave it.
   const chooseProvider = useCallback((next: DetectorProvider) => {
@@ -153,6 +182,7 @@ export function useImageAuthenticity(subject: AuthenticitySubject | null): Image
     stopReason,
     run,
     recheck,
+    recheckAll,
     running,
     provider,
     setProvider: chooseProvider,
@@ -271,6 +301,7 @@ export function ImageAuthenticitySummary({
   paths: string[];
   className?: string;
 }) {
+  const [confirmAll, setConfirmAll] = useState(false);
   const unique = [...new Set(paths)];
   const described = unique.map((path) => describeCheck(state.checks[path]));
   const count = (tone: AuthenticityTone) => described.filter((item) => item.tone === tone).length;
@@ -384,7 +415,24 @@ export function ImageAuthenticitySummary({
           </Button>
           {providerMenu}
           </div>
-        ) : null}
+        ) : (
+          // Every file has an answer: the reviewer may still ask again, with
+          // either detector - for a second opinion, or after Walter Writes was down.
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={state.loading || state.running}
+              onClick={() => setConfirmAll(true)}
+            >
+              {state.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Check all again ({unique.length})
+            </Button>
+            {providerMenu}
+          </div>
+        )}
       </div>
 
       {!state.loading && overall.suggestion && overall.average != null && overall.highest != null && (
@@ -440,6 +488,20 @@ export function ImageAuthenticitySummary({
           {blocked ? `${blocked.label}. ${blocked.detail}` : state.error} The review works as usual without it.
         </p>
       )}
+
+      <ConfirmDialog
+        open={confirmAll}
+        title={`Check all ${unique.length} file${unique.length === 1 ? "" : "s"} again?`}
+        description={`Every file is sent to ${providerLabel} again and its current result is replaced. This uses ${
+          state.provider === "sightengine" ? "Sightengine operations (5 per image)" : "Walter Writes credits (1 per image)"
+        }; PDFs are skipped and cost nothing.`}
+        confirmText={`Check again with ${providerLabel}`}
+        onCancel={() => setConfirmAll(false)}
+        onConfirm={() => {
+          setConfirmAll(false);
+          void state.recheckAll();
+        }}
+      />
     </div>
   );
 }
