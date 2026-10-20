@@ -454,10 +454,10 @@ export default function AdminCarCatalogPage() {
               placeholder="New body type (e.g., utility van)"
               value={newBodyTypeName}
               onChange={(e) => setNewBodyTypeName(e.target.value)}
-              className="h-10"
+              className="h-10 min-w-0 flex-1"
               onKeyDown={(e) => e.key === "Enter" && handleAddBodyType()}
             />
-            <div className="flex gap-3">
+            <div className="flex shrink-0 gap-3">
               <div className="flex items-center gap-2">
                 <Label className="text-xs whitespace-nowrap">Default seats</Label>
                 <Input
