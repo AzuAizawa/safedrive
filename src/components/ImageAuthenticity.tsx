@@ -15,6 +15,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -306,7 +307,10 @@ export function ImageAuthenticitySummary({
         <ChevronDown className="h-3.5 w-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuLabel className="text-xs">Detector for this check</DropdownMenuLabel>
+        {/* A Base UI group label must sit inside a group. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs">Detector for this check</DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup
           value={state.provider}
