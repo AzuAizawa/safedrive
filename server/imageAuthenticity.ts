@@ -134,6 +134,81 @@ export const callWalterImageDetector = async (
   }
 };
 
+// The backup detector, chosen by the reviewer when Walter Writes is down:
+// Sightengine's AI-generated image model. It gives one score (how likely the
+// image is AI-generated) and has no separate "AI-edited" class.
+// https://sightengine.com/docs/ai-generated-image-detection
+export const SIGHTENGINE_URL = "https://api.sightengine.com/1.0/check.json";
+
+export type DetectorProvider = "walter" | "sightengine";
+/** Stored in image_authenticity_checks.detector. */
+export const DETECTOR_NAMES: Record<DetectorProvider, string> = {
+  walter: "walter-image-detector",
+  sightengine: "sightengine-genai",
+};
+
+export const interpretSightengineResponse = (httpStatus: number, body: unknown): CheckOutcome => {
+  const data = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  if (httpStatus === 200 && data.status === "success") {
+    const score = probability((data.type as Record<string, unknown> | undefined)?.ai_generated);
+    if (score == null) return outcome("unavailable", "unexpected_response");
+    const fake = score >= 0.5;
+    return {
+      status: "checked",
+      reason: null,
+      verdict: fake ? "fake" : "real",
+      confidence: fake ? score : 1 - score,
+      prob_real: 1 - score,
+      prob_fake: score,
+      prob_inpainting: null,
+      credits_charged: null,
+      stop: false,
+    };
+  }
+  const error = (data.error ?? {}) as Record<string, unknown>;
+  const type = typeof error.type === "string" ? error.type : "";
+  if (type === "credentials_error" || httpStatus === 401) return outcome("unavailable", "key_invalid", true);
+  if (type === "usage_limit") return outcome("unavailable", "credits_exhausted", true);
+  if (type === "rate_limit" || httpStatus === 429) return outcome("pending", "rate_limited", true);
+  if (type === "media_error") return outcome("unsupported", "invalid_image");
+  if (type === "argument_error" || httpStatus === 400) return outcome("unsupported", "rejected_file");
+  return outcome("unavailable", "service_unavailable", true);
+};
+
+export const callSightengineImageDetector = async (
+  apiUser: string,
+  apiSecret: string,
+  file: Blob,
+  filename: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CheckOutcome> => {
+  const form = new FormData();
+  form.append("media", file, filename);
+  form.append("models", "genai");
+  form.append("api_user", apiUser);
+  form.append("api_secret", apiSecret);
+  try {
+    const response = await fetchImpl(SIGHTENGINE_URL, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(15_000),
+    });
+    const text = await response.text();
+    let body: unknown = null;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Not JSON: a gateway error page.
+    }
+    if (response.status !== 200) {
+      console.warn("Sightengine refused the request", response.status, text.slice(0, 300));
+    }
+    return interpretSightengineResponse(response.status, body);
+  } catch {
+    return outcome("unavailable", "service_unavailable", true);
+  }
+};
+
 /**
  * Whether a file needs a (new) check. `force` is the reviewer's "Check again":
  * it retries anything without a verdict, but never re-spends a credit on one

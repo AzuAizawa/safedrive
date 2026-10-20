@@ -2,7 +2,7 @@
 // vehicle document (CHAPTER 108). The server runs it (api/image-authenticity);
 // this is how the app asks for it and how a reviewer reads the answer.
 import { supabase } from "@/lib/supabase";
-import type { AuthenticityCheck } from "@/lib/imageAuthenticityLabels";
+import type { AuthenticityCheck, DetectorProvider } from "@/lib/imageAuthenticityLabels";
 
 export * from "@/lib/imageAuthenticityLabels";
 
@@ -13,9 +13,16 @@ export type AuthenticityResponse = {
   remaining: number;
   stopReason: string | null;
   configured: boolean;
+  /** Which detectors have keys on the server. */
+  providers: Record<DetectorProvider, boolean>;
 };
 
-const post = async (subject: AuthenticitySubject, mode: "run" | "force" | "peek" = "run", keepalive = false) => {
+const post = async (
+  subject: AuthenticitySubject,
+  mode: "run" | "force" | "peek" = "run",
+  keepalive = false,
+  provider: DetectorProvider = "walter",
+) => {
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -24,7 +31,7 @@ const post = async (subject: AuthenticitySubject, mode: "run" | "force" | "peek"
     method: "POST",
     keepalive,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify({ ...subject, force: mode === "force", peek: mode === "peek" }),
+    body: JSON.stringify({ ...subject, force: mode === "force", peek: mode === "peek", provider }),
   });
 };
 
@@ -43,8 +50,12 @@ export const queueImageChecks = (subject: AuthenticitySubject) => {
  * a review spends no credits; "run" checks files still missing; "force" also
  * retries ones the detector could not do (expired trial, no credits).
  */
-export const fetchImageChecks = async (subject: AuthenticitySubject, mode: "run" | "force" | "peek" = "peek") => {
-  const response = await post(subject, mode);
+export const fetchImageChecks = async (
+  subject: AuthenticitySubject,
+  mode: "run" | "force" | "peek" = "peek",
+  provider: DetectorProvider = "walter",
+) => {
+  const response = await post(subject, mode, false, provider);
   if (!response) throw new Error("Sign in again to check images.");
   const payload = (await response.json().catch(() => ({}))) as Partial<AuthenticityResponse> & { error?: string };
   if (!response.ok) throw new Error(payload.error || "Image check is unavailable.");
@@ -53,5 +64,6 @@ export const fetchImageChecks = async (subject: AuthenticitySubject, mode: "run"
     remaining: payload.remaining ?? 0,
     stopReason: payload.stopReason ?? null,
     configured: payload.configured ?? true,
+    providers: payload.providers ?? { walter: payload.configured ?? true, sightengine: false },
   } satisfies AuthenticityResponse;
 };

@@ -1,10 +1,30 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { format } from "date-fns";
-import { CircleSlash, Loader2, RefreshCw, ScanSearch, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
+import {
+  ChevronDown,
+  CircleSlash,
+  Loader2,
+  RefreshCw,
+  ScanSearch,
+  ShieldAlert,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  DETECTOR_LABELS,
   describeCheck,
+  detectorOf,
   fetchImageChecks,
   indexChecks,
   OVERALL_LABELS,
@@ -14,6 +34,7 @@ import {
   type AuthenticityCheck,
   type AuthenticitySubject,
   type AuthenticityTone,
+  type DetectorProvider,
 } from "@/lib/imageAuthenticity";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +54,11 @@ export type ImageAuthenticityState = {
   /** Also retry files the detector could not do - expired trial, no credits. */
   recheck: () => Promise<void>;
   running: boolean;
+  /** The detector the reviewer's buttons use: Walter Writes, or Sightengine as the backup. */
+  provider: DetectorProvider;
+  setProvider: (provider: DetectorProvider) => void;
+  /** Which detectors have keys on the server. */
+  providers: Record<DetectorProvider, boolean>;
 };
 
 /**
@@ -52,18 +78,23 @@ export function useImageAuthenticity(subject: AuthenticitySubject | null): Image
   const [error, setError] = useState<string | null>(null);
   const [remaining, setRemaining] = useState(0);
   const [stopReason, setStopReason] = useState<string | null>(null);
+  const [provider, setProvider] = useState<DetectorProvider>("walter");
+  const [providers, setProviders] = useState<Record<DetectorProvider, boolean>>({ walter: true, sightengine: false });
   const subjectRef = useRef(subject);
   subjectRef.current = subject;
+  const providerRef = useRef(provider);
+  providerRef.current = provider;
   const polls = useRef(0);
 
   const request = useCallback(async (mode: "run" | "force" | "peek") => {
     const current = subjectRef.current;
     if (!current) return;
     try {
-      const result = await fetchImageChecks(current, mode);
+      const result = await fetchImageChecks(current, mode, providerRef.current);
       setChecks(indexChecks(result.checks));
       setRemaining(result.remaining);
       setStopReason(result.stopReason);
+      setProviders(result.providers);
       setError(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Image check is unavailable.");
@@ -107,7 +138,25 @@ export function useImageAuthenticity(subject: AuthenticitySubject | null): Image
   const run = useCallback(() => start("run"), [start]);
   const recheck = useCallback(() => start("force"), [start]);
 
-  return { checks, loading, error, remaining, stopReason, run, recheck, running };
+  // A stop reason belongs to the detector that gave it.
+  const chooseProvider = useCallback((next: DetectorProvider) => {
+    setProvider(next);
+    setStopReason(null);
+  }, []);
+
+  return {
+    checks,
+    loading,
+    error,
+    remaining,
+    stopReason,
+    run,
+    recheck,
+    running,
+    provider,
+    setProvider: chooseProvider,
+    providers,
+  };
 }
 
 const TONE_CLASSES: Record<AuthenticityTone, string> = {
@@ -193,12 +242,15 @@ export function ImageAuthenticityBadge({
             <div className="space-y-1.5">
               <Bar label="Real photo" value={check.prob_real} tone="bg-green-500" />
               <Bar label="AI-generated" value={check.prob_fake} tone="bg-red-500" />
-              <Bar label="AI-edited" value={check.prob_inpainting} tone="bg-amber-500" />
+              {/* Sightengine has no separate AI-edit score. */}
+              {detectorOf(check) === "walter" && (
+                <Bar label="AI-edited" value={check.prob_inpainting} tone="bg-amber-500" />
+              )}
             </div>
           )}
           <p className="border-t pt-1.5 text-[10px] leading-snug text-muted-foreground">
-            A guide from the Walter Writes image detector, not a decision. It can miss a fake and can flag a
-            real photo - you approve or reject.
+            A guide from the {DETECTOR_LABELS[detectorOf(check)]} image detector, not a decision. It can miss a
+            fake and can flag a real photo - you approve or reject.
             {check?.checked_at ? ` Checked ${format(new Date(check.checked_at), "MMM d, h:mm a")}.` : ""}
           </p>
         </div>
@@ -231,8 +283,58 @@ export function ImageAuthenticitySummary({
   const retryable = unique.filter((path) => state.checks[path]?.status === "unavailable").length;
   const overall = summarizeAuthenticity(unique.map((path) => state.checks[path]));
   const blocked = state.stopReason && !["rate_limited", "busy"].includes(state.stopReason)
-    ? describeCheck({ status: "unavailable", reason: state.stopReason } as AuthenticityCheck)
+    ? describeCheck({
+        status: "unavailable",
+        reason: state.stopReason,
+        detector: state.provider === "sightengine" ? "sightengine-genai" : "walter-image-detector",
+      } as AuthenticityCheck)
     : null;
+  const usedBackup = unique.some(
+    (path) => state.checks[path]?.status === "checked" && detectorOf(state.checks[path]) === "sightengine",
+  );
+  const providerLabel = DETECTOR_LABELS[state.provider];
+  // The detector beside the reviewer's button: Walter Writes first, Sightengine
+  // when Walter is down. An upload only ever uses Walter Writes.
+  const providerMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="gap-1 px-2"
+          disabled={state.loading || state.running}
+          aria-label={`Detector: ${providerLabel}. Change detector`}
+        >
+          {providerLabel}
+          <ChevronDown className="h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuLabel className="text-xs">Detector for this check</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup
+          value={state.provider}
+          onValueChange={(value) => state.setProvider(value as DetectorProvider)}
+        >
+          <DropdownMenuRadioItem value="walter" className="flex-col items-start">
+            <span>Walter Writes (primary)</span>
+            <span className="text-[11px] text-muted-foreground">Real, AI-generated or AI-edited</span>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem
+            value="sightengine"
+            disabled={!state.providers.sightengine}
+            className="flex-col items-start"
+          >
+            <span>Sightengine (backup)</span>
+            <span className="text-[11px] text-muted-foreground">
+              {state.providers.sightengine ? "Use when Walter Writes is down" : "No Sightengine key set on the server"}
+            </span>
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
   if (unique.length === 0) return null;
 
@@ -250,10 +352,12 @@ export function ImageAuthenticitySummary({
             <ScanSearch className="h-4 w-4 text-primary" aria-hidden="true" /> AI image check
           </h4>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Walter Writes image detector · a guide for you, not a decision
+            Walter Writes image detector{usedBackup ? " · some files by Sightengine (backup)" : ""} · a guide for
+            you, not a decision
           </p>
         </div>
         {unchecked + waiting > 0 ? (
+          <div className="flex items-center gap-1">
           <Button
             type="button"
             size="sm"
@@ -264,7 +368,10 @@ export function ImageAuthenticitySummary({
             {state.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanSearch className="h-3.5 w-3.5" />}
             Run AI check ({unchecked + waiting})
           </Button>
+          {providerMenu}
+          </div>
         ) : retryable > 0 ? (
+          <div className="flex items-center gap-1">
           <Button
             type="button"
             size="sm"
@@ -276,6 +383,8 @@ export function ImageAuthenticitySummary({
             {state.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Check again ({retryable})
           </Button>
+          {providerMenu}
+          </div>
         ) : null}
       </div>
 

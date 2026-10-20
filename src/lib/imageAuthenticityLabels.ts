@@ -3,6 +3,17 @@
 
 export type AuthenticityStatus = "checked" | "unsupported" | "pending" | "unavailable";
 export type AuthenticityVerdict = "real" | "fake" | "inpainting";
+/** Walter Writes is the primary detector; Sightengine is the reviewer's backup. */
+export type DetectorProvider = "walter" | "sightengine";
+
+export const DETECTOR_LABELS: Record<DetectorProvider, string> = {
+  walter: "Walter Writes",
+  sightengine: "Sightengine",
+};
+
+/** Which detector a stored check came from (image_authenticity_checks.detector). */
+export const detectorOf = (check: Pick<AuthenticityCheck, "detector"> | undefined): DetectorProvider =>
+  check?.detector?.startsWith("sightengine") ? "sightengine" : "walter";
 
 export type AuthenticityCheck = {
   bucket: string;
@@ -14,6 +25,7 @@ export type AuthenticityCheck = {
   prob_real: number | null;
   prob_fake: number | null;
   prob_inpainting: number | null;
+  detector?: string | null;
   checked_at: string;
 };
 
@@ -49,14 +61,18 @@ export const describeCheck = (
     return {
       label: `No AI detected${percent}`,
       tone: "ok",
-      detail: "The detector found no sign of AI generation or AI editing. Ordinary editing (such as retyped text) can still pass - read the document itself.",
+      detail:
+        detectorOf(check) === "sightengine"
+          ? "Sightengine found no sign of AI generation. It does not look for AI edits, so read names, dates and plate numbers closely."
+          : "The detector found no sign of AI generation or AI editing. Ordinary editing (such as retyped text) can still pass - read the document itself.",
     };
   }
   const known = REASON_LABELS[check.reason ?? ""];
+  const provider = DETECTOR_LABELS[detectorOf(check)];
   return {
     label: known?.label ?? "Not checked",
     tone: check.status === "pending" ? "busy" : "neutral",
-    detail: known?.detail ?? "The AI image check could not run for this file.",
+    detail: (known?.detail ?? "The AI image check could not run for this file.").replaceAll("{provider}", provider),
   };
 };
 
@@ -70,24 +86,27 @@ const REASON_LABELS: Record<string, { label: string; detail: string }> = {
   busy: { label: "Checking…", detail: "The detector is busy. It continues on its own." },
   trial_expired: {
     label: "Not checked · subscription expired",
-    detail: "The Walter Writes API trial or subscription has expired. Renew it and press Check again.",
+    detail: "The {provider} API trial or subscription has expired. Renew it, or pick the other detector, and press Check again.",
   },
   insufficient_credits: {
     label: "Not checked · out of credits",
-    detail: "The Walter Writes API has no credits left. Top up and press Check again.",
+    detail: "The {provider} API has no credits left. Top up, or pick the other detector, and press Check again.",
   },
   credits_exhausted: {
     label: "Not checked · out of credits",
-    detail: "This month's Walter Writes credits are used up. They reset next billing cycle, or top up and press Check again.",
+    detail: "The {provider} credits are used up for now. Pick the other detector and press Check again.",
   },
-  key_invalid: { label: "Not checked · API key invalid", detail: "The WALTER_API_KEY in Vercel is invalid, inactive or expired." },
+  key_invalid: { label: "Not checked · API key invalid", detail: "The {provider} API key in Vercel is invalid, inactive or expired." },
   blocked_by_provider: {
     label: "Not checked · detector blocked the server",
     detail: "Walter Writes' firewall refused SafeDrive's server. The key is fine; press Check again later.",
   },
   key_missing_scope: { label: "Not checked · key lacks access", detail: "The Walter Writes API key does not include the image detector." },
-  not_configured: { label: "Not checked · detector off", detail: "No WALTER_API_KEY is set on the server." },
-  service_unavailable: { label: "Not checked · detector down", detail: "The Walter Writes detector did not respond. Press Check again later." },
+  not_configured: { label: "Not checked · detector off", detail: "No {provider} API key is set on the server." },
+  service_unavailable: {
+    label: "Not checked · detector down",
+    detail: "The {provider} detector did not respond. Pick the other detector beside Check again, or try later.",
+  },
   unexpected_response: { label: "Not checked · bad answer", detail: "The detector answered in a way SafeDrive does not recognise." },
   file_missing: { label: "Not checked · file missing", detail: "The stored file could not be read." },
 };

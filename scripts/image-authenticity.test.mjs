@@ -13,6 +13,7 @@ import { PGlite } from "@electric-sql/pglite";
 import {
   classifyFile,
   interpretDetectorResponse,
+  interpretSightengineResponse,
   needsCheck,
 } from "../server/imageAuthenticity.ts";
 import { describeCheck, summarizeAuthenticity } from "../src/lib/imageAuthenticityLabels.ts";
@@ -212,4 +213,37 @@ test("files the detector could not read do not count toward the overall", () => 
   assert.equal(overall.total, 3);
   assert.equal(overall.suggestion, "clean");
   assert.equal(summarizeAuthenticity([undefined]).suggestion, null, "nothing checked, nothing suggested");
+});
+
+// The backup detector a reviewer picks when Walter Writes is down.
+test("a Sightengine score becomes a verdict the review already reads", () => {
+  const ai = interpretSightengineResponse(200, { status: "success", type: { ai_generated: 0.93 } });
+  assert.equal(ai.status, "checked");
+  assert.equal(ai.verdict, "fake");
+  assert.equal(ai.prob_fake, 0.93);
+  assert.equal(ai.prob_inpainting, null, "Sightengine has no separate AI-edit score");
+  const real = interpretSightengineResponse(200, { status: "success", type: { ai_generated: 0.04 } });
+  assert.equal(real.verdict, "real");
+  assert.ok(Math.abs(real.confidence - 0.96) < 1e-9);
+  assert.equal(
+    describeCheck({ ...real, detector: "sightengine-genai", bucket: "b", storage_path: "p", checked_at: "2026-10-20T00:00:00Z" }).tone,
+    "ok",
+  );
+});
+
+test("every way Sightengine can fail is a status, never a verdict", () => {
+  const failure = (type, http = 200) => interpretSightengineResponse(http, { status: "failure", error: { type } });
+  assert.deepEqual([failure("credentials_error").reason, failure("credentials_error").stop], ["key_invalid", true]);
+  assert.equal(failure("usage_limit").reason, "credits_exhausted");
+  assert.deepEqual([failure("rate_limit").status, failure("rate_limit").reason], ["pending", "rate_limited"]);
+  assert.deepEqual([failure("media_error").status, failure("media_error").reason], ["unsupported", "invalid_image"]);
+  assert.equal(interpretSightengineResponse(503, null).reason, "service_unavailable");
+  assert.equal(interpretSightengineResponse(200, { status: "success", type: {} }).reason, "unexpected_response");
+});
+
+test("a failure names the detector it came from", () => {
+  const down = (detector) =>
+    describeCheck({ status: "unavailable", reason: "service_unavailable", detector, bucket: "b", storage_path: "p", checked_at: "2026-10-20T00:00:00Z" }).detail;
+  assert.match(down("walter-image-detector"), /Walter Writes detector did not respond/);
+  assert.match(down("sightengine-genai"), /Sightengine detector did not respond/);
 });

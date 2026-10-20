@@ -1,7 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
+  callSightengineImageDetector,
   callWalterImageDetector,
   classifyFile,
+  DETECTOR_NAMES,
+  type DetectorProvider,
   needsCheck,
   type CheckOutcome,
   type CheckStatus,
@@ -19,7 +22,16 @@ const TIME_BUDGET_MS = 18_000;
 
 // peek: a reviewer opening a user or listing reads what is stored and spends
 // nothing; the check itself runs only when they press the button.
-type Payload = { scope?: "user" | "car"; userId?: string; carId?: string; force?: boolean; peek?: boolean };
+// provider: Walter Writes is the primary detector and the only one an upload
+// triggers; a reviewer may pick Sightengine as the backup when Walter is down.
+type Payload = {
+  scope?: "user" | "car";
+  userId?: string;
+  carId?: string;
+  force?: boolean;
+  peek?: boolean;
+  provider?: DetectorProvider;
+};
 
 type SubjectKind = "identity" | "vehicle_photo" | "vehicle_document";
 type SourceFile = {
@@ -111,6 +123,8 @@ export async function POST(req: Request) {
     const url = process.env.VITE_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
     const walterKey = process.env.WALTER_API_KEY;
+    const sightengineUser = process.env.SIGHTENGINE_API_USER;
+    const sightengineSecret = process.env.SIGHTENGINE_API_SECRET;
     if (!url || !serviceKey) throw new Error("Image check service is not configured");
 
     const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
@@ -157,6 +171,15 @@ export async function POST(req: Request) {
       existing.get(`${file.bucket}:${file.storage_path}`) ??
       (file.fallbackBucket ? existing.get(`${file.fallbackBucket}:${file.storage_path}`) : undefined);
 
+    const provider: DetectorProvider = reviewer && payload.provider === "sightengine" ? "sightengine" : "walter";
+    const detect = (blob: Blob, name: string): Promise<CheckOutcome> | CheckOutcome => {
+      if (provider === "sightengine") {
+        return sightengineUser && sightengineSecret
+          ? callSightengineImageDetector(sightengineUser, sightengineSecret, blob, name)
+          : emptyOutcome("unavailable", "not_configured", true);
+      }
+      return walterKey ? callWalterImageDetector(walterKey, blob, name) : emptyOutcome("unavailable", "not_configured", true);
+    };
     const force = reviewer && payload.force === true;
     const peek = reviewer && payload.peek === true;
     const queue = peek
@@ -177,9 +200,7 @@ export async function POST(req: Request) {
       } else {
         result =
           classifyFile(file.storage_path, blob.type, blob.size) ??
-          (walterKey
-            ? await callWalterImageDetector(walterKey, blob, file.storage_path.split("/").pop() || "upload")
-            : emptyOutcome("unavailable", "not_configured", true));
+          (await detect(blob, file.storage_path.split("/").pop() || "upload"));
       }
 
       const { stop, ...row } = result;
@@ -192,6 +213,7 @@ export async function POST(req: Request) {
             subject_kind: file.subject_kind,
             subject_id: file.subject_id,
             ...row,
+            detector: DETECTOR_NAMES[provider],
             checked_at: new Date().toISOString(),
           },
           { onConflict: "bucket,storage_path" },
@@ -219,7 +241,13 @@ export async function POST(req: Request) {
     const checks = files
       .map((file) => find(file))
       .filter((check): check is StoredCheck => Boolean(check));
-    return jsonResponse({ checks, remaining, stopReason, configured: Boolean(walterKey) });
+    return jsonResponse({
+      checks,
+      remaining,
+      stopReason,
+      configured: Boolean(walterKey),
+      providers: { walter: Boolean(walterKey), sightengine: Boolean(sightengineUser && sightengineSecret) },
+    });
   } catch (error) {
     console.error("Image authenticity check failed", error);
     return jsonResponse({ error: "Unable to check images right now" }, 500);
