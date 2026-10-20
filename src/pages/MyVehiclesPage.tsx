@@ -255,9 +255,18 @@ const statusBadge: Record<string, { label: string; color: string }> = {
 type VehicleTab = "in_review" | "listed" | "inactive";
 
 const VEHICLE_TAB_STATUSES: Record<VehicleTab, string[]> = {
-  in_review: ["pending", "renewal_required"],
+  in_review: ["pending"],
   listed: ["approved", "active"],
   inactive: ["inactive", "rejected"],
+};
+
+// A car whose papers expired (renewal_required) is offline. It waits in
+// Inactive until its lister uploads the renewal, and only then is it in review.
+const vehicleTabOf = (status: string, awaitingReview: boolean): VehicleTab | null => {
+  if (status === "renewal_required") return awaitingReview ? "in_review" : "inactive";
+  return (Object.keys(VEHICLE_TAB_STATUSES) as VehicleTab[]).find((tab) =>
+    VEHICLE_TAB_STATUSES[tab].includes(status),
+  ) ?? null;
 };
 
 const formatModelLabel = (model: CarModel) =>
@@ -531,6 +540,8 @@ export default function MyVehiclesPage() {
   // Documents an admin sent back, per car (CHAPTER 118). A car still in review
   // is corrected from here, not from Document Renewal & Updates.
   const [corrections, setCorrections] = useState<Record<string, DocumentCorrection[]>>({});
+  // Cars with an uploaded document still waiting for the admin.
+  const [awaitingReview, setAwaitingReview] = useState<Set<string>>(new Set());
   const [searchParams, setSearchParams] = useSearchParams();
   const [editPrice, setEditPrice] = useState("");
   const [editMileage, setEditMileage] = useState("");
@@ -790,12 +801,19 @@ export default function MyVehiclesPage() {
     if (carIds.length === 0) return {};
     const { data, error } = await supabase
       .from("car_documents")
-      .select("car_id, document_type, compliance_status, review_reason, created_at")
+      .select("car_id, document_type, compliance_status, review_reason, created_at, superseded_at")
       .in("car_id", carIds);
     if (error) {
       console.warn("Unable to load document reviews:", error.message);
       return {};
     }
+    setAwaitingReview(
+      new Set(
+        ((data ?? []) as Array<{ car_id: string; compliance_status: string | null; superseded_at: string | null }>)
+          .filter((row) => row.compliance_status === "pending" && !row.superseded_at)
+          .map((row) => row.car_id),
+      ),
+    );
     const byCar: Record<string, DocumentCorrection[]> = {};
     for (const carId of carIds) {
       const found = documentsNeedingCorrection(
@@ -908,19 +926,17 @@ export default function MyVehiclesPage() {
   const isLiveVehicle = (status: string) =>
     status === "approved" || status === "active";
 
+  const tabOf = useCallback(
+    (v: VehicleRow) => vehicleTabOf(v.status, awaitingReview.has(v.id)),
+    [awaitingReview],
+  );
   const vehicleTabCounts = useMemo(
     () => ({
-      in_review: vehicles.filter((v) =>
-        VEHICLE_TAB_STATUSES.in_review.includes(v.status),
-      ).length,
-      listed: vehicles.filter((v) =>
-        VEHICLE_TAB_STATUSES.listed.includes(v.status),
-      ).length,
-      inactive: vehicles.filter((v) =>
-        VEHICLE_TAB_STATUSES.inactive.includes(v.status),
-      ).length,
+      in_review: vehicles.filter((v) => tabOf(v) === "in_review").length,
+      listed: vehicles.filter((v) => tabOf(v) === "listed").length,
+      inactive: vehicles.filter((v) => tabOf(v) === "inactive").length,
     }),
-    [vehicles],
+    [vehicles, tabOf],
   );
 
   // Land on the tab that needs attention: anything in review wins, otherwise
@@ -937,10 +953,8 @@ export default function MyVehiclesPage() {
 
   const visibleVehicles = useMemo(
     () =>
-      sortedVehicles.filter((v) =>
-        VEHICLE_TAB_STATUSES[vehicleTab].includes(v.status),
-      ),
-    [sortedVehicles, vehicleTab],
+      sortedVehicles.filter((v) => tabOf(v) === vehicleTab),
+    [sortedVehicles, vehicleTab, tabOf],
   );
 
   const normalizePlate = (value: string) => value.trim().toUpperCase();
@@ -2165,7 +2179,7 @@ export default function MyVehiclesPage() {
                         </p>
                       )}
                       {/* Set once the car is approved; not shown while it is in review. */}
-                      {!VEHICLE_TAB_STATUSES.in_review.includes(v.status) && (<>
+                      {tabOf(v) !== "in_review" && (<>
                       <p className="mt-1 text-xs text-muted-foreground">
                         GPS option:{" "}
                         <span className="font-medium text-foreground">
@@ -2272,8 +2286,9 @@ export default function MyVehiclesPage() {
                           <p className="flex items-start gap-1.5 text-orange-700 dark:text-orange-300">
                             <FileWarning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                             <span>
-                              This listing is offline until you upload renewed
-                              registration, CTPL, and insurance documents.
+                              {awaitingReview.has(v.id)
+                                ? "Renewed papers sent · waiting for admin review. The listing stays offline until they are approved."
+                                : "This listing is offline because its papers expired. Upload the renewed papers to put it back up."}
                             </span>
                           </p>
                           <Button
@@ -2310,6 +2325,18 @@ export default function MyVehiclesPage() {
                     >
                       Edit
                     </Button>
+                    {v.status === "renewal_required" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled
+                        title="Renew the expired papers first"
+                        className="gap-2"
+                      >
+                        <Power className="w-3.5 h-3.5" />
+                        Enable
+                      </Button>
+                    )}
                     {(isLiveVehicle(v.status) || v.status === "inactive") && (
                       <Button
                         variant="outline"

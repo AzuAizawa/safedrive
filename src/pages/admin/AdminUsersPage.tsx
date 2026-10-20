@@ -1196,6 +1196,14 @@ export default function AdminUsersPage() {
         </Select>
       </div>
 
+      {!loading && (
+        <p className="text-sm text-muted-foreground" aria-live="polite">
+          {filter === "all" && search === ""
+            ? `${users.length} user${users.length === 1 ? "" : "s"} in total`
+            : `Showing ${filteredUsers.length} of ${users.length} user${users.length === 1 ? "" : "s"}`}
+        </p>
+      )}
+
       {/* Users table */}
       {loading ? (
         <div className="space-y-3">

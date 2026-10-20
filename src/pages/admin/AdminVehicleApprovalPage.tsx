@@ -244,6 +244,7 @@ export default function AdminVehicleApprovalPage() {
     ? (requestedTab as VehicleTab)
     : "pending";
   const [activeTab, setActiveTab] = useState<VehicleTab>(initialTab);
+  const [totalCars, setTotalCars] = useState<number | null>(null);
 
   useEffect(() => {
     if (!selected) {
@@ -332,16 +333,21 @@ export default function AdminVehicleApprovalPage() {
       // renewals page used to be the only place those surfaced; now they
       // belong here, alongside the listings already waiting for review.
       let resubmittedIds: string[] = [];
-      if (activeTab === "pending") {
-        const { data: resubmitted } = await supabase
+      // Cars with any uploaded document waiting for review. A car whose papers
+      // expired (renewal_required) is only in the queue once its lister has
+      // uploaded the renewal; until then it is an approved car that is offline.
+      let awaitingIds: string[] = [];
+      if (activeTab !== "removed") {
+        const { data: waitingDocs } = await supabase
           .from("car_documents")
-          .select("car_id")
+          .select("car_id, renewal_id")
           .eq("compliance_status", "pending")
-          .not("renewal_id", "is", null);
-        resubmittedIds = Array.from(
-          new Set(((resubmitted ?? []) as Array<{ car_id: string }>).map((row) => row.car_id)),
-        );
+          .is("superseded_at", null);
+        const rows = (waitingDocs ?? []) as Array<{ car_id: string; renewal_id: string | null }>;
+        awaitingIds = Array.from(new Set(rows.map((row) => row.car_id)));
+        resubmittedIds = Array.from(new Set(rows.filter((row) => row.renewal_id).map((row) => row.car_id)));
       }
+      const awaitingList = awaitingIds.length ? `(${awaitingIds.join(",")})` : null;
       // A car that is removed - by its lister or by an admin - leaves the
       // review queue and the active list, so no one is asked to approve a
       // listing that is gone. It is shown only under Removed, the one place
@@ -352,14 +358,29 @@ export default function AdminVehicleApprovalPage() {
           : activeTab === "pending"
             ? baseQuery.is("deleted_at", null).or(
                 [
-                  "status.in.(pending,renewal_required)",
+                  "status.eq.pending",
+                  ...(awaitingList ? [`and(status.eq.renewal_required,id.in.${awaitingList})`] : []),
                   ...(resubmittedIds.length ? [`id.in.(${resubmittedIds.join(",")})`] : []),
                 ].join(","),
               )
             // Approved cars, live or not: a newly approved car waits in
-            // inactive until its lister sets it up (CHAPTER 127), and one
-            // its lister turned off is still on SafeDrive.
-            : baseQuery.is("deleted_at", null).in("status", ["approved", "active", "inactive"]);
+            // inactive until its lister sets it up (CHAPTER 127), one its
+            // lister turned off is still on SafeDrive, and so is one whose
+            // papers expired while no renewal has been uploaded yet.
+            : baseQuery.is("deleted_at", null).or(
+                [
+                  "status.in.(approved,active,inactive)",
+                  awaitingList
+                    ? `and(status.eq.renewal_required,id.not.in.${awaitingList})`
+                    : "status.eq.renewal_required",
+                ].join(","),
+              );
+      // Every car on SafeDrive (not removed), for "12 of 25 cars".
+      const { count: allCars } = await supabase
+        .from("cars")
+        .select("id", { count: "exact", head: true })
+        .is("deleted_at", null);
+      setTotalCars(allCars ?? null);
       const { data, error } = await scopedQuery.order(
         activeTab === "removed" ? "deleted_at" : "created_at",
         { ascending: false },
@@ -835,6 +856,16 @@ export default function AdminVehicleApprovalPage() {
         ]}
       />
 
+      {!loading && (
+        <p className="text-sm text-muted-foreground" aria-live="polite">
+          {activeTab === "removed"
+            ? `${cars.length} removed car${cars.length === 1 ? "" : "s"}`
+            : `Showing ${cars.length} ${activeTab === "pending" ? "waiting for review" : "approved"} of ${
+                totalCars ?? "-"
+              } car${totalCars === 1 ? "" : "s"} on SafeDrive`}
+        </p>
+      )}
+
       {loading ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -909,7 +940,9 @@ export default function AdminVehicleApprovalPage() {
                       : activeTab === "active"
                         ? car.status === "inactive"
                           ? "Inactive"
-                          : "Live"
+                          : car.status === "renewal_required"
+                            ? "Inactive · papers expired"
+                            : "Live"
                         : car.status}
                   </TableCell>
                   {/* CHAPTER 105. How long this submission has waited, so the
