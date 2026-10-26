@@ -3,6 +3,8 @@
 // this lets the admin form say so before a proposal is sent. No client
 // imports, so it is testable on its own.
 
+import { formatPeso } from "./money";
+
 export type PlanValues = {
   free: number;
   proExtra: number;
@@ -20,7 +22,7 @@ export const planOrderProblem = (plan: PlanValues): string | null => {
     return `Premium must give more vehicle slots than Pro (${plan.free + plan.proExtra} total).`;
   }
   if (!(plan.premiumPricePhp > plan.proPricePhp)) {
-    return `Premium must cost more than Pro (PHP ${plan.proPricePhp}).`;
+    return `Premium must cost more than Pro (${formatPeso(plan.proPricePhp)}).`;
   }
   return null;
 };

@@ -81,7 +81,7 @@ const getVehicleLabel = (payment: RefundPaymentRecord) =>
   `${payment.bookings.cars.car_models.car_brands.name} ${payment.bookings.cars.car_models.name} (${payment.bookings.cars.plate_number})`;
 
 const peso = (amount: number) =>
-  `PHP ${amount.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  `${amount < 0 ? "-" : ""}₱${Math.abs(amount).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default async function handler(req: Request) {
   if (req.method !== "POST") {

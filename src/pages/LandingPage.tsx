@@ -22,6 +22,7 @@ import type { CarWithDetails } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import InstallButton from "@/components/InstallButton";
+import { formatPeso } from "@/lib/money";
 
 const FEATURED_CAR_LIMIT = 8;
 
@@ -289,7 +290,7 @@ export default function LandingPage() {
                             </div>
                           )}
                           <div className="absolute right-3 top-3 rounded-full bg-background/95 px-3 py-1 text-xs font-semibold shadow-sm">
-                            ₱{Number(car.price_per_day).toLocaleString()}/day
+                            {formatPeso(Number(car.price_per_day))}/day
                           </div>
                         </div>
                         <div className="space-y-3 p-4">

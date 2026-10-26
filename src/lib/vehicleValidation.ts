@@ -7,6 +7,7 @@
  * through to admin review. These helpers run in the submit handlers and drive
  * inline error text, independent of native constraint validation.
  */
+import { formatPeso } from "./money";
 
 /**
  * Philippine four-wheel plate: 3 letters, an optional single space or hyphen,
@@ -41,10 +42,10 @@ export const validateListingPrice = (value: string | number): string | null => {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "Enter a valid number.";
   if (amount < LISTING_PRICE_MIN) {
-    return `Daily price must be at least PHP ${LISTING_PRICE_MIN.toLocaleString()}.`;
+    return `Daily price must be at least ${formatPeso(LISTING_PRICE_MIN)}.`;
   }
   if (amount > LISTING_PRICE_MAX) {
-    return `Daily price cannot exceed PHP ${LISTING_PRICE_MAX.toLocaleString()}.`;
+    return `Daily price cannot exceed ${formatPeso(LISTING_PRICE_MAX)}.`;
   }
   return null;
 };

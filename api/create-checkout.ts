@@ -254,8 +254,8 @@ export default async function handler(req: Request) {
         {
           error:
             paymentMode === "full"
-              ? "This full payment exceeds PayMongo's PHP 100,000 hosted checkout limit."
-              : "This downpayment exceeds PayMongo's PHP 100,000 hosted checkout limit.",
+              ? "This full payment exceeds PayMongo's ₱100,000.00 hosted checkout limit."
+              : "This downpayment exceeds PayMongo's ₱100,000.00 hosted checkout limit.",
         },
         422,
       );

@@ -92,7 +92,7 @@ const vehicleLabel = (booking: BookingForCompensation) => {
 };
 
 const peso = (amount: number) =>
-  `PHP ${amount.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  `${amount < 0 ? "-" : ""}₱${Math.abs(amount).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export async function releaseCancellationCompensation(
   supabase: ServiceRoleSupabaseClient,

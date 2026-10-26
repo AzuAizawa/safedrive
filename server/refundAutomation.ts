@@ -3,6 +3,7 @@ import { postCompletedRefundToLedger } from "./ledger.js";
 import { sendAdminAlertEmail, sendRefundReceiptEmail } from "./email.js";
 import { isDemoMoneyMovementEnabled } from "./paymongoMode.js";
 import { getVehicleLabel as bookingVehicleLabel, type RefundableBooking } from "./cancellationRefundPlan.js";
+import { formatPeso } from "./money.js";
 
 type PaymentRecord = {
   id: string;
@@ -1017,7 +1018,7 @@ export const createManualRefundReview = async (
   const note = [
     "Manual refund review required.",
     hasRecommendation
-      ? `Policy recommendation: refund PHP ${refundAmount.toLocaleString()} of PHP ${capturedTotal.toLocaleString()} captured (short-notice cancellation). Admin confirms or adjusts.`
+      ? `Policy recommendation: refund ${formatPeso(refundAmount)} of ${formatPeso(capturedTotal)} captured (short-notice cancellation). Admin confirms or adjusts.`
       : null,
     safeDestinationNote,
     `Automatic refund result: ${automaticFailureReason}`,

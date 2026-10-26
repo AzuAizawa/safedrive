@@ -26,6 +26,7 @@ import {
   DEFAULT_USER_VERIFICATION_ETA,
   DEFAULT_VEHICLE_VERIFICATION_ETA,
 } from "@/lib/platformSettings";
+import { formatPeso } from "@/lib/money";
 
 const isEmailShaped = (value: string) =>
   /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value.trim());
@@ -339,7 +340,7 @@ const FIELDS: Record<
         ? n
         : null;
     },
-    formatStored: (s) => `PHP ${Math.round(s).toLocaleString()}`,
+    formatStored: (s) => formatPeso(Math.round(s)),
   },
   premium_price_php: {
     label: "Premium plan price (30 days)",
@@ -352,7 +353,7 @@ const FIELDS: Record<
         ? n
         : null;
     },
-    formatStored: (s) => `PHP ${Math.round(s).toLocaleString()}`,
+    formatStored: (s) => formatPeso(Math.round(s)),
   },
 };
 

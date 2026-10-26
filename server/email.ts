@@ -1,3 +1,4 @@
+import { formatPeso } from "./money.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 
 type EmailState = "sent" | "not_configured" | "rejected" | "failed";
@@ -78,12 +79,7 @@ const escapeHtml = (value: string) =>
 const isEmail = (value: string) =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
-const peso = (amount: number) =>
-  new Intl.NumberFormat("en-PH", {
-    style: "currency",
-    currency: "PHP",
-    minimumFractionDigits: 2,
-  }).format(Math.abs(amount));
+const peso = (amount: number) => formatPeso(Math.abs(amount));
 
 const shortDate = (value: string | null | undefined) => {
   if (!value) return "";

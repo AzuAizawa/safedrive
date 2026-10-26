@@ -28,6 +28,7 @@ import BookingPagination from "@/components/BookingPagination";
 import { usePagedItems } from "@/lib/usePagedItems";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatPeso } from "@/lib/money";
 
 type RefundPayment = {
   id: string;
@@ -167,7 +168,7 @@ const showRefundRetryToast = (
 };
 
 const formatCurrency = (value: number) =>
-  `PHP ${Math.abs(Number(value || 0)).toLocaleString()}`;
+  formatPeso(Math.abs(Number(value || 0)));
 
 const getVehicleLabel = (refund: RefundPayment) =>
   `${refund.bookings.cars.car_models.car_brands.name} ${refund.bookings.cars.car_models.name}`;
@@ -1083,7 +1084,7 @@ export default function AdminRefundReviewPage({ embedded = false }: AdminRefundR
                       [
                         ["recommended", `Release as recommended (${formatCurrency(review.recommended)})`],
                         ["other", "Release a different amount"],
-                        ["deny", "Deny - no refund (PHP 0)"],
+                        ["deny", "Deny - no refund (₱0.00)"],
                       ] as Array<[DecisionChoice, string]>
                     ).map(([value, label]) => (
                       <label key={value} className="flex items-center gap-2">

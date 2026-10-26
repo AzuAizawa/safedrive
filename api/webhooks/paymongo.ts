@@ -6,6 +6,7 @@ import {
   postSimpleBalancedJournal,
 } from "../../server/ledger.js";
 import { sendPaymentReceiptEmail, sendRefundReceiptEmail, sendUserNotificationEmail } from "../../server/email.js";
+import { formatPeso } from "../../server/money.js";
 
 export const config = {
   runtime: "edge",
@@ -487,7 +488,7 @@ const recordUnclaimableCapture = async (
         superAdmins.map((admin) => ({
           user_id: admin.id,
           title: "Payment captured on a booking that cannot accept it",
-          message: `PHP ${input.amount.toLocaleString()} was captured after the booking became "${input.bookingStatus}". It was recorded but not applied - review and refund if appropriate.`,
+          message: `${formatPeso(input.amount)} was captured after the booking became "${input.bookingStatus}". It was recorded but not applied - review and refund if appropriate.`,
           type: "warning",
           link: "/admin/financial-reviews?view=refunds",
         })),

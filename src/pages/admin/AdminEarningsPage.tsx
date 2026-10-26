@@ -26,6 +26,7 @@ import {
 import { buildEarningsExportRows, EARNINGS_EXPORT_HEADERS } from "@/lib/ledgerExportRows";
 import { formatElapsed } from "@/lib/queueAge";
 import { supabase } from "@/lib/supabase";
+import { formatPesoFromCentavos } from "@/lib/money";
 
 // Revenue accounts in the double-entry ledger. Commission is recognised when
 // a booking completes; subscription revenue when the plan is paid.
@@ -38,11 +39,7 @@ const SUBSCRIPTION_ACCOUNT = "4030";
 // silently-wrong figure.
 const ROW_LIMIT = 5000;
 
-const peso = (centavos: number) =>
-  new Intl.NumberFormat("en-PH", {
-    style: "currency",
-    currency: "PHP",
-  }).format(centavos / 100);
+const peso = (centavos: number) => formatPesoFromCentavos(centavos);
 
 const MONTH_LABELS = [
   "January", "February", "March", "April", "May", "June",

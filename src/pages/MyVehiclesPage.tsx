@@ -81,6 +81,7 @@ import {
 } from "@/lib/vehicleValidation";
 import FieldError from "@/components/FieldError";
 import { focusField, INVALID_CONTROL_CLASSES } from "@/lib/formErrors";
+import { formatPeso } from "@/lib/money";
 
 const MAX_LISTING_PRICE = 100000;
 // How long the lister has to answer an early-return request before it rejects
@@ -2171,7 +2172,7 @@ export default function MyVehiclesPage() {
                       </h3>
                       <p className="text-sm text-muted-foreground mt-0.5">
                         <span className="font-medium text-foreground">{v.plate_number}</span> &bull;{" "}
-                        {v.price_per_day == null ? "Price not set yet" : `₱${Number(v.price_per_day).toLocaleString()}/day`}
+                        {v.price_per_day == null ? "Price not set yet" : `${formatPeso(Number(v.price_per_day))}/day`}
                       </p>
                       {(v.fuel_category || v.fuel_subtype) && (
                         <p className="mt-1 text-xs text-muted-foreground">
@@ -2494,12 +2495,12 @@ export default function MyVehiclesPage() {
                     />
                     {editPrice !== "" && !validateListingPrice(editPrice) && (
                       <p className="text-xs text-muted-foreground">
-                        Renters pay ₱{Number(editPrice).toLocaleString()}/day. You'll earn
-                        approximately ₱
-                        {(
+                        Renters pay {formatPeso(Number(editPrice))}/day. You'll earn
+                        approximately{" "}
+                        {formatPeso(
                           Number(editPrice) -
-                          calculateCommissionAmount(Number(editPrice), commissionRate)
-                        ).toLocaleString()}
+                            calculateCommissionAmount(Number(editPrice), commissionRate),
+                        )}
                         /day after SafeDrive's {formatCommissionPercent(commissionRate)} commission.
                       </p>
                     )}

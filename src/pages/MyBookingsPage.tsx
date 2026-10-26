@@ -51,7 +51,6 @@ import {
 } from "@/lib/platformSettings";
 import {
   describeRenterCharge,
-  formatPeso,
   getCancellationOutcome,
   getMutualNoShowTimes,
   pickupBlocksCancellation,
@@ -75,6 +74,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import type { Payment } from "@/types/database";
 import { fetchCarRatingSummaries, fetchRenterReputation } from "@/lib/ratings";
+import { formatPeso } from "@/lib/money";
 
 interface BookingRow {
   compliance_hold?: boolean;
@@ -790,8 +790,8 @@ export default function MyBookingsPage() {
       toast.error("Payment Exceeds Online Limit", {
         description:
           paymentMode === "full"
-            ? `This full payment (PHP ${selectedAmount.toLocaleString()}) exceeds PayMongo's PHP 100,000 limit. Please use the downpayment option instead.`
-            : `This downpayment (PHP ${selectedAmount.toLocaleString()}) exceeds PayMongo's PHP 100,000 limit. Please arrange payment directly with the car owner.`,
+            ? `This full payment (${formatPeso(selectedAmount)}) exceeds PayMongo's ₱100,000.00 limit. Please use the downpayment option instead.`
+            : `This downpayment (${formatPeso(selectedAmount)}) exceeds PayMongo's ₱100,000.00 limit. Please arrange payment directly with the car owner.`,
       });
       return;
     }
@@ -1179,7 +1179,7 @@ export default function MyBookingsPage() {
   const handlePayBalance = async (booking: BookingRow) => {
     if (booking.balance_amount > 100000) {
       toast.error("Payment Exceeds Online Limit", {
-        description: `This remaining balance (PHP ${Number(booking.balance_amount).toLocaleString()}) exceeds PayMongo's PHP 100,000 limit.`,
+        description: `This remaining balance (${formatPeso(Number(booking.balance_amount))}) exceeds PayMongo's ₱100,000.00 limit.`,
       });
       return;
     }
@@ -1728,7 +1728,7 @@ export default function MyBookingsPage() {
   );
 
   const formatCurrency = (amount: number) =>
-    `PHP ${Number(amount).toLocaleString()}`;
+    formatPeso(Number(amount));
 
   const downloadPaymentAcknowledgment = async (payment: Payment, booking?: BookingRow) => {
     const isRefund = payment.payment_type === "refund" || Number(payment.amount) < 0;
@@ -2197,7 +2197,7 @@ export default function MyBookingsPage() {
                       </div>
                       <div className="text-right">
                         <p className="text-base font-bold">
-                          PHP {Number(booking.total_price).toLocaleString()}
+                          {formatPeso(Number(booking.total_price))}
                         </p>
                         <span className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary">
                           View details
@@ -2340,20 +2340,20 @@ export default function MyBookingsPage() {
                             Total
                           </span>
                           <span className="text-lg font-bold">
-                            PHP {Number(booking.total_price).toLocaleString()}
+                            {formatPeso(Number(booking.total_price))}
                           </span>
                         </div>
                         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                           <span>
                             Down:{" "}
                             <span className="font-medium text-foreground">
-                              PHP {Number(booking.downpayment_amount).toLocaleString()}
+                              {formatPeso(Number(booking.downpayment_amount))}
                             </span>
                           </span>
                           <span>
                             Balance:{" "}
                             <span className="font-medium text-foreground">
-                              PHP {Number(booking.balance_amount).toLocaleString()}
+                              {formatPeso(Number(booking.balance_amount))}
                             </span>
                           </span>
                         </div>
@@ -2655,7 +2655,7 @@ export default function MyBookingsPage() {
                               ) : (
                                 <CreditCard className="w-3.5 h-3.5" />
                               )}
-                              Pay Down PHP {Number(booking.downpayment_amount).toLocaleString()}
+                              Pay Down {formatPeso(Number(booking.downpayment_amount))}
                             </Button>
                             <Button
                               size="sm"
@@ -2668,7 +2668,7 @@ export default function MyBookingsPage() {
                               ) : (
                                 <CreditCard className="w-3.5 h-3.5" />
                               )}
-                              Pay Full PHP {Number(booking.total_price).toLocaleString()}
+                              Pay Full {formatPeso(Number(booking.total_price))}
                             </Button>
                           </div>
                         </div>
@@ -2686,7 +2686,7 @@ export default function MyBookingsPage() {
                             ) : (
                               <CreditCard className="w-3.5 h-3.5" />
                             )}
-                            Pay Balance PHP {Number(booking.balance_amount).toLocaleString()}
+                            Pay Balance {formatPeso(Number(booking.balance_amount))}
                           </Button>
                           <p className="text-[10px] text-amber-600 mt-2 max-w-md leading-tight">
                             Remaining balance must be confirmed before the rental can start.

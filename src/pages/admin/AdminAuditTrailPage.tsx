@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import type { AuditLog, Json } from "@/types/database";
 import BookingPagination from "@/components/BookingPagination";
 import { LIST_PAGE_SIZE, serverPageInfo } from "@/lib/pagination";
+import { formatPeso } from "@/lib/money";
 
 interface AuditEntry extends AuditLog {
   profiles: { full_name: string | null; email: string } | null;
@@ -248,10 +249,10 @@ const formatDetailEntries = (action: string, details: Json | null) => {
       let label = humanizeKey(key);
 
       if ((key === "amount" || key === "total_price") && typeof value === "number") {
-        formattedValue = `PHP ${Number(value).toLocaleString()}`;
+        formattedValue = formatPeso(Number(value));
       }
       if (key === "amount" && action.includes("refund") && typeof value === "number") {
-        formattedValue = `PHP ${Math.abs(Number(value)).toLocaleString()}`;
+        formattedValue = formatPeso(Math.abs(Number(value)));
       }
       if (key === "transitioned_to" && typeof value === "string") {
         formattedValue = formatStatusText(value);

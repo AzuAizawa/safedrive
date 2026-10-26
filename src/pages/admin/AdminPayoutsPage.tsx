@@ -30,6 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatPeso } from "@/lib/money";
 
 interface PayoutPaymentRow {
   id: string;
@@ -97,7 +98,7 @@ type PayoutOutcome =
     };
 
 const formatCurrency = (value: number) =>
-  `PHP ${Number(value || 0).toLocaleString()}`;
+  formatPeso(Number(value || 0));
 
 const maskAccountNumber = (value: string | null) => {
   if (!value) return "Not provided";

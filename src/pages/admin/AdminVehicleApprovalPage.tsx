@@ -55,6 +55,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { formatPeso } from "@/lib/money";
 
 interface PendingCar {
   id: string;
@@ -932,7 +933,7 @@ export default function AdminVehicleApprovalPage() {
                   <TableCell>
                     {car.price_per_day == null
                       ? "Not set yet"
-                      : `₱${Number(car.price_per_day).toLocaleString()}`}
+                      : formatPeso(Number(car.price_per_day))}
                   </TableCell>
                   <TableCell className="capitalize">
                     {car.deleted_at
@@ -1061,7 +1062,7 @@ export default function AdminVehicleApprovalPage() {
                     <span className="font-medium">
                       {selected.price_per_day == null
                         ? "Not set yet"
-                        : `₱${Number(selected.price_per_day).toLocaleString()}`}
+                        : formatPeso(Number(selected.price_per_day))}
                     </span>
                   </div>
                   <div>

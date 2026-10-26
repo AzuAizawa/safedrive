@@ -34,6 +34,7 @@ import {
   formatAverage,
   type RatingSummary,
 } from "@/lib/ratings";
+import { formatPeso } from "@/lib/money";
 
 const MAX_PAYMENT_AMOUNT = 100000;
 const CARS_PER_PAGE = 12;
@@ -575,7 +576,7 @@ export default function BrowseCarsPage() {
                   const value = e.target.value;
                   setMaxPrice(value === "" ? "" : String(Math.min(Number(value), MAX_PAYMENT_AMOUNT)));
                 }}
-                placeholder="Max PHP 100,000"
+                placeholder="Max ₱100,000.00"
                 className="h-10"
               />
             </div>
@@ -683,7 +684,7 @@ export default function BrowseCarsPage() {
                     </div>
                   )}
                   <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full bg-background/90 backdrop-blur-sm text-xs font-semibold shadow-sm">
-                    ₱{Number(car.price_per_day).toLocaleString()}/day
+                    {formatPeso(Number(car.price_per_day))}/day
                   </div>
                   {profile?.id === car.owner_id ? (
                     <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-primary text-primary-foreground text-xs font-semibold shadow-sm">

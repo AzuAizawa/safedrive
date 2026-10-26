@@ -372,7 +372,7 @@ export default function SignUpPage() {
 
                   <div>
                     <h4 className="font-semibold text-foreground mb-1">3. Vehicle Requirements</h4>
-                    <p>Listed vehicles must be roadworthy, use a model from the approved catalogue, and include current CR/OR, registration, CTPL, insurer disclosure, images, and rental-agreement evidence. Current daily rates are PHP 500 to PHP 100,000, while a booking total cannot exceed PHP 100,000.</p>
+                    <p>Listed vehicles must be roadworthy, use a model from the approved catalogue, and include current CR/OR, registration, CTPL, insurer disclosure, images, and rental-agreement evidence. Current daily rates are ₱500.00 to ₱100,000.00, while a booking total cannot exceed ₱100,000.00.</p>
                   </div>
 
                   <div>

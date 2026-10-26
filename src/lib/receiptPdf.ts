@@ -2,6 +2,8 @@
 // renter refund, and lister payout downloads. One code path so the layout and
 // the (occasionally fussy) save step are fixed in one place.
 
+import { formatPeso } from "./money";
+
 type JsPdfCtor = typeof import("jspdf").jsPDF;
 
 /**
@@ -69,8 +71,56 @@ export type ReceiptDocument = {
   filename: string;
 };
 
-const peso = (amount: number) =>
-  `PHP ${Number(amount || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+type JsPdfDoc = InstanceType<JsPdfCtor>;
+
+// jsPDF's built-in Helvetica has no peso sign (it is outside WinAnsi), so a
+// "₱" would print as garbage. It is drawn instead: a "P" with the two bars.
+// While wrapping, "₱" stands in as "Þ" - also outside our text, and exactly
+// as wide as "P" in Helvetica - so line breaks are measured correctly.
+const PESO = "₱";
+const PESO_STAND_IN = "Þ";
+
+const drawPesoBars = (pdf: JsPdfDoc, pLeft: number, baseline: number) => {
+  const em = pdf.getFontSize() / pdf.internal.scaleFactor;
+  const pWidth = pdf.getTextWidth("P");
+  const lineWidth = pdf.getLineWidth();
+  const drawColor = pdf.getDrawColor();
+  pdf.setLineWidth(em * 0.06);
+  pdf.setDrawColor(pdf.getTextColor());
+  for (const height of [0.56, 0.43]) {
+    const barY = baseline - em * height;
+    pdf.line(pLeft + em * 0.02, barY, pLeft + pWidth + em * 0.03, barY);
+  }
+  pdf.setLineWidth(lineWidth);
+  pdf.setDrawColor(drawColor);
+};
+
+/** pdf.text for one or more lines that may contain "₱" (already in stand-in form). */
+const drawMoneyText = (
+  pdf: JsPdfDoc,
+  text: string | string[],
+  x: number,
+  y: number,
+  align: "left" | "right" = "left",
+) => {
+  const lines = Array.isArray(text) ? text : [text];
+  const lineHeight = (pdf.getFontSize() * pdf.getLineHeightFactor()) / pdf.internal.scaleFactor;
+  lines.forEach((line, index) => {
+    const baseline = y + index * lineHeight;
+    const plain = line.split(PESO_STAND_IN).join("P");
+    const start = align === "right" ? x - pdf.getTextWidth(plain) : x;
+    pdf.text(plain, start, baseline);
+    const parts = line.split(PESO_STAND_IN);
+    let cursor = start;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      cursor += pdf.getTextWidth(parts[i]);
+      drawPesoBars(pdf, cursor, baseline);
+      cursor += pdf.getTextWidth("P");
+    }
+  });
+};
+
+const toStandIn = (text: string) => text.split(PESO).join(PESO_STAND_IN);
 
 /** Builds and downloads the receipt. Throws on failure so callers can toast. */
 export async function downloadReceiptPdf(doc: ReceiptDocument): Promise<void> {
@@ -140,8 +190,8 @@ export async function downloadReceiptPdf(doc: ReceiptDocument): Promise<void> {
     pdf.text(label, margin, y);
     pdf.setFont("helvetica", "normal");
     pdf.setTextColor(15, 23, 42);
-    const valueLines = pdf.splitTextToSize(value || "Not recorded", contentWidth - 47);
-    pdf.text(valueLines, margin + 47, y);
+    const valueLines: string[] = pdf.splitTextToSize(toStandIn(value || "Not recorded"), contentWidth - 47);
+    drawMoneyText(pdf, valueLines, margin + 47, y);
     y += Math.max(8, valueLines.length * 5);
   });
 
@@ -154,7 +204,7 @@ export async function downloadReceiptPdf(doc: ReceiptDocument): Promise<void> {
   pdf.setFontSize(9);
   pdf.text(doc.amountLabel.toUpperCase(), margin + 7, y + 11);
   pdf.setFontSize(18);
-  pdf.text(peso(doc.amount), pageWidth - margin - 7, y + 17, { align: "right" });
+  drawMoneyText(pdf, toStandIn(formatPeso(doc.amount)), pageWidth - margin - 7, y + 17, "right");
 
   // Notice
   y += 40;

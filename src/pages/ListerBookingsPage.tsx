@@ -104,11 +104,11 @@ import {
 } from "@/lib/platformSettings";
 import {
   describeRenterCharge,
-  formatPeso,
   getCancellationOutcome,
   getMutualNoShowTimes,
   pickupBlocksCancellation,
 } from "@/lib/cancellationPolicy";
+import { formatPeso } from "@/lib/money";
 
 const getBookingPickupMs = (booking: {
   start_date: string;
@@ -2399,7 +2399,7 @@ export default function ListerBookingsPage() {
               </div>
               <div className="text-right">
                 <p className="text-xs text-muted-foreground">Released</p>
-                <p className="font-semibold">PHP {totalPayoutReleased.toLocaleString()}</p>
+                <p className="font-semibold">{formatPeso(totalPayoutReleased)}</p>
               </div>
             </div>
 
@@ -2444,7 +2444,7 @@ export default function ListerBookingsPage() {
                         </p>
                       </div>
                       <p className="shrink-0 text-sm font-semibold">
-                        PHP {car.earned.toLocaleString()}
+                        {formatPeso(car.earned)}
                       </p>
                     </div>
                   ))}
@@ -2483,7 +2483,7 @@ export default function ListerBookingsPage() {
                         </p>
                         <div className="shrink-0 text-right">
                           <p className="font-semibold">
-                            PHP {Number(payment.amount).toLocaleString()}
+                            {formatPeso(Number(payment.amount))}
                           </p>
                           {booking ? (
                             <p className="text-xs text-muted-foreground">
@@ -2589,7 +2589,7 @@ export default function ListerBookingsPage() {
               <CardContent className="p-5">
                 <p className="text-sm text-muted-foreground">Completed payout value</p>
                 <p className="mt-2 text-2xl font-bold">
-                  PHP {statistics.totalPayout.toLocaleString()}
+                  {formatPeso(statistics.totalPayout)}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Net lister payout from rentals completed in this period.
@@ -2678,13 +2678,13 @@ export default function ListerBookingsPage() {
                             <div
                               className="w-full max-w-14 rounded-t-md bg-primary/80 transition-all"
                               style={{ height }}
-                              title={`${bucket.label}: PHP ${bucket.payout.toLocaleString()} from ${bucket.bookings} booking(s)`}
+                              title={`${bucket.label}: ${formatPeso(bucket.payout)} from ${bucket.bookings} booking(s)`}
                             />
                           </div>
                           <div className="text-center">
                             <p className="text-xs font-medium">{bucket.label}</p>
                             <p className="text-[10px] text-muted-foreground">
-                              PHP {bucket.payout.toLocaleString()}
+                              {formatPeso(bucket.payout)}
                             </p>
                           </div>
                         </div>
@@ -2734,7 +2734,7 @@ export default function ListerBookingsPage() {
                           <td className="py-2 pr-3 text-right">{vehicle.bookings}</td>
                           <td className="py-2 pr-3 text-right">{vehicle.completed}</td>
                           <td className="py-2 pr-3 text-right">{vehicle.issues}</td>
-                          <td className="py-2 text-right">PHP {vehicle.payout.toLocaleString()}</td>
+                          <td className="py-2 text-right">{formatPeso(vehicle.payout)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2996,7 +2996,7 @@ export default function ListerBookingsPage() {
                       </p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="font-bold">PHP {Number(b.total_price).toLocaleString()}</p>
+                      <p className="font-bold">{formatPeso(Number(b.total_price))}</p>
                       <span className="mt-1 inline-flex items-center gap-0.5 text-xs font-medium text-primary">
                         View details
                         <ChevronRight className="h-3.5 w-3.5" />
@@ -3166,13 +3166,13 @@ export default function ListerBookingsPage() {
 
                     <div className="mt-5 space-y-3 border-t border-border/50 pt-5">
                       <p className="text-lg font-bold">
-                        PHP {Number(b.total_price).toLocaleString()}
+                        {formatPeso(Number(b.total_price))}
                       </p>
                       {showProjectedPayout ? (
                         <p className="text-xs text-muted-foreground">
                           {payoutLabel}:{" "}
                           <span className="text-green-600 font-semibold">
-                            PHP {(Number(b.base_price) - Number(b.commission)).toLocaleString()}
+                            {formatPeso((Number(b.base_price) - Number(b.commission)))}
                           </span>{" "}
                           <span className="text-[10px]">(after SafeDrive's commission)</span>
                         </p>
@@ -3244,16 +3244,16 @@ export default function ListerBookingsPage() {
                           <p className="mt-1">Reason: {latestExtension.reason}</p>
                           <p className="mt-1">
                             Added: {formatDayCount(latestExtension.extension_days)} | Extension:
-                            {" "}PHP {Number(latestExtension.extension_amount).toLocaleString()}
+                            {" "}{formatPeso(Number(latestExtension.extension_amount))}
                             {extensionCommissionAmount > 0
-                              ? ` | SafeDrive commission: -PHP ${extensionCommissionAmount.toLocaleString()}`
+                              ? ` | SafeDrive commission: -${formatPeso(extensionCommissionAmount)}`
                               : ""}
                             {Number(latestExtension.fuel_top_up_amount) > 0
-                              ? ` | Fuel top-up: PHP ${Number(latestExtension.fuel_top_up_amount).toLocaleString()}`
+                              ? ` | Fuel top-up: ${formatPeso(Number(latestExtension.fuel_top_up_amount))}`
                               : ""}
                           </p>
                           <p className="mt-1 font-medium">
-                            Total additional amount: PHP {Number(latestExtension.total_additional_amount).toLocaleString()}
+                            Total additional amount: {formatPeso(Number(latestExtension.total_additional_amount))}
                           </p>
                           {latestExtension.payment_deadline ? (
                             <p className="mt-1 opacity-80">

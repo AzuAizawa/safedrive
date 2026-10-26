@@ -2,6 +2,7 @@ import { CalendarClock } from "lucide-react";
 import { Link } from "react-router";
 
 import { formatManilaDateTime } from "@/lib/bookingNotice";
+import { formatPeso } from "@/lib/money";
 import {
   formatFeeDays,
   getCancellationQuote,
@@ -22,12 +23,7 @@ type CancellationPolicySummaryProps = {
   returnTo: string;
 };
 
-// Whole pesos without decimals; centavos always as two digits (₱999.50, not ₱999.5).
-const formatAmount = (amount: number) =>
-  `₱${amount.toLocaleString("en-PH", {
-    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
-    maximumFractionDigits: 2,
-  })}`;
+const formatAmount = (amount: number) => formatPeso(amount);
 
 const bulletClass = "mt-[0.4rem] h-1.5 w-1.5 shrink-0 rounded-full";
 

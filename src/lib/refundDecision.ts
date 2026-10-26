@@ -155,7 +155,7 @@ export type RefundDecisionResult =
   | { ok: false; code: "invalid_amount" | "over_capacity" | "not_adjustable" | "reason_required"; error: string };
 
 const peso = (amount: number) =>
-  `PHP ${amount.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  `${amount < 0 ? "-" : ""}₱${Math.abs(amount).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // `requested` null/undefined means "release as recommended", exactly the
 // release that existed before a decision could be made - it keeps the one
@@ -181,7 +181,7 @@ export const decideRefund = (input: {
       : roundPesos(Number(input.requested));
 
   if (!Number.isFinite(amount) || amount < 0) {
-    return { ok: false, code: "invalid_amount", error: "Enter a refund amount of PHP 0 or more." };
+    return { ok: false, code: "invalid_amount", error: "Enter a refund amount of ₱0.00 or more." };
   }
   if (amount > input.available + 0.005) {
     return {

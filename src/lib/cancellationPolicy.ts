@@ -264,7 +264,7 @@ export const getCancellationQuote = (input: {
 };
 
 export const formatPeso = (amount: number) =>
-  `PHP ${amount.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  `${amount < 0 ? "-" : ""}₱${Math.abs(amount).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export const formatFeeDays = (days: number) => {
   if (days === 1) return "1 day";
@@ -273,7 +273,7 @@ export const formatFeeDays = (days: number) => {
   return `${Math.round(days * 100) / 100} days`;
 };
 
-// "a late-cancellation fee of PHP 500 (half a day of rental)"
+// "a late-cancellation fee of ₱500.00 (half a day of rental)"
 export const describeRenterCharge = (plan: CancellationOutcome) => {
   if (plan.outcome === "free") return "no fee";
   if (plan.terms === "legacy_percent" || plan.feeDays === null) {

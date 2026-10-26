@@ -9,6 +9,7 @@ import {
   meetsBookingNotice,
   normalizeBookingNoticeHours,
 } from "../server/bookingNotice.js";
+import { formatPeso } from "../server/money.js";
 
 export const config = {
   runtime: "edge",
@@ -690,7 +691,7 @@ export default async function handler(req: Request) {
     if (totalPrice > MAX_BOOKING_TOTAL) {
       return jsonResponse(
         {
-          error: `Booking total must be PHP ${MAX_BOOKING_TOTAL.toLocaleString()} or below`,
+          error: `Booking total must be ${formatPeso(MAX_BOOKING_TOTAL)} or below`,
         },
         400,
       );

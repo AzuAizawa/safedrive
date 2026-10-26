@@ -7,9 +7,9 @@ import {
 } from "../server/bookingCompletion.js";
 import {
   describeRenterCharge,
-  formatPeso,
   getCancellationRefundPlan,
 } from "../server/cancellationRefundPlan.js";
+import { formatPeso } from "../server/money.js";
 
 export const config = {
   runtime: "edge",
@@ -232,7 +232,7 @@ const queueManualRefundReview = async (
       superAdmins.map((admin) => ({
         user_id: admin.id,
         title: "Refund needs manual review",
-        message: `A booking incident needs refund review. Confirm PHP ${amount.toLocaleString()} of PHP ${captured.toLocaleString()} captured in Financial Reviews.`,
+        message: `A booking incident needs refund review. Confirm ${formatPeso(amount)} of ${formatPeso(captured)} captured in Financial Reviews.`,
         type: "warning",
         link: "/admin/financial-reviews?view=refunds",
       })),

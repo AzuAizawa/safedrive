@@ -19,6 +19,7 @@ import {
 } from "@/lib/platformSettings";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { toast } from "sonner";
+import { formatPeso } from "@/lib/money";
 
 const formatPlanDate = (value: string | null) => {
   if (!value) return null;
@@ -50,7 +51,7 @@ const buildPlans = (slots: PlanSettings) => [
   {
     id: "free",
     label: "Free",
-    priceLabel: "PHP 0",
+    priceLabel: formatPeso(0),
     period: "forever",
     tagline: "Start listing with the default vehicle slots.",
     icon: Shield,
@@ -64,7 +65,7 @@ const buildPlans = (slots: PlanSettings) => [
   {
     id: "pro",
     label: "Pro",
-    priceLabel: `PHP ${slots.proPricePhp.toLocaleString()}`,
+    priceLabel: formatPeso(slots.proPricePhp),
     period: "/ month",
     tagline: "Add more vehicle slots.",
     icon: Zap,
@@ -84,7 +85,7 @@ const buildPlans = (slots: PlanSettings) => [
   {
     id: "premium",
     label: "Premium",
-    priceLabel: `PHP ${slots.premiumPricePhp.toLocaleString()}`,
+    priceLabel: formatPeso(slots.premiumPricePhp),
     period: "/ month",
     tagline: "Maximum vehicle slots for current release.",
     icon: Star,

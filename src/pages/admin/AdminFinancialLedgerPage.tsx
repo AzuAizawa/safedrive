@@ -17,6 +17,7 @@ import {
 import { pageRange, serverPageInfo } from "@/lib/pagination";
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/types/database";
+import { formatPesoFromCentavos } from "@/lib/money";
 
 type Journal = Database["public"]["Tables"]["ledger_journals"]["Row"];
 type Entry = Database["public"]["Tables"]["ledger_entries"]["Row"];
@@ -29,8 +30,7 @@ type CorrectionLine = {
   memo: string;
 };
 
-const money = (centavos: number) =>
-  new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(centavos / 100);
+const money = (centavos: number) => formatPesoFromCentavos(centavos);
 
 // Every record here is money moving between two accounts. An admin needs to
 // know WHAT happened; the account codes and debit/credit columns behind that

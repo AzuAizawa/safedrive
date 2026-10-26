@@ -67,6 +67,7 @@ import {
   type Reliability,
 } from "@/lib/ratings";
 import { carTransmissionLabel, isLicenseExpired } from "@/lib/driversLicense";
+import { formatPeso } from "@/lib/money";
 
 const MAX_BOOKING_TOTAL = 100000;
 // Two independent policy limits, mirrored from api/create-booking.ts (kept in
@@ -516,7 +517,7 @@ export default function CarDetailPage() {
 
     if (totalPrice > MAX_BOOKING_TOTAL) {
       toast.error("Booking total exceeds online payment limit", {
-        description: `Please choose fewer days. SafeDrive can only process bookings up to PHP ${MAX_BOOKING_TOTAL.toLocaleString()}.`,
+        description: `Please choose fewer days. SafeDrive can only process bookings up to ${formatPeso(MAX_BOOKING_TOTAL)}.`,
       });
       return;
     }
@@ -710,7 +711,7 @@ export default function CarDetailPage() {
         : isOverlapping
         ? "Those dates are booked or blocked by the owner. Pick another schedule."
         : exceedsPaymentLimit
-          ? `Online checkout is limited to bookings worth ${MAX_BOOKING_TOTAL.toLocaleString()} pesos or less.`
+          ? `Online checkout is limited to bookings worth ${formatPeso(MAX_BOOKING_TOTAL)} or less.`
           : noPickupTimeOnDate
             ? `No pickup time on that date is at least ${minBookingNoticeHours} hours from now. Choose a later pickup date.`
           : !pickupTime || !dropoffTime
@@ -1158,7 +1159,7 @@ export default function CarDetailPage() {
               <CardTitle className="flex items-center justify-between">
                 <span>Book this car</span>
                 <span className="text-primary">
-                  ₱{pricePerDay.toLocaleString()}
+                  {formatPeso(pricePerDay)}
                   <span className="text-sm text-muted-foreground font-normal">
                     /day
                   </span>
@@ -1211,9 +1212,9 @@ export default function CarDetailPage() {
                       {/* formatDayCount already pluralises ("3 days"). The
                           trailing "s" here predates it and was doubling up,
                           rendering "3 dayss". */}
-                      ₱{pricePerDay.toLocaleString()} × {formatDayCount(totalDays)}
+                      {formatPeso(pricePerDay)} × {formatDayCount(totalDays)}
                     </span>
-                    <span>₱{basePrice.toLocaleString()}</span>
+                    <span>{formatPeso(basePrice)}</span>
                   </div>
                   {/* Only shown when there is one. The rate is 0 until a real
                       PayMongo rate is confirmed (see the "keep 0 unless
@@ -1223,12 +1224,12 @@ export default function CarDetailPage() {
                   {processingFee > 0 && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Payment processing fee</span>
-                      <span>₱{processingFee.toLocaleString()}</span>
+                      <span>{formatPeso(processingFee)}</span>
                     </div>
                   )}
                   <div className="flex justify-between font-semibold border-t border-border pt-2 mt-2">
                     <span>Total</span>
-                    <span>₱{totalPrice.toLocaleString()}</span>
+                    <span>{formatPeso(totalPrice)}</span>
                   </div>
                   {downpaymentRate < 1 ? (
                     <>
@@ -1236,7 +1237,7 @@ export default function CarDetailPage() {
                         <span>
                           Reservation downpayment ({Math.round(downpaymentRate * 100)}%)
                         </span>
-                        <span>₱{Math.ceil(totalPrice * downpaymentRate).toLocaleString()}</span>
+                        <span>{formatPeso(Math.ceil(totalPrice * downpaymentRate))}</span>
                       </div>
                       <p className="text-[11px] text-muted-foreground">
                         The {Math.round(downpaymentRate * 100)}% downpayment reserves the booking and is part of the rental price.
@@ -1274,7 +1275,7 @@ export default function CarDetailPage() {
                 )}
                 {exceedsPaymentLimit && (
                   <p className="text-sm font-semibold text-red-500 bg-red-500/10 p-2 rounded text-center">
-                    Booking total must be PHP {MAX_BOOKING_TOTAL.toLocaleString()} or below.
+                    Booking total must be {formatPeso(MAX_BOOKING_TOTAL)} or below.
                   </p>
                 )}
               

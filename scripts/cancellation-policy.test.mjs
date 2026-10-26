@@ -313,13 +313,13 @@ test("the charge is described in pesos and days", () => {
     assert.equal(browser.describeRenterCharge(outcome(booking, options)), text);
     return text;
   };
-  assert.equal(describe(feeDayBooking(), { captured: 2000, hoursBeforePickup: 10 }), "a late-cancellation fee of PHP 500 (half a day of rental)");
-  assert.equal(describe(fiveDays(), { captured: 5000, hoursBeforePickup: 0, event: "no_show" }), "a no-show fee of PHP 2,000 (2 days of rental)");
+  assert.equal(describe(feeDayBooking(), { captured: 2000, hoursBeforePickup: 10 }), "a late-cancellation fee of ₱500.00 (half a day of rental)");
+  assert.equal(describe(fiveDays(), { captured: 5000, hoursBeforePickup: 0, event: "no_show" }), "a no-show fee of ₱2,000.00 (2 days of rental)");
   assert.equal(
     describe(feeDayBooking(), { captured: 400, hoursBeforePickup: 0, event: "no_show" }),
-    "a no-show fee of PHP 750 (75% of a day of rental, capped at the PHP 400 paid)",
+    "a no-show fee of ₱750.00 (75% of a day of rental, capped at the ₱400.00 paid)",
   );
-  assert.equal(describe(fiveDays(), { captured: 5000, hoursBeforePickup: 10 }), "a late-cancellation fee of PHP 1,000 (1 day of rental)");
+  assert.equal(describe(fiveDays(), { captured: 5000, hoursBeforePickup: 10 }), "a late-cancellation fee of ₱1,000.00 (1 day of rental)");
   assert.equal(describe(feeDayBooking(), { captured: 2000, hoursBeforePickup: 30 }), "no fee");
 });
 

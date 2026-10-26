@@ -251,7 +251,7 @@ export default async function handler(req: Request) {
       return jsonResponse(
         {
           error:
-            "This extension amount exceeds PayMongo's PHP 100,000 hosted checkout limit.",
+            "This extension amount exceeds PayMongo's ₱100,000.00 hosted checkout limit.",
         },
         422,
       );

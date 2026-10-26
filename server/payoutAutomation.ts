@@ -4,6 +4,7 @@ import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { sendAdminAlertEmail, sendPayoutReceiptEmail } from "./email.js";
 import { getPayoutAccountNumberError, maskPayoutAccount } from "./payoutAccount.js";
 import { isPayMongoTestKey } from "./paymongoMode.js";
+import { formatPeso } from "./money.js";
 
 type PaymentRecord = {
   id: string;
@@ -838,7 +839,7 @@ export const processAutomaticPayoutForBooking = async ({
       supabase,
       payoutBooking.owner.id,
       "Payout Recorded (demo mode)",
-      `Your SafeDrive payout of PHP ${Number(payoutBooking.base_price).toLocaleString()} for ${getVehicleLabel(payoutBooking)} was recorded${sandboxDestination ? ` for ${sandboxDestination}` : ""}. This build runs in demo payout mode, so no real PayMongo transfer was sent.`,
+      `Your SafeDrive payout of ${formatPeso(Number(payoutBooking.base_price))} for ${getVehicleLabel(payoutBooking)} was recorded${sandboxDestination ? ` for ${sandboxDestination}` : ""}. This build runs in demo payout mode, so no real PayMongo transfer was sent.`,
       "success",
     );
     await sendPayoutReceiptEmail(supabase, {
@@ -861,7 +862,7 @@ export const processAutomaticPayoutForBooking = async ({
     await notifyAdmins(
       supabase,
       "Lister Payout Released (demo)",
-      `PHP ${Number(payoutBooking.base_price).toLocaleString()} ${initiatedByUserId ? "was released by an admin" : "auto-released on completion"} for ${getVehicleLabel(payoutBooking)}${sandboxDestination ? ` to ${sandboxDestination}` : ""}.`,
+      `${formatPeso(Number(payoutBooking.base_price))} ${initiatedByUserId ? "was released by an admin" : "auto-released on completion"} for ${getVehicleLabel(payoutBooking)}${sandboxDestination ? ` to ${sandboxDestination}` : ""}.`,
     );
     // Keep the double-entry ledger complete even in demo mode so financial
     // reports and reconciliation stay balanced. The event key matches the
@@ -1004,7 +1005,7 @@ export const processAutomaticPayoutForBooking = async ({
       await notifyAdmins(
         supabase,
         "Lister Payout Released",
-        `PHP ${Number(payoutBooking.base_price).toLocaleString()} ${initiatedByUserId ? "was released by an admin" : "auto-released on completion"} for ${getVehicleLabel(payoutBooking)}${releasedDestination ? ` to ${releasedDestination}` : ""}.`,
+        `${formatPeso(Number(payoutBooking.base_price))} ${initiatedByUserId ? "was released by an admin" : "auto-released on completion"} for ${getVehicleLabel(payoutBooking)}${releasedDestination ? ` to ${releasedDestination}` : ""}.`,
       );
       await postSimpleBalancedJournal(supabase, {
         bookingId,
