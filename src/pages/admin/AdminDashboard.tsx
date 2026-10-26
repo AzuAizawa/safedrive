@@ -27,13 +27,15 @@ export default function AdminDashboard() {
     void (async () => {
       setLoading(true);
       setLoadError(null);
-      const [profiles, vehicles, support, guests, payouts, refunds, retention, reconciliation, activity] = await Promise.all([
+      const [profiles, vehicles, support, waitingOnMember, guests, payouts, refunds, retention, reconciliation, activity] = await Promise.all([
         supabase.from("profiles").select("id, updated_at").eq("verified_status", "pending").order("updated_at", { ascending: true }),
         supabase.from("cars").select("id, created_at").eq("status", "pending").is("deleted_at", null).order("created_at", { ascending: true }),
         loadSupportTicketsNeedingAdminReply().catch((error: unknown) => {
           console.error("Failed to load support reply queue:", error);
           return [];
         }),
+        // CHAPTER 130: support tickets parked on the member, oldest first.
+        supabase.from("support_tickets").select("id, status_changed_at").eq("status", "waiting_for_user").is("participant_user_id", null).order("status_changed_at", { ascending: true }),
         supabase.from("guest_inquiries").select("id, created_at").in("status", ["open", "in_progress"]).order("created_at", { ascending: true }),
         isSuperAdmin ? supabase.from("payments").select("id, created_at").eq("payment_type", "payout").in("status", ["pending", "failed"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         isSuperAdmin ? supabase.from("payments").select("id, created_at").eq("payment_type", "refund").in("status", ["pending", "failed"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
@@ -41,7 +43,7 @@ export default function AdminDashboard() {
         isSuperAdmin ? supabase.from("reconciliation_items").select("id, created_at").in("status", ["open", "investigating"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(6),
       ]);
-      const firstError = [profiles, vehicles, guests, payouts, refunds, retention, reconciliation, activity].find(
+      const firstError = [profiles, vehicles, waitingOnMember, guests, payouts, refunds, retention, reconciliation, activity].find(
         (result) => result.error,
       )?.error;
       if (firstError) setLoadError(firstError.message);
@@ -49,6 +51,7 @@ export default function AdminDashboard() {
         { label: "Profiles to verify", count: profiles.data?.length ?? 0, oldest: profiles.data?.[0]?.updated_at ?? null, to: "/admin/users", icon: UserCheck },
         { label: "Vehicles to approve", count: vehicles.data?.length ?? 0, oldest: vehicles.data?.[0]?.created_at ?? null, to: "/admin/vehicle-approval?tab=pending", icon: Car },
         { label: "Support needing reply", count: support.length, oldest: support[0]?.waiting_since ?? null, to: "/admin/support", icon: Headset },
+        { label: "Support waiting on member", count: waitingOnMember.data?.length ?? 0, oldest: waitingOnMember.data?.[0]?.status_changed_at ?? null, to: "/admin/support", icon: Headset },
         { label: "User inquiries", count: guests.data?.length ?? 0, oldest: guests.data?.[0]?.created_at ?? null, to: "/admin/guest-inquiries", icon: MessageSquare },
       ];
       if (isSuperAdmin) operational.push(

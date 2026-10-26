@@ -5,6 +5,7 @@ import { sendAdminAlertEmail, sendPayoutReceiptEmail } from "./email.js";
 import { getPayoutAccountNumberError, maskPayoutAccount } from "./payoutAccount.js";
 import { isPayMongoTestKey } from "./paymongoMode.js";
 import { formatPeso } from "./money.js";
+import { ACTIVE_TICKET_STATUSES, PAYOUT_BLOCKING_TICKET_TAGS } from "./ticketStatus.js";
 
 type PaymentRecord = {
   id: string;
@@ -736,12 +737,19 @@ export const processAutomaticPayoutForBooking = async ({
   // same filter in src/lib/adminWorkQueue.ts): the three conversation
   // creators always set it, and real support/incident/refund tickets never
   // do - so a dispute still blocks the payout exactly as before.
+  //
+  // Only a real case holds the money (R2): an incident or a refund review. A
+  // member's ordinary question linked to the booking ("how do I extend?") is
+  // also a support_tickets row with this booking_id, and used to stop the
+  // lister being paid until staff closed it. A case parked on the member
+  // (waiting_for_user, CHAPTER 130) is still open and still blocks.
   let blockingTicketQuery = supabase
     .from("support_tickets")
     .select("id", { count: "exact", head: true })
     .eq("booking_id", bookingId)
     .is("participant_user_id", null)
-    .in("status", ["open", "in_progress"]);
+    .in("tag", [...PAYOUT_BLOCKING_TICKET_TAGS])
+    .in("status", [...ACTIVE_TICKET_STATUSES]);
   // A running trip only reaches this line through payoutReleaseState's
   // earned-rental release during an open case. That case's own incident
   // ticket IS the open case the release was designed for, so it cannot also be

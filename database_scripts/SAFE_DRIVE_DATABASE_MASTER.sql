@@ -20474,4 +20474,419 @@ commit;
 --        'yes' as expected;
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 130 - A support ticket shows where it stands
+-- ============================================================================
+-- Panel feedback: a ticket was only ever "Open" or "Resolved", so a member
+-- could not tell whether anyone was working on it, or whether SafeDrive was
+-- waiting on them. A support ticket (participant_user_id null) now moves
+-- through five statuses:
+--
+--   open              new; no staff reply yet                     (system)
+--   in_progress       staff replied, or the member answered       (automatic)
+--   waiting_for_user  staff asked the member for something        (admin)
+--   resolved          done; the member may reopen it for N days   (admin)
+--   closed            N days after resolved; read-only            (daily job)
+--
+-- N is the new platform setting ticket_reopen_days (default 7, 1-30), voted
+-- on like every other setting. Booking conversations (participant_user_id
+-- set) keep their own open/closed life and the closing time from CHAPTER 81.
+--
+-- waiting_for_user is still an open case. Every place that asked "is a case
+-- still open?" with ('open', 'in_progress') has to include it, or a dispute
+-- parked on the member would quietly release a payout or let an account be
+-- deleted. The server code does that through one shared list; in the
+-- database it is account_deletion_blockers, reproduced below.
+--
+-- A member may reopen only a ticket they raised themselves. The incident and
+-- refund cases the system opens (tags booking_incident, manual_refund) hold a
+-- payout or a refund, so only staff reopen those.
+begin;
+
+alter table public.support_tickets
+  add column if not exists resolved_at timestamptz,
+  add column if not exists status_changed_at timestamptz;
+
+alter table public.support_tickets
+  drop constraint if exists support_tickets_status_check;
+alter table public.support_tickets
+  add constraint support_tickets_status_check
+  check (status in ('open', 'in_progress', 'waiting_for_user', 'resolved', 'closed'));
+
+alter table public.platform_settings
+  add column if not exists ticket_reopen_days integer not null default 7;
+alter table public.platform_settings
+  drop constraint if exists platform_settings_ticket_reopen_days_check;
+alter table public.platform_settings
+  add constraint platform_settings_ticket_reopen_days_check
+  check (ticket_reopen_days >= 1 and ticket_reopen_days <= 30);
+
+-- Every status change is timed, whoever makes it (staff, the member, a job or
+-- the server). resolved_at starts the reopen window; a ticket that is closed
+-- keeps it, one that is reopened loses it.
+create or replace function public.stamp_support_ticket_status()
+returns trigger
+language plpgsql
+as $stamp_ticket_status$
+begin
+  if tg_op = 'INSERT' or new.status is distinct from old.status then
+    new.status_changed_at := now();
+    if new.status = 'resolved' then
+      new.resolved_at := now();
+    elsif new.status <> 'closed' then
+      new.resolved_at := null;
+    end if;
+  end if;
+  return new;
+end;
+$stamp_ticket_status$;
+
+drop trigger if exists stamp_support_ticket_status on public.support_tickets;
+create trigger stamp_support_ticket_status
+  before insert or update of status on public.support_tickets
+  for each row execute function public.stamp_support_ticket_status();
+
+-- A reply moves the ticket on by itself: staff answering a new ticket puts it
+-- in progress; the member answering a question puts it back in progress. A
+-- member cannot write into a resolved or closed ticket - they reopen it
+-- first. The message that opens a ticket changes nothing.
+create or replace function public.move_support_ticket_on_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $move_ticket$
+declare
+  t public.support_tickets%rowtype;
+  sender_is_staff boolean;
+  opens_ticket boolean;
+begin
+  select * into t from public.support_tickets where id = new.ticket_id for update;
+  if not found or t.participant_user_id is not null then
+    return new;
+  end if;
+  opens_ticket := not exists (select 1 from public.ticket_messages m where m.ticket_id = new.ticket_id);
+
+  select exists (
+    select 1 from public.profiles p
+    where p.id = new.sender_id and p.role in ('admin', 'super_admin')
+  ) into sender_is_staff;
+
+  if sender_is_staff then
+    if t.status = 'open' and not opens_ticket then
+      update public.support_tickets set status = 'in_progress' where id = t.id;
+    end if;
+  elsif new.sender_id = t.user_id then
+    if t.status in ('resolved', 'closed') then
+      raise exception 'This ticket is %. Reopen it to add a message.', t.status;
+    end if;
+    if t.status = 'waiting_for_user' then
+      update public.support_tickets set status = 'in_progress' where id = t.id;
+    end if;
+  end if;
+  return new;
+end;
+$move_ticket$;
+
+drop trigger if exists move_support_ticket_on_message on public.ticket_messages;
+create trigger move_support_ticket_on_message
+  before insert on public.ticket_messages
+  for each row execute function public.move_support_ticket_on_message();
+
+-- Staff set a status here (In Progress, Waiting for User, Resolved, Closed),
+-- also to reopen a resolved or closed ticket. The member is told in the app;
+-- the page then asks api/send-support-ticket-reply-email.ts to email it.
+create or replace function public.set_support_ticket_status(p_ticket_id uuid, p_status text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $set_ticket_status$
+declare
+  t public.support_tickets%rowtype;
+  notice text;
+begin
+  if not public.admin_can('support.handle') then
+    raise exception 'Support permission required';
+  end if;
+  if p_status not in ('in_progress', 'waiting_for_user', 'resolved', 'closed') then
+    raise exception 'A ticket cannot be set to %', p_status;
+  end if;
+
+  select * into t from public.support_tickets where id = p_ticket_id for update;
+  if not found then
+    raise exception 'Support ticket not found';
+  end if;
+  if t.participant_user_id is not null then
+    raise exception 'A booking conversation is closed, not given a support status';
+  end if;
+  if t.status = p_status then
+    return jsonb_build_object('status', t.status, 'changed', false);
+  end if;
+
+  update public.support_tickets set status = p_status where id = t.id;
+
+  notice := case p_status
+    when 'in_progress' then 'SafeDrive Support is working on it.'
+    when 'waiting_for_user' then 'SafeDrive Support needs more information from you. Reply in the ticket to continue.'
+    when 'resolved' then 'SafeDrive Support marked it resolved. You can reopen it within '
+      || (select ticket_reopen_days from public.platform_settings where id = 'default') || ' days if it is not.'
+    else 'It is now closed.'
+  end;
+  insert into public.notifications (user_id, title, message, type, link)
+  values (t.user_id, 'Support ticket update', t.subject || ': ' || notice, 'support', '/support');
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (auth.uid(), 'support_ticket_status_changed', 'support_ticket', t.id::text,
+    jsonb_build_object('from', t.status, 'to', p_status, 'subject', t.subject));
+
+  return jsonb_build_object('status', p_status, 'previous', t.status, 'changed', true);
+end;
+$set_ticket_status$;
+
+revoke all on function public.set_support_ticket_status(uuid, text) from public, anon;
+grant execute on function public.set_support_ticket_status(uuid, text) to authenticated;
+
+-- The member reopens a ticket SafeDrive resolved, within ticket_reopen_days.
+-- It goes back to open, so it is counted and sorted with new tickets.
+create or replace function public.reopen_support_ticket(p_ticket_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $reopen_ticket$
+declare
+  t public.support_tickets%rowtype;
+  window_days integer;
+begin
+  select * into t from public.support_tickets where id = p_ticket_id for update;
+  if not found or t.user_id is distinct from auth.uid() then
+    raise exception 'Support ticket not found';
+  end if;
+  if t.participant_user_id is not null then
+    raise exception 'A booking conversation cannot be reopened';
+  end if;
+  if string_to_array(coalesce(t.tag, ''), ',') && array['booking_incident', 'manual_refund'] then
+    raise exception 'Only SafeDrive Support can reopen this case. Open a new ticket instead.';
+  end if;
+  if t.status <> 'resolved' then
+    raise exception 'Only a resolved ticket can be reopened';
+  end if;
+
+  select ticket_reopen_days into window_days from public.platform_settings where id = 'default';
+  if t.resolved_at is null or t.resolved_at < now() - make_interval(days => coalesce(window_days, 7)) then
+    raise exception 'The % days to reopen this ticket have passed. Open a new ticket instead.', coalesce(window_days, 7);
+  end if;
+
+  update public.support_tickets set status = 'open' where id = t.id;
+
+  insert into public.notifications (user_id, title, message, type, link)
+  select p.id, 'Support ticket reopened', t.subject || ' was reopened by the member.', 'support',
+         '/admin/support?ticket=' || t.id
+    from public.profiles p
+   where p.role in ('admin', 'super_admin') and p.deleted_at is null;
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (auth.uid(), 'support_ticket_reopened_by_member', 'support_ticket', t.id::text,
+    jsonb_build_object('subject', t.subject));
+
+  return jsonb_build_object('status', 'open');
+end;
+$reopen_ticket$;
+
+revoke all on function public.reopen_support_ticket(uuid) from public, anon;
+grant execute on function public.reopen_support_ticket(uuid) to authenticated;
+
+-- Run by the daily api/expire-platform-setting-changes.ts job: a resolved
+-- ticket nobody reopened within the window is closed. Returns what it closed
+-- so the job can email each member.
+create or replace function public.close_resolved_support_tickets()
+returns table (ticket_id uuid, user_id uuid, subject text)
+language plpgsql
+security definer
+set search_path = public
+as $close_resolved$
+declare
+  window_days integer;
+begin
+  select ticket_reopen_days into window_days from public.platform_settings where id = 'default';
+  return query
+  with closed as (
+    update public.support_tickets t
+       set status = 'closed'
+     where t.status = 'resolved'
+       and t.participant_user_id is null
+       and t.resolved_at is not null
+       and t.resolved_at <= now() - make_interval(days => coalesce(window_days, 7))
+    returning t.id, t.user_id, t.subject
+  ), noticed as (
+    insert into public.notifications (user_id, title, message, type, link)
+    select c.user_id, 'Support ticket closed',
+           c.subject || ' was closed. Open a new ticket if you still need help.', 'support', '/support'
+      from closed c
+    returning 1
+  )
+  select c.id, c.user_id, c.subject from closed c;
+end;
+$close_resolved$;
+
+revoke all on function public.close_resolved_support_tickets() from public, anon, authenticated;
+grant execute on function public.close_resolved_support_tickets() to service_role;
+
+-- CHAPTER 97's function, reproduced verbatim with waiting_for_user added to
+-- the statuses that still count as an open case.
+create or replace function public.account_deletion_blockers(p_user_id uuid)
+returns text[]
+language sql
+stable
+security definer
+set search_path = public
+as $account_deletion_blockers$
+  select array_remove(array[
+    case when exists (
+      select 1 from public.bookings b
+      where (b.renter_id = p_user_id or b.owner_id = p_user_id)
+        and b.status in ('pending', 'confirmed', 'awaiting_payment', 'downpayment_paid', 'fully_paid', 'active')
+    ) then 'You have a booking that has not finished. Finish or cancel it first.' end,
+    case when exists (
+      select 1 from public.payments p
+      join public.bookings b on b.id = p.booking_id
+      where b.renter_id = p_user_id
+        and p.payment_type = 'refund'
+        and p.status in ('pending', 'failed')
+    ) then 'A refund to you has not been completed yet.' end,
+    case when exists (
+      select 1 from public.bookings b
+      where b.owner_id = p_user_id
+        and (
+          exists (
+            select 1 from public.payments p
+            where p.booking_id = b.id and p.payment_type = 'payout' and p.status in ('pending', 'failed')
+          )
+          or (
+            b.status = 'completed'
+            and not exists (
+              select 1 from public.payments p
+              where p.booking_id = b.id and p.payment_type = 'payout' and p.status = 'completed'
+            )
+          )
+        )
+    ) then 'A payout to you has not been completed yet.' end,
+    case when exists (
+      select 1 from public.support_tickets t
+      where t.booking_id is not null
+        and t.status in ('open', 'in_progress', 'waiting_for_user')
+        and (t.user_id = p_user_id or t.participant_user_id = p_user_id)
+    ) then 'A support case about one of your bookings is still open.' end,
+    case when exists (
+      select 1 from public.profiles pr
+      where pr.id = p_user_id and pr.suspended_at is not null
+    ) then 'The account is suspended, so SafeDrive has to review it before it can be deleted.' end
+  ], null);
+$account_deletion_blockers$;
+
+revoke all on function public.account_deletion_blockers(uuid) from public, anon, authenticated;
+grant execute on function public.account_deletion_blockers(uuid) to service_role;
+
+-- The settings whitelist, reproduced from CHAPTER 115 with ticket_reopen_days
+-- added.
+create or replace function public.validate_platform_setting_change(p_changes jsonb)
+returns void
+language plpgsql
+stable
+set search_path = public
+as $validate$
+declare
+  k text;
+  v numeric;
+  merged jsonb;
+begin
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' or p_changes = '{}'::jsonb then
+    raise exception 'No settings to change';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if jsonb_typeof(p_changes -> k) <> 'number' then
+      raise exception 'Setting % must be a number', k;
+    end if;
+    v := (p_changes ->> k)::numeric;
+    if k = 'commission_rate' then
+      if v < 0 or v > 1 then raise exception 'commission_rate must be 0-1'; end if;
+    elsif k = 'payment_processing_fee_rate' then
+      if v < 0 or v > 0.25 then raise exception 'payment_processing_fee_rate must be 0-0.25'; end if;
+    elsif k = 'payment_processing_fixed_centavos' then
+      if v < 0 or v > 100000 or v <> floor(v) then raise exception 'payment_processing_fixed_centavos must be a whole number 0-100000'; end if;
+    elsif k = 'downpayment_rate' then
+      if v < 0.2 or v > 1 then raise exception 'downpayment_rate must be 0.2-1.0'; end if;
+    elsif k = 'refund_full_hours' then
+      if v < 0 or v > 720 or v <> floor(v) then raise exception 'refund_full_hours must be a whole number 0-720'; end if;
+    elsif k = 'refund_late_renter_percent' then
+      if v < 0 or v > 100 then raise exception 'refund_late_renter_percent must be 0-100'; end if;
+    elsif k = 'short_notice_free_hours' then
+      if v < 0 or v > 24 or v <> floor(v) then raise exception 'short_notice_free_hours must be a whole number 0-24'; end if;
+    elsif k in ('late_cancel_fee_days', 'no_show_fee_days') then
+      if v < 0 or v > 30 then raise exception '% must be 0-30 days', k; end if;
+    elsif k in ('short_trip_late_cancel_fee_days', 'short_trip_no_show_fee_days') then
+      if v < 0 or v > 2 then raise exception '% must be 0-2 days', k; end if;
+    elsif k = 'arrival_checkin_lead_hours' then
+      if v < 0 or v > 48 or v <> floor(v) then raise exception 'arrival_checkin_lead_hours must be a whole number 0-48'; end if;
+    elsif k = 'lister_completion_timeout_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'lister_completion_timeout_hours must be a whole number 1-72'; end if;
+    elsif k = 'balance_deadline_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'balance_deadline_hours must be a whole number 1-168'; end if;
+    elsif k = 'balance_reminder_hours_before' then
+      if v < 0 or v > 168 or v <> floor(v) then raise exception 'balance_reminder_hours_before must be a whole number 0-168'; end if;
+    elsif k = 'dormant_account_days' then
+      if v < 90 or v > 3650 or v <> floor(v) then raise exception 'dormant_account_days must be a whole number 90-3650'; end if;
+    elsif k = 'no_show_grace_minutes' then
+      if v < 15 or v > 180 or v <> floor(v) then raise exception 'no_show_grace_minutes must be a whole number 15-180'; end if;
+    elsif k = 'mutual_no_show_close_hours' then
+      if v < 1 or v > 72 or v <> floor(v) then raise exception 'mutual_no_show_close_hours must be a whole number 1-72'; end if;
+    elsif k = 'min_booking_notice_hours' then
+      if v < 1 or v > 168 or v <> floor(v) then raise exception 'min_booking_notice_hours must be a whole number 1-168'; end if;
+    elsif k = 'account_deletion_grace_days' then
+      if v < 7 or v > 90 or v <> floor(v) then raise exception 'account_deletion_grace_days must be a whole number 7-90'; end if;
+    elsif k = 'free_vehicle_slots' then
+      if v < 1 or v > 100 or v <> floor(v) then raise exception 'free_vehicle_slots must be a whole number 1-100'; end if;
+    elsif k in ('pro_extra_vehicle_slots', 'premium_extra_vehicle_slots') then
+      if v < 0 or v > 100 or v <> floor(v) then raise exception '% must be a whole number 0-100', k; end if;
+    elsif k in ('pro_price_php', 'premium_price_php') then
+      if v < 100 or v > 10000 or v <> floor(v) then raise exception '% must be a whole number of pesos 100-10000', k; end if;
+    elsif k = 'ticket_reopen_days' then
+      if v < 1 or v > 30 or v <> floor(v) then raise exception 'ticket_reopen_days must be a whole number 1-30'; end if;
+    else
+      raise exception 'Setting % is not configurable', k;
+    end if;
+  end loop;
+
+  -- A higher plan is always the better deal, judged on the values as they
+  -- would stand after this change. Checked only when a plan value moves, so
+  -- an unrelated change is never held up by it.
+  if p_changes ?| array['free_vehicle_slots', 'pro_extra_vehicle_slots',
+                        'premium_extra_vehicle_slots', 'pro_price_php', 'premium_price_php'] then
+    select coalesce(to_jsonb(s), '{}'::jsonb) || p_changes
+      into merged
+      from public.platform_settings s
+     where s.id = 'default';
+    perform public.check_plan_order(merged);
+  end if;
+end;
+$validate$;
+
+revoke all on function public.validate_platform_setting_change(jsonb) from public, anon, authenticated;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'ticket statuses' as check_name,
+--        (select pg_get_constraintdef(oid) like '%waiting_for_user%' from pg_constraint
+--          where conname = 'support_tickets_status_check')::text as result,
+--        'true' as expected
+-- union all
+-- select 'reopen window', (select ticket_reopen_days::text from public.platform_settings where id = 'default'), '7'
+-- union all
+-- select 'status functions', (select count(*)::text from pg_proc where proname in
+--          ('set_support_ticket_status', 'reopen_support_ticket', 'close_resolved_support_tickets',
+--           'move_support_ticket_on_message', 'stamp_support_ticket_status')), '5';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

@@ -42,6 +42,14 @@ import {
   richTextHasVisibleContent,
 } from "@/lib/richText";
 import type { GuestInquiry, SupportTicket, TicketMessage } from "@/types/database";
+import {
+  canMemberReopenTicket,
+  isActiveTicketStatus,
+  reopenDaysLeft,
+  ticketStatusClasses,
+  ticketStatusLabel,
+} from "@/lib/ticketStatus";
+import { DEFAULT_TICKET_REOPEN_DAYS, fetchTicketReopenDays } from "@/lib/platformSettings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -105,6 +113,9 @@ export default function SupportTicketsPage() {
   const [now, setNow] = useState(() => Date.now());
   const [loading, setLoading] = useState(true);
   const [activeTicket, setActiveTicket] = useState<SupportTicket | null>(null);
+  // CHAPTER 130: days a resolved ticket can be reopened (a platform setting).
+  const [reopenDays, setReopenDays] = useState(DEFAULT_TICKET_REOPEN_DAYS);
+  const [isReopening, setIsReopening] = useState(false);
   const [inquiries, setInquiries] = useState<GuestInquiry[]>([]);
   const [activeInquiry, setActiveInquiry] = useState<GuestInquiry | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
@@ -235,6 +246,10 @@ export default function SupportTicketsPage() {
   useEffect(() => {
     void fetchTickets();
   }, [fetchTickets]);
+
+  useEffect(() => {
+    void fetchTicketReopenDays().then(setReopenDays);
+  }, []);
 
   // The inquiries this account sent from the Inquiry button or the contact
   // page. A guest's inquiry has no account and stays an email exchange.
@@ -527,8 +542,38 @@ export default function SupportTicketsPage() {
     }
 
     await fetchMessages(activeTicket.id);
+    // Answering a ticket that was waiting on you puts it back in progress.
+    await refreshActiveTicketStatus(activeTicket.id);
     clearReplyAttachment();
     setIsSendingMessage(false);
+  };
+
+  const refreshActiveTicketStatus = async (ticketId: string) => {
+    const { data } = await supabase
+      .from("support_tickets")
+      .select("status, resolved_at, status_changed_at")
+      .eq("id", ticketId)
+      .maybeSingle();
+    if (!data) return;
+    setActiveTicket((current) => (current && current.id === ticketId ? { ...current, ...data } : current));
+    setTickets((current) =>
+      current.map((ticket) => (ticket.id === ticketId ? { ...ticket, ...data } : ticket)),
+    );
+  };
+
+  // CHAPTER 130: the member reopens a ticket SafeDrive resolved, within the
+  // window. The database checks it again and tells the support team.
+  const handleReopenTicket = async () => {
+    if (!activeTicket) return;
+    setIsReopening(true);
+    const { error } = await supabase.rpc("reopen_support_ticket", { p_ticket_id: activeTicket.id });
+    setIsReopening(false);
+    if (error) {
+      toast.error("The ticket was not reopened", { description: error.message });
+      return;
+    }
+    toast.success("Ticket reopened. Add a message so Support knows what is still wrong.");
+    await refreshActiveTicketStatus(activeTicket.id);
   };
 
   const toggleTag = (value: string) => {
@@ -607,7 +652,16 @@ export default function SupportTicketsPage() {
     () => getTicketTagLabels(serializeTicketTags(newTags)),
     [newTags],
   );
-  const isActiveTicketClosed = activeTicket ? activeTicket.status !== "open" : false;
+  // A booking conversation is open or closed; a support ticket takes messages
+  // while it is open, in progress, or waiting on the member (CHAPTER 130).
+  const isActiveTicketClosed = activeTicket
+    ? isConversationTicket(activeTicket)
+      ? activeTicket.status !== "open"
+      : !isActiveTicketStatus(activeTicket.status)
+    : false;
+  const activeTicketReopenable = activeTicket
+    ? canMemberReopenTicket(activeTicket, reopenDays, now)
+    : false;
   const activeConversationClosesIn = activeTicket
     ? conversationClosesInMs(activeTicket, now)
     : null;
@@ -908,13 +962,9 @@ export default function SupportTicketsPage() {
                   />
                   <div className="flex items-center justify-between mt-2">
                     <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${
-                        ticket.status === "open"
-                          ? "bg-amber-500/10 text-amber-500"
-                          : "bg-green-500/10 text-green-500"
-                      }`}
+                      className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${ticketStatusClasses(ticket.status)}`}
                     >
-                      {ticket.status === "open" ? "Open" : "Resolved"}
+                      {ticketStatusLabel(ticket.status)}
                     </span>
                     <span className="text-[10px] text-muted-foreground">
                       {format(new Date(ticket.created_at), "MMM d")}
@@ -1000,11 +1050,18 @@ export default function SupportTicketsPage() {
                     className="flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-500"
                   />
                 )}
-                {isActiveTicketClosed && (
+                {!isConversationTicket(activeTicket) ? (
+                  <div
+                    className={`flex items-center gap-1.5 text-sm font-semibold px-3 py-1 rounded-full ${ticketStatusClasses(activeTicket.status)}`}
+                  >
+                    {isActiveTicketClosed && <CheckCircle2 className="w-4 h-4" />}
+                    {ticketStatusLabel(activeTicket.status)}
+                  </div>
+                ) : isActiveTicketClosed ? (
                   <div className="flex items-center gap-1.5 text-sm font-semibold text-green-500 bg-green-500/10 px-3 py-1 rounded-full">
                     <CheckCircle2 className="w-4 h-4" /> Resolved
                   </div>
-                )}
+                ) : null}
               </div>
 
               <div
@@ -1085,6 +1142,11 @@ export default function SupportTicketsPage() {
                 )}
               </div>
 
+              {activeTicket.status === "waiting_for_user" && !isConversationTicket(activeTicket) ? (
+                <div className="border-t border-purple-500/30 bg-purple-500/5 px-4 py-2.5 text-sm text-purple-700 dark:text-purple-300">
+                  SafeDrive Support is waiting for your reply. Answer below to continue.
+                </div>
+              ) : null}
               {!isActiveTicketClosed ? (
                 <form onSubmit={handleSendMessage} className="p-3 border-t border-border/50 bg-muted/10 space-y-3">
                   <div className="flex gap-2">
@@ -1161,8 +1223,26 @@ export default function SupportTicketsPage() {
                   )}
                 </form>
               ) : (
-                <div className="p-4 text-center text-sm text-muted-foreground border-t border-border/50 bg-muted/20">
-                  This support ticket is resolved and cannot receive new messages.
+                <div className="p-4 text-center text-sm text-muted-foreground border-t border-border/50 bg-muted/20 space-y-2">
+                  {activeTicketReopenable ? (
+                    <>
+                      <p>
+                        SafeDrive Support marked this ticket resolved. Not fixed? You can reopen it for{" "}
+                        {reopenDaysLeft(activeTicket.resolved_at, reopenDays, now)} more day
+                        {reopenDaysLeft(activeTicket.resolved_at, reopenDays, now) === 1 ? "" : "s"}.
+                      </p>
+                      <Button size="sm" variant="outline" onClick={handleReopenTicket} disabled={isReopening}>
+                        Reopen Ticket
+                      </Button>
+                    </>
+                  ) : activeTicket.status === "resolved" ? (
+                    <p>
+                      This ticket is resolved. Open a new ticket if you still need help
+                      {isConversationTicket(activeTicket) ? "" : " - this case can only be reopened by SafeDrive Support"}.
+                    </p>
+                  ) : (
+                    <p>This support ticket is closed and cannot receive new messages. Open a new ticket if you still need help.</p>
+                  )}
                 </div>
               )}
             </>

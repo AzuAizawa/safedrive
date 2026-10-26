@@ -10,6 +10,7 @@ import {
   getCancellationRefundPlan,
 } from "../server/cancellationRefundPlan.js";
 import { formatPeso } from "../server/money.js";
+import { ACTIVE_TICKET_STATUSES } from "../server/ticketStatus.js";
 
 export const config = {
   runtime: "edge",
@@ -264,7 +265,7 @@ const openIncidentTicket = async (
     .select("id")
     .eq("booking_id", b.id)
     .eq("tag", "booking_incident")
-    .in("status", ["open", "in_progress"])
+    .in("status", [...ACTIVE_TICKET_STATUSES])
     .limit(1)
     .maybeSingle();
   if (existing?.id) return existing.id as string;

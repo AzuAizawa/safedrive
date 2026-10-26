@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { sendUserNotificationEmail } from "../server/email.js";
 
 export const config = {
   runtime: "edge",
@@ -91,11 +92,39 @@ export default async function handler(req: Request) {
     );
     if (promoteError) throw promoteError;
 
+    // CHAPTER 130: a support ticket resolved longer ago than the reopen window
+    // (platform_settings.ticket_reopen_days) is closed, on this same daily run.
+    // The database writes the in-app notice; each member is emailed here. A
+    // failed email does not undo the close or stop the others.
+    const { data: closedTickets, error: closeError } = await supabase.rpc(
+      "close_resolved_support_tickets",
+    );
+    if (closeError) throw closeError;
+    const baseOrigin = new URL(req.url).origin;
+    let closeEmailsSent = 0;
+    for (const ticket of (closedTickets ?? []) as Array<{ ticket_id: string; user_id: string; subject: string }>) {
+      try {
+        const result = await sendUserNotificationEmail(supabase, {
+          userId: ticket.user_id,
+          title: `Ticket closed: ${ticket.subject}`,
+          message: "Your ticket is closed. Open a new ticket from the Support page if you still need help.",
+          link: "/support",
+          baseOrigin,
+          eventKey: `support-ticket-status:${ticket.ticket_id}:closed`,
+        });
+        if (result.state === "sent") closeEmailsSent += 1;
+      } catch (emailError) {
+        console.error("Ticket close email failed", emailError);
+      }
+    }
+
     return jsonResponse({
       success: true,
       checked: pendingRequests?.length ?? 0,
       expired,
       promoted: Number(promotedCount ?? 0),
+      ticketsClosed: closedTickets?.length ?? 0,
+      closeEmailsSent,
     });
   } catch (error) {
     return jsonResponse(

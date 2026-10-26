@@ -1,9 +1,80 @@
 import { createClient } from "@supabase/supabase-js";
 import { sendUserNotificationEmail } from "../server/email.js";
+import type { ServiceRoleSupabaseClient } from "../server/supabaseTypes.js";
 
 export const config = { runtime: "edge" };
 
-type Payload = { ticketId?: string; messageId?: string };
+type Payload = { ticketId?: string; messageId?: string; status?: string };
+
+type ServiceClient = ServiceRoleSupabaseClient;
+
+const STATUS_EMAIL: Record<string, (subject: string, reopenDays: number) => { title: string; message: string }> = {
+  in_progress: (subject) => ({
+    title: `Support is working on: ${subject}`,
+    message: "SafeDrive Support is working on your ticket. We will reply in the ticket.",
+  }),
+  waiting_for_user: (subject) => ({
+    title: `Support needs your reply: ${subject}`,
+    message: "SafeDrive Support needs more information from you. Open the ticket and reply to continue.",
+  }),
+  resolved: (subject, reopenDays) => ({
+    title: `Ticket resolved: ${subject}`,
+    message: `SafeDrive Support marked your ticket resolved. If it is not, you can reopen it from the Support page within ${reopenDays} days.`,
+  }),
+  closed: (subject) => ({
+    title: `Ticket closed: ${subject}`,
+    message: "Your ticket is closed. Open a new ticket from the Support page if you still need help.",
+  }),
+};
+
+/**
+ * CHAPTER 130: the status email that follows set_support_ticket_status. Sent
+ * only for the status the ticket actually has now, by staff who may handle
+ * support, so it cannot be used to send a member a made-up update. Keyed on
+ * the ticket's own status_changed_at, so a retry never emails twice.
+ */
+async function emailStatusChange(
+  supabase: ServiceClient,
+  actorId: string,
+  ticketId: string,
+  status: string,
+  baseOrigin: string,
+) {
+  const template = STATUS_EMAIL[status];
+  if (!template) return respond({ error: "Unknown ticket status" }, 400);
+  const [{ data: canHandleSupport }, { data: ticket, error: ticketError }, { data: settings }] = await Promise.all([
+    supabase.rpc("admin_can_for", { p_uid: actorId, p_key: "support.handle" }),
+    supabase
+      .from("support_tickets")
+      .select("id, user_id, subject, status, status_changed_at, participant_user_id")
+      .eq("id", ticketId)
+      .maybeSingle(),
+    supabase.from("platform_settings").select("ticket_reopen_days").eq("id", "default").maybeSingle(),
+  ]);
+  if (canHandleSupport !== true) return respond({ error: "Missing permission: support.handle" }, 403);
+  const row = ticket as {
+    id: string;
+    user_id: string;
+    subject: string;
+    status: string;
+    status_changed_at: string | null;
+    participant_user_id: string | null;
+  } | null;
+  if (ticketError || !row || row.participant_user_id) return respond({ error: "Support ticket not found" }, 404);
+  if (row.status !== status) return respond({ error: "The ticket no longer has this status" }, 409);
+
+  const reopenDays = Number((settings as { ticket_reopen_days?: number } | null)?.ticket_reopen_days) || 7;
+  const { title, message } = template(row.subject, reopenDays);
+  const result = await sendUserNotificationEmail(supabase, {
+    userId: row.user_id,
+    title,
+    message,
+    link: "/support",
+    baseOrigin,
+    eventKey: `support-ticket-status:${row.id}:${status}:${row.status_changed_at ?? ""}`,
+  });
+  return respond({ success: result.state === "sent", deliveryState: result.state });
+}
 
 const respond = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -41,6 +112,10 @@ export default async function handler(req: Request) {
     const payload = (await req.json().catch(() => ({}))) as Payload;
     const ticketId = payload.ticketId?.trim();
     const messageId = payload.messageId?.trim();
+    const statusChange = payload.status?.trim();
+    if (ticketId && statusChange && !messageId) {
+      return await emailStatusChange(supabase, actor.id, ticketId, statusChange, new URL(req.url).origin);
+    }
     if (!ticketId || !messageId) return respond({ error: "Ticket and message are required" }, 400);
 
     const [{ data: actorProfile }, { data: message, error: messageError }, { data: ticket, error: ticketError }] = await Promise.all([

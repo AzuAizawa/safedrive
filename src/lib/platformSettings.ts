@@ -183,6 +183,28 @@ export const fetchDormantAccountDays = async (): Promise<number> => {
     : DEFAULT_DORMANT_ACCOUNT_DAYS;
 };
 
+// CHAPTER 130: how many days a member may reopen a ticket SafeDrive resolved;
+// after that the daily job closes it.
+export const DEFAULT_TICKET_REOPEN_DAYS = 7;
+
+export const fetchTicketReopenDays = async (): Promise<number> => {
+  const { data, error } = await supabase
+    .from("platform_settings")
+    .select("ticket_reopen_days")
+    .eq("id", "default")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load the ticket reopen window:", error);
+    return DEFAULT_TICKET_REOPEN_DAYS;
+  }
+
+  const days = Number(data?.ticket_reopen_days);
+  return Number.isFinite(days) && days >= 1 && days <= 30
+    ? Math.round(days)
+    : DEFAULT_TICKET_REOPEN_DAYS;
+};
+
 export type PlatformPricingSettings = {
   commissionRate: number;
   processingFeeRate: number;

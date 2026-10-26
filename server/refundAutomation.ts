@@ -4,6 +4,7 @@ import { sendAdminAlertEmail, sendRefundReceiptEmail } from "./email.js";
 import { isDemoMoneyMovementEnabled } from "./paymongoMode.js";
 import { getVehicleLabel as bookingVehicleLabel, type RefundableBooking } from "./cancellationRefundPlan.js";
 import { formatPeso } from "./money.js";
+import { ACTIVE_TICKET_STATUSES } from "./ticketStatus.js";
 
 type PaymentRecord = {
   id: string;
@@ -1067,7 +1068,7 @@ export const createManualRefundReview = async (
     .select("id")
     .eq("booking_id", booking.id)
     .eq("tag", "manual_refund")
-    .in("status", ["open", "in_progress"])
+    .in("status", [...ACTIVE_TICKET_STATUSES])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

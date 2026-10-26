@@ -1519,6 +1519,7 @@ export interface Database {
           // CHAPTER 115. Whole pesos for a 30-day plan, for new purchases.
           pro_price_php: number;
           premium_price_php: number;
+          ticket_reopen_days: number;
           ledger_activated_at: string | null;
           payment_processing_fee_rate: number;
           payment_processing_fixed_centavos: number;
@@ -1553,6 +1554,7 @@ export interface Database {
           premium_extra_vehicle_slots?: number;
           pro_price_php?: number;
           premium_price_php?: number;
+          ticket_reopen_days?: number;
           ledger_activated_at?: string | null;
           payment_processing_fee_rate?: number;
           payment_processing_fixed_centavos?: number;
@@ -1587,6 +1589,7 @@ export interface Database {
           premium_extra_vehicle_slots?: number;
           pro_price_php?: number;
           premium_price_php?: number;
+          ticket_reopen_days?: number;
           ledger_activated_at?: string | null;
           payment_processing_fee_rate?: number;
           payment_processing_fixed_centavos?: number;
@@ -1749,6 +1752,8 @@ export interface Database {
           status: string;
           created_at: string;
           conversation_closes_at: string | null;
+          resolved_at: string | null;
+          status_changed_at: string | null;
         };
         Insert: {
           id?: string;
@@ -1760,6 +1765,8 @@ export interface Database {
           status?: string;
           created_at?: string;
           conversation_closes_at?: string | null;
+          resolved_at?: string | null;
+          status_changed_at?: string | null;
         };
         Update: {
           id?: string;
@@ -1771,6 +1778,8 @@ export interface Database {
           status?: string;
           created_at?: string;
           conversation_closes_at?: string | null;
+          resolved_at?: string | null;
+          status_changed_at?: string | null;
         };
         Relationships: [
           {
@@ -1894,6 +1903,18 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      set_support_ticket_status: {
+        Args: { p_ticket_id: string; p_status: string };
+        Returns: Json;
+      };
+      reopen_support_ticket: {
+        Args: { p_ticket_id: string };
+        Returns: Json;
+      };
+      close_resolved_support_tickets: {
+        Args: never;
+        Returns: { ticket_id: string; user_id: string; subject: string }[];
+      };
       set_account_suspended: {
         Args: { p_user_id: string; p_suspended: boolean; p_reason?: string | null };
         Returns: undefined;

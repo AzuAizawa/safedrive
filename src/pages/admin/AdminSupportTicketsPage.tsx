@@ -37,6 +37,13 @@ import {
   ticketMatchesTagFilter,
 } from "@/lib/supportTickets";
 import {
+  isActiveTicketStatus,
+  TICKET_STATUSES,
+  ticketStatusClasses,
+  ticketStatusLabel,
+  type TicketStatus,
+} from "@/lib/ticketStatus";
+import {
   formatRichTextForDisplay,
   normalizeRichTextInput,
   richTextHasVisibleContent,
@@ -94,7 +101,7 @@ export default function AdminSupportTicketsPage() {
   const deepLinkTicketId = searchParams.get("ticket");
   const [tickets, setTickets] = useState<AdminTicket[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "open" | "closed">("all");
+  const [filter, setFilter] = useState<"all" | TicketStatus>("all");
   const [tagFilter, setTagFilter] = useState("all");
   const [kindFilter, setKindFilter] = useState<"all" | "support" | "conversation">(
     "support",
@@ -113,6 +120,9 @@ export default function AdminSupportTicketsPage() {
   const [newMessage, setNewMessage] = useState("");
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  // CHAPTER 130: Resolved and Closed are confirmed first; the others apply at once.
+  const [confirmStatus, setConfirmStatus] = useState<TicketStatus | null>(null);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [replyAttachment, setReplyAttachment] = useState<File | null>(null);
   const [users, setUsers] = useState<Array<Pick<Profile, "id" | "full_name" | "email">>>([]);
   const [showCreateTicket, setShowCreateTicket] = useState(false);
@@ -264,11 +274,19 @@ export default function AdminSupportTicketsPage() {
   }, [messages]);
 
   const queueStats = useMemo(() => {
-    const openTickets = tickets.filter((ticket) => ticket.status === "open");
+    // Still a case to work on: open, in progress, or waiting on the member.
+    const activeTickets = tickets.filter((ticket) => isActiveTicketStatus(ticket.status));
+    const byStatus = Object.fromEntries(
+      TICKET_STATUSES.map((status) => [
+        status,
+        tickets.filter((ticket) => ticket.status === status).length,
+      ]),
+    ) as Record<TicketStatus, number>;
     return {
-      open: openTickets.length,
-      noShow: openTickets.filter((ticket) => ticketMatchesTagFilter(ticket.tag, "no_show")).length,
-      inquiries: openTickets.filter((ticket) => ticketMatchesTagFilter(ticket.tag, "inquiry")).length,
+      open: activeTickets.length,
+      byStatus,
+      noShow: activeTickets.filter((ticket) => ticketMatchesTagFilter(ticket.tag, "no_show")).length,
+      inquiries: activeTickets.filter((ticket) => ticketMatchesTagFilter(ticket.tag, "inquiry")).length,
     };
   }, [tickets]);
 
@@ -285,8 +303,12 @@ export default function AdminSupportTicketsPage() {
               : !isConversationTicket(ticket);
         return matchesStatus && matchesTag && matchesKind;
       }).sort((left, right) => {
-        const leftOpenScore = left.status === "open" ? 1 : 0;
-        const rightOpenScore = right.status === "open" ? 1 : 0;
+        // New tickets first, then those being worked on, then those waiting on
+        // the member; resolved and closed last.
+        const statusRank = (status: string) =>
+          ({ open: 4, in_progress: 3, waiting_for_user: 2, resolved: 1 } as Record<string, number>)[status] ?? 0;
+        const leftOpenScore = statusRank(left.status);
+        const rightOpenScore = statusRank(right.status);
         if (leftOpenScore !== rightOpenScore) return rightOpenScore - leftOpenScore;
 
         const leftNoShowScore = ticketMatchesTagFilter(left.tag, "no_show") ? 1 : 0;
@@ -644,8 +666,68 @@ export default function AdminSupportTicketsPage() {
     });
 
     await fetchMessages(activeTicket.id);
+    // A reply can move the ticket on by itself (open -> in progress).
+    await refreshActiveTicketStatus(activeTicket.id);
     clearReplyAttachment();
     setIsSendingMessage(false);
+  };
+
+  const refreshActiveTicketStatus = async (ticketId: string) => {
+    const { data } = await supabase
+      .from("support_tickets")
+      .select("status, resolved_at, status_changed_at")
+      .eq("id", ticketId)
+      .maybeSingle();
+    if (!data) return;
+    setActiveTicket((current) => (current && current.id === ticketId ? { ...current, ...data } : current));
+    setTickets((current) =>
+      current.map((ticket) => (ticket.id === ticketId ? { ...ticket, ...data } : ticket)),
+    );
+  };
+
+  // CHAPTER 130: staff move a support ticket between In Progress, Waiting for
+  // User, Resolved and Closed (also to reopen one). The database records it,
+  // audits it and tells the member in the app; the email follows here and, like
+  // a reply email, never blocks the change.
+  const handleSetTicketStatus = async (status: TicketStatus) => {
+    if (!activeTicket || status === activeTicket.status) return;
+    setIsUpdatingStatus(true);
+    const { error } = await supabase.rpc("set_support_ticket_status", {
+      p_ticket_id: activeTicket.id,
+      p_status: status,
+    });
+    if (error) {
+      toast.error("Ticket status was not changed", { description: error.message });
+      setIsUpdatingStatus(false);
+      setConfirmStatus(null);
+      return;
+    }
+    toast.success(`Ticket marked ${ticketStatusLabel(status, "admin")}`);
+    setConfirmStatus(null);
+    await refreshActiveTicketStatus(activeTicket.id);
+    setIsUpdatingStatus(false);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return;
+    try {
+      const response = await fetch("/api/send-support-ticket-reply-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ ticketId: activeTicket.id, status }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { deliveryState?: string };
+      if (body.deliveryState === "not_configured") {
+        toast.warning("Status updated, but email is not configured yet.");
+      } else if (!response.ok || body.deliveryState !== "sent") {
+        toast.warning("Status updated, but the email notification was not delivered.");
+      }
+    } catch (emailError) {
+      console.warn("Support ticket status email failed", emailError);
+      toast.warning("Status updated, but the email notification could not be sent.");
+    }
   };
 
   const handleCloseTicket = async () => {
@@ -875,8 +957,12 @@ export default function AdminSupportTicketsPage() {
           ariaLabel="Support ticket status"
           tabs={[
             { value: "all", label: "All statuses" },
-            { value: "open", label: "Open", count: queueStats.open },
-            { value: "closed", label: "Closed" },
+            ...TICKET_STATUSES.map((status) => ({
+              value: status,
+              label: ticketStatusLabel(status, "admin"),
+              // Counts only where something is still to be done.
+              count: isActiveTicketStatus(status) ? queueStats.byStatus[status] : undefined,
+            })),
           ]}
         />
         <select
@@ -973,13 +1059,9 @@ export default function AdminSupportTicketsPage() {
                   </div>
                   <div className="flex items-center justify-between mt-2">
                     <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${
-                        ticket.status === "open"
-                          ? "bg-amber-500/10 text-amber-500"
-                          : "bg-green-500/10 text-green-500"
-                      }`}
+                      className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${ticketStatusClasses(ticket.status)}`}
                     >
-                      {ticket.status === "open" ? "Open" : "Resolved"}
+                      {ticketStatusLabel(ticket.status, "admin")}
                     </span>
                     <span className="text-[10px] text-muted-foreground">
                       {format(new Date(ticket.created_at), "MMM d")}
@@ -1028,7 +1110,42 @@ export default function AdminSupportTicketsPage() {
                     </span>
                   </div>
                 </div>
-                {activeTicket.status === "open" ? (
+                {!isConversationTicket(activeTicket) ? (
+                  // CHAPTER 130: a support ticket's status is picked here.
+                  <div className="flex flex-col items-end gap-1">
+                    <span
+                      className={`text-xs px-2.5 py-1 rounded-full uppercase tracking-wider font-bold ${ticketStatusClasses(activeTicket.status)}`}
+                    >
+                      {ticketStatusLabel(activeTicket.status, "admin")}
+                    </span>
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      Set status
+                      <select
+                        aria-label="Set ticket status"
+                        value=""
+                        disabled={isUpdatingStatus}
+                        onChange={(event) => {
+                          const next = event.target.value as TicketStatus;
+                          if (!next) return;
+                          if (next === "resolved" || next === "closed") setConfirmStatus(next);
+                          else void handleSetTicketStatus(next);
+                        }}
+                        className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                      >
+                        <option value="">Choose…</option>
+                        {(["in_progress", "waiting_for_user", "resolved", "closed"] as TicketStatus[])
+                          .filter((status) => status !== activeTicket.status)
+                          .map((status) => (
+                            <option key={status} value={status}>
+                              {status === "in_progress" && !isActiveTicketStatus(activeTicket.status)
+                                ? "Reopen (In Progress)"
+                                : ticketStatusLabel(status, "admin")}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  </div>
+                ) : activeTicket.status === "open" ? (
                   <Button
                     size="sm"
                     variant="outline"
@@ -1259,7 +1376,7 @@ export default function AdminSupportTicketsPage() {
                 )}
               </div>
 
-              {activeTicket.status === "open" ? (
+              {(isConversationTicket(activeTicket) ? activeTicket.status === "open" : isActiveTicketStatus(activeTicket.status)) ? (
                 <form onSubmit={handleSendMessage} className="p-3 border-t border-border/50 bg-background space-y-3">
                   <div className="flex gap-2">
                     <div
@@ -1356,6 +1473,22 @@ export default function AdminSupportTicketsPage() {
         confirmText="Resolve Ticket"
         onCancel={() => setShowCloseConfirm(false)}
         onConfirm={handleCloseTicket}
+      />
+      <ConfirmDialog
+        open={confirmStatus !== null}
+        title={confirmStatus === "closed" ? "Close this ticket?" : "Mark this ticket resolved?"}
+        description={
+          activeTicket
+            ? confirmStatus === "closed"
+              ? `"${activeTicket.subject}" becomes read-only. The member opens a new ticket if they need more help.`
+              : `The member is told "${activeTicket.subject}" is resolved and can reopen it for a few days if it is not. After that it closes automatically.`
+            : ""
+        }
+        confirmText={confirmStatus === "closed" ? "Close Ticket" : "Mark Resolved"}
+        onCancel={() => setConfirmStatus(null)}
+        onConfirm={() => {
+          if (confirmStatus) void handleSetTicketStatus(confirmStatus);
+        }}
       />
       {showCreateTicket && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">

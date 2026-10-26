@@ -31,6 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatPeso } from "@/lib/money";
+import { ACTIVE_TICKET_STATUSES, PAYOUT_BLOCKING_TICKET_TAGS } from "@/lib/ticketStatus";
 
 interface PayoutPaymentRow {
   id: string;
@@ -359,11 +360,16 @@ export default function AdminPayoutsPage({ embedded = false }: AdminPayoutsPageP
 
       const bookingIds = (data as Array<{ id: string }> | null)?.map((item) => item.id) ?? [];
       if (bookingIds.length > 0) {
+        // The same cases server/payoutAutomation.ts treats as holding the
+        // payout (R2): an open incident or refund review, not a conversation
+        // or an ordinary question linked to the booking.
         const { data: ticketRows, error: ticketError } = await supabase
           .from("support_tickets")
           .select("booking_id, status")
           .in("booking_id", bookingIds)
-          .in("status", ["open", "in_progress"]);
+          .is("participant_user_id", null)
+          .in("tag", [...PAYOUT_BLOCKING_TICKET_TAGS])
+          .in("status", [...ACTIVE_TICKET_STATUSES]);
 
         if (ticketError) throw ticketError;
 

@@ -7,6 +7,7 @@ import {
 } from "../../server/ledger.js";
 import { sendPaymentReceiptEmail, sendRefundReceiptEmail, sendUserNotificationEmail } from "../../server/email.js";
 import { formatPeso } from "../../server/money.js";
+import { ACTIVE_TICKET_STATUSES } from "../../server/ticketStatus.js";
 
 export const config = {
   runtime: "edge",
@@ -448,7 +449,7 @@ const recordUnclaimableCapture = async (
       .select("id")
       .eq("booking_id", input.bookingId)
       .eq("tag", "manual_refund")
-      .in("status", ["open", "in_progress"])
+      .in("status", [...ACTIVE_TICKET_STATUSES])
       .maybeSingle();
 
     if (!existingTicket?.id) {

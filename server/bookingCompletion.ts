@@ -2,6 +2,7 @@ import { postSimpleBalancedJournal } from "./ledger.js";
 import { processAutomaticPayoutForBooking } from "./payoutAutomation.js";
 import type { ServiceRoleSupabaseClient } from "./supabaseTypes.js";
 import { sendAdminAlertEmail, sendUserNotificationEmail } from "./email.js";
+import { ACTIVE_TICKET_STATUSES } from "./ticketStatus.js";
 
 /**
  * Side effects that run once a booking reaches `completed` (both parties, or the
@@ -122,7 +123,7 @@ export async function settleCompletedBookingCase(
     .eq("booking_id", bookingId)
     .eq("tag", "booking_incident")
     .is("participant_user_id", null)
-    .in("status", ["open", "in_progress"])
+    .in("status", [...ACTIVE_TICKET_STATUSES])
     .select("id");
   if (closeError) throw closeError;
 

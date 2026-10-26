@@ -52,6 +52,7 @@ type SettingsRow = {
   mutual_no_show_close_hours: number;
   min_booking_notice_hours: number;
   account_deletion_grace_days: number;
+  ticket_reopen_days: number;
   free_vehicle_slots: number;
   pro_extra_vehicle_slots: number;
   premium_extra_vehicle_slots: number;
@@ -288,6 +289,20 @@ const FIELDS: Record<
     },
     formatStored: (s) => `${Math.round(s)} days`,
   },
+  // CHAPTER 130.
+  ticket_reopen_days: {
+    label: "Support ticket reopen window",
+    hint: "Days a member may reopen a ticket SafeDrive marked resolved (1-30). After that the ticket closes automatically and the member opens a new one. Incident and refund cases are reopened by staff only. Applies to tickets resolved from now on.",
+    unit: "days",
+    toDisplay: (s) => String(Math.round(s)),
+    fromDisplay: (i) => {
+      const n = Number(i);
+      return i.trim() !== "" && Number.isFinite(n) && n >= 1 && n <= 30 && Number.isInteger(n)
+        ? n
+        : null;
+    },
+    formatStored: (s) => `${Math.round(s)} days`,
+  },
   // CHAPTER 112. Applies to everyone at once, subscribers included.
   free_vehicle_slots: {
     label: "Free plan vehicle slots",
@@ -434,7 +449,7 @@ export default function AdminPlatformSettingsPage() {
       supabase
         .from("platform_settings")
         .select(
-          "commission_rate, downpayment_rate, refund_full_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes, mutual_no_show_close_hours, min_booking_notice_hours, account_deletion_grace_days, free_vehicle_slots, pro_extra_vehicle_slots, premium_extra_vehicle_slots, pro_price_php, premium_price_php",
+          "commission_rate, downpayment_rate, refund_full_hours, short_notice_free_hours, late_cancel_fee_days, short_trip_late_cancel_fee_days, no_show_fee_days, short_trip_no_show_fee_days, arrival_checkin_lead_hours, lister_completion_timeout_hours, balance_deadline_hours, balance_reminder_hours_before, dormant_account_days, no_show_grace_minutes, mutual_no_show_close_hours, min_booking_notice_hours, account_deletion_grace_days, ticket_reopen_days, free_vehicle_slots, pro_extra_vehicle_slots, premium_extra_vehicle_slots, pro_price_php, premium_price_php",
         )
         .eq("id", "default")
         .maybeSingle(),
