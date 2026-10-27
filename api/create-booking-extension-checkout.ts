@@ -2,6 +2,7 @@ import { bookingCompliance, complianceBlockedResponse } from "../server/vehicleC
 import { createClient } from "@supabase/supabase-js";
 import { blockedIpResponse } from "../server/ipBlock.js";
 import { findExtensionCollision } from "../server/extensionHolds.js";
+import { carIsDisabled, DISABLED_CAR_EXTENSION_MESSAGE } from "../server/vehicleBookingCancellation.js";
 
 export const config = {
   runtime: "edge",
@@ -223,6 +224,9 @@ export default async function handler(req: Request) {
         { error: "This booking can no longer be extended, so no payment was taken." },
         409,
       );
+    }
+    if (await carIsDisabled(supabase, parentBooking.car_id)) {
+      return jsonResponse({ error: `${DISABLED_CAR_EXTENSION_MESSAGE} No payment was taken.` }, 409);
     }
     const collision = await findExtensionCollision(supabase, {
       bookingId: parentBooking.id,

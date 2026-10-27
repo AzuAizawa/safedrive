@@ -193,6 +193,10 @@ interface VehicleRow {
   created_at: string | null;
   // CHAPTER 120. SafeDrive is removing this car once its current trip ends.
   removal_scheduled_at: string | null;
+  // CHAPTER 131. SafeDrive disabled the car: until a clearance is approved
+  // ("clearance"), or until SafeDrive enables it ("other").
+  disabled_type: string | null;
+  disabled_reason: string | null;
   car_models: { name: string; body_type: string; car_brands: { name: string } };
 }
 
@@ -251,6 +255,10 @@ const statusBadge: Record<string, { label: string; color: string }> = {
     label: "Renewal needed",
     color: "text-orange-600 bg-orange-50 dark:bg-orange-950/30",
   },
+  disabled: {
+    label: "Disabled by SafeDrive",
+    color: "text-red-600 bg-red-50 dark:bg-red-950/30",
+  },
 };
 
 type VehicleTab = "in_review" | "listed" | "inactive";
@@ -258,7 +266,7 @@ type VehicleTab = "in_review" | "listed" | "inactive";
 const VEHICLE_TAB_STATUSES: Record<VehicleTab, string[]> = {
   in_review: ["pending"],
   listed: ["approved", "active"],
-  inactive: ["inactive", "rejected"],
+  inactive: ["inactive", "rejected", "disabled"],
 };
 
 // A car whose papers expired (renewal_required) is offline. It waits in
@@ -2304,6 +2312,30 @@ export default function MyVehiclesPage() {
                         </div>
                       )}
 
+                      {v.status === "disabled" && (
+                        <div className="mt-2 rounded-md border border-red-500/25 bg-red-500/5 px-2 py-2 text-xs">
+                          <p className="flex items-start gap-1.5 text-red-700 dark:text-red-300">
+                            <FileWarning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              {v.disabled_type === "clearance"
+                                ? `SafeDrive disabled this listing until you submit a clearance. What to submit: ${v.disabled_reason ?? "see your notification"}`
+                                : `SafeDrive disabled this listing. Reason: ${v.disabled_reason ?? "see your notification"}. Only SafeDrive can enable it again.`}
+                            </span>
+                          </p>
+                          {v.disabled_type === "clearance" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="mt-2 h-8 gap-1.5 border-red-500/40 text-red-700 hover:bg-red-500/10 dark:text-red-300"
+                              onClick={() => navigate(`/car-renewals?car=${v.id}`)}
+                            >
+                              <Upload className="h-3.5 w-3.5" />
+                              Submit clearance
+                            </Button>
+                          )}
+                        </div>
+                      )}
+
                       {v.status === "rejected" && v.rejection_reason && (
                         <p className="mt-2 rounded-md border border-red-500/20 bg-red-500/5 px-2 py-1.5 text-xs text-red-600">
                           Rejected: {v.rejection_reason}
@@ -2322,7 +2354,8 @@ export default function MyVehiclesPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => openEditor(v)}
-                      disabled={vehicleActionId === v.id}
+                      disabled={vehicleActionId === v.id || v.status === "disabled"}
+                      title={v.status === "disabled" ? "SafeDrive disabled this car; it cannot be edited until it is enabled" : undefined}
                     >
                       Edit
                     </Button>

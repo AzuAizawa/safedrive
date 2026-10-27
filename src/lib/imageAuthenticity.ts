@@ -6,7 +6,22 @@ import type { AuthenticityCheck, DetectorProvider } from "@/lib/imageAuthenticit
 
 export * from "@/lib/imageAuthenticityLabels";
 
-export type AuthenticitySubject = { scope: "user"; userId?: string } | { scope: "car"; carId: string };
+export type AuthenticitySubject =
+  | { scope: "user"; userId?: string }
+  | { scope: "car"; carId: string }
+  // CHAPTER 131: the photos of one vehicle report, or of one clearance.
+  | { scope: "report"; reportId: string }
+  | { scope: "clearance"; clearanceId: string };
+
+/** One key per subject, so a hook re-reads when the subject changes. */
+export const authenticitySubjectKey = (subject: AuthenticitySubject) =>
+  subject.scope === "car"
+    ? `car:${subject.carId}`
+    : subject.scope === "report"
+      ? `report:${subject.reportId}`
+      : subject.scope === "clearance"
+        ? `clearance:${subject.clearanceId}`
+        : `user:${subject.userId ?? "me"}`;
 
 export type AuthenticityResponse = {
   checks: AuthenticityCheck[];

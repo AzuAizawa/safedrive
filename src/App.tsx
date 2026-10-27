@@ -59,6 +59,7 @@ const AdminLoginPage = lazyWithReload(() => import("@/pages/admin/AdminLoginPage
 const AdminUsersPage = lazyWithReload(() => import("@/pages/admin/AdminUsersPage"));
 const AdminCarCatalogPage = lazyWithReload(() => import("@/pages/admin/AdminCarCatalogPage"));
 const AdminVehicleApprovalPage = lazyWithReload(() => import("@/pages/admin/AdminVehicleApprovalPage"));
+const AdminVehicleReportsPage = lazyWithReload(() => import("@/pages/admin/AdminVehicleReportsPage"));
 const AdminAuditTrailPage = lazyWithReload(() => import("@/pages/admin/AdminAuditTrailPage"));
 const AdminFinancialReviewsPage = lazyWithReload(() => import("@/pages/admin/AdminFinancialReviewsPage"));
 const AdminPlatformSettingsPage = lazyWithReload(() => import("@/pages/admin/AdminPlatformSettingsPage"));
@@ -164,6 +165,7 @@ function App() {
                         <Route path="/admin/vehicle-approval" element={<AdminVehicleApprovalPage />} />
                       </Route>
                       <Route element={<PermissionRoute anyOf={["vehicles.review"]} />}>
+                        <Route path="/admin/vehicle-reports" element={<AdminVehicleReportsPage />} />
                       </Route>
                       <Route element={<PermissionRoute anyOf={["audit.view"]} />}>
                         <Route path="/admin/audit-trail" element={<AdminAuditTrailPage />} />

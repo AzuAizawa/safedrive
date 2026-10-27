@@ -109,6 +109,7 @@ import {
   pickupBlocksCancellation,
 } from "@/lib/cancellationPolicy";
 import { formatPeso } from "@/lib/money";
+import VehicleReportButton from "@/components/VehicleReportButton";
 
 const getBookingPickupMs = (booking: {
   start_date: string;
@@ -3869,6 +3870,8 @@ export default function ListerBookingsPage() {
                                   {ownReportsByBooking[b.id]?.return && <CheckCircle2 className="w-3.5 h-3.5" />}
                                   {ownReportsByBooking[b.id]?.return ? "Return report (submitted)" : "Return report (required)"}
                                 </Button>
+                                {/* CHAPTER 131: optional, never holds up the receipt. */}
+                                <VehicleReportButton booking={b} role="lister" />
                                 <Button
                                   size="sm"
                                   onClick={() => handleComplete(b)}

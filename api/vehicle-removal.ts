@@ -2,10 +2,11 @@ import { createSupabaseAdmin } from "../server/payoutAutomation.js";
 import { requirePermission } from "../server/adminAuth.js";
 import { sendUserNotificationEmail } from "../server/email.js";
 import {
-  createManualRefundReview,
-  processAutomaticRefundForBooking,
-} from "../server/refundAutomation.js";
-import { getVehicleLabel } from "../server/cancellationRefundPlan.js";
+  cancelBookingForVehicleExit,
+  NOT_STARTED_BOOKING_SELECT,
+  NOT_STARTED_BOOKING_STATUSES,
+  type CancellableBooking,
+} from "../server/vehicleBookingCancellation.js";
 import type { ServiceRoleSupabaseClient } from "../server/supabaseTypes.js";
 
 export const config = { runtime: "edge" };
@@ -28,20 +29,6 @@ export const config = { runtime: "edge" };
 type Payload = { action?: string; carId?: string; reasonCode?: string; note?: string };
 
 type Notice = { owner_id: string; title: string; message: string };
-
-type CancellableBooking = {
-  id: string;
-  renter_id: string;
-  owner_id: string;
-  status: string;
-  start_date: string;
-  end_date: string;
-  cars: { plate_number: string; car_models: { name: string; car_brands: { name: string } } } | null;
-  payments: Array<{ payment_type: string; status: string; amount: number | string }>;
-};
-
-const NOT_STARTED = ["pending", "confirmed", "awaiting_payment", "downpayment_paid", "fully_paid"];
-const REFUNDABLE = ["downpayment", "balance"];
 
 const respond = (body: Record<string, unknown>, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -83,122 +70,6 @@ const emailNotice = (supabase: ServiceRoleSupabaseClient, notice: Notice, baseOr
     baseOrigin,
     eventKey,
   });
-
-/**
- * Cancel one booking that has not started because SafeDrive removed its car:
- * the renter is refunded everything they paid and both sides are told.
- * Returns false when the booking moved on (e.g. the handover began) - it is
- * then left to finish and the removal waits for it.
- */
-async function cancelForRemoval(
-  supabase: ServiceRoleSupabaseClient,
-  booking: CancellableBooking,
-  carId: string,
-  adminId: string,
-  reason: string,
-  baseOrigin: string,
-) {
-  const { data: claimed, error } = await supabase
-    .from("bookings")
-    .update({ status: "cancelled", payment_deadline: null })
-    .eq("id", booking.id)
-    .is("lister_handover_confirmed_at", null)
-    .in("status", NOT_STARTED)
-    .select("id")
-    .maybeSingle();
-  if (error) throw error;
-  if (!claimed) return false;
-
-  const label = getVehicleLabel(booking);
-  const paid = booking.payments.some(
-    (p) => REFUNDABLE.includes(p.payment_type) && p.status === "completed" && Number(p.amount) > 0,
-  );
-  let refundState = "none";
-  if (paid) {
-    const note = `SafeDrive removed this vehicle (${reason}); the renter is refunded in full.`;
-    try {
-      const outcome = await processAutomaticRefundForBooking({
-        supabase,
-        bookingId: booking.id,
-        initiatedByUserId: adminId,
-        reason: "others",
-        note,
-        allowedPaymentTypes: REFUNDABLE,
-        baseOrigin,
-      });
-      refundState = outcome.state;
-      const outcomeReason = "reason" in outcome && outcome.reason ? outcome.reason : note;
-      if (outcome.state === "failed" || (outcome.state === "skipped" && !/already pending/i.test(outcomeReason))) {
-        await createManualRefundReview(supabase, booking, booking.renter_id, null, outcomeReason);
-        refundState = "manual_review";
-      }
-    } catch (refundError) {
-      await createManualRefundReview(
-        supabase,
-        booking,
-        booking.renter_id,
-        null,
-        refundError instanceof Error ? refundError.message : "Automatic refund failed",
-      );
-      refundState = "manual_review";
-    }
-  }
-
-  await supabase.from("booking_cancellations").upsert(
-    {
-      booking_id: booking.id,
-      cancelled_by_role: "lister",
-      cancelled_by_id: adminId,
-      lister_id: booking.owner_id,
-      renter_id: booking.renter_id,
-      car_id: carId,
-      reason: `SafeDrive removed the vehicle: ${reason}`,
-      hours_before_pickup: null,
-      was_late: false,
-      had_captured_payment: paid,
-      strike_waived: true,
-    },
-    { onConflict: "booking_id" },
-  );
-  await supabase.from("audit_log").insert({
-    user_id: adminId,
-    action: "admin_cancelled_booking_for_vehicle_removal",
-    entity_type: "booking",
-    entity_id: booking.id,
-    details: { vehicle: label, reason, refund_state: refundState },
-  });
-
-  const dates = `${booking.start_date} to ${booking.end_date}`;
-  const renterNotice = {
-    title: "Your booking was cancelled",
-    message: paid
-      ? `SafeDrive removed ${label} from the platform, so your booking for ${dates} was cancelled. Everything you paid is being refunded to you in full. Browse other cars to rebook.`
-      : `SafeDrive removed ${label} from the platform, so your booking request for ${dates} was cancelled. Browse other cars to rebook.`,
-  };
-  const listerNotice = {
-    title: "A booking was cancelled",
-    message: `Because SafeDrive removed ${label}, its booking for ${dates} was cancelled${paid ? " and the renter is refunded in full" : ""}. This does not count against you as a late cancellation.`,
-  };
-  await supabase.from("notifications").insert([
-    { user_id: booking.renter_id, ...renterNotice, type: "error", link: "/my-bookings" },
-    { user_id: booking.owner_id, ...listerNotice, type: "info", link: "/lister-bookings" },
-  ]);
-  await sendUserNotificationEmail(supabase, {
-    userId: booking.renter_id,
-    ...renterNotice,
-    link: "/my-bookings",
-    baseOrigin,
-    eventKey: `vehicle-removal-cancel:${booking.id}:renter`,
-  });
-  await sendUserNotificationEmail(supabase, {
-    userId: booking.owner_id,
-    ...listerNotice,
-    link: "/lister-bookings",
-    baseOrigin,
-    eventKey: `vehicle-removal-cancel:${booking.id}:lister`,
-  });
-  return true;
-}
 
 async function runScheduledWork(req: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -252,9 +123,9 @@ export default async function handler(req: Request) {
 
       const { data: bookings, error: bookingsError } = await supabase
         .from("bookings")
-        .select("id, renter_id, owner_id, status, start_date, end_date, cars(plate_number, car_models(name, car_brands(name))), payments(payment_type, status, amount)")
+        .select(NOT_STARTED_BOOKING_SELECT)
         .eq("car_id", carId)
-        .in("status", NOT_STARTED);
+        .in("status", NOT_STARTED_BOOKING_STATUSES);
       if (bookingsError) return respond({ error: bookingsError.message }, 500);
 
       // Validate the reason before touching any booking: the same rules
@@ -269,7 +140,7 @@ export default async function handler(req: Request) {
 
       let cancelled = 0;
       for (const booking of (bookings ?? []) as unknown as CancellableBooking[]) {
-        if (await cancelForRemoval(supabase, booking, carId, adminId, note, baseOrigin)) cancelled += 1;
+        if (await cancelBookingForVehicleExit(supabase, booking, carId, adminId, note, baseOrigin, "removed")) cancelled += 1;
       }
 
       const { data, error } = await supabase.rpc("remove_vehicle_for", {

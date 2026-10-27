@@ -75,6 +75,7 @@ import { format } from "date-fns";
 import type { Payment } from "@/types/database";
 import { fetchCarRatingSummaries, fetchRenterReputation } from "@/lib/ratings";
 import { formatPeso } from "@/lib/money";
+import VehicleReportButton from "@/components/VehicleReportButton";
 
 interface BookingRow {
   compliance_hold?: boolean;
@@ -2999,6 +3000,16 @@ export default function MyBookingsPage() {
                           Rating submitted
                         </p>
                       )}
+
+                      {/* CHAPTER 131: report an issue with the car, from the
+                          lister's hand-over until the trip is over. Optional;
+                          it never holds up the receipt or the return. */}
+                      {booking.lister_handover_confirmed_at &&
+                        (apparentState === "fully_paid" || apparentState === "active") && (
+                          <div className="mt-2 flex justify-end">
+                            <VehicleReportButton booking={booking} role="renter" />
+                          </div>
+                        )}
 
                       {/* Confirm Agreement */}
                       {(apparentState === "fully_paid" || apparentState === "active") && booking.renter_arrived_at && !booking.renter_completed && (

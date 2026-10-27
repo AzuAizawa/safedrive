@@ -30,6 +30,7 @@ import {
   CheckCheck,
   Clock3,
   UserCheck,
+  AlertTriangle,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
@@ -50,7 +51,9 @@ const allNavItems: AdminNavItem[] = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/admin/users", label: "Users", icon: Users, keys: ["users.verify", "users.moderate"] },
   { to: "/admin/car-catalog", label: "Car Catalog", icon: CarFront, keys: ["catalog.manage"] },
-  { to: "/admin/vehicle-approval", label: "Vehicle Approval", icon: Car, keys: ["vehicles.review", "vehicles.delete"] },
+  { to: "/admin/vehicle-approval", label: "Vehicle Management", icon: Car, keys: ["vehicles.review", "vehicles.delete"] },
+  // CHAPTER 131: what renters and listers reported about a car.
+  { to: "/admin/vehicle-reports", label: "Vehicle Reports", icon: AlertTriangle, keys: ["vehicles.review"] },
   { to: "/admin/support", label: "Support Tickets", icon: Headset, keys: ["support.handle"] },
   { to: "/admin/guest-inquiries", label: "User Inquiries", icon: MessageSquare, keys: ["inquiries.handle"] },
   { to: "/admin/audit-trail", label: "Audit Trail", icon: ClipboardList, keys: ["audit.view"] },

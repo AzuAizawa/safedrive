@@ -25,9 +25,12 @@ const TIME_BUDGET_MS = 18_000;
 // provider: Walter Writes is the primary detector and the only one an upload
 // triggers; a reviewer may pick Sightengine as the backup when Walter is down.
 type Payload = {
-  scope?: "user" | "car";
+  scope?: "user" | "car" | "report" | "clearance";
   userId?: string;
   carId?: string;
+  /** CHAPTER 131: the photos of one vehicle report, or of one clearance. */
+  reportId?: string;
+  clearanceId?: string;
   force?: boolean;
   peek?: boolean;
   provider?: DetectorProvider;
@@ -39,7 +42,8 @@ type Payload = {
   since?: string;
 };
 
-type SubjectKind = "identity" | "vehicle_photo" | "vehicle_document";
+type SubjectKind = "identity" | "vehicle_photo" | "vehicle_document" | "vehicle_report_photo" | "vehicle_clearance";
+type Scope = "user" | "car" | "report" | "clearance";
 type SourceFile = {
   bucket: string;
   fallbackBucket?: string;
@@ -105,6 +109,40 @@ const vehicleFiles = async (supabase: SupabaseClient, carId: string): Promise<So
   ];
 };
 
+// CHAPTER 131. Report photos are kept with the trip photos; clearance images
+// with the car's private documents.
+const reportFiles = async (supabase: SupabaseClient, reportId: string): Promise<SourceFile[]> => {
+  const { data, error } = await supabase
+    .from("vehicle_report_photos")
+    .select("storage_path, captured_at")
+    .eq("report_id", reportId);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    bucket: "trip-condition-evidence",
+    storage_path: row.storage_path as string,
+    subject_kind: "vehicle_report_photo" as const,
+    subject_id: reportId,
+    created_at: (row.captured_at as string | null) ?? null,
+    historical: false,
+  }));
+};
+
+const clearanceFiles = async (supabase: SupabaseClient, clearanceId: string): Promise<SourceFile[]> => {
+  const { data, error } = await supabase
+    .from("vehicle_clearance_images")
+    .select("storage_path, created_at")
+    .eq("clearance_id", clearanceId);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    bucket: "vehicle-private-documents",
+    storage_path: row.storage_path as string,
+    subject_kind: "vehicle_clearance" as const,
+    subject_id: clearanceId,
+    created_at: (row.created_at as string | null) ?? null,
+    historical: false,
+  }));
+};
+
 const download = async (supabase: SupabaseClient, file: SourceFile) => {
   const first = await supabase.storage.from(file.bucket).download(file.storage_path);
   if (!first.error && first.data) return first.data;
@@ -116,7 +154,8 @@ const download = async (supabase: SupabaseClient, file: SourceFile) => {
 };
 
 /**
- * POST { scope: "user", userId? } | { scope: "car", carId }, optional force / peek.
+ * POST { scope: "user", userId? } | { scope: "car", carId }
+ *    | { scope: "report", reportId } | { scope: "clearance", clearanceId }, optional force / peek.
  *
  * An uploader calls it for their own identity photos or vehicle right after
  * uploading, and gets only { ok } back - never a score, so a doctored file
@@ -141,8 +180,15 @@ export async function POST(req: Request) {
     if (authError || !user) return jsonResponse({ error: "Unauthorized" }, 401);
 
     const payload = (await req.json().catch(() => ({}))) as Payload;
-    const scope = payload.scope === "car" ? "car" : "user";
-    const subjectId = scope === "car" ? payload.carId : payload.userId || user.id;
+    const scope: Scope = (["car", "report", "clearance"] as const).find((value) => value === payload.scope) ?? "user";
+    const subjectId =
+      scope === "car"
+        ? payload.carId
+        : scope === "report"
+          ? payload.reportId
+          : scope === "clearance"
+            ? payload.clearanceId
+            : payload.userId || user.id;
     if (!subjectId || !UUID.test(subjectId)) return jsonResponse({ error: "A valid subject is required" }, 400);
 
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
@@ -151,7 +197,7 @@ export async function POST(req: Request) {
     if (isAdmin) {
       const { data: allowed } = await supabase.rpc("admin_can_for", {
         p_uid: user.id,
-        p_key: scope === "car" ? "vehicles.review" : "users.verify",
+        p_key: scope === "user" ? "users.verify" : "vehicles.review",
       });
       reviewer = allowed === true;
     }
@@ -162,9 +208,25 @@ export async function POST(req: Request) {
         const { data: car } = await supabase.from("cars").select("owner_id").eq("id", subjectId).maybeSingle();
         if (!car || car.owner_id !== user.id) return jsonResponse({ error: "Forbidden" }, 403);
       }
+      // The member who filed the report, or the lister who filed the clearance.
+      if (scope === "report") {
+        const { data: report } = await supabase.from("vehicle_reports").select("reporter_id").eq("id", subjectId).maybeSingle();
+        if (!report || report.reporter_id !== user.id) return jsonResponse({ error: "Forbidden" }, 403);
+      }
+      if (scope === "clearance") {
+        const { data: clearance } = await supabase.from("vehicle_clearances").select("submitted_by").eq("id", subjectId).maybeSingle();
+        if (!clearance || clearance.submitted_by !== user.id) return jsonResponse({ error: "Forbidden" }, 403);
+      }
     }
 
-    const files = scope === "car" ? await vehicleFiles(supabase, subjectId) : await identityFiles(supabase, subjectId);
+    const files =
+      scope === "car"
+        ? await vehicleFiles(supabase, subjectId)
+        : scope === "report"
+          ? await reportFiles(supabase, subjectId)
+          : scope === "clearance"
+            ? await clearanceFiles(supabase, subjectId)
+            : await identityFiles(supabase, subjectId);
     const paths = files.map((file) => file.storage_path);
     const { data: existingRows, error: existingError } = paths.length
       ? await supabase.from("image_authenticity_checks").select("*").in("storage_path", paths)

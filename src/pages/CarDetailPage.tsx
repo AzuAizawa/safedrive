@@ -225,6 +225,8 @@ export default function CarDetailPage() {
       !error &&
       data &&
       !(data as unknown as { deleted_at?: string | null }).deleted_at &&
+      // A car SafeDrive disabled is off the platform until it is enabled (CHAPTER 131).
+      (data as unknown as { status?: string }).status !== "disabled" &&
       !ownerState?.deleted_at &&
       !ownerState?.deletion_scheduled_for &&
       // Approved but not yet given a price and pickup location (CHAPTER 114).

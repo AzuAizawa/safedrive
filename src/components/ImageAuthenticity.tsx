@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  authenticitySubjectKey,
   DETECTOR_LABELS,
   describeCheck,
   detectorOf,
@@ -72,7 +73,7 @@ export type ImageAuthenticityState = {
  * blocks the review itself.
  */
 export function useImageAuthenticity(subject: AuthenticitySubject | null): ImageAuthenticityState {
-  const key = subject ? (subject.scope === "car" ? `car:${subject.carId}` : `user:${subject.userId ?? "me"}`) : null;
+  const key = subject ? authenticitySubjectKey(subject) : null;
   const [checks, setChecks] = useState<Record<string, AuthenticityCheck>>({});
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);

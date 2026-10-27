@@ -1,4 +1,7 @@
 import VehicleCompliancePanel from "@/components/VehicleCompliancePanel";
+import DisableVehicleDialog from "@/components/DisableVehicleDialog";
+import VehicleModerationSection from "@/components/VehicleModerationSection";
+import { describeReportCount } from "@/lib/vehicleReports";
 import {
   ImageAuthenticityBadge,
   ImageAuthenticitySummary,
@@ -45,6 +48,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertCircle,
+  Ban,
   Car,
   CheckCircle,
   Eye,
@@ -74,6 +78,10 @@ interface PendingCar {
   created_at: string;
   // CHAPTER 105. When this vehicle last entered pending review.
   review_submitted_at: string | null;
+  // CHAPTER 131. Set while SafeDrive has the car disabled.
+  disabled_type: string | null;
+  disabled_reason: string | null;
+  disabled_at: string | null;
   registration_expiry: string | null;
   ctpl_expiry: string | null;
   comprehensive_insurance_expiry: string | null;
@@ -238,7 +246,9 @@ export default function AdminVehicleApprovalPage() {
     national_id: null as string | null,
   });
   const [searchParams] = useSearchParams();
-  const validTabs = ["pending", "active", "removed"] as const;
+  // CHAPTER 131: a disabled car waits under Clearance (the lister submits
+  // dated photos) or under Disabled (staff enable it).
+  const validTabs = ["pending", "active", "clearance", "disabled", "removed"] as const;
   type VehicleTab = (typeof validTabs)[number];
   const requestedTab = searchParams.get("tab");
   const initialTab: VehicleTab = validTabs.includes(requestedTab as VehicleTab)
@@ -246,6 +256,13 @@ export default function AdminVehicleApprovalPage() {
     : "pending";
   const [activeTab, setActiveTab] = useState<VehicleTab>(initialTab);
   const [totalCars, setTotalCars] = useState<number | null>(null);
+  // Clearance tab: whether each car's latest clearance waits for review.
+  const [clearanceFilter, setClearanceFilter] = useState<"waiting" | "submitted">("submitted");
+  const [clearanceStateByCar, setClearanceStateByCar] = useState<Record<string, "waiting" | "submitted">>({});
+  // Approved tab: each car's confirmed (reviewed) vehicle reports.
+  const [confirmedReportsByCar, setConfirmedReportsByCar] = useState<Record<string, number>>({});
+  const [showDisable, setShowDisable] = useState(false);
+  const deepLinkVehicleId = searchParams.get("vehicle");
 
   useEffect(() => {
     if (!selected) {
@@ -311,7 +328,11 @@ export default function AdminVehicleApprovalPage() {
     return 0;
   });
 
-  const carPages = usePagedItems(orderedCars, activeTab);
+  const listedCars =
+    activeTab === "clearance"
+      ? orderedCars.filter((car) => (clearanceStateByCar[car.id] ?? "waiting") === clearanceFilter)
+      : orderedCars;
+  const carPages = usePagedItems(listedCars, `${activeTab}|${clearanceFilter}`);
 
   const displayPii = (rawValue: string | null, decryptedValue: string | null) => {
     if (piiLoading) return "Decrypting...";
@@ -356,12 +377,18 @@ export default function AdminVehicleApprovalPage() {
       const scopedQuery =
         activeTab === "removed"
           ? baseQuery.not("deleted_at", "is", null)
+          : activeTab === "clearance" || activeTab === "disabled"
+            ? baseQuery
+                .is("deleted_at", null)
+                .eq("status", "disabled")
+                .eq("disabled_type", activeTab === "clearance" ? "clearance" : "other")
           : activeTab === "pending"
             ? baseQuery.is("deleted_at", null).or(
                 [
                   "status.eq.pending",
                   ...(awaitingList ? [`and(status.eq.renewal_required,id.in.${awaitingList})`] : []),
-                  ...(resubmittedIds.length ? [`id.in.(${resubmittedIds.join(",")})`] : []),
+                  // A disabled car's documents wait until it is enabled.
+                  ...(resubmittedIds.length ? [`and(id.in.(${resubmittedIds.join(",")}),status.neq.disabled)`] : []),
                 ].join(","),
               )
             // Approved cars, live or not: a newly approved car waits in
@@ -390,6 +417,27 @@ export default function AdminVehicleApprovalPage() {
       if (data) {
         const typedCars = data as unknown as PendingCar[];
         setCars(typedCars);
+        const ids = typedCars.map((car) => car.id);
+        if (activeTab === "clearance" && ids.length) {
+          const { data: clearances } = await supabase
+            .from("vehicle_clearances")
+            .select("car_id, status")
+            .in("car_id", ids)
+            .eq("status", "submitted");
+          setClearanceStateByCar(
+            Object.fromEntries(ids.map((id) => [id, (clearances ?? []).some((row) => row.car_id === id) ? "submitted" : "waiting"])),
+          );
+        }
+        if (activeTab === "active" && ids.length) {
+          const { data: confirmed } = await supabase
+            .from("vehicle_reports")
+            .select("car_id")
+            .eq("status", "reviewed")
+            .in("car_id", ids);
+          const counts: Record<string, number> = {};
+          for (const row of confirmed ?? []) counts[row.car_id] = (counts[row.car_id] ?? 0) + 1;
+          setConfirmedReportsByCar(counts);
+        }
         setDocumentUrls(
           await createPrivateStorageUrlMap(
             "vehicle-private-documents",
@@ -417,6 +465,15 @@ export default function AdminVehicleApprovalPage() {
   useEffect(() => {
     void fetchVehicleReviewTargetHours().then(setReviewTargetHours);
   }, []);
+
+  useEffect(() => {
+    if (!deepLinkVehicleId || loading) return;
+    const linked = cars.find((car) => car.id === deepLinkVehicleId);
+    if (linked) {
+      setSelected(linked);
+      if (activeTab === "clearance") setClearanceFilter(clearanceStateByCar[linked.id] ?? "waiting");
+    }
+  }, [activeTab, cars, clearanceStateByCar, deepLinkVehicleId, loading]);
 
   const getUrl = useCallback((bucket: string, path: string) => {
     // backwards compat: if path is already a full URL (old entries stored full URL), return directly
@@ -853,13 +910,33 @@ export default function AdminVehicleApprovalPage() {
         tabs={[
           { value: "pending", label: "Pending & resubmissions" },
           { value: "active", label: "Approved cars" },
+          { value: "clearance", label: "Clearance" },
+          { value: "disabled", label: "Disabled" },
           { value: "removed", label: "Removed" },
         ]}
       />
 
+      {activeTab === "clearance" && (
+        <AdminSectionTabs
+          value={clearanceFilter}
+          onChange={setClearanceFilter}
+          ariaLabel="Clearance stage"
+          tabs={[
+            {
+              value: "submitted",
+              label: "Submitted - needs review",
+              count: Object.values(clearanceStateByCar).filter((state) => state === "submitted").length,
+            },
+            { value: "waiting", label: "Waiting for lister" },
+          ]}
+        />
+      )}
+
       {!loading && (
         <p className="text-sm text-muted-foreground" aria-live="polite">
-          {activeTab === "removed"
+          {activeTab === "clearance" || activeTab === "disabled"
+            ? `${listedCars.length} disabled car${listedCars.length === 1 ? "" : "s"}`
+            : activeTab === "removed"
             ? `${cars.length} removed car${cars.length === 1 ? "" : "s"}`
             : `Showing ${cars.length} ${activeTab === "pending" ? "waiting for review" : "approved"} of ${
                 totalCars ?? "-"
@@ -873,18 +950,28 @@ export default function AdminVehicleApprovalPage() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
-      ) : cars.length === 0 ? (
+      ) : listedCars.length === 0 ? (
         <div className="text-center py-20">
           <Car className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
           <h3 className="text-lg font-semibold">
-            {activeTab === "pending"
+            {activeTab === "clearance"
+              ? clearanceFilter === "submitted"
+                ? "No clearance to review"
+                : "No car waiting for its lister's clearance"
+              : activeTab === "disabled"
+                ? "No disabled cars"
+                : activeTab === "pending"
               ? "Nothing waiting for review"
               : activeTab === "removed"
                 ? "No removed cars"
                 : "No approved cars"}
           </h3>
           <p className="text-muted-foreground text-sm">
-            {activeTab === "pending"
+            {activeTab === "clearance"
+              ? "Cars disabled until their lister submits dated photos that you approve."
+              : activeTab === "disabled"
+                ? "Cars disabled for another reason. They stay off Browse until you enable them."
+                : activeTab === "pending"
               ? "New listings and document resubmissions both appear here."
               : activeTab === "removed"
                 ? "Cars removed by an admin or deleted by their lister appear here. Their plate, documents and photos are erased; the owner adds the car again to list it."
@@ -938,6 +1025,12 @@ export default function AdminVehicleApprovalPage() {
                   <TableCell className="capitalize">
                     {car.deleted_at
                       ? "removed"
+                      : car.status === "disabled"
+                        ? activeTab === "clearance"
+                          ? clearanceStateByCar[car.id] === "submitted"
+                            ? "Disabled · clearance sent"
+                            : "Disabled · waiting for clearance"
+                          : "Disabled"
                       : activeTab === "active"
                         ? car.status === "inactive"
                           ? "Inactive"
@@ -945,6 +1038,12 @@ export default function AdminVehicleApprovalPage() {
                             ? "Inactive · papers expired"
                             : "Live"
                         : car.status}
+                    {/* Repeated damage, for the reviewer to weigh (CHAPTER 131). */}
+                    {activeTab === "active" && confirmedReportsByCar[car.id] ? (
+                      <span className="ml-2 rounded-md bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold normal-case text-red-600">
+                        {describeReportCount(confirmedReportsByCar[car.id])}
+                      </span>
+                    ) : null}
                   </TableCell>
                   {/* CHAPTER 105. How long this submission has waited, so the
                       queue can be read as a queue rather than a list. Red past
@@ -1570,6 +1669,21 @@ export default function AdminVehicleApprovalPage() {
               )}
               {activeTab === "active" && (canReview || canDelete) && (
                 <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap">
+                  {canReview && !selected.deleted_at ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowRevoke(false);
+                        closeRemoveForm();
+                        setShowDisable(true);
+                      }}
+                      disabled={actionLoading}
+                      className="gap-2 text-red-600 hover:text-red-600"
+                    >
+                      <Ban className="w-4 h-4" />
+                      Disable
+                    </Button>
+                  ) : null}
                   {canReview && !showRevoke ? (
                     <Button
                       variant="outline"
@@ -1682,6 +1796,20 @@ export default function AdminVehicleApprovalPage() {
                   </div>
                 </div>
               )}
+              {(activeTab === "clearance" || activeTab === "disabled") && selected.status === "disabled" && (
+                <VehicleModerationSection
+                  key={selected.id}
+                  carId={selected.id}
+                  disabledType={selected.disabled_type}
+                  disabledReason={selected.disabled_reason}
+                  disabledAt={selected.disabled_at}
+                  canReview={canReview}
+                  onChanged={() => {
+                    setSelected(null);
+                    fetchCars();
+                  }}
+                />
+              )}
               {activeTab === "removed" && selected.deleted_at && (
                 <div className="space-y-3 rounded-lg border border-border/60 bg-muted/30 p-4 text-sm">
                   <div>
@@ -1707,6 +1835,18 @@ export default function AdminVehicleApprovalPage() {
           </div>
         </div>,
         document.body,
+      )}
+      {showDisable && selected && (
+        <DisableVehicleDialog
+          carId={selected.id}
+          vehicleLabel={`${selected.car_models.car_brands.name} ${selected.car_models.name} (${selected.plate_number})`}
+          onClose={() => setShowDisable(false)}
+          onDisabled={() => {
+            setShowDisable(false);
+            setSelected(null);
+            fetchCars();
+          }}
+        />
       )}
     </div>
   );

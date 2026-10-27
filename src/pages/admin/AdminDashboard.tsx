@@ -27,9 +27,12 @@ export default function AdminDashboard() {
     void (async () => {
       setLoading(true);
       setLoadError(null);
-      const [profiles, vehicles, support, waitingOnMember, guests, payouts, refunds, retention, reconciliation, activity] = await Promise.all([
+      const [profiles, vehicles, vehicleReports, clearances, support, waitingOnMember, guests, payouts, refunds, retention, reconciliation, activity] = await Promise.all([
         supabase.from("profiles").select("id, updated_at").eq("verified_status", "pending").order("updated_at", { ascending: true }),
         supabase.from("cars").select("id, created_at").eq("status", "pending").is("deleted_at", null).order("created_at", { ascending: true }),
+        // CHAPTER 131: open vehicle reports, and disabled cars' clearances to decide.
+        supabase.from("vehicle_reports").select("id, created_at").eq("status", "open").order("created_at", { ascending: true }),
+        supabase.from("vehicle_clearances").select("id, created_at").eq("status", "submitted").order("created_at", { ascending: true }),
         loadSupportTicketsNeedingAdminReply().catch((error: unknown) => {
           console.error("Failed to load support reply queue:", error);
           return [];
@@ -43,13 +46,15 @@ export default function AdminDashboard() {
         isSuperAdmin ? supabase.from("reconciliation_items").select("id, created_at").in("status", ["open", "investigating"]).order("created_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
         supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(6),
       ]);
-      const firstError = [profiles, vehicles, waitingOnMember, guests, payouts, refunds, retention, reconciliation, activity].find(
+      const firstError = [profiles, vehicles, vehicleReports, clearances, waitingOnMember, guests, payouts, refunds, retention, reconciliation, activity].find(
         (result) => result.error,
       )?.error;
       if (firstError) setLoadError(firstError.message);
       const operational: QueueCard[] = [
         { label: "Profiles to verify", count: profiles.data?.length ?? 0, oldest: profiles.data?.[0]?.updated_at ?? null, to: "/admin/users", icon: UserCheck },
         { label: "Vehicles to approve", count: vehicles.data?.length ?? 0, oldest: vehicles.data?.[0]?.created_at ?? null, to: "/admin/vehicle-approval?tab=pending", icon: Car },
+        { label: "Vehicle reports open", count: vehicleReports.data?.length ?? 0, oldest: vehicleReports.data?.[0]?.created_at ?? null, to: "/admin/vehicle-reports", icon: Car },
+        { label: "Clearances to review", count: clearances.data?.length ?? 0, oldest: clearances.data?.[0]?.created_at ?? null, to: "/admin/vehicle-approval?tab=clearance", icon: Car },
         { label: "Support needing reply", count: support.length, oldest: support[0]?.waiting_since ?? null, to: "/admin/support", icon: Headset },
         { label: "Support waiting on member", count: waitingOnMember.data?.length ?? 0, oldest: waitingOnMember.data?.[0]?.status_changed_at ?? null, to: "/admin/support", icon: Headset },
         { label: "User inquiries", count: guests.data?.length ?? 0, oldest: guests.data?.[0]?.created_at ?? null, to: "/admin/guest-inquiries", icon: MessageSquare },

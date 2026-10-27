@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import VehicleCompliancePanel from "@/components/VehicleCompliancePanel";
+import VehicleClearancePanel from "@/components/VehicleClearancePanel";
 import { Button } from "@/components/ui/button";
 import {
   documentExpiryChips,
@@ -10,7 +11,14 @@ import {
   expiryChipTone,
 } from "@/lib/vehicleCompliance";
 
-type Vehicle = { id: string; plate_number: string; status: string };
+type Vehicle = {
+  id: string;
+  plate_number: string;
+  status: string;
+  // CHAPTER 131: set while SafeDrive has the car disabled.
+  disabled_type: string | null;
+  disabled_reason: string | null;
+};
 type ExpiryRow = {
   car_id: string;
   document_type: string;
@@ -32,7 +40,7 @@ export default function ListerCarRenewalPage() {
     // A deleted or removed car takes no documents: its review queue is gone (CHAPTER 95).
     // A car still in review is corrected from My Vehicles' Edit (CHAPTER 118);
     // this page is for vehicles already approved or live.
-    const {data,error:e}=await supabase.from("cars").select("id,plate_number,status").eq("owner_id",user.id).is("deleted_at",null).not("status","in","(pending,rejected)").order("created_at",{ascending:false});
+    const {data,error:e}=await supabase.from("cars").select("id,plate_number,status,disabled_type,disabled_reason").eq("owner_id",user.id).is("deleted_at",null).not("status","in","(pending,rejected)").order("created_at",{ascending:false});
     setError(e?.message ?? "");setCars(data ?? []);setLoading(false);
     // The expiry dates live on the documents, not on cars - that is the only
     // place the DTI and the Mayor's Permit dates have ever been recorded.
@@ -53,18 +61,19 @@ export default function ListerCarRenewalPage() {
     {loading ? <p>Loading vehicles…</p> : selected ? <>
       <Button variant="outline" onClick={()=>setParams({})}>Back to vehicles</Button>
       <h2 className="text-xl font-semibold">{selected.plate_number}</h2>
+      {selected.status==="disabled" && <VehicleClearancePanel key={`clearance-${selected.id}`} carId={selected.id} disabledType={selected.disabled_type} disabledReason={selected.disabled_reason} onSubmitted={()=>void load()} />}
       <VehicleCompliancePanel key={selected.id} carId={selected.id} onChange={()=>void load()} />
     </> : <div className="grid gap-3 sm:grid-cols-2">
       {cars.map(car=>{
         const chips=documentExpiryChips(expiries.filter(row=>row.car_id===car.id));
         return <button key={car.id} type="button" className="rounded-xl border p-4 text-left hover:bg-muted" onClick={()=>setParams({car:car.id})}>
-          <span className="block font-semibold">{car.plate_number}</span><span className="text-sm text-muted-foreground">{car.status.replaceAll("_"," ")}</span>
+          <span className="block font-semibold">{car.plate_number}</span><span className={`text-sm ${car.status==="disabled"?"font-medium text-red-600 dark:text-red-400":"text-muted-foreground"}`}>{car.status==="disabled" ? (car.disabled_type==="clearance" ? "Disabled by SafeDrive · clearance needed" : "Disabled by SafeDrive") : car.status.replaceAll("_"," ")}</span>
           {chips.length>0&&<span className="mt-3 flex flex-wrap gap-1.5">
             {chips.map(chip=><span key={chip.type} className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${expiryChipTone(chip)}`}>
               {expiryChipText(chip)}
             </span>)}
           </span>}
-          <span className="mt-3 block text-sm text-primary">Renew / update documents</span>
+          <span className="mt-3 block text-sm text-primary">{car.status==="disabled"&&car.disabled_type==="clearance" ? "Submit clearance / update documents" : "Renew / update documents"}</span>
         </button>;
       })}
       {!cars.length && <p>You have no approved vehicles yet.</p>}

@@ -21,7 +21,7 @@ const requireSuccess = <T extends { error: { message: string } | null }>(result:
 };
 
 export async function loadAdminAttentionItems(isSuperAdmin: boolean) {
-  const [guestResult, supportItems, profileResult, vehicleResult] = await Promise.all([
+  const [guestResult, supportItems, profileResult, vehicleResult, reportResult, clearanceResult] = await Promise.all([
     supabase
       .from("guest_inquiries")
       .select("id,name,topics,subject,status,created_at")
@@ -41,11 +41,25 @@ export async function loadAdminAttentionItems(isSuperAdmin: boolean) {
       // A removed car is not waiting for anyone (CHAPTER 95).
       .is("deleted_at", null)
       .order("created_at", { ascending: true }),
+    // CHAPTER 131: reports nobody has looked at, and clearances to decide.
+    // Without vehicles.review the policies return none, so nothing shows.
+    supabase
+      .from("vehicle_reports")
+      .select("id,car_id,reporter_role,created_at")
+      .eq("status", "open")
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("vehicle_clearances")
+      .select("id,car_id,created_at")
+      .eq("status", "submitted")
+      .order("created_at", { ascending: true }),
   ]);
 
   requireSuccess(guestResult);
   requireSuccess(profileResult);
   requireSuccess(vehicleResult);
+  requireSuccess(reportResult);
+  requireSuccess(clearanceResult);
 
   const items: AdminAttentionItem[] = [
     ...(guestResult.data ?? []).map((item) => ({
@@ -79,6 +93,22 @@ export async function loadAdminAttentionItems(isSuperAdmin: boolean) {
       createdAt: item.created_at,
       kind: "vehicle" as const,
       link: `/admin/vehicle-approval?vehicle=${item.id}`,
+    })),
+    ...(reportResult.data ?? []).map((item) => ({
+      id: `vehicle-report-${item.id}`,
+      title: "Vehicle report",
+      detail: item.reporter_role === "renter" ? "The renter reported an issue at the handover" : "The lister reported an issue at the return",
+      createdAt: item.created_at,
+      kind: "vehicle" as const,
+      link: `/admin/vehicle-reports?report=${item.id}`,
+    })),
+    ...(clearanceResult.data ?? []).map((item) => ({
+      id: `vehicle-clearance-${item.id}`,
+      title: "Vehicle clearance",
+      detail: "A disabled car's clearance is waiting for review",
+      createdAt: item.created_at,
+      kind: "vehicle" as const,
+      link: `/admin/vehicle-approval?tab=clearance&vehicle=${item.car_id}`,
     })),
   ];
 

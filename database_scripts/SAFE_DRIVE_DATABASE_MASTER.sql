@@ -20889,4 +20889,691 @@ commit;
 --           'move_support_ticket_on_message', 'stamp_support_ticket_status')), '5';
 --   (every result matches expected)
 
+-- ============================================================================
+-- CHAPTER 131 - A car can be reported, disabled, and cleared to rent again
+-- ============================================================================
+-- Panel feedback: the current situation of the car, and repeated damage that
+-- is subject to evaluation. A renter could not say "the door was already
+-- dented when I got it", and SafeDrive had no way to take a car off the
+-- platform until it was fixed short of removing it for good.
+--
+-- Reports. At the handover the renter, and at the return the lister, may file
+-- one report about the car: what they saw, with 1-4 live photos. It is
+-- optional and never holds anything up - not the trip, not the completion,
+-- not the payout. It is not a support ticket for that reason: an open booking
+-- case holds a payout (server/payoutAutomation.ts). Staff mark a report
+-- reviewed or dismissed. Repeated reports are counted on the car for staff to
+-- weigh; nothing happens to the car automatically.
+--
+-- Disabled. Staff with vehicles.review may disable a car:
+--   clearance  until its lister submits 1-4 dated photos (a clearance) and
+--              staff approve them, or
+--   other      for a stated reason, until staff enable it again.
+-- A disabled car is off Browse and cannot be booked (every booking path
+-- already requires approved/active). Bookings that have not started are
+-- cancelled and refunded in full by api/vehicle-moderation.ts, the way a
+-- removal does it; a trip already under way runs to its scheduled end, and
+-- its extension requests are cancelled. The lister cannot edit the car or
+-- turn it back on; only enable_vehicle_for and an approved clearance bring it
+-- back, through the same compliance refresh a renewal uses, so a car whose
+-- papers lapsed meanwhile comes back as renewal_required and one over its
+-- plan's slots comes back inactive.
+--
+-- Terms of Service 7.6 says so.
+begin;
+
+-- ---------------------------------------------------------------- cars
+do $drop_car_status_check$
+declare c record;
+begin
+  for c in
+    select conname from pg_constraint
+     where conrelid = 'public.cars'::regclass and contype = 'c'
+       and pg_get_constraintdef(oid) like '%renewal_required%'
+  loop
+    execute format('alter table public.cars drop constraint %I', c.conname);
+  end loop;
+end;
+$drop_car_status_check$;
+
+alter table public.cars
+  add constraint cars_status_check
+  check (status in ('pending', 'approved', 'rejected', 'active', 'inactive', 'renewal_required', 'disabled'));
+
+-- ---------------------------------------------------------------- reports
+create table if not exists public.vehicle_reports (
+  id uuid primary key default gen_random_uuid(),
+  booking_id uuid not null references public.bookings(id) on delete cascade,
+  car_id uuid not null references public.cars(id) on delete cascade,
+  reporter_id uuid not null references public.profiles(id) on delete cascade,
+  reporter_role text not null check (reporter_role in ('renter', 'lister')),
+  phase text not null check (phase in ('pickup', 'return')),
+  message text not null check (char_length(btrim(message)) between 10 and 2000),
+  status text not null default 'open' check (status in ('open', 'reviewed', 'dismissed')),
+  admin_note text,
+  reviewed_by uuid references public.profiles(id) on delete set null,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now(),
+  check ((reporter_role = 'renter' and phase = 'pickup') or (reporter_role = 'lister' and phase = 'return')),
+  unique (booking_id, reporter_id, phase)
+);
+create index if not exists vehicle_reports_car_idx on public.vehicle_reports (car_id, status);
+create index if not exists vehicle_reports_status_idx on public.vehicle_reports (status, created_at);
+
+create table if not exists public.vehicle_report_photos (
+  id uuid primary key default gen_random_uuid(),
+  report_id uuid not null references public.vehicle_reports(id) on delete cascade,
+  storage_path text not null unique,
+  provenance_status text not null default 'unknown'
+    check (provenance_status in ('unknown', 'credential_present', 'credential_missing', 'credential_invalid')),
+  provenance_source text,
+  provenance_summary text,
+  captured_at timestamptz not null default now()
+);
+create index if not exists vehicle_report_photos_report_idx on public.vehicle_report_photos (report_id);
+
+alter table public.cars
+  add column if not exists disabled_type text check (disabled_type in ('clearance', 'other')),
+  add column if not exists disabled_reason text,
+  add column if not exists disabled_by uuid references public.profiles(id) on delete set null,
+  add column if not exists disabled_at timestamptz,
+  add column if not exists status_before_disable text,
+  add column if not exists disabled_report_id uuid references public.vehicle_reports(id) on delete set null;
+
+-- ---------------------------------------------------------------- clearances
+create table if not exists public.vehicle_clearances (
+  id uuid primary key default gen_random_uuid(),
+  car_id uuid not null references public.cars(id) on delete cascade,
+  submitted_by uuid not null references public.profiles(id) on delete cascade,
+  note text,
+  status text not null default 'submitted' check (status in ('submitted', 'approved', 'rejected')),
+  rejection_reason text,
+  reviewed_by uuid references public.profiles(id) on delete set null,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists vehicle_clearances_one_waiting
+  on public.vehicle_clearances (car_id) where status = 'submitted';
+
+create table if not exists public.vehicle_clearance_images (
+  id uuid primary key default gen_random_uuid(),
+  clearance_id uuid not null references public.vehicle_clearances(id) on delete cascade,
+  storage_path text not null unique,
+  created_at timestamptz not null default now()
+);
+create index if not exists vehicle_clearance_images_clearance_idx on public.vehicle_clearance_images (clearance_id);
+
+-- ---------------------------------------------------------------- RLS
+-- Every write goes through the functions below or the service role.
+alter table public.vehicle_reports enable row level security;
+alter table public.vehicle_report_photos enable row level security;
+alter table public.vehicle_clearances enable row level security;
+alter table public.vehicle_clearance_images enable row level security;
+
+drop policy if exists "Reporters and vehicle reviewers read vehicle reports" on public.vehicle_reports;
+create policy "Reporters and vehicle reviewers read vehicle reports" on public.vehicle_reports
+  for select to authenticated
+  using (reporter_id = auth.uid() or public.admin_can('vehicles.review'));
+
+drop policy if exists "Reporters and vehicle reviewers read report photos" on public.vehicle_report_photos;
+create policy "Reporters and vehicle reviewers read report photos" on public.vehicle_report_photos
+  for select to authenticated
+  using (exists (
+    select 1 from public.vehicle_reports r
+     where r.id = vehicle_report_photos.report_id
+       and (r.reporter_id = auth.uid() or public.admin_can('vehicles.review'))
+  ));
+
+drop policy if exists "Owners and vehicle reviewers read clearances" on public.vehicle_clearances;
+create policy "Owners and vehicle reviewers read clearances" on public.vehicle_clearances
+  for select to authenticated
+  using (
+    public.admin_can('vehicles.review')
+    or exists (select 1 from public.cars c where c.id = vehicle_clearances.car_id and c.owner_id = auth.uid())
+  );
+
+drop policy if exists "Owners and vehicle reviewers read clearance images" on public.vehicle_clearance_images;
+create policy "Owners and vehicle reviewers read clearance images" on public.vehicle_clearance_images
+  for select to authenticated
+  using (exists (
+    select 1 from public.vehicle_clearances v
+      join public.cars c on c.id = v.car_id
+     where v.id = vehicle_clearance_images.clearance_id
+       and (c.owner_id = auth.uid() or public.admin_can('vehicles.review'))
+  ));
+
+-- Report photos live with the trip photos (trip-condition-evidence, path
+-- <booking>/<user>/...); a filed one can no longer be deleted by its sender.
+drop policy if exists "Submitters delete unlinked trip condition evidence" on storage.objects;
+create policy "Submitters delete unlinked trip condition evidence" on storage.objects
+for delete to authenticated using (
+  bucket_id = 'trip-condition-evidence'
+  and (storage.foldername(name))[2] = auth.uid()::text
+  and not exists (select 1 from public.trip_condition_photos p where p.storage_path = name)
+  and not exists (select 1 from public.vehicle_report_photos p where p.storage_path = name)
+);
+
+-- Clearance images live with the car's private documents
+-- (vehicle-private-documents, path <owner>/<car>/clearance-.../...); once
+-- filed they are evidence and cannot be changed or deleted.
+drop policy if exists "Filed clearance images are immutable" on storage.objects;
+create policy "Filed clearance images are immutable" on storage.objects
+  as restrictive for update to authenticated
+  using (not exists (select 1 from public.vehicle_clearance_images i where bucket_id = 'vehicle-private-documents' and i.storage_path = name))
+  with check (not exists (select 1 from public.vehicle_clearance_images i where bucket_id = 'vehicle-private-documents' and i.storage_path = name));
+drop policy if exists "Filed clearance images cannot be deleted" on storage.objects;
+create policy "Filed clearance images cannot be deleted" on storage.objects
+  as restrictive for delete to authenticated
+  using (not exists (select 1 from public.vehicle_clearance_images i where bucket_id = 'vehicle-private-documents' and i.storage_path = name));
+
+-- The AI image check covers report photos and clearance images too.
+alter table public.image_authenticity_checks
+  drop constraint if exists image_authenticity_checks_subject_kind_check;
+alter table public.image_authenticity_checks
+  add constraint image_authenticity_checks_subject_kind_check
+  check (subject_kind in ('identity', 'vehicle_photo', 'vehicle_document', 'vehicle_report_photo', 'vehicle_clearance'));
+
+-- ---------------------------------------------------------------- guards
+-- A disabled car leaves that state only through enable_vehicle_for or an
+-- approved clearance (both set safedrive.enabling_car), or by being removed
+-- (which parks it inactive). It enters it only through disable_vehicle_for.
+create or replace function public.guard_disabled_car_status()
+returns trigger
+language plpgsql
+as $guard_disabled$
+begin
+  if new.status is distinct from old.status then
+    if old.status = 'disabled'
+       and new.status <> 'inactive'
+       and coalesce(current_setting('safedrive.enabling_car', true), '') <> new.id::text then
+      raise exception 'This vehicle is disabled by SafeDrive. Enable it from Vehicle Management, or approve its clearance.';
+    end if;
+    if new.status = 'disabled'
+       and coalesce(current_setting('safedrive.disabling_car', true), '') <> new.id::text then
+      raise exception 'A vehicle is disabled only from Vehicle Management, with a reason';
+    end if;
+  end if;
+  return new;
+end;
+$guard_disabled$;
+
+drop trigger if exists guard_disabled_car_status on public.cars;
+create trigger guard_disabled_car_status
+  before update of status on public.cars
+  for each row execute function public.guard_disabled_car_status();
+
+-- The lister cannot touch the disable fields, nor edit a car while it is
+-- disabled. The same "privileged" test as protect_car_submission_fields, but
+-- deliberately SECURITY INVOKER: inside a SECURITY DEFINER function
+-- current_user is the function's owner (postgres), so the test would pass for
+-- everyone. Run as the caller, it sees 'authenticated' for a member's request,
+-- and the owner only when SafeDrive's own functions (disable, enable,
+-- compliance refresh) make the change.
+create or replace function public.protect_car_disable_fields()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public
+as $protect_disable$
+begin
+  if public.is_admin() or current_user in ('postgres', 'service_role', 'supabase_admin') then
+    return new;
+  end if;
+  if old.status = 'disabled' then
+    raise exception 'This vehicle is disabled by SafeDrive and cannot be edited until it is enabled again';
+  end if;
+  if new.disabled_type is distinct from old.disabled_type
+     or new.disabled_reason is distinct from old.disabled_reason
+     or new.disabled_by is distinct from old.disabled_by
+     or new.disabled_at is distinct from old.disabled_at
+     or new.status_before_disable is distinct from old.status_before_disable
+     or new.disabled_report_id is distinct from old.disabled_report_id then
+    raise exception 'Only SafeDrive can disable or enable a vehicle';
+  end if;
+  return new;
+end;
+$protect_disable$;
+
+drop trigger if exists protect_car_disable_fields on public.cars;
+create trigger protect_car_disable_fields
+  before update on public.cars
+  for each row execute function public.protect_car_disable_fields();
+
+-- Staff who review vehicles, for in-app notices.
+create or replace function public.notify_vehicle_reviewers(p_title text, p_message text, p_link text)
+returns void
+language sql
+security definer
+set search_path = public
+as $notify_reviewers$
+  insert into public.notifications (user_id, title, message, type, link)
+  select p.id, p_title, p_message, 'vehicle', p_link
+    from public.profiles p
+   where p.role in ('admin', 'super_admin')
+     and p.deleted_at is null
+     and public.admin_can_for(p.id, 'vehicles.review');
+$notify_reviewers$;
+
+revoke all on function public.notify_vehicle_reviewers(text, text, text) from public, anon, authenticated;
+grant execute on function public.notify_vehicle_reviewers(text, text, text) to service_role;
+
+-- ---------------------------------------------------------------- disable
+create or replace function public.disable_vehicle_for(
+  p_admin uuid,
+  p_car_id uuid,
+  p_type text,
+  p_reason text,
+  p_report_id uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $disable_vehicle$
+declare
+  v_car record;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_vehicle text;
+  v_title text;
+  v_message text;
+  v_extension record;
+begin
+  if not coalesce(public.admin_can_for(p_admin, 'vehicles.review'), false) then
+    raise exception 'Disabling a vehicle requires the vehicles.review permission';
+  end if;
+  if p_type not in ('clearance', 'other') then
+    raise exception 'Choose whether the vehicle needs a clearance or is disabled for another reason';
+  end if;
+  if v_reason is null or length(v_reason) < 10 then
+    raise exception 'Give a reason of at least 10 characters so the lister knows why';
+  end if;
+
+  select id, owner_id, plate_number, status, deleted_at, removal_scheduled_at
+    into v_car from public.cars where id = p_car_id for update;
+  if not found or v_car.deleted_at is not null then
+    raise exception 'Vehicle not found';
+  end if;
+  if v_car.removal_scheduled_at is not null then
+    raise exception 'This vehicle is already being removed';
+  end if;
+  if v_car.status = 'disabled' then
+    raise exception 'This vehicle is already disabled';
+  end if;
+  if v_car.status not in ('approved', 'active', 'inactive', 'renewal_required') then
+    raise exception 'Only an approved vehicle can be disabled';
+  end if;
+  if p_report_id is not null and not exists (
+    select 1 from public.vehicle_reports where id = p_report_id and car_id = p_car_id
+  ) then
+    raise exception 'That report is not about this vehicle';
+  end if;
+
+  perform set_config('safedrive.disabling_car', p_car_id::text, true);
+  update public.cars set
+    status_before_disable = status,
+    status = 'disabled',
+    disabled_type = p_type,
+    disabled_reason = v_reason,
+    disabled_by = p_admin,
+    disabled_at = now(),
+    disabled_report_id = p_report_id,
+    updated_at = now()
+  where id = p_car_id;
+  perform set_config('safedrive.disabling_car', '', true);
+
+  if p_report_id is not null then
+    update public.vehicle_reports
+       set status = 'reviewed', reviewed_by = p_admin, reviewed_at = now(),
+           admin_note = coalesce(admin_note, 'Vehicle disabled: ' || v_reason)
+     where id = p_report_id and status = 'open';
+  end if;
+
+  -- A trip under way runs to its scheduled end: an extension asked for or
+  -- approved but not yet paid is cancelled, and the renter told.
+  for v_extension in
+    select e.id, e.renter_id
+      from public.booking_extensions e
+      join public.bookings b on b.id = e.booking_id
+     where b.car_id = p_car_id and e.status in ('pending', 'approved')
+  loop
+    update public.booking_extensions
+       set status = 'cancelled',
+           owner_decision_note = 'Cancelled because SafeDrive disabled this vehicle. Return it on the original date.'
+     where id = v_extension.id;
+    insert into public.notifications (user_id, title, message, type, link)
+    values (v_extension.renter_id, 'Extension cancelled',
+      'SafeDrive disabled the vehicle you are renting, so your extension request was cancelled. Return it on the original date.',
+      'error', '/my-bookings');
+  end loop;
+
+  v_vehicle := public.vehicle_label(p_car_id);
+  if p_type = 'clearance' then
+    v_title := 'Your vehicle was disabled - clearance needed';
+    v_message := 'SafeDrive disabled your ' || v_vehicle || '. What to submit: ' || rtrim(v_reason, '.')
+      || '. Renters cannot see or book it until you submit a clearance from Document Renewal & Updates and SafeDrive approves it.';
+  else
+    v_title := 'Your vehicle was disabled';
+    v_message := 'SafeDrive disabled your ' || v_vehicle || '. Reason: ' || rtrim(v_reason, '.')
+      || '. Renters cannot see or book it until SafeDrive enables it again.';
+  end if;
+  insert into public.notifications (user_id, title, message, type, link)
+  values (v_car.owner_id, v_title, v_message, 'vehicle', '/my-vehicles');
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (p_admin, 'vehicle_disabled_by_admin', 'car', p_car_id::text,
+    jsonb_build_object('plate', v_car.plate_number, 'type', p_type, 'reason', v_reason,
+      'previous_status', v_car.status, 'report_id', p_report_id));
+
+  return jsonb_build_object('owner_id', v_car.owner_id, 'title', v_title, 'message', v_message);
+end;
+$disable_vehicle$;
+
+revoke all on function public.disable_vehicle_for(uuid, uuid, text, text, uuid) from public, anon, authenticated;
+grant execute on function public.disable_vehicle_for(uuid, uuid, text, text, uuid) to service_role;
+
+-- ---------------------------------------------------------------- enable
+-- Shared by enable_vehicle_for and an approved clearance. A car that was
+-- live goes back through renewal_required and refresh_vehicle_compliance,
+-- exactly as a renewal does: approved if its papers still cover today,
+-- renewal_required if they lapsed while it was disabled. Over the plan's
+-- slots it is parked inactive. A car that was not live comes back inactive.
+create or replace function public._enable_disabled_car(p_car_id uuid, p_actor uuid, p_action text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $enable_car$
+declare
+  v_car record;
+  v_status text;
+  v_vehicle text;
+  v_message text;
+begin
+  select id, owner_id, plate_number, status, status_before_disable
+    into v_car from public.cars where id = p_car_id for update;
+  if not found or v_car.status <> 'disabled' then
+    raise exception 'This vehicle is not disabled';
+  end if;
+
+  perform set_config('safedrive.enabling_car', p_car_id::text, true);
+  update public.cars set
+    status = case when coalesce(status_before_disable, '') in ('approved', 'active', 'renewal_required')
+                  then 'renewal_required' else 'inactive' end,
+    disabled_type = null,
+    disabled_reason = null,
+    disabled_by = null,
+    disabled_at = null,
+    status_before_disable = null,
+    disabled_report_id = null,
+    updated_at = now()
+  where id = p_car_id;
+  perform set_config('safedrive.enabling_car', '', true);
+
+  if coalesce(v_car.status_before_disable, '') in ('approved', 'active', 'renewal_required') then
+    perform public.refresh_vehicle_compliance(p_car_id);
+  end if;
+
+  select status into v_status from public.cars where id = p_car_id;
+  if v_status in ('approved', 'active') and (
+    select count(*) from public.cars
+     where owner_id = v_car.owner_id and status in ('approved', 'active')
+       and deleted_at is null and id <> p_car_id
+  ) >= public.vehicle_slot_allowance(v_car.owner_id) then
+    update public.cars set status = 'inactive' where id = p_car_id;
+    v_status := 'inactive';
+  end if;
+
+  v_vehicle := public.vehicle_label(p_car_id);
+  v_message := case
+    when v_status in ('approved', 'active') then 'SafeDrive enabled your ' || v_vehicle || ' again. It is back on Browse.'
+    when v_status = 'renewal_required' then 'SafeDrive enabled your ' || v_vehicle
+      || ' again, but its papers expired while it was disabled. Upload the renewed papers to put it back up.'
+    else 'SafeDrive enabled your ' || v_vehicle
+      || ' again. It is inactive for now: turn it on from My Vehicles when you are ready (your plan''s vehicle slots must have room).'
+  end;
+  insert into public.notifications (user_id, title, message, type, link)
+  values (v_car.owner_id, 'Your vehicle was enabled', v_message, 'vehicle', '/my-vehicles');
+
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (p_actor, p_action, 'car', p_car_id::text,
+    jsonb_build_object('plate', v_car.plate_number, 'restored_status', v_status,
+      'status_before_disable', v_car.status_before_disable));
+
+  return jsonb_build_object('owner_id', v_car.owner_id, 'title', 'Your vehicle was enabled',
+    'message', v_message, 'status', v_status);
+end;
+$enable_car$;
+
+revoke all on function public._enable_disabled_car(uuid, uuid, text) from public, anon, authenticated;
+
+create or replace function public.enable_vehicle_for(p_admin uuid, p_car_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $enable_vehicle$
+begin
+  if not coalesce(public.admin_can_for(p_admin, 'vehicles.review'), false) then
+    raise exception 'Enabling a vehicle requires the vehicles.review permission';
+  end if;
+  if exists (select 1 from public.cars where id = p_car_id and disabled_type = 'clearance') then
+    raise exception 'This vehicle is waiting for a clearance. Approve the lister''s clearance to enable it.';
+  end if;
+  return public._enable_disabled_car(p_car_id, p_admin, 'vehicle_enabled_by_admin');
+end;
+$enable_vehicle$;
+
+revoke all on function public.enable_vehicle_for(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.enable_vehicle_for(uuid, uuid) to service_role;
+
+-- ---------------------------------------------------------------- clearance
+-- The lister files 1-4 images already uploaded to the car's private folder.
+create or replace function public.submit_vehicle_clearance(p_car_id uuid, p_note text, p_paths text[])
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $submit_clearance$
+declare
+  v_car record;
+  v_id uuid;
+  v_path text;
+  v_count integer := coalesce(array_length(p_paths, 1), 0);
+begin
+  select id, owner_id, plate_number, status, disabled_type, deleted_at
+    into v_car from public.cars where id = p_car_id for update;
+  if not found or v_car.owner_id is distinct from auth.uid() or v_car.deleted_at is not null then
+    raise exception 'Only the vehicle owner can submit a clearance';
+  end if;
+  if v_car.status <> 'disabled' or v_car.disabled_type is distinct from 'clearance' then
+    raise exception 'This vehicle does not need a clearance';
+  end if;
+  if exists (select 1 from public.vehicle_clearances where car_id = p_car_id and status = 'submitted') then
+    raise exception 'A clearance for this vehicle is already waiting for review';
+  end if;
+  if v_count < 1 or v_count > 4 then
+    raise exception 'Attach 1 to 4 images';
+  end if;
+  foreach v_path in array p_paths loop
+    if v_path is null
+       or v_path not like auth.uid()::text || '/' || p_car_id::text || '/clearance-%'
+       or lower(v_path) !~ '\.(jpe?g|png|webp)$'
+       or not exists (select 1 from storage.objects where bucket_id = 'vehicle-private-documents' and name = v_path) then
+      raise exception 'Each image must be a photo uploaded to this vehicle''s clearance folder';
+    end if;
+  end loop;
+
+  insert into public.vehicle_clearances (car_id, submitted_by, note)
+  values (p_car_id, auth.uid(), nullif(btrim(coalesce(p_note, '')), ''))
+  returning id into v_id;
+  insert into public.vehicle_clearance_images (clearance_id, storage_path)
+  select v_id, path from unnest(p_paths) as path;
+
+  perform public.notify_vehicle_reviewers('Vehicle clearance submitted',
+    v_car.plate_number || ': the lister submitted a clearance for review.',
+    '/admin/vehicle-approval?tab=clearance');
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (auth.uid(), 'vehicle_clearance_submitted', 'car', p_car_id::text,
+    jsonb_build_object('plate', v_car.plate_number, 'clearance_id', v_id, 'images', v_count));
+  return v_id;
+end;
+$submit_clearance$;
+
+revoke all on function public.submit_vehicle_clearance(uuid, text, text[]) from public, anon;
+grant execute on function public.submit_vehicle_clearance(uuid, text, text[]) to authenticated;
+
+create or replace function public.review_vehicle_clearance_for(
+  p_admin uuid,
+  p_clearance_id uuid,
+  p_approve boolean,
+  p_reason text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $review_clearance$
+declare
+  v_clearance record;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_owner uuid;
+  v_message text;
+begin
+  if not coalesce(public.admin_can_for(p_admin, 'vehicles.review'), false) then
+    raise exception 'Reviewing a clearance requires the vehicles.review permission';
+  end if;
+  select * into v_clearance from public.vehicle_clearances where id = p_clearance_id for update;
+  if not found or v_clearance.status <> 'submitted' then
+    raise exception 'This clearance is not waiting for review';
+  end if;
+
+  if p_approve then
+    update public.vehicle_clearances
+       set status = 'approved', reviewed_by = p_admin, reviewed_at = now()
+     where id = p_clearance_id;
+    return public._enable_disabled_car(v_clearance.car_id, p_admin, 'vehicle_clearance_approved')
+      || jsonb_build_object('title', 'Clearance approved - your vehicle is enabled');
+  end if;
+
+  if v_reason is null or length(v_reason) < 5 then
+    raise exception 'Say why the clearance was not accepted, so the lister can fix it';
+  end if;
+  update public.vehicle_clearances
+     set status = 'rejected', rejection_reason = v_reason, reviewed_by = p_admin, reviewed_at = now()
+   where id = p_clearance_id;
+  select owner_id into v_owner from public.cars where id = v_clearance.car_id;
+  v_message := 'SafeDrive did not accept the clearance for your ' || public.vehicle_label(v_clearance.car_id)
+    || '. Reason: ' || rtrim(v_reason, '.') || '. Submit a new clearance from Document Renewal & Updates.';
+  insert into public.notifications (user_id, title, message, type, link)
+  values (v_owner, 'Clearance not accepted', v_message, 'vehicle', '/car-renewals?car=' || v_clearance.car_id);
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (p_admin, 'vehicle_clearance_rejected', 'car', v_clearance.car_id::text,
+    jsonb_build_object('clearance_id', p_clearance_id, 'reason', v_reason));
+  return jsonb_build_object('owner_id', v_owner, 'title', 'Clearance not accepted', 'message', v_message, 'status', 'disabled');
+end;
+$review_clearance$;
+
+revoke all on function public.review_vehicle_clearance_for(uuid, uuid, boolean, text) from public, anon, authenticated;
+grant execute on function public.review_vehicle_clearance_for(uuid, uuid, boolean, text) to service_role;
+
+-- ---------------------------------------------------------------- report review
+create or replace function public.review_vehicle_report(p_report_id uuid, p_status text, p_note text default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $review_report$
+declare
+  v_report record;
+begin
+  if not public.admin_can('vehicles.review') then
+    raise exception 'Vehicle review permission required';
+  end if;
+  if p_status not in ('reviewed', 'dismissed') then
+    raise exception 'A report is marked reviewed or dismissed';
+  end if;
+  select * into v_report from public.vehicle_reports where id = p_report_id for update;
+  if not found then
+    raise exception 'Report not found';
+  end if;
+  update public.vehicle_reports
+     set status = p_status,
+         admin_note = nullif(btrim(coalesce(p_note, '')), ''),
+         reviewed_by = auth.uid(),
+         reviewed_at = now()
+   where id = p_report_id;
+  insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+  values (auth.uid(), 'vehicle_report_' || p_status, 'vehicle_report', p_report_id::text,
+    jsonb_build_object('car_id', v_report.car_id, 'booking_id', v_report.booking_id, 'previous', v_report.status));
+  return jsonb_build_object('status', p_status);
+end;
+$review_report$;
+
+revoke all on function public.review_vehicle_report(uuid, text, text) from public, anon;
+grant execute on function public.review_vehicle_report(uuid, text, text) to authenticated;
+
+-- ---------------------------------------------------------------- Terms 7.6
+do $chapter131_terms$
+declare
+  doc record;
+  next_html text;
+  next_version integer;
+  new_id uuid;
+begin
+  for doc in
+    select id, document_key, content_html
+    from public.legal_document_versions
+    where status = 'published'
+      and document_key = 'terms_of_service'
+      and position('7.6 Vehicle Condition Reports' in content_html) = 0
+  loop
+    next_html := replace(doc.content_html,
+      $anchor$<h2>8. User Conduct</h2>$anchor$,
+      $clause$<p><strong>7.6 Vehicle Condition Reports and Clearance:</strong> When a vehicle is handed over, the Renter may report its condition to SafeDrive, and when it is returned, the Lister may do the same, with a written description and live photos. SafeDrive reviews these reports and may disable a vehicle's listing: until the Lister submits a clearance - dated photos showing the vehicle is fit to rent - and SafeDrive approves it, or for another stated reason until SafeDrive enables it again. A disabled listing cannot be booked. Bookings that have not started are cancelled and the Renter refunded in full; a trip already under way continues to its scheduled end, without extension. A report does not hold the Lister's payout, and SafeDrive does not decide liability for damage between the Lister and the Renter (Section 7.3).</p>
+
+<h2>8. User Conduct</h2>$clause$);
+
+    if next_html <> doc.content_html then
+      select coalesce(max(version_number), 0) + 1 into next_version
+        from public.legal_document_versions where document_key = doc.document_key;
+      update public.legal_document_versions set status = 'superseded' where id = doc.id;
+      insert into public.legal_document_versions (document_key, version_number, content_html, status)
+        values (doc.document_key, next_version, next_html, 'published')
+        returning id into new_id;
+      insert into public.audit_log (user_id, action, entity_type, entity_id, details)
+        values (null, 'legal_document_published', 'legal_document_versions', new_id::text,
+          jsonb_build_object('document_key', doc.document_key, 'version_number', next_version,
+            'source', 'CHAPTER 131'));
+    end if;
+  end loop;
+end;
+$chapter131_terms$;
+
+commit;
+
+-- Read-only verification after applying this chapter:
+-- select 'cars can be disabled' as check_name,
+--        (select pg_get_constraintdef(oid) like '%disabled%' from pg_constraint
+--          where conrelid = 'public.cars'::regclass and conname = 'cars_status_check')::text as result,
+--        'true' as expected
+-- union all
+-- select 'report and clearance tables',
+--        (select count(*)::text from pg_class where relname in
+--          ('vehicle_reports', 'vehicle_report_photos', 'vehicle_clearances', 'vehicle_clearance_images')),
+--        '4'
+-- union all
+-- select 'moderation functions',
+--        (select count(*)::text from pg_proc where proname in
+--          ('disable_vehicle_for', 'enable_vehicle_for', '_enable_disabled_car', 'submit_vehicle_clearance',
+--           'review_vehicle_clearance_for', 'review_vehicle_report', 'notify_vehicle_reviewers',
+--           'guard_disabled_car_status', 'protect_car_disable_fields')),
+--        '9'
+-- union all
+-- select 'terms carry 7.6',
+--        (select case when position('7.6 Vehicle Condition Reports' in content_html) > 0 then 'yes' else 'no' end
+--           from public.legal_document_versions
+--          where document_key = 'terms_of_service' and status = 'published'),
+--        'yes';
+--   (every result matches expected)
+
 -- End of SafeDrive chaptered database master.

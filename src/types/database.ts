@@ -381,6 +381,13 @@ export interface Database {
           insurer_rental_use_confirmed: boolean;
           insurance_verification_status: string;
           deleted_at: string | null;
+          // CHAPTER 131: SafeDrive disabled the car.
+          disabled_type: string | null;
+          disabled_reason: string | null;
+          disabled_by: string | null;
+          disabled_at: string | null;
+          status_before_disable: string | null;
+          disabled_report_id: string | null;
           deleted_by: string | null;
           deletion_reason: string | null;
           created_at: string;
@@ -413,6 +420,12 @@ export interface Database {
           insurer_rental_use_confirmed?: boolean;
           insurance_verification_status?: string;
           deleted_at?: string | null;
+          disabled_type?: string | null;
+          disabled_reason?: string | null;
+          disabled_by?: string | null;
+          disabled_at?: string | null;
+          status_before_disable?: string | null;
+          disabled_report_id?: string | null;
           deleted_by?: string | null;
           deletion_reason?: string | null;
           created_at?: string;
@@ -445,6 +458,12 @@ export interface Database {
           insurer_rental_use_confirmed?: boolean;
           insurance_verification_status?: string;
           deleted_at?: string | null;
+          disabled_type?: string | null;
+          disabled_reason?: string | null;
+          disabled_by?: string | null;
+          disabled_at?: string | null;
+          status_before_disable?: string | null;
+          disabled_report_id?: string | null;
           deleted_by?: string | null;
           deletion_reason?: string | null;
           created_at?: string;
@@ -1393,6 +1412,32 @@ export interface Database {
         Update: { id?: string; report_id?: string; category?: string; storage_path?: string; captured_at?: string };
         Relationships: [];
       };
+      // CHAPTER 131 - a report about the car at the handover (renter) or return (lister).
+      vehicle_reports: {
+        Row: { id: string; booking_id: string; car_id: string; reporter_id: string; reporter_role: string; phase: string; message: string; status: string; admin_note: string | null; reviewed_by: string | null; reviewed_at: string | null; created_at: string };
+        Insert: { id?: string; booking_id: string; car_id: string; reporter_id: string; reporter_role: string; phase: string; message: string; status?: string; admin_note?: string | null; reviewed_by?: string | null; reviewed_at?: string | null; created_at?: string };
+        Update: { id?: string; booking_id?: string; car_id?: string; reporter_id?: string; reporter_role?: string; phase?: string; message?: string; status?: string; admin_note?: string | null; reviewed_by?: string | null; reviewed_at?: string | null; created_at?: string };
+        Relationships: [];
+      };
+      vehicle_report_photos: {
+        Row: { id: string; report_id: string; storage_path: string; provenance_status: string; provenance_source: string | null; provenance_summary: string | null; captured_at: string };
+        Insert: { id?: string; report_id: string; storage_path: string; provenance_status?: string; provenance_source?: string | null; provenance_summary?: string | null; captured_at?: string };
+        Update: { id?: string; report_id?: string; storage_path?: string; provenance_status?: string; provenance_source?: string | null; provenance_summary?: string | null; captured_at?: string };
+        Relationships: [];
+      };
+      // CHAPTER 131 - the lister's dated photos that a disabled car is fit to rent.
+      vehicle_clearances: {
+        Row: { id: string; car_id: string; submitted_by: string; note: string | null; status: string; rejection_reason: string | null; reviewed_by: string | null; reviewed_at: string | null; created_at: string };
+        Insert: { id?: string; car_id: string; submitted_by: string; note?: string | null; status?: string; rejection_reason?: string | null; reviewed_by?: string | null; reviewed_at?: string | null; created_at?: string };
+        Update: { id?: string; car_id?: string; submitted_by?: string; note?: string | null; status?: string; rejection_reason?: string | null; reviewed_by?: string | null; reviewed_at?: string | null; created_at?: string };
+        Relationships: [];
+      };
+      vehicle_clearance_images: {
+        Row: { id: string; clearance_id: string; storage_path: string; created_at: string };
+        Insert: { id?: string; clearance_id: string; storage_path: string; created_at?: string };
+        Update: { id?: string; clearance_id?: string; storage_path?: string; created_at?: string };
+        Relationships: [];
+      };
       data_retention_requests: {
         Row: { id: string; subject_user_id: string | null; requester_email: string; request_type: string; status: string; request_details: string; decision_reason: string | null; legal_hold_reason: string | null; assigned_to: string | null; due_at: string | null; completed_at: string | null; created_at: string; updated_at: string };
         Insert: { id?: string; subject_user_id?: string | null; requester_email: string; request_type: string; status?: string; request_details: string; decision_reason?: string | null; legal_hold_reason?: string | null; assigned_to?: string | null; due_at?: string | null; completed_at?: string | null; created_at?: string; updated_at?: string };
@@ -1903,6 +1948,14 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      submit_vehicle_clearance: {
+        Args: { p_car_id: string; p_note: string | null; p_paths: string[] };
+        Returns: string;
+      };
+      review_vehicle_report: {
+        Args: { p_report_id: string; p_status: string; p_note?: string | null };
+        Returns: Json;
+      };
       set_support_ticket_status: {
         Args: { p_ticket_id: string; p_status: string };
         Returns: Json;

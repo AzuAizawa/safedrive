@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { sendUserNotificationEmail } from "../server/email.js";
 import { blockedIpResponse } from "../server/ipBlock.js";
 import { findExtensionCollision, type ExtensionCollision } from "../server/extensionHolds.js";
+import { carIsDisabled, DISABLED_CAR_EXTENSION_MESSAGE } from "../server/vehicleBookingCancellation.js";
 
 export const config = {
   runtime: "edge",
@@ -227,6 +228,10 @@ export default async function handler(req: Request) {
           { error: "Settle the full booking balance before requesting an extension." },
           409,
         );
+      }
+
+      if (await carIsDisabled(supabase, bookingRecord.car_id)) {
+        return jsonResponse({ error: DISABLED_CAR_EXTENSION_MESSAGE }, 409);
       }
 
       // Once the renter has checked in at the return, they are standing at
@@ -475,6 +480,9 @@ export default async function handler(req: Request) {
         .single();
       if (parentBookingError || !parentBooking) {
         throw parentBookingError ?? new Error("Booking not found for this extension");
+      }
+      if (await carIsDisabled(supabase, parentBooking.car_id)) {
+        return jsonResponse({ error: DISABLED_CAR_EXTENSION_MESSAGE }, 409);
       }
       const collision = await findExtensionCollision(supabase, {
         bookingId: extensionRecord.booking_id,
