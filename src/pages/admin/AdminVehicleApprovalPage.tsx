@@ -1798,7 +1798,7 @@ export default function AdminVehicleApprovalPage() {
               )}
               {(activeTab === "clearance" || activeTab === "disabled") && selected.status === "disabled" && (
                 <VehicleModerationSection
-                  key={selected.id}
+                  key={`moderation-${selected.id}`}
                   carId={selected.id}
                   disabledType={selected.disabled_type}
                   disabledReason={selected.disabled_reason}
