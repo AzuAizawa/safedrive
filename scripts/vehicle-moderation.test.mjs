@@ -430,11 +430,17 @@ test("every embed of cars from vehicle_reports names its link (cars.disabled_rep
     if (error.status !== 1) throw error;
   }
   const files = [...new Set(output.split("\n").filter(Boolean).map((line) => line.split(":")[0]))];
+  let checked = 0;
   for (const file of files) {
     const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
-    const unhinted = source.match(/[\s,"`]cars\(/g);
-    if (source.includes('from("vehicle_reports")') && unhinted) {
-      assert.fail(`${file} embeds cars( from vehicle_reports without !vehicle_reports_car_id_fkey`);
+    // Only the select of a vehicle_reports query: .from("vehicle_reports") ... .select("...").
+    for (const match of source.matchAll(/from\("vehicle_reports"\)\s*\.select\(\s*["'`]([^"'`]*)/g)) {
+      checked += 1;
+      assert.ok(
+        !/(^|[\s,])cars\(/.test(match[1]),
+        `${file} embeds cars( from vehicle_reports without !vehicle_reports_car_id_fkey`,
+      );
     }
   }
+  assert.ok(checked > 0, "the vehicle_reports selects were found");
 });
